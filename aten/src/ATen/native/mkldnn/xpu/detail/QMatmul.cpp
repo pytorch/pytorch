@@ -1,61 +1,58 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
 
-#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
 
 void quantized_matmul(
-  at::Tensor  mat1, // act
-  double input_scale,
-  int64_t input_zero_point,
-  at::Tensor  mat2, // weight
-  at::Tensor& weight_scales,
-  at::Tensor& weight_zero_points,
-  at::Tensor& b_raw,
-  at::Tensor result, // output
-  double output_scale,
-  int64_t output_zero_point,
-  std::optional<c10::ScalarType> output_dtype,
-  std::optional<at::Tensor> other, // extra input for binary-post-op
-  double other_scale,
-  int64_t other_zero_point,
-  const c10::string_view& binary_post_op,
-  double binary_alpha,
-  const c10::string_view& unary_post_op,
-  torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-  c10::string_view unary_post_op_algorithm){
-
+    at::Tensor mat1, // act
+    double input_scale,
+    int64_t input_zero_point,
+    at::Tensor mat2, // weight
+    at::Tensor& weight_scales,
+    at::Tensor& weight_zero_points,
+    at::Tensor& b_raw,
+    at::Tensor result, // output
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<at::Tensor> other, // extra input for binary-post-op
+    double other_scale,
+    int64_t other_zero_point,
+    const c10::string_view& binary_post_op,
+    double binary_alpha,
+    const c10::string_view& unary_post_op,
+    torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    c10::string_view unary_post_op_algorithm) {
+  // [Note] Quantized Matrix Multiplication at XPU
+  // The following code integrates oneDNN quantized gemm. The quantization config we support:
+  // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
+  // weight: s8; per_tensor/per_channel calibrated; symmetric
   bool m2_trans = true;
   auto attr = Attr(output_scale, output_zero_point);
   construct_attr_by_post_op(
-    binary_post_op,
-    binary_alpha,
-    input_scale,
-    input_zero_point,
-    unary_post_op,
-    unary_post_op_args,
-    unary_post_op_algorithm,
-    attr
-  );
+      binary_post_op,
+      binary_alpha,
+      input_scale,
+      input_zero_point,
+      unary_post_op,
+      unary_post_op_args,
+      unary_post_op_algorithm,
+      attr);
 
   size_t dims = result.dim();
   at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(curDevice);
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  at::Tensor m1 = is_onednn_matmul_strides(mat1)
-      ? mat1
-      : mat1.contiguous();
-  at::Tensor m2 = is_onednn_matmul_strides(mat2)
-      ? mat2
-      : mat2.contiguous();
-  at::Tensor dst = is_onednn_matmul_strides(result, true)
-      ? result
-      : result.contiguous();
+  at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
+  at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
+  at::Tensor dst =
+      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
@@ -81,7 +78,8 @@ void quantized_matmul(
     if (b.dim() == 1) {
       TORCH_CHECK(
           b.size(0) == n || b.size(0) == 1,
-          "matmul supports [n] or [1] when bias dim is 1, but b.size() is:", b.size(0));
+          "matmul supports [n] or [1] when bias dim is 1, but b.size() is:",
+          b.size(0));
       if (b.size(0) == 0) {
         with_bias = false;
       } else if (m1.dim() == 3) {
@@ -131,9 +129,9 @@ void quantized_matmul(
   auto dst_dt = dst_usr_dt;
   dnnl::memory::data_type bias_dt;
 
-  dnnl::memory::desc m1_md, m1_usr_md, m1_any_md;
-  dnnl::memory::desc m2_md, m2_usr_md, m2_any_md;
-  dnnl::memory::desc dst_md, dst_usr_md, dst_any_md;
+  dnnl::memory::desc m1_md, m1_usr_md;
+  dnnl::memory::desc m2_md, m2_usr_md;
+  dnnl::memory::desc dst_md, dst_usr_md;
   dnnl::memory::desc b_md;
 
   dnnl::memory::dims m1_dims, m2_dims, dst_dims, bias_dims;
@@ -173,7 +171,7 @@ void quantized_matmul(
   std::unordered_map<int, dnnl::memory> args;
 
   dnnl::post_ops po;
-  attr.extract_post_ops(dst, true);
+  po = attr.extract_post_ops(dst, true);
   bool m1_need_zp = (input_zero_point != 0);
   bool wgh_is_per_channel = weight_scales.numel() > 1;
 
@@ -195,8 +193,8 @@ void quantized_matmul(
   }
 
   at::Tensor m1_sc;
-  dnnl::memory::desc m1_sc_md =
-      dnnl::memory::desc({1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+  dnnl::memory::desc m1_sc_md = dnnl::memory::desc(
+      {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
   int mask_ac = 0;
   pattr.set_scales_mask(DNNL_ARG_SRC, mask_ac);
   if (m1_need_zp) {
@@ -208,7 +206,8 @@ void quantized_matmul(
     matmul_pd =
         dnnl::matmul::primitive_desc(engine, m1_md, m2_md, b_md, dst_md, pattr);
   } else {
-    matmul_pd = dnnl::matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
+    matmul_pd =
+        dnnl::matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
   }
 
   matmul_p = dnnl::matmul(matmul_pd);
@@ -229,8 +228,8 @@ void quantized_matmul(
   at::Tensor m1_, m2_, dst_;
 
   int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
-  at::Tensor scratchpad_tensor = at::empty(
-      {scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
+  at::Tensor scratchpad_tensor =
+      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
@@ -248,15 +247,17 @@ void quantized_matmul(
 
   // Add scale/zp md
   dnnl::memory m2_sc_m, m2_zp_m;
-  dnnl::memory::desc m2_sc_md =
-      dnnl::memory::desc({1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+  dnnl::memory::desc m2_sc_md = dnnl::memory::desc(
+      {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
   m2_sc_m = make_onednn_memory(m2_sc_md, engine, weight_scales.data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, m2_sc_m});
 
   dnnl::memory m1_sc_m, m1_zp_m;
   Tensor m1_sc_tensor, m1_zp_tensor;
-  m1_sc_m = dnnl_memory_from_host_scalar(static_cast<float>(input_scale), m1_sc_tensor, engine);
-  m1_zp_m = dnnl_memory_from_host_scalar(static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
+  m1_sc_m = dnnl_memory_from_host_scalar(
+      static_cast<float>(input_scale), m1_sc_tensor, engine);
+  m1_zp_m = dnnl_memory_from_host_scalar(
+      static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
 
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
