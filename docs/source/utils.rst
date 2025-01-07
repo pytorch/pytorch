@@ -83,6 +83,7 @@ torch.utils
 .. py:module:: torch.utils.jit.log_extract
 .. py:module:: torch.utils.mkldnn
 .. py:module:: torch.utils.mobile_optimizer
+.. py:module:: torch.utils.pytree
 .. py:module:: torch.utils.show_pickle
 .. py:module:: torch.utils.tensorboard.summary
 .. py:module:: torch.utils.tensorboard.writer
