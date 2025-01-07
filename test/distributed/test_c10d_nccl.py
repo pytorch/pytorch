@@ -442,7 +442,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_cuda_event_cache(self):
         import threading
-        
+
         # initiate collectives here
         def init_collective_task(t):
             dist.all_reduce(t)
