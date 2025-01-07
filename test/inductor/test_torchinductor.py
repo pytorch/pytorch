@@ -6215,6 +6215,18 @@ class CommonTemplate:
             ):
                 model(x)
 
+    def test_avg_pool_errors_with_uint(self):
+        torch._dynamo.config.recompile_limit = 12
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                x = torch.randn([2] * (dim + 2)).to(dtype)
+                op = eval(f"torch.nn.functional.avg_pool{dim}d")
+                c_op = torch.compile(op)
+                with self.assertRaisesRegex(
+                    RuntimeError, r".*(not implemented|aoti_torch_).*"
+                ):
+                    c_op(x, kernel_size=2, stride=2)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2

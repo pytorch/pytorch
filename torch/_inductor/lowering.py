@@ -4957,6 +4957,9 @@ def _avg_poolnd(
     assert len(stride) == dim
     assert len(padding) == dim
     assert len(x.get_size()) in (dim + 1, dim + 2)
+    if x.get_dtype() in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+        # not supported in eager
+        raise RuntimeError(f""""avg_pool{dim}d" not implemented for {x.get_dtype()}'""")
 
     x.realize_hint()
     batch = x.get_size()[:-dim]
