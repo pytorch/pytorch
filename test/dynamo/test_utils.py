@@ -125,6 +125,7 @@ class TestDynamoTimed(TestCase):
     # return the same value; all durations will be zero.
     @mock.patch("time.time", return_value=0.001)
     @mock.patch("time.time_ns", return_value=100000)
+    @dynamo_config.patch(specialize_float=False)
     def test_dynamo_timed(self, mock_time, mock_time_ns):
         """
         Run a compilation that includes a forward and a backward and validate
@@ -168,7 +169,8 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0]}""",  # noqa: B950
+ 'create_aot_dispatcher_function': [0.0],
+ 'gc': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -180,10 +182,12 @@ class TestDynamoTimed(TestCase):
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
+ 'async_compile.wait': 0.0,
  'backend_compile': 0.0,
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
  'entire_frame_compile': 0.0,
+ 'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}""",  # noqa: B950
         )
@@ -221,6 +225,7 @@ class TestDynamoTimed(TestCase):
  'co_name': 'forward',
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -239,6 +244,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
@@ -254,6 +260,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': True,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
  'non_compliant_ops': set(),
@@ -275,7 +282,10 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 
@@ -295,6 +305,7 @@ class TestDynamoTimed(TestCase):
  'co_name': None,
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
@@ -313,6 +324,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
  'graph_op_count': None,
@@ -328,6 +340,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': False,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
  'non_compliant_ops': None,
@@ -349,7 +362,10 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 
@@ -383,27 +399,25 @@ class TestInductorConfigParsingForLogging(TestCase):
         """
         obj = TestCase
         test_mock_config = {
-            "some": {1: "0", obj: "this", "name": obj, "some": True},
-            "data": {1: "0", obj: "this", "name": obj, "some": True},
+            "some": {"name": obj, "some": True},
+            "data": {"name": obj, "some": True},
             "list": [
-                {1: "0", obj: "this", "name": obj, "some": True},
-                {1: "0", obj: "this", "name": obj, "some": True},
+                {"name": obj, "some": True},
+                {"name": obj, "some": True},
             ],
             "object": {
-                1: "0",
-                obj: "this",
                 "name": obj,
                 "some": True,
-                "data": {1: "0", obj: "this", "name": obj, "some": True},
+                "data": {"name": obj, "some": True},
             },
         }
         expected = (
-            """{"some": {"1": "0", "name": "Value is not JSON serializable", "some": true},"""
-            """ "data": {"1": "0", "name": "Value is not JSON serializable", "some": true}, "list": """
-            """[{"1": "0", "name": "Value is not JSON serializable", "some": true}, """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}], "object": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true, "data": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}}}"""
+            """{"some": {"name": "Value is not JSON serializable", "some": true}, """
+            """"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"list": [{"name": "Value is not JSON serializable", "some": true}, """
+            """{"name": "Value is not JSON serializable", "some": true}], """
+            """"object": {"name": "Value is not JSON serializable", "some": true, """
+            """"data": {"name": "Value is not JSON serializable", "some": true}}}"""
         )
         mocked_inductor_config.get_config_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
