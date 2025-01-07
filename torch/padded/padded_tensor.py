@@ -7,8 +7,13 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
+def log(*msgs):
+    msg = " ".join([str(x) for x in msgs])
+    print(msg)
+
+
 def slice_nd(input, start_idxs, end_idxs):
-    print("Slicing tensor with shape %s to %s" % (input.shape, end_idxs))
+    log("Slicing tensor with shape %s to %s" % (input.shape, end_idxs))
 
     # Slice a tensor along multiple dimensions
     # This is a generalization of torch.slice, which only supports slicing along one dimension
@@ -180,18 +185,18 @@ class ViewOp(SlicingOp):
         if len(args[0].shape) > len(args[1]):
             prefix = strip_common_suffix(args[0].orig_shape, args[1])
             args[0].view_shape_stack.append(prefix)
-            print("Adding to view stack %s" % (prefix))
+            log("Adding to view stack %s" % (prefix))
 
         # If the shapes are not compatible, we need to slice the input tensor to the orig shape
         if len(args[0].shape) < len(args[1]):
-            print("Applying view stack from %s" % (shape))
-            print("View stack", args[0].view_shape_stack)
+            log("Applying view stack from %s" % (shape))
+            log("View stack", args[0].view_shape_stack)
 
             if len(args[0].view_shape_stack) > 0:
                 b = args[0].view_shape_stack[-1]
             else:
                 # TODO: Remove this hard-coded hack.
-                b = [987]
+                b = [992]
 
             # Find the first non-1 dim
             idx = 0
@@ -205,7 +210,7 @@ class ViewOp(SlicingOp):
             if -1 in shape:
                 shape = infer_minus_1_shape(args[0].orig_shape, shape)
 
-            print("Result", shape)
+            log("Result", shape)
         else:
             shape = self.infer_shape(args, kwargs)[0]
 
@@ -630,7 +635,7 @@ class OpDatabase:
         else:
             raise NotImplementedError(f"Op '{opname}' not supported")
 
-            # print("WARNING: Op", opname, "not supported. Using NoOp")
+            # log("WARNING: Op", opname, "not supported. Using NoOp")
             # return NoOp()
 
 
@@ -657,7 +662,7 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
     out_str = "{0:40} P: {1:60} {2:20}".format(
         func_name_str, arg_shapes_str, out_shape_str
     )
-    print(out_str)
+    log(out_str)
 
     def to_orig_shape_str(arg):
         if isinstance(arg, PaddedTensor):
@@ -680,7 +685,7 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
     )
 
     out_str = "{0:40} U: {1:60} {2:20}".format("", arg_shapes_str, out_shape_str)
-    print(out_str)
+    log(out_str)
 
 
 def get_strides(shape: torch.Size) -> List[int]:
@@ -793,7 +798,7 @@ class PaddedTensor(torch.Tensor):
         kwargs["dtype"] = tensor.dtype
         out = torch.Tensor._make_wrapper_subclass(cls, padded_shape, **kwargs)
 
-        print(
+        log(
             "Creating padded tensor with shape",
             list(out.shape),
             "orig_shape",
@@ -843,9 +848,9 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        print()
-        print("Dispatching", func._opname)
-        print("-" * 40)
+        log()
+        log("Dispatching", func._opname)
+        log("-" * 40)
 
         op = OP_DATABASE.get_op(func._opname)
         multipliers = get_multipliers(args)
@@ -855,7 +860,7 @@ class PaddedTensor(torch.Tensor):
         for arg in args:
             if type(arg) is torch.Tensor or type(arg) is torch.nn.Parameter:
                 args_new.append(PaddedTensor(arg, multipliers))
-                print(
+                log(
                     "Encountered tensor with shape",
                     arg.shape,
                     "and converted to padded tensor",
