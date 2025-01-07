@@ -783,11 +783,10 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
 
-  // for checking matrix's positive definitness
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
   id<MTLBuffer> successBuffer = getMTLBufferStorage(success);
 
-  MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
+  MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
   id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
   [computeEncoder setBuffer:outBuffer offset:0 atIndex:0];
@@ -811,71 +810,58 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
-        int64_t startJ = k + 1;
-        int64_t nBlocksJ = (numBlocks - (k + 1));
-        if (nBlocksJ <= 0) {
-          // no TRSM to do
-        } else {
-          uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
+        // process all remaining blocks in this row/column in parallel
+        if (k < numBlocks - 1) {
+          int64_t startJ = k + 1;
+          int64_t nBlocksJ = (numBlocks - startJ);
 
-          std::array<uint32_t, 8> sizes = {static_cast<uint32_t>(N),
-                                           static_cast<uint32_t>(NB),
-                                           static_cast<uint32_t>(k),
-                                           static_cast<uint32_t>(startJ),
-                                           static_cast<uint32_t>(nBlocksJ),
-                                           static_cast<uint32_t>(activeNB_k),
-                                           static_cast<uint32_t>(B),
-                                           static_cast<uint32_t>(batch_stride)};
-          id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:sizes.data()
-                                                          length:sizes.size() * sizeof(uint32_t)
-                                                         options:MTLResourceStorageModePrivate];
-          // total threadgroups is B * nBlocksJ
-          MTLSize gridSize = MTLSizeMake(B * nBlocksJ, 1, 1);
-          MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
+          if (nBlocksJ > 0) {
+            // TRSM for all blocks in parallel
+            uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
+            std::array<uint32_t, 8> trsmSizes = {static_cast<uint32_t>(N),
+                                                 static_cast<uint32_t>(NB),
+                                                 static_cast<uint32_t>(k),
+                                                 static_cast<uint32_t>(startJ),
+                                                 static_cast<uint32_t>(nBlocksJ),
+                                                 static_cast<uint32_t>(activeNB_k),
+                                                 static_cast<uint32_t>(B),
+                                                 static_cast<uint32_t>(batch_stride)};
 
-          [computeEncoder setComputePipelineState:applyTRSMPSO];
-          [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
+            id<MTLBuffer> trsmSizesBuffer = [device newBufferWithBytes:trsmSizes.data()
+                                                                length:trsmSizes.size() * sizeof(uint32_t)
+                                                               options:MTLResourceStorageModePrivate];
 
-          [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-        };
-        int64_t nBlocksJ_64 = numBlocks - startJ; // how many j-blocks remain
-        if (nBlocksJ_64 <= 0) {
-          // no SYRK to do
-        } else {
-          // number of j-blocks
-          uint32_t nBlocksJ = static_cast<uint32_t>(nBlocksJ_64);
+            MTLSize trsmGridSize = MTLSizeMake(B * nBlocksJ, 1, 1);
+            [computeEncoder setComputePipelineState:applyTRSMPSO];
+            [computeEncoder setBuffer:trsmSizesBuffer offset:0 atIndex:1];
+            [computeEncoder dispatchThreadgroups:trsmGridSize threadsPerThreadgroup:threadGroupSize];
 
-          // total number of (j,h) pairs for jRel in [0..nBlocksJ-1], hRel in [0..jRel]
-          // sum of 1..nBlocksJ = nBlocksJ*(nBlocksJ+1)/2
-          uint32_t nPairs = nBlocksJ * (nBlocksJ + 1) / 2;
+            // SYRK for all independent block pairs in parallel
+            uint32_t nPairs = nBlocksJ * (nBlocksJ + 1) / 2;
+            std::array<uint32_t, 9> syrkSizes = {static_cast<uint32_t>(N),
+                                                 static_cast<uint32_t>(NB),
+                                                 static_cast<uint32_t>(k),
+                                                 static_cast<uint32_t>(startJ),
+                                                 static_cast<uint32_t>(nBlocksJ),
+                                                 static_cast<uint32_t>(activeNB_k),
+                                                 static_cast<uint32_t>(B),
+                                                 static_cast<uint32_t>(batch_stride),
+                                                 static_cast<uint32_t>(nPairs)};
 
-          // active size for the diagonal block k
-          uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
+            id<MTLBuffer> syrkSizesBuffer = [device newBufferWithBytes:&syrkSizes
+                                                                length:sizeof(syrkSizes)
+                                                               options:MTLResourceStorageModePrivate];
 
-          std::array<uint32_t, 9> sizes = {static_cast<uint32_t>(N),
-                                           static_cast<uint32_t>(NB),
-                                           static_cast<uint32_t>(k),
-                                           static_cast<uint32_t>(startJ),
-                                           static_cast<uint32_t>(nBlocksJ),
-                                           static_cast<uint32_t>(activeNB_k),
-                                           static_cast<uint32_t>(B),
-                                           static_cast<uint32_t>(batch_stride),
-                                           static_cast<uint32_t>(nPairs)};
-          id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:&sizes
-                                                          length:sizeof(sizes)
-                                                         options:MTLResourceStorageModePrivate];
-
-          MTLSize gridSize = MTLSizeMake(B * nPairs, 1, 1);
-          MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
-
-          [computeEncoder setComputePipelineState:applySYRKPSO];
-          [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
-
-          [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+            MTLSize syrkGridSize = MTLSizeMake(B * nPairs, 1, 1);
+            [computeEncoder setComputePipelineState:applySYRKPSO];
+            [computeEncoder setBuffer:syrkSizesBuffer offset:0 atIndex:1];
+            [computeEncoder dispatchThreadgroups:syrkGridSize threadsPerThreadgroup:threadGroupSize];
+          }
         }
       }
     });
   }
+
   TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
   out.tril_();
   return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
