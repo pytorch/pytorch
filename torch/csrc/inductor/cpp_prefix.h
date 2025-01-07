@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TORCH_CSRC_INDUCTOR_CPP_PREFIX
+#define TORCH_CSRC_INDUCTOR_CPP_PREFIX
 
 #include <algorithm>
 #include <atomic>
@@ -945,3 +946,5 @@ class AMXState {
     tile_release();
   }
 };
+
+#endif // TORCH_CSRC_INDUCTOR_CPP_PREFIX
