@@ -292,6 +292,12 @@ intra_node_bw = 300
 # default value is InfiniBand
 inter_node_bw = 25
 
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1044,6 +1050,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Skip L1 cache for buffers that are used only once.  Disabled by default
+    skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
 
 class aot_inductor:
@@ -1340,76 +1348,6 @@ class trace:
 
     # Save mapping info from inductor generated triton kernel to post_grad fx nodes
     log_inductor_triton_kernel_to_post_grad_node_info: bool = True
-
-
-def get_feature_local_version(feature_name: str) -> Optional[int]:
-    """Get the local version of a benchmarking feature. A feature's local version
-    is hardcoded like `torch._inductor.fb.FEATURE_FOO_VERSION`, where `feature_foo`
-    is the feature name.
-    """
-    try:
-        from torch._inductor.fb import benchmarking
-    except ImportError:
-        return None
-    return getattr(benchmarking, feature_name.upper() + "_VERSION", None)
-
-
-class benchmarking:
-    """Class containing all configurations relating to benchmarking, specifically
-    the various features of benchmarking. Feature enablement is controlled differently
-    depending on whether we are running in OSS or fbcode, and adheres to the following
-    formula:
-
-    [OSS]
-        1. Check if the corresponding environment variable, which follows the format
-        `TORCHINDUCTOR_BENCHMARKING_FEATURE_FOO=...`, where `feature_foo` is the feature,
-        is set; this value is stored in `benchmarking.feature_foo.env_val`. If the environment
-        variable is set and `env_val == "1"`, the feature is force-enabled; if the environment
-        variable is set and `env_val == "0"`, the feature is force-disabled.
-        2. If the corresponding environment variable is un-set, we return the OSS default; the
-        OSS default is stored in `benchmarking.feature_foo.oss_default`.
-
-    [fbcode]
-        1. Same as [OSS #1].
-        2. We compare the feature's local version, see `get_feature_local_version(...)`, with
-        the fetched JK version of the same name, like `"pytorch/benchmarking:FEATURE_FOO_VERSION"`.
-        If the feature's local version is greater than or equal to the JK version we consider the
-        feature to be enabled; if the feature's local version is less than the JK version we consider
-        the feature to be disabled. Intuitively, one can reason about this by taking the JK version,
-        let's call this X, and saying "this feature works at and after version X". If, for whatever
-        reason, we are unable to get a feature's local version we will automatically default to
-        disabling the feature.
-    """
-
-    class inductor_benchmarker:
-        env_val: Optional[str] = os.environ.get(
-            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_BENCHMARKER"
-        )
-        oss_default: bool = True
-        local_version: Optional[int] = get_feature_local_version("inductor_benchmarker")
-
-    class inductor_grouped_benchmarker:
-        env_val: Optional[str] = os.environ.get(
-            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER"
-        )
-        oss_default: bool = True
-        local_version: Optional[int] = get_feature_local_version(
-            "inductor_grouped_benchmarker"
-        )
-    
-    class inductor_grouped_benchmarker_ranking:
-        env_val: Optional[str] = os.environ.get(
-            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER_RANKING"
-        )
-        oss_default: bool = True
-        local_version: Optional[int] = get_feature_local_version("inductor_grouped_benchmarker_ranking")
-    
-    class inductor_grouped_benchmarker_pruning:
-        env_val: Optional[str] = os.environ.get(
-            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER_PRUNING"
-        )
-        oss_default: bool = True
-        local_version: Optional[int] = get_feature_local_version("inductor_grouped_benchmarker_pruning")
 
 
 _save_config_ignore = [

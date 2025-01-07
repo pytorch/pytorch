@@ -1,4 +1,3 @@
-import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
@@ -8,7 +7,7 @@ from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import benchmarking as benchmarking_config, is_fbcode
+from torch._inductor.config import use_experimental_benchmarker
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -130,15 +129,15 @@ class Benchmarker:
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
     
-    @maybe_time
-    @count
-    def benchmark_many_cpu(self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any) -> List[float]:
+    @time_and_count
+    def benchmark_many_cpu(
+        self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
+    ) -> List[float]:
         return [
             self.benchmark_cpu(_callable, *args, **kwargs) for _callable in callables
         ]
-
-    @maybe_time
-    @count
+    
+    @time_and_count
     def benchmark_many_gpu(
         self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
     ) -> List[float]:
@@ -175,16 +174,6 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
-
-        # this method may be used as a fallback if certain benchmarking features are disabled,
-        # in which case those requests may contain kwargs that are not specific to Triton's
-        # `do_bench_gpu`. as such, we may need to prune out kwargs that do not exists in
-        # `do_bench_gpu`'s signature.
-        do_bench_params = inspect.signature(self.triton_do_bench).parameters
-        for kwarg in list(kwargs.keys()):
-            if kwarg not in do_bench_params:
-                del kwargs[kwarg]
-
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:
@@ -192,64 +181,7 @@ class TritonBenchmarker(Benchmarker):
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
-def is_feature_enabled(feature_name: str) -> bool:
-    """Method to decide whether or not a feature is enabled. For more context, see the
-    benchmarking configuration section in `torch._inductor.config.benchmarking`.
-    """
-    feature_config = getattr(benchmarking_config, feature_name)
-    if feature_config.env_val is not None:
-        if feature_config.env_val == "1":
-            return True
-        elif feature_config.env_val == "0":
-            return False
-    if not is_fbcode():
-        return feature_config.oss_default
-    if feature_config.local_version is not None:
-        return (
-            feature_config.local_version
-            >= torch._utils_internal.justknobs_getval_int(
-                f"pytorch/benchmarking:{feature_name.upper()}_VERSION"
-            )
-        )
-    return False
-
-
-def maybe_fallback(
-    fn: Callable[Concatenate[Any, P], T]
-) -> Callable[Concatenate[Any, P], T]:
-    """Wrapper that controls feature fallbacks. It is expected that `fn` is a
-    method of one of `Benchmarker`'s subclasses with a corresponding `feature_name`
-    attribute; typing limitations prevent us from declaring this directly. When
-    `fn` is called, in the form `fn(self, ...)`, we will check that the feature
-    `self.feature_name` is enabled; if the feature `feature_name` is not enabled,
-    we will fallback to the parent class' implementation of `fn`.
-    """
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        fn_class = inspect._findclass(fn)  # type: ignore
-        feature_name = fn_class.feature_name
-        if not is_feature_enabled(feature_name):
-            fallback_fn = getattr(super(fn_class, self), fn.__name__)
-            counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
-            logger.debug(
-                "Feature `%s` is disabled, `benchmarking.%s.%s` will fallback to `benchmarking.%s.%s`.",
-                feature_name,
-                fn_class.__name__,
-                fn.__name__,
-                fn_class.__base__.__name__,
-                fallback_fn.__name__,
-            )
-            # don't need `self` since we called `getattr`
-            return fallback_fn(*args, **kwargs)
-        return fn(self, *args, **kwargs)
-
-    return wrapper
-
-
 class InductorBenchmarker(TritonBenchmarker):
-    feature_name = "inductor_benchmarker"
-
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -279,28 +211,8 @@ class InductorBenchmarker(TritonBenchmarker):
                 for start_event, end_event in event_pairs
             ]
         )
-    
-    @cached_property
-    def gpu_t_per_clock_cycle(self: Self) -> float:
-        """Estimate the duration of a GPU clock cycle, in milliseconds. We do
-        this estimation by measuring the duration of a GPU sleep for a specified
-        number of clock cycles.
-        """
-        torch.cuda.synchronize()
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
-        # one million clock cycles provides a good balance between accuracy 
-        # and overhead for the measurement
-        num_clock_cycles = 1000000
-        torch.cuda._sleep(num_clock_cycles)
-        end_event.record()
-        torch.cuda.synchronize()
-        return start_event.elapsed_time(end_event) / num_clock_cycles
 
-    @maybe_fallback
-    @maybe_time
-    @count
+    @time_and_count
     def benchmark_gpu(
         self: Self,
         _callable: Callable[[], Any],
@@ -345,13 +257,11 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters)
-        start_t = time.perf_counter()
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
             _callable()
             end_event.record()
-        cpu_t_per_iter = ((time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND) / estimation_iters
         torch.cuda.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
@@ -366,9 +276,6 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters)
-        # this sleep duration should be a close enough approximation to more or less overlap
-        # the time spent on the CPU queueing up all the L2 cache flushes and kernel calls
-        torch.cuda._sleep(int((cpu_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
@@ -386,9 +293,7 @@ class InductorBenchmarker(TritonBenchmarker):
         return min(estimated_timing, benchmarked_timing)
 
 
-class InductorGroupedBenchmarker(InductorBenchmarker):
-    feature_name = "inductor_grouped_benchmarker"
-
+class GroupedInductorBenchmarker(InductorBenchmarker):
     def get_interleaved_event_pairs(
         self: Self, num_callables: int, iters: int
     ) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
@@ -404,9 +309,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         """
         return [self.get_event_pairs_min_timing(list(event_pairs)) for event_pairs in zip(*interleaved_event_pairs)]
 
-    @maybe_fallback
-    @maybe_time
-    @count
+    @time_and_count
     def benchmark_many_gpu(
         self: Self,
         callables: List[Callable[[], Any]],
@@ -416,7 +319,8 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         max_benchmark_duration: int = 25,
         ranking: bool = False,
         pruning: bool = False,
-        pruning_k: int = 5,
+        pruning_factor: float = 1.1,
+        pruning_limit: int = 5,
         **kwargs: Any,
     ) -> List[float]:
         """Benchmark many GPU callables using a custom benchmarking implementation.
@@ -436,24 +340,11 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         the values of `memory_warmup_iters` and `benchmark_iters`, along with the
         estimated runtime of `_callable` and various other factors, and we then
         shrink `benchmark_iters` to fit in the alloted maximum duration.
-        - ranking: Optionally, exit benchmarking early and return the estimated
-        runtimes for each of the callables; essentially, skip the full benchmarking
-        stage. This mode is preferred when an accurate ranking of the kernels is
-        required but not accurate timings for each kernel. This mode should not be
-        used when benchmarking results will be cross-compared (i.e. in the case of
-        GEMM-Epilogue fusion benchmarking). Ranking is significantly (an order of
-        magnitude or more) faster than non-ranking.
-        - pruning: Optionally, halt benchmarking of all but the top-`pruning_k`
-        callables immediately after the runtime estimation. The top-`pruning_k`
-        callables are benchmarked for the full duration.
-        - pruning_k: Optionally, the number of "best" callables to fully benchmark.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
         - The minimum runtime of each callable in `callables`, in milliseconds.
         """
-        saved_callables = callables
-
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
@@ -470,51 +361,42 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         interleaved_event_pairs = self.get_interleaved_event_pairs(
             len(callables), estimation_iters
         )
-        # we want to sleep here and not in `benchmark_gpu` because we may return these estimated
-        # timings if we are ranking. 100us per iteration is good enough for most cases, this is
-        # really a "best effort" type of thing since we have no way of knowing how long to actually
-        # sleep at this point
-        sleep_t_per_iter = 0.10
-        torch.cuda._sleep(int((sleep_t_per_iter * len(callables) * estimation_iters) / self.gpu_t_per_clock_cycle))
-        start_t = time.perf_counter()
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
                 start_event.record()
                 _callable()
                 end_event.record()
-        cpu_t_per_iter = (time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND
         torch.cuda.synchronize()
         estimated_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
         )
 
         if ranking:
-            feature_name = "inductor_grouped_benchmarker_ranking"
-            if is_feature_enabled(feature_name):
-                # explicitly delete the buffer, sometimes helps memory
-                # footprint metrics in OSS Inductor performance benchmarks
-                del buffer
-                return estimated_timings
-            else:
-                counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
-                logger.debug("Feature %s is disabled, proceeding with full benchmarking cycle.", feature_name)
-        
-        callable_to_timing = {
-            _callable: estimated_timing for _callable, estimated_timing in zip(callables, estimated_timings)
-        }
+            del buffer
+            return estimated_timings
+
+        callable_to_timing = dict(zip(callables, estimated_timings))
+
         if pruning:
-            feature_name = "inductor_grouped_benchmarker_pruning"
-            if is_feature_enabled(feature_name):
-                callables = sorted(callables, key=callables.__getitem__)[:pruning_k]
-                estimated_timings = sorted(callables.values())[:pruning_k]
-            else:
-                counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
-                logger.debug("Feature %s is disabled, will not prune callables.", feature_name)
+            target_timing = min(estimated_timings) * pruning_factor
+            callables_to_benchmark = []
+            for _callable, timing_ms in sorted(
+                callable_to_timing.items(), key=lambda x: x[1]
+            ):
+                if timing_ms <= target_timing:
+                    callables_to_benchmark.append(_callable)
+                if len(callables_to_benchmark) == pruning_limit:
+                    break
+            # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
+            # we're alloted `max_benchmark_duration` per-callable, and since we've
+            # pruned the callables we can assume the 
+        else:
+            callables_to_benchmark = callables
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration, we're
         # alloted `max_benchmark_duration` per-callable, so we can just take the average
-        # of the estimated timings
+        # of the estimated timings. note that if we are pruning
         benchmark_iters = max(
             min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
         )
@@ -527,9 +409,6 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         interleaved_event_pairs = self.get_interleaved_event_pairs(
             len(callables), estimation_iters
         )
-        # this sleep duration should be a close enough approximation to more or less overlap
-        # the time spent on the CPU queueing up all the L2 cache flushes and kernel calls
-        torch.cuda._sleep(int((cpu_t_per_iter * len(callables) * benchmark_iters) / self.gpu_t_per_clock_cycle))
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
@@ -547,10 +426,12 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
 
         # return the minimum of estimated_timing and benchmarked_timing, since
         # we just want the minimum timing overall we might check both
-        for _callable, benchmarked_timing in zip(_callable, benchmarked_timings):
-            callable_to_timing[_callable] = min(callable_to_timing[_callable], benchmarked_timing)
+        return [
+            min(estimated_timing, benchmarked_timing)
+            for estimated_timing, benchmarked_timing in zip(
+                estimated_timings, benchmarked_timings
+            )
+        ]
 
-        return [callable_to_timing[_callable] for _callable in saved_callables]
 
-
-benchmarker = InductorGroupedBenchmarker()
+benchmarker = GroupedInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
