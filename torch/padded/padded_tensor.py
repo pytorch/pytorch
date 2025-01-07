@@ -1,3 +1,4 @@
+import itertools
 import math
 from typing import Dict, List, Optional, Tuple
 
@@ -285,15 +286,6 @@ class ExpandOp(SlicingOp):
 
         return [torch.Size(shape)]
 
-    # def modify_args(self, args, kwargs):
-    #    padded_args, padded_kwargs = padded_to_tensor(args, kwargs)
-
-    #    inp, shape = padded_args
-
-    #    pa = slice_nd(inp, [0] * len(shape), shape)
-
-    #    return args, kwargs, (pa, shape), padded_kwargs
-
 
 class ElementwiseUnaryOp(NonSlicingOp):
     def __init__(self) -> None:
@@ -474,22 +466,6 @@ class IndexPutOp(SlicingOp):
     def infer_shape(self, args, kwargs):
         input_shape = args[0].orig_shape
         return [torch.Size(input_shape)]
-
-    # def modify_args(self, args, kwargs):
-    #    tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
-
-    #    # Slice out the padded indices and values, so they fit the input tensor
-    #    inp, indices, values = args
-    #    padded_inp, padded_indices, padded_values = tensor_args
-
-    #    depadded_indices = [
-    #        x if x is None else torch.arange(x.orig_shape[0]).int() for x in indices
-    #    ]
-    #    depadded_values = slice_nd(
-    #        padded_values, [0] * len(values.orig_shape), values.orig_shape
-    #    )
-
-    #    return [padded_inp, depadded_indices, depadded_values], tensor_kwargs
 
 
 class SplitWithSizesOp(SlicingOp):
@@ -728,22 +704,6 @@ def get_multipliers(args):
     return {n: 1 for n in range(10)}
 
 
-# def strip_common_suffix(list_1, list_2):
-#    """
-#    Remove common suffix from two lists.
-#    Args:
-#        list_1 (list): The first list.
-#        list_2 (list): The second list.
-#    Returns:
-#        tuple: Two lists with common suffix removed.
-#    """
-#    list_1, list_2 = list(list_1), list(list_2)
-#    while list_1 and list_2 and list_1[-1] == list_2[-1]:
-#        list_1.pop()
-#        list_2.pop()
-#    return list_1, list_2
-
-
 def strip_common_suffix(list1, list2):
     list1, list2 = list(list1), list(list2)
 
@@ -765,11 +725,6 @@ def strip_common_suffix(list1, list2):
     cand2 = f(list2, list1)
 
     return cand1
-
-    # if len(cand1) > len(cand2):
-    #    return cand2
-    # else:
-    #    return cand1
 
 
 class PaddedTensor(torch.Tensor):
@@ -887,10 +842,11 @@ class PaddedTensor(torch.Tensor):
         out = op.modify_results(out)
 
         # Merge arguments view_shape_stacks
-        view_shape_stack = []
-        for arg in args:
-            if type(arg) is PaddedTensor:
-                view_shape_stack += arg.view_shape_stack
+        view_shape_stack = list(
+            itertools.chain.from_iterable(
+                [arg.view_shape_stack for arg in args if type(arg) is PaddedTensor]
+            )
+        )
 
         out_flat, spec = pytree.tree_flatten(out)
 
