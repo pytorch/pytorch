@@ -6,7 +6,7 @@ import math
 import operator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, Generator, List, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -39,7 +39,7 @@ def move_block_before(block: List[fx.Node], target_node: fx.Node) -> None:
 def call_function(
     graph: fx.Graph,
     target: Union[str, Callable[..., Any]],
-    args: Optional[Tuple[fx.node.Argument, ...]] = None,
+    args: Optional[tuple[fx.node.Argument, ...]] = None,
     kwargs: Optional[Dict[str, fx.node.Argument]] = None,
 ) -> fx.Node:
     # We accept target as a str to avoid typing error as the type of
@@ -148,7 +148,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
 
 def get_all_comm_blocks(
     graph: fx.Graph,
-    comm_ops: Tuple[torch._ops.OpOverload, ...],
+    comm_ops: tuple[torch._ops.OpOverload, ...],
     comm_filter: Optional[Callable[..., bool]] = None,
 ) -> List[CommBlock]:
     if comm_filter is None:

@@ -42,7 +42,9 @@ class MPSBasicTests(TestCase):
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
     test_cat_empty = CommonTemplate.test_cat_empty
+    test_floordiv = CommonTemplate.test_floordiv
     test_inf = CommonTemplate.test_inf
+    test_isinf2 = CommonTemplate.test_isinf2
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
@@ -71,6 +73,12 @@ class MPSBasicTests(TestCase):
 
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
+
+    def test_floor(self):
+        self.common(lambda x: x.floor(), (torch.rand(1024),))
+
+    def test_sign(self):
+        self.common(lambda x: x.sign(), (torch.rand(1024),))
 
     def test_sliced_input(self):
         self.common(
