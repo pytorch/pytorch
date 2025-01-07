@@ -1019,8 +1019,7 @@ struct GemmHelper {
       ScalarType dt_a,
       ScalarType dt_b,
       ScalarType dt_c,
-      const bool add_C,
-      std::vector<std::pair<int64_t, int64_t>>& A_B_offsets_batch) {
+      const bool add_C) {
     // Create brgemm
 #if defined(ONEDNN_UKERNEL_1)
     brg = dnnl::ukernel::brgemm(
@@ -1053,13 +1052,9 @@ struct GemmHelper {
 #endif
     // Create a scratchpad buffer for the brgemm execution
     scratchpad = std::vector<uint8_t>(brg.get_scratchpad_size());
-    if (!A_B_offsets_batch.empty()) {
-      A_B_offsets = A_B_offsets_batch;
-    } else {
-      // Prepare default vector of pairs of tensors A and B offsets for each batch.
-      A_B_offsets.reserve(1);
-      A_B_offsets[0] = std::make_pair(0, 0);
-    }
+    // Prepare default vector of pairs of tensors A and B offsets for each batch.
+    A_B_offsets.reserve(1);
+    A_B_offsets[0] = std::make_pair(0, 0);
   }
   dnnl::ukernel::brgemm brg;
   std::vector<uint8_t> scratchpad;
@@ -1073,20 +1068,18 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
       int64_t M,
       int64_t N,
       int64_t K,
-      int64_t batch_size,
       int64_t ld_a,
       int64_t ld_b,
       int64_t ld_c,
       const bool add_C,
       const scalar_t_a* A,
       const scalar_t_b* B,
-      scalar_t_c* C,
-      std::vector<std::pair<int64_t, int64_t>>& A_B_offsets_batch) {
+      scalar_t_c* C) {
     auto&& key = BrgemmKey(
         M,
         N,
         K,
-        batch_size,
+        int64_t(1),
         ld_a,
         ld_b,
         ld_c,
@@ -1100,15 +1093,14 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           M,
           N,
           K,
-          batch_size,
+          int64_t(1),
           ld_a,
           ld_b,
           ld_c,
           c10::CppTypeToScalarType<scalar_t_a>::value,
           c10::CppTypeToScalarType<scalar_t_b>::value,
           c10::CppTypeToScalarType<scalar_t_c>::value,
-          add_C,
-          A_B_offsets_batch);
+          add_C);
       (*v).brg.generate();
       return std::move(v);
     });
@@ -1207,7 +1199,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch_size,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -1215,8 +1206,7 @@ void brgemm(
     const float* A,
     const float* B,
     float* C,
-    bool is_vnni,
-    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+    bool is_vnni) {
 
   TORCH_CHECK(!is_vnni,
     "Float Brgemm does not support vnni layout.");
@@ -1224,13 +1214,11 @@ void brgemm(
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (Brgemm::device_check(ScalarType::Float)) {
     Brgemm::call<float, float, float>(
-      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
   // fallback path
-  TORCH_CHECK(batch_size == 1,
-    "Batch_size greater than 1 is only supported for Brgemm.");
   auto beta = add_C ? 1 : 0;
   gemm(
     at::native::TransposeType::NoTranspose,
@@ -1244,7 +1232,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch_size,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -1252,20 +1239,17 @@ void brgemm(
     const at::BFloat16* A,
     const at::BFloat16* B,
     float* C,
-    bool is_vnni,
-    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::BFloat16)) {
     Brgemm::call<at::BFloat16, at::BFloat16, float>(
-      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
   // fallback path
   TORCH_CHECK(!is_vnni,
     "BFloat16 Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
-  TORCH_CHECK(batch_size == 1,
-    "Batch_size greater than 1 is only supported for Brgemm.");
   auto beta = add_C ? 1 : 0;
   gemm(
     at::native::TransposeType::NoTranspose,
@@ -1279,7 +1263,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch_size,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -1287,12 +1270,11 @@ void brgemm(
     const at::Half* A,
     const at::Half* B,
     float* C,
-    bool is_vnni,
-    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::Half)) {
     Brgemm::call<at::Half, at::Half, float>(
-      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
@@ -1300,8 +1282,6 @@ void brgemm(
   TORCH_CHECK(!is_vnni,
     "Half Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx_fp16` is supported");
   auto beta = add_C ? 1 : 0;
-  TORCH_CHECK(batch_size == 1,
-    "Batch_size greater than 1 is only supported for Brgemm.");
   gemm(
     at::native::TransposeType::NoTranspose,
     at::native::TransposeType::NoTranspose,
@@ -1314,7 +1294,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch_size,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -1322,12 +1301,11 @@ void brgemm(
     const unsigned char* A,
     const unsigned char* B,
     int32_t* C,
-    bool is_vnni,
-    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::Byte)) {
     Brgemm::call<unsigned char, unsigned char, int32_t>(
-      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
@@ -1340,7 +1318,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t batch_size,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -1348,12 +1325,11 @@ void brgemm(
     const unsigned char* A,
     const signed char* B,
     int32_t* C,
-    bool is_vnni,
-    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
     Brgemm::call<unsigned char, signed char, int32_t>(
-      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
