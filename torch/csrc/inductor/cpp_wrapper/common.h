@@ -1,5 +1,4 @@
-#ifndef TORCH_CSRC_INDUCTOR_CPP_WRAPPER_COMMON
-#define TORCH_CSRC_INDUCTOR_CPP_WRAPPER_COMMON
+#pragma once
 
 #include <Python.h>
 #include <filesystem>
@@ -48,5 +47,3 @@ using bfloat16 = at::BFloat16;
 [[maybe_unused]] inline int64_t align(int64_t nbytes) {
   return (nbytes + 64 - 1) & -64;
 }
-
-#endif // TORCH_CSRC_INDUCTOR_CPP_WRAPPER_COMMON
