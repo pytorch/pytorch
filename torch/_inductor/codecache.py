@@ -52,9 +52,9 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
+    CompileEventLogger,
     counters,
     dynamo_timed,
-    get_chromium_event_logger,
     get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
@@ -1053,12 +1053,10 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                logger = get_chromium_event_logger()
-                if "inductor_compile" in logger.get_stack():
-                    # TODO: Clean up autograd cache integration
-                    logger.add_event_data(
-                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                    )
+                # TODO: Clean up autograd cache integration
+                CompileEventLogger.try_add_pt2_compile(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
@@ -2653,7 +2651,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         donefile = str(dirpath / "done")
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
-        jobs = []
+        jobs: List[Any] = []
         if need_compile:
             write_atomic(genfile, source_code)
             cmd = [
@@ -2803,7 +2801,7 @@ def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
         raise
 
 
-def touch(filename: str):  # type: ignore[no-untyped-def]
+def touch(filename: str) -> None:
     open(filename, "a").close()
 
 
