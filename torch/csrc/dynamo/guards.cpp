@@ -1758,7 +1758,7 @@ class DICT_CONTAINS : public LeafGuard {
         _key(std::move(key)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    int result = PyDict_Contains(value, _key.ptr());
+    int result = PyDict_Check(value) && PyDict_Contains(value, _key.ptr());
     if (result == -1) {
       PyErr_Clear();
       return false;
@@ -5176,6 +5176,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("DICT_VERSION");
             self.add_leaf_guard(std::make_shared<DICT_VERSION>(
                 std::move(value), std::move(verbose_code_parts)));
           })
@@ -5531,9 +5532,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](DictGuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
-            // DICT_VERSION is used in a very narrow context today to guard on
-            // pytree SUPPPORTED_NODES. We can remove this once we have tags in
-            // DictGuardManager.
+            SKIP_IF_GUARD_ALREADY_PRESENT("DICT_VERSION");
             self.add_permitted_leaf_guard(std::make_shared<DICT_VERSION>(
                 std::move(value), std::move(verbose_code_parts)));
           })
