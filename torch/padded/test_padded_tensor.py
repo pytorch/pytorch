@@ -1,15 +1,14 @@
+import sys
 import time
-from os import times
 
 import torch
 import torch.utils._pytree as pytree
 from numpy import dtype, outer
+from torch._inductor.test_case import run_tests, TestCase
 
 from padded_tensor import *
 from transformer_model import *
 from helpers import *
-
-from torch._inductor.test_case import run_tests, TestCase
 
 
 class TestAttention(TestCase):
@@ -38,8 +37,8 @@ class TestAttention(TestCase):
         )
 
     def create_kv_cache(self):
-        max_batch_size = 4
-        max_seq_length = 16
+        max_batch_size = 16
+        max_seq_length = 1024
         cache_shape = (
             max_batch_size,
             self.n_local_heads,
@@ -76,7 +75,6 @@ class TestAttention(TestCase):
         for _ in range(10):
             start = time.time()
             outputs_p = fn(*inputs_p)
-            print(f"Padded time (eager): {time.time() - start}")
             times_padded.append(time.time() - start)
 
         fn_compiled = torch.compile(fn, mode="reduce-overhead")
@@ -223,7 +221,6 @@ class TestAttention(TestCase):
 
     def f_5(self, q, k, v, mask):
         # y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
-        print(q.shape, k.shape, v.shape, mask.shape)
         outs = torch.ops.aten._scaled_dot_product_flash_attention(
             q, k, v, dropout_p=0.0
         )
@@ -281,9 +278,9 @@ class TestAttention(TestCase):
         return (y,)
 
     def create_inputs(self, SEQLEN):
-        x = torch.ones(4, SEQLEN, dtype=torch.int32).to(device="cuda")
-        freqs_cis = torch.randn(987, 64, 2).to(device="cuda", dtype=self.dtype)
-        mask = torch.ones([1, 1, SEQLEN, 16], device="cuda")
+        x = torch.ones(16, SEQLEN, dtype=torch.int32).to(device="cuda")
+        freqs_cis = torch.randn(SEQLEN, 64, 2).to(device="cuda", dtype=self.dtype)
+        mask = torch.ones([16, 1, SEQLEN, 16], device="cuda")
         input_pos = torch.ones([SEQLEN], dtype=torch.int32, device="cuda")
 
         k_cache, v_cache = self.create_kv_cache()
@@ -295,7 +292,7 @@ class TestAttention(TestCase):
         return inputs
 
     def test_attention_all(self):
-        inputs = self.create_inputs(987)
+        inputs = self.create_inputs(992)
         x, freqs_cis, mask, input_pos, k_cache, v_cache = inputs
 
         N = 16
@@ -311,14 +308,12 @@ class TestAttention(TestCase):
 
         self.run_unpadded_padded(self.f_attention, inputs, inputs_p, None)
 
-        import sys
-
         dot_aten_graph(
             self.f_attention, inputs, "/tmp/alex/graph.pdf", max_nodes=sys.maxsize
         )
 
     def test_attention_bench(self):
-        inputs = self.create_inputs(987)
+        inputs = self.create_inputs(992)
         x, freqs_cis, mask, input_pos, k_cache, v_cache = inputs
 
         N = 16
