@@ -19,9 +19,9 @@ class TestAttention(TestCase):
         # Define model parameters
         self.n_local_heads = 8
         self.head_dim = 128
-        self.dim = 1024
-        self.n_head = 8
-        self.vocab_size = 32000
+        self.dim = 4096
+        self.n_head = 32
+        self.vocab_size = 128256
 
         self.dtype = torch.bfloat16
 
