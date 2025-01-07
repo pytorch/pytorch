@@ -11,13 +11,13 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-import sys
 
 
 aten = torch.ops.aten
@@ -428,8 +428,16 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 1.0
-        o_zero_point = kwargs["o_zp"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 0
+        )
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase
@@ -614,7 +622,8 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             if "other" in match.kwargs
             else (
                 match.kwargs["accum"]
-                if (output_dtype in {torch.uint8, torch.int8}) or (not extra_input_from_dequant)
+                if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+                or (not extra_input_from_dequant)
                 else match.kwargs["accum_after_dequant"]
             )
         )
@@ -645,11 +654,19 @@ def _register_quantized_conv_binary_lowering(
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = (
             kwargs["accum"]
-            if (output_dtype in {torch.uint8, torch.int8})
+            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
             else kwargs["accum_after_dequant"]
         )
-        accum_scale = kwargs["accum_scale"] if (output_dtype in {torch.uint8, torch.int8}) else 1.0
-        accum_zp = kwargs["accum_zp"] if (output_dtype in {torch.uint8, torch.int8}) else 0
+        accum_scale = (
+            kwargs["accum_scale"]
+            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            else 1.0
+        )
+        accum_zp = (
+            kwargs["accum_zp"]
+            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            else 0
+        )
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
@@ -663,8 +680,16 @@ def _register_quantized_conv_binary_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if (output_dtype in {torch.uint8, torch.int8}) else 1.0
-        o_zero_point = kwargs["o_zp"] if (output_dtype in {torch.uint8, torch.int8}) else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"]
+            if (output_dtype in OrderedSet([torch.uint8, torch.int8]))
+            else 0
+        )
 
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
@@ -1789,7 +1814,6 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
-                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
                 # Grouped quantized convolution is not supported at XPU backend
