@@ -318,6 +318,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         ranking: bool = False,
+        pruning: bool = False,
+        pruning_factor: float = 1.1,
+        pruning_limit: int = 5,
         **kwargs: Any,
     ) -> List[float]:
         """Benchmark many GPU callables using a custom benchmarking implementation.
@@ -373,9 +376,27 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             del buffer
             return estimated_timings
 
+        callable_to_timing = dict(zip(callables, estimated_timings))
+
+        if pruning:
+            target_timing = min(estimated_timings) * pruning_factor
+            callables_to_benchmark = []
+            for _callable, timing_ms in sorted(
+                callable_to_timing.items(), key=lambda x: x[1]
+            ):
+                if timing_ms <= target_timing:
+                    callables_to_benchmark.append(_callable)
+                if len(callables_to_benchmark) == pruning_limit:
+                    break
+            # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
+            # we're alloted `max_benchmark_duration` per-callable, and since we've
+            # pruned the callables we can assume the 
+        else:
+            callables_to_benchmark = callables
+
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration, we're
         # alloted `max_benchmark_duration` per-callable, so we can just take the average
-        # of the estimated timings
+        # of the estimated timings. note that if we are pruning
         benchmark_iters = max(
             min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
         )
