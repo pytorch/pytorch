@@ -1282,11 +1282,6 @@ class TritonHOPifier:
             # ...
             # variable.kernel.fn ==> JITFunction
 
-            # One way of doing this is iterating over configs, adding each config to the kwargs,
-            # running heuristics on the args / kwargs
-            # and augmenting the config with the result of the heuristics.
-            # We should also bail out if heuristics returns non-constant values, as we can't put them into configs.
-
             # Copy the configs, we are going to be modifying them
             new_configs = copy.deepcopy(variable.kernel.configs)
 

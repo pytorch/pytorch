@@ -3914,7 +3914,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             N = 1023
             src = torch.empty(N, device=GPU_TYPE)
             dst = torch.zeros(N, device=GPU_TYPE)
-            msg = "Values returned from @triton.heuristic wrappers must be constant values."
+            msg = "@triton.heuristic must return constant values because configs can only contain constant values."
             with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
                 compiled_f(dst, src, N=N)
 
