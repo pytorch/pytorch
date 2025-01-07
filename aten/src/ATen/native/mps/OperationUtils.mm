@@ -1,4 +1,8 @@
 //  Copyright © 2022 Apple Inc.
+#include <ATen/core/TensorBase.h>
+#include <ATen/native/mps/MetalShaderLibrary.h>
+#include <functional>
+#include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -15,6 +19,37 @@
 #else
 #include <ATen/ops/scalar_tensor.h>
 #endif
+
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+
+@implementation MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self minimumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self maximumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+@end
 
 namespace at::native::mps {
 
@@ -758,42 +793,13 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
+// MetalShaderLibrary implementation
+MetalShaderLibrary::~MetalShaderLibrary() {
+  for (const auto& it : cplMap) {
+    auto [cpl, func] = it.second;
+    [cpl release];
+    [func release];
   }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO(
-      use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
@@ -885,6 +891,135 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 
   cplMap[key] = std::make_pair(cpl, func);
   return cplMap[key];
+}
+
+std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  if (C10_UNLIKELY(!library && nparams > 0)) {
+    throw std::runtime_error("Library must be initialized first");
+  }
+  std::vector<std::string> rc;
+  @autoreleasepool {
+    NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
+    for (auto idx : c10::irange([names count])) {
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
+    }
+  }
+  return rc;
+}
+
+std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
+  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+}
+
+class BundledShaderLibary : public MetalShaderLibrary {
+ public:
+  BundledShaderLibary() : MetalShaderLibrary("") {}
+
+ protected:
+  id<MTLLibrary> getLibrary() override {
+    if (C10_UNLIKELY(!library)) {
+      auto device = MPSDevice::getInstance()->device();
+      NSError* error = nil;
+      auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? "metal_bfloat" : "metal_basic";
+      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
+      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    }
+    return library;
+  }
+
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
+    throw std::runtime_error("Should never be called");
+  }
+
+ private:
+  static dispatch_data_t getSectionData(const std::string& name) {
+    uint32_t idx = 0;
+    for (const auto cnt : c10::irange(_dyld_image_count())) {
+      if (strstr(_dyld_get_image_name(cnt), "/libtorch_cpu.dylib")) {
+        idx = cnt;
+        break;
+      }
+    }
+    const auto* mach_header = reinterpret_cast<const struct mach_header_64*>(_dyld_get_image_header(idx));
+    unsigned long mtl_lib_size = 0;
+    const auto* mtl_lib_data = getsectiondata(mach_header, "__TEXT", name.c_str(), &mtl_lib_size);
+    if (mtl_lib_data == nullptr) {
+      throw std::runtime_error("Can't find metal library section " + name);
+    }
+    return dispatch_data_create(mtl_lib_data,
+                                mtl_lib_size,
+                                dispatch_get_main_queue(),
+                                ^(){
+                                });
+  }
+};
+
+MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
+  static BundledShaderLibary l;
+  return l;
+}
+
+// DynamicMetalShaderLibrary implementation
+DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
+  [library release];
+}
+
+// MetalKernelFunction implementation
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+
+MetalKernelFunction::~MetalKernelFunction() {
+  [cps release];
+}
+
+void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      run();
+    }
+  });
+}
+
+void MetalKernelFunction::startEncoding() {
+  encoder = getCurrentMPSStream()->commandEncoder();
+  [encoder setComputePipelineState:cps];
+}
+
+void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
+  auto group_size_val = group_size.value_or(std::min(length, getMaxThreadsPerThreadgroup()));
+  [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
+}
+
+void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::OptionalArrayRef<uint64_t> group_size) {
+  TORCH_CHECK(length.size() > 0 && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
+  TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
+              "size and group_size must have same number of dimentions");
+  auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
+      threadsPerThreadgroup:MTLSizeMake(group_size_length > 0 ? group_size->at(0) : getMaxThreadsPerThreadgroup(),
+                                        group_size_length > 1 ? group_size->at(1) : 1,
+                                        group_size_length == 3 ? group_size->at(2) : 1)];
+}
+
+void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
+  mtl_setBuffer(encoder, t, idx);
+}
+
+void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
+  TORCH_CHECK(size > 0);
+  [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+uint64_t MetalKernelFunction::getMaxThreadsPerThreadgroup() const {
+  return [cps maxTotalThreadsPerThreadgroup];
+}
+
+uint64_t MetalKernelFunction::getThreadExecutionWidth() const {
+  return [cps threadExecutionWidth];
+}
+
+uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
+  return [cps staticThreadgroupMemoryLength];
 }
 
 } // namespace at::native::mps

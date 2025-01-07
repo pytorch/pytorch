@@ -245,20 +245,21 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
-    if is_initialized():
-        callable()
-    else:
-        # TODO(torch_deploy): this accesses linecache, which attempts to read the
-        # file system to get traceback info. Patch linecache or do something
-        # else here if this ends up being important.
-        global _lazy_seed_tracker
-        if kwargs.get("seed_all", False):
-            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
-        elif kwargs.get("seed", False):
-            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+    with _initialization_lock:
+        if is_initialized():
+            callable()
         else:
-            # Don't store the actual traceback to avoid memory cycle
-            _queued_calls.append((callable, traceback.format_stack()))
+            # TODO(torch_deploy): this accesses linecache, which attempts to read the
+            # file system to get traceback info. Patch linecache or do something
+            # else here if this ends up being important.
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                # Don't store the actual traceback to avoid memory cycle
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 _lazy_call(_check_capability)
@@ -322,9 +323,7 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -603,8 +602,9 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it is
-    an object of the custom class ``torch.classes.cuda.Stream``.
+    .. note::
+        In eager mode stream is of type Stream class while in JIT it is
+        an object of the custom class ``torch.classes.cuda.Stream``.
     """
     return StreamContext(stream)
 
@@ -648,7 +648,25 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
     if torch.version.hip:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
-        if hip_devices is not None:
+        rocr_devices = os.getenv("ROCR_VISIBLE_DEVICES")
+
+        # You must take care if both HIP and ROCR env vars are set as they have
+        # different meanings. Both env vars accept either a list of ints or a
+        # list of UUIDs. The ROCR env var is processed first which then reduces
+        # the number of GPUs that HIP can select from.
+        if rocr_devices is not None:
+            rocr_count = len(rocr_devices.split(","))
+            if hip_devices is not None:
+                # sanity check if both env vars are set
+                if len(hip_devices.split(",")) > rocr_count:
+                    raise RuntimeError(
+                        "HIP_VISIBLE_DEVICES contains more devices than ROCR_VISIBLE_DEVICES"
+                    )
+                # HIP_VISIBLE_DEVICES is preferred over ROCR_VISIBLE_DEVICES
+                var = hip_devices
+            else:
+                return list(range(rocr_count))
+        elif hip_devices is not None:
             var = hip_devices
 
     if var is None:
@@ -1018,6 +1036,34 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
+def get_stream_from_external(
+    data_ptr: int, device: Optional[_device_t] = None
+) -> Stream:
+    r"""Return a :class:`Stream` from an externally allocated CUDA stream.
+
+    This function is used to wrap streams allocated in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This function doesn't manage the stream life-cycle, it is the user
+       responsibility to keep the referenced stream alive while this returned
+       stream is being used.
+
+    Args:
+        data_ptr(int): Integer representation of the `cudaStream_t` value that
+            is allocated externally.
+        device(torch.device or int, optional): the device where the stream
+            was originally allocated. If device is specified incorrectly,
+            subsequent launches using this stream may fail.
+    """
+    _lazy_init()
+    streamdata = torch._C._cuda_getStreamFromExternal(
+        data_ptr, _get_device_index(device, optional=True)
+    )
+    return Stream(
+        stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2]
+    )
+
+
 def current_blas_handle():
     r"""Return cublasHandle_t pointer to current cuBLAS handle"""
     _lazy_init()
@@ -1110,10 +1156,20 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     return idx_map[idx]
 
 
+def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
+    handle = _get_amdsmi_handler()
+    device = _get_amdsmi_device_index(device)
+    # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
+    mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    mem_bytes = mem_mega_bytes * 1024 * 1024
+    return mem_bytes
+
+
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler()
     device = _get_amdsmi_device_index(device)
-    return amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
@@ -1148,6 +1204,24 @@ def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
         return clock_info["cur_clk"]
     else:
         return clock_info["clk"]
+
+
+def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Return used global (device) memory in bytes as given by `nvidia-smi` or `amd-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    """
+    if not torch.version.hip:
+        handle = _get_pynvml_handler()
+        device = _get_nvml_device_index(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        return pynvml.nvmlDeviceGetMemoryInfo(handle).used
+    else:
+        return _get_amdsmi_device_memory_used(device)
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1609,6 +1683,7 @@ __all__ = [
     "default_stream",
     "device",
     "device_count",
+    "device_memory_used",
     "device_of",
     "empty_cache",
     "get_allocator_backend",
@@ -1619,8 +1694,10 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
+    "get_stream_from_external",
     "get_sync_debug_mode",
     "graph",
     "graph_pool_handle",

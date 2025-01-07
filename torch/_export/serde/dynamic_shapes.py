@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch._dynamo.exc import UserError, UserErrorType
@@ -33,12 +33,12 @@ class DynamicShapesSpec:
     This stores a dynamic_shapes spec for de/serialization.
     """
 
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None]
     dims: Dict[str, RootDim]
 
 
 def _postprocess_serialized_shapes(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
     dims: Dict[str, Dict[str, Union[int, List[str], None]]],
     to_dict: Optional[bool] = False,
 ) -> Union[DynamicShapesSpec, Dict[str, Any]]:
@@ -63,8 +63,8 @@ def _postprocess_serialized_shapes(
 
 
 def _dump_dynamic_shapes(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
-    args: Tuple[Any],
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
+    args: tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     to_dict: Optional[bool] = False,
 ) -> Union[DynamicShapesSpec, Dict[str, Any]]:
@@ -166,8 +166,8 @@ def _dump_dynamic_shapes(
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
         if root.__name__ not in dims:
             dims[root.__name__] = {
-                "min": root.min,
-                "max": root.max,
+                "min": root.min,  # type: ignore[attr-defined,union-attr]
+                "max": root.max,  # type: ignore[attr-defined,union-attr]
                 "derived": set(),
             }
 
@@ -200,7 +200,7 @@ def _dump_dynamic_shapes(
 def _load_dynamic_shapes(
     spec: Union[DynamicShapesSpec, Dict[str, Any]],
     from_dict: Optional[bool] = False,
-) -> Union[Dict[str, Any], Tuple[Any], List[Any], None]:
+) -> Union[Dict[str, Any], tuple[Any], List[Any], None]:
     """
     Utility function for dynamic shapes serialization.
     Deserializes a DynamicShapesSpec or corresponding dictionary into a dynamic_shapes input to export().

@@ -244,7 +244,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
     const PackedSequence& sequence,
     bool batch_first = false,
     double padding_value = 0.0,
-    std::optional<int64_t> total_length = torch::nullopt) {
+    std::optional<int64_t> total_length = std::nullopt) {
   int64_t max_seq_length = sequence.batch_sizes().size(0);
   if (total_length.has_value()) {
     int64_t total_length_val = total_length.value();
@@ -307,7 +307,7 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0,
-    c10::string_view padding_side = "right") {
+    std::string_view padding_side = "right") {
   return at::pad_sequence(sequences, batch_first, padding_value, padding_side);
 }
 

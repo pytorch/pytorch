@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinousTest,
     requires_nccl,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
@@ -161,7 +162,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_allreduce_ops(self):
-        device_count = torch.cuda.device_count()
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -278,16 +278,21 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
             # single warmup
             pg.allreduce(xs).wait()
-            self.assertEqual(xs[0].item(), 2)
+            # 1 + 1 + ...  = world_size
+            expected_val = self.world_size
+            self.assertEqual(xs[0].item(), expected_val)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 pg.allreduce(xs).wait()
-            self.assertEqual(xs[0].item(), 2)
+            # Graph capture should not change the tensor value
+            self.assertEqual(xs[0].item(), expected_val)
 
             graph.replay()
+            expected_val *= self.world_size
             graph.replay()
-            self.assertEqual(xs[0].item(), 8)
+            expected_val *= self.world_size
+            self.assertEqual(xs[0].item(), expected_val)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -297,9 +302,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
         with torch.cuda.device(rank):
-            for i in range(10):
+            for _ in range(10):
                 xs = [torch.FloatTensor([1]).cuda(rank)]
-                ys = [torch.FloatTensor([4]).cuda(rank)]
                 for _ in range(30):
                     pg.allreduce(xs[0]).wait()
 
@@ -404,7 +408,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
             output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
             expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
-        result = allgather(output_tensors, tensors)
+        allgather(output_tensors, tensors)
 
         # Verification
         self.assertEqual(output_tensors, expected_output)
@@ -552,7 +556,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
         # init output
         output_ts = []
-        for rank in range(self.world_size):
+        for _ in range(self.world_size):
             output_ts.append(torch.tensor([-1]).cuda(device_id))
 
         with self.assertRaisesRegex(ValueError, "invalid root rank"):
@@ -908,7 +912,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_send_recv(self):
-        pg = self.pg
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor
@@ -924,7 +927,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_send_recv_complex(self):
-        pg = self.pg
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor
@@ -979,8 +981,14 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
 
 if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+
     rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 2))
+    world_size = int(os.getenv("WORLD_SIZE", -1))
+
+    if world_size == -1:  # Not set by external launcher
+        world_size = torch.cuda.device_count()
 
     if rank != -1:
         # Launched with torchrun or other multi-proc launchers. Directly run the test.

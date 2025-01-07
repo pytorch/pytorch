@@ -33,6 +33,8 @@ from .eval_frame import (
 )
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
+from .pgo import reset_code_state
+from .symbolic_convert import TensorifyState
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 
@@ -67,6 +69,9 @@ __all__ = [
     "lookup_backend",
 ]
 
+# allowlist this for weights_only load of NJTs
+torch.serialization.add_safe_globals([torch._dynamo.decorators._DimRange])
+
 if torch.manual_seed is torch.random.manual_seed:
     import torch.jit._builtins
 
@@ -78,10 +83,24 @@ if torch.manual_seed is torch.random.manual_seed:
 
 
 def reset() -> None:
-    """Clear all compile caches and restore initial state"""
+    """
+    Clear all compile caches and restore initial state.  This function is intended
+    to reset Dynamo's state *as if* you had started a fresh process invocation, which
+    makes it good for testing scenarios where you want to behave as if you started
+    a new process.  It does NOT affect any file system caches.
+
+    NB: this does NOT reset logging state.  Don't use this to test logging
+    initialization/reinitialization.
+    """
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset")
     with convert_frame.compile_lock:
         reset_code_caches()
         convert_frame.input_codes.clear()
+        reset_code_state()
         convert_frame.output_codes.clear()
         orig_code_map.clear()
         guard_failures.clear()
@@ -89,19 +108,31 @@ def reset() -> None:
         resume_execution.ContinueExecutionCache.cache.clear()
         _reset_guarded_backend_cache()
         reset_frame_count()
-        torch._C._dynamo.compiled_autograd.clear_cache()
+        torch._dynamo.compiled_autograd.reset()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 
 def reset_code_caches() -> None:
+    """
+    Clears in-memory code cache, which is what stores compiled products.  This
+    resets less state than :func:`reset` and is mostly only used for testing
+    purposes.
+    """
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        reset_code_state()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
         ):

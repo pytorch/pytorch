@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass
@@ -10,8 +9,6 @@ from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.pt2e.utils import (
-    _conv1d_bn_example_inputs,
-    _conv2d_bn_example_inputs,
     _get_aten_graph_module_for_pattern,
     _is_conv_node,
     _is_conv_transpose_node,
@@ -19,7 +16,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
@@ -73,8 +69,8 @@ AnnotatorType = Callable[
 OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
 
 
-def register_annotator(op: str):
-    def decorator(annotator: AnnotatorType):
+def register_annotator(op: str) -> Callable[[AnnotatorType], None]:
+    def decorator(annotator: AnnotatorType) -> None:
         OP_TO_ANNOTATOR[op] = annotator
 
     return decorator
@@ -152,6 +148,7 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_spec.qscheme not in [
         torch.per_tensor_symmetric,
         torch.per_channel_symmetric,
+        None,
     ]:
         raise ValueError(
             f"Unsupported quantization_spec {quantization_spec} for weight"
@@ -247,6 +244,10 @@ def _annotate_linear_relu(
             continue
 
         linear_node = maybe_linear_node
+        if len(linear_node.users) > 1:
+            # if linear node has multiple users, then it can't be fused with relu
+            continue
+
         input_qspec_map = {}
         input_act = linear_node.args[0]
         assert isinstance(input_act, Node)
@@ -350,6 +351,11 @@ def _do_annotate_conv_relu(
         if not isinstance(maybe_conv_node, Node) or not is_conv_node(maybe_conv_node):
             continue
         conv_node = maybe_conv_node
+
+        if len(conv_node.users) > 1:
+            # relu shouldn't be fuseable to conv if there are other users
+            # of convolution
+            continue
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
@@ -478,6 +484,28 @@ def _do_annotate_conv_bn(
     for the following names: "input", "conv", "weight", "bias", and "output".
     """
 
+    # Example inputs for conv-bn1d patterns
+    _conv1d_bn_example_inputs = (
+        torch.randn(1, 1, 3),  # x
+        torch.randn(1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
+
+    # Example inputs for conv-bn2d patterns
+    _conv2d_bn_example_inputs = (
+        torch.randn(1, 1, 3, 3),  # x
+        torch.randn(1, 1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
+
     def get_pattern(conv_fn: Callable, relu_is_inplace: bool):
         def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
             conv = conv_fn(x, conv_weight, conv_bias)
@@ -501,10 +529,6 @@ def _do_annotate_conv_bn(
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
-    from torch._export import gm_using_training_ir
-
-    using_training_ir = gm_using_training_ir(gm)
-
     matches = []
     if is_conv_transpose:
         combinations = [
@@ -527,7 +551,7 @@ def _do_annotate_conv_bn(
     # Match against all conv dimensions and cuda variants
     for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
         pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda, using_training_ir=using_training_ir)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
@@ -603,7 +627,6 @@ def _annotate_gru_io_only(
             continue
         # inside each GRU partition, we should be able to annotate each linear
         # subgraph
-        input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)
@@ -738,6 +761,12 @@ def _annotate_add_relu(
             continue
 
         add_node = maybe_add
+
+        if len(add_node.users) > 1:
+            # add can't be fused with ReLU if the result of add is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, add_node]
 
         if _is_annotated(partition):
@@ -860,6 +889,11 @@ def _annotate_mul_relu(
             continue
 
         mul_node = maybe_mul
+        if len(mul_node.users) > 1:
+            # mul can't be fused with ReLU if the result of mul is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, mul_node]
 
         if _is_annotated(partition):
@@ -988,8 +1022,9 @@ def _annotate_cat(
             input_qspec_map[input_act0] = input_act_qspec
 
         shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
-        for input_act in inputs[1:]:  # type: ignore[index]
-            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
+        for input_act in inputs[1:]:  # type: ignore[index, union-attr]
+            if input_act not in input_qspec_map:
+                input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 
@@ -1003,6 +1038,7 @@ def _annotate_cat(
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     return op in [
+        torch.ops.aten.relu.default,
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.hardtanh_.default,
         torch.ops.aten.max_pool2d.default,

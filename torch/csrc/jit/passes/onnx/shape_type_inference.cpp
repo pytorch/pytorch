@@ -2144,10 +2144,8 @@ void ONNXShapeTypeInference(
             ex.what(),
             " on graph: ",
             n_graph->toString());
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char shape_err[] = "ShapeInferenceError";
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        const char type_err[] = "TypeInferenceError";
+        constexpr const char* shape_err = "ShapeInferenceError";
+        constexpr const char* type_err = "TypeInferenceError";
         if ((strstr(ex.what(), shape_err) == nullptr) &&
             (strstr(ex.what(), type_err) == nullptr)) {
           throw;

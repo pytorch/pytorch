@@ -178,7 +178,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
                     bwd_context = (
                         contextlib.nullcontext()
                         if model_idx == 0
-                        else compiled_autograd.enable(compiler_fn(no_inductor))
+                        else compiled_autograd._enable(compiler_fn(no_inductor))
                     )
                     with bwd_context:
                         loss = models[model_idx](input).sum()
@@ -222,14 +222,18 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu_ac(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
@@ -291,7 +295,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
 
         def bwd(loss):
-            with compiled_autograd.enable(compiler_fn()):
+            with compiled_autograd._enable(compiler_fn()):
                 loss.backward()
 
         for i in range(loop):
@@ -313,17 +317,23 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -332,11 +342,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -349,17 +359,23 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
@@ -367,11 +383,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
@@ -423,7 +439,7 @@ class DDP_TP_Test(InductorTestCase):
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
-        with compiled_autograd.enable(compiler_fn()):
+        with compiled_autograd._enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474

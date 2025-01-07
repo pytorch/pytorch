@@ -329,7 +329,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const CompareSelectPtr& v) override;
 
 #define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##ImmPtr& v) override;
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE)
 #undef IMM_VISIT_DECLARE
 
   void visit(const CastPtr& v) override;
@@ -1078,7 +1078,7 @@ template <typename T>
 std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
     llvm::Type* type,
     T value) {
-  return llvm::ConstantInt::get(type, value, std::is_signed<T>::value);
+  return llvm::ConstantInt::get(type, value, std::is_signed_v<T>);
 }
 
 template <typename T>

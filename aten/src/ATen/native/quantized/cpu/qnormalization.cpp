@@ -14,8 +14,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(quantized_normalize_stub);
 DEFINE_DISPATCH(quantized_groupnorm_nhwc_stub);
@@ -175,5 +174,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

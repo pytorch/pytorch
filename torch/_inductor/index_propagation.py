@@ -22,7 +22,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing import Any, Callable, Dict, Literal, Optional, overload, Union
 from typing_extensions import TypeAlias
 
 import sympy
@@ -135,7 +135,7 @@ class SymPyOps:
         if not is_integer_dtype(result_type):
             return NotImplemented
 
-        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
@@ -152,7 +152,7 @@ class SymPyOps:
             x_expr.is_nonnegative is not None
             and x_expr.is_nonnegative == y_expr.is_positive
         ):
-            result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+            result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
             return TypedExpr(result_expr, result_type)
         return NotImplemented
 
@@ -182,7 +182,7 @@ class IndexPropVar:
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
-IndexPropResult: TypeAlias = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
 
 
 class IndexPropagation:
@@ -247,19 +247,19 @@ class IndexPropagation:
     def fallback(
         self,
         name: Literal["indirect_indexing"],
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> IndexPropVar:
         ...
 
     @overload
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> IndexPropResult:
         ...
 
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> IndexPropResult:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
@@ -267,7 +267,7 @@ class IndexPropagation:
         return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:

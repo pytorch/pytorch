@@ -256,7 +256,7 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
     dim = at::maybe_wrap_dim(dim, base.dim());
     auto dim_size = base.sym_size(dim);
     c10::SymInt start = 0;
-    for (auto i = 0; i < mutated_view_idx; ++i) {
+    for (int64_t i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];

@@ -35,6 +35,8 @@ public:
          float val5, float val6, float val7, float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
+  Vectorized(const float (&arr)[8])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]) {}
   operator __m256() const {
     return values;
   }
@@ -154,6 +156,9 @@ public:
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
+  }
+  Vectorized<float> asinh() const {
+    return Vectorized<float>(Sleef_asinhf8_u10(values));
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf8_u10(values));
@@ -374,6 +379,32 @@ public:
   }
   Vectorized<float> pow(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_powf8_u10(values, b));
+  }
+  float reduce_add() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_ps(v, v, 0x1);
+    v = _mm256_add_ps(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0x4E);
+    v = _mm256_add_ps(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0xB1);
+    v = _mm256_add_ps(v, v1);
+    return _mm256_cvtss_f32(v);
+  }
+  float reduce_max() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_ps(v, v, 0x1);
+    v = _mm256_max_ps(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0x4E);
+    v = _mm256_max_ps(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0xB1);
+    v = _mm256_max_ps(v, v1);
+    return _mm256_cvtss_f32(v);
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

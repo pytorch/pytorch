@@ -67,7 +67,7 @@ struct TORCH_API TensorNames {
   std::vector<Dimname> toDimnameVec() const;
 
  private:
-  explicit TensorNames(TensorNameVec&& names) : names_(std::move(names)){};
+  explicit TensorNames(TensorNameVec&& names) : names_(std::move(names)) {}
 
   TensorNameVec names_;
 };

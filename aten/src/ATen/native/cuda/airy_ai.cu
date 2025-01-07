@@ -38,5 +38,5 @@ void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda);
+REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda)
 } // namespace at::native

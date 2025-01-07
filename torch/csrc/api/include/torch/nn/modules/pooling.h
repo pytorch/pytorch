@@ -227,7 +227,7 @@ class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
       const AdaptiveMaxPoolOptions<output_size_t>& options_)
       : options(options_) {}
 
-  void reset() override{};
+  void reset() override {}
 
   /// Pretty prints the `AdaptiveMaxPool{1,2,3}d` module into the given
   /// `stream`.

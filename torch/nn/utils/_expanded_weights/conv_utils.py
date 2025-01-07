@@ -142,9 +142,7 @@ def conv_backward(func, ctx, grad_output):
         ctx.groups,
     )
 
-    kernel_size = []
-    for i in range(2, conv_picker(func, 3, 4, 5)):
-        kernel_size.append(weight_shape[i])
+    kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
     results: List[Optional[torch.Tensor]] = []

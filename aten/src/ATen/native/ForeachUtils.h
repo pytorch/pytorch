@@ -98,6 +98,19 @@ inline void check_foreach_api_restrictions(
       scalars.size());
 }
 
+inline void check_foreach_api_restrictions(
+    TensorList tensors1,
+    TensorList tensors2,
+    ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  TORCH_CHECK(
+      tensors1.size() == scalars.size(),
+      "Tensor list must have same number of elements as scalar list, got ",
+      tensors1.size(),
+      " and ",
+      scalars.size());
+}
+
 // Helper function called in check_fast_path_restrictions to check whether all
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.

@@ -151,6 +151,7 @@ elseif(USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

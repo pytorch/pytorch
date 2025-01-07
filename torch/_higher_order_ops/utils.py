@@ -2,13 +2,14 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -99,7 +100,23 @@ def _maybe_reenter_make_fx(fn):
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn)
     else:
-        return make_fx(fn)
+
+        def _maybe_make_fx_with_fake_mode(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                from torch._guards import detect_fake_mode
+
+                fake_mode = detect_fake_mode(args)
+                if fake_mode is None:
+                    # we creaeta a fake_mode here to make sure we could
+                    # trace the graph with data-dependent calls e.g. .item()
+                    return make_fx(fn, tracing_mode="fake")(*args)
+                # Tracing with real if all inputs have been fakfied
+                return make_fx(fn)(*args)
+
+            return wrapped
+
+        return _maybe_make_fx_with_fake_mode(fn)
 
 
 @contextmanager
@@ -150,7 +167,9 @@ def _detect_input_alias(gm):
 
             def check_alias(out):
                 if (
-                    out is not None
+                    # out can be an integer
+                    isinstance(out, torch.fx.Node)
+                    and out is not None
                     and "val" in out.meta
                     and isinstance(out.meta["val"], torch.Tensor)
                 ):
@@ -292,6 +311,30 @@ def prepare_fw_with_masks(fn):
     return fw_with_masks
 
 
+# This function replaces None gradients with all-zero gradients.
+# `None` gradients are problematic for CUDA graphs. Those gradients are
+# replaced with an all-zero tensor for better optimization
+def unmask_none_gradients(grads, operands):
+    allowed_types = (torch.Tensor, int, torch.SymInt)
+    assert all(
+        isinstance(o, allowed_types) for o in operands
+    ), f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+
+    unmasked_grads = []
+    for g, o in zip(grads, operands):
+        if g is not None:
+            unmasked_grads.append(g)
+        else:
+            # In case the operand is an int or a torch.SymInt, return None
+            # This can happen for lifted_arguments. E.g., the shapes of a dynamic tensor are lifted and passed
+            # as additional arguments
+            unmasked_grads.append(
+                torch.zeros_like(o) if isinstance(o, torch.Tensor) else None
+            )
+
+    return unmasked_grads
+
+
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
 def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
@@ -340,11 +383,14 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
             [grad for grad in grads if grad is not None and grad.requires_grad],
         )
 
+        # Unmask None gradients to all-zero gradients
+        unmasked_grads = unmask_none_gradients(grads, inputs)
+
         # In order to keep map functional for backward graph,
         # we clone outputs that are aliasing inputs
         maybe_clone = clone_outputs_aliasing_inputs(joint_operands_grads)
 
-        return pytree.tree_map(maybe_clone, grads)
+        return pytree.tree_map(maybe_clone, unmasked_grads)
 
     if use_output_and_grad_bw:
         example_xs_out = list(fw_inputs) + list(fw_outputs)
@@ -372,9 +418,7 @@ def _unstack_pytree(xs):
 
     a = zip(*flat_xs)
 
-    pytrees = []
-    for tuple in a:
-        pytrees.append(pytree.tree_unflatten(tuple, inspec))
+    pytrees = [pytree.tree_unflatten(tuple, inspec) for tuple in a]
     return pytrees
 
 
@@ -415,7 +459,9 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
+    assert all(
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+    ), args
     partitioned_args: List[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
@@ -458,3 +504,45 @@ def get_dummy_aot_autograd_config():
         aot_id=0,
         keep_inference_input_mutations=False,
     )
+
+
+# Slices off the first element of a given dimension
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)
+
+
+# Reports the difference between meta of two tensors in a string
+def diff_tensor_meta(
+    meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
+) -> List[str]:
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+    pair_diffs = []
+    for meta_name in TensorMetadata._fields:
+        if not check_grad and meta_name == "requires_grad":
+            continue
+        val1 = getattr(meta1, meta_name)
+        val2 = getattr(meta2, meta_name)
+        try:
+            if val1 != val2:
+                pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+        except GuardOnDataDependentSymNode as _:
+            pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+            continue
+    return pair_diffs
+
+
+# Note [lifted arg types in hop]
+# For dynamoed hops, we automatically lift the free symbols in tensors as arguments.
+# This has implications for the types of lifted args for different dispatch keys:
+#   1. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd need to support torch.Symint
+#      lifted args because it's on the path of torch.compile(dynamic=True).
+#   2. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd, CompositeExplicitAutograd need
+#      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
+#      hops may receive int inputs from the shape of outer tensor inputs.
+#      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
+def validate_subgraph_args_types(lifted_args: Union[Tuple[Any, ...], List[Any]]):
+    allowed_types = (torch.Tensor, int, torch.SymInt)
+    assert all(
+        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
+    ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"

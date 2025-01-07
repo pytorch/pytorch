@@ -37,6 +37,7 @@ if(USE_CUDA)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_cpp_rpc PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_cpp_rpc DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

@@ -1,4 +1,5 @@
 #include <ATen/TensorGeometry.h>
+#include <c10/util/overflows.h>
 
 namespace at {
 

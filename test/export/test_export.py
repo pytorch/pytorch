@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+# ruff: noqa: F841
 # flake8: noqa
 import copy
 import dataclasses
@@ -23,7 +24,6 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
-    _decomp_table_to_post_autograd_aten,
     get_buffer,
     get_param,
     is_buffer,
@@ -33,7 +33,13 @@ from torch._export.utils import (
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import default_decompositions, Dim, export, unflatten
+from torch.export import (
+    default_decompositions,
+    Dim,
+    export,
+    export_for_training,
+    unflatten,
+)
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -66,6 +72,11 @@ from torch.testing._internal.common_utils import (
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.custom_tensor import (
+    ConstantExtraMetadataTensor,
+    CustomTensorPlainOut,
+)
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -172,10 +183,16 @@ SERDES_NON_STRICT_SUFFIX = "_serdes_non_strict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_non_strict"
+LEGACY_EXPORT_STRICT_SUFFIX = "_legacy_export_strict"
+LEGACY_EXPORT_NONSTRICT_SUFFIX = "_legacy_export_non_strict"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_non_strict_legacy_test(test_name):
+    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
@@ -292,6 +309,40 @@ class TestDynamismExpression(TestCase):
 
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
+
+    def test_export_strict_narrow_unbacked_expr(self):
+        # Tests that we are able to handle 0/1 specialization on sizes represented
+        # by unbacked int expressions by transforming them into an unbacked int.
+        #
+        # This test only works with strict=True, since it relies on dynamo tracing
+        # for transforming the expression into an unbacked SymInt.
+
+        def identity(x):
+            return x
+
+        class Module(torch.nn.Module):
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, x, p):
+                u0 = p.item()
+                torch._check(u0 + 5 <= x.shape[0])
+                torch._check(u0 >= 0)
+                # Create a tensor of size: (x.shape[0] - u0 - 5).
+                return x.narrow(0, u0 + 5, self.fn(x.shape[0] - u0 - 5))
+
+        inputs = (torch.arange(10), torch.tensor(2))
+
+        # Without transforming the unbacked int expression, we can't export.
+        with self.assertRaisesRegex(
+            RuntimeError, escape("Could not guard on data-dependent expression")
+        ):
+            export(Module(identity), inputs, strict=True)
+
+        # It works if we transform the whole unbacked int expression into
+        # an unbacked int.
+        export(Module(torch.sym_fresh_size), inputs, strict=True)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -619,6 +670,61 @@ graph():
         for vr_upper in vr_upper_bounds:
             self.assertTrue(vr_upper <= expected_upper_bound)
 
+    def test_nonzero_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, as_tuple: bool) -> torch.Tensor:
+                return torch.nonzero(x, as_tuple=as_tuple)
+
+        # Case 1 and 2: as_tuple is True and as_tuple is False.
+        for as_tuple in [True, False]:
+            example_args = (torch.randn(3, 4, 5), as_tuple)
+            dim0_x_max, dim1_x_max = 100, 7
+            dynamic_shapes = {
+                "x": {
+                    0: Dim("dim0_x", max=dim0_x_max),
+                    1: Dim("dim1_x_max", max=dim1_x_max),
+                },
+                "as_tuple": None,
+            }
+            m = M()
+            exported_program: torch.export.ExportedProgram = export(
+                m, args=example_args, dynamic_shapes=dynamic_shapes
+            )
+
+            # Test that the expected upper bound is among the range constraints.
+            expected_upper_bound = dim0_x_max * dim1_x_max * 5
+            vr_upper_bounds = [
+                vr.upper for vr in exported_program.range_constraints.values()
+            ]
+            self.assertTrue(expected_upper_bound in set(vr_upper_bounds))
+            # Test that none of the upper bounds are larger.
+            for vr_upper in vr_upper_bounds:
+                self.assertTrue(vr_upper <= expected_upper_bound)
+
+        # Case 3: Test special case when input has zero dimensions and a nonzero
+        # scalar value.
+        example_args = (torch.tensor(10), as_tuple)
+        dim0_x_max = 100
+        dynamic_shapes = {
+            "x": None,
+            "as_tuple": None,
+        }
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        # Test that the expected upper bound is equal to 1, since our output
+        # for this edge case should always be a tensor of size 1.
+        vr_upper_bounds = [
+            vr.upper for vr in exported_program.range_constraints.values()
+        ]
+        for vr_upper in vr_upper_bounds:
+            self.assertEqual(vr_upper, 1)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -782,6 +888,39 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_symint_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.int),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symbool_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.bool),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symfloat_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([3.14], dtype=torch.float),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -876,7 +1015,7 @@ graph():
                 # z = 4
                 return x + y + z + w2
 
-        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False).run_decompositions({})
         self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
@@ -925,7 +1064,7 @@ graph():
                 # z = 3 + 3
                 return x + y + z
 
-        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False).run_decompositions({})
         self.assertEqual(
             list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
@@ -959,6 +1098,69 @@ graph():
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_malformed_fqn_from_source_name(self):
+        # See https://github.com/pytorch/pytorch/issues/141939
+        from types import MethodType
+
+        class Block(torch.nn.Module):
+            def __init__(self, i, o):
+                super().__init__()
+                self.to_out = torch.nn.ModuleList([])
+                self.to_out.append(torch.nn.Linear(i, o, bias=True))
+                self.to_out.append(torch.nn.Dropout(0.5))
+
+            def forward(self, x):
+                for l in self.to_out:
+                    x = l(x)
+                return x
+
+        class Problem1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleDict(
+                    {f"{i}": Block(64, 64) for i in range(5)}
+                )
+
+            def forward(self, x):
+                for k, m in self.blocks.items():
+                    x = m(x)
+                return x
+
+        class Problem2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleList([Block(64, 64) for i in range(5)])
+
+            def forward(self, x):
+                x = self.blocks[0](x)
+                for m in self.blocks[1:4]:
+                    x = m(x)
+                return x
+
+        def _split_after_forward(self, *args, **kwargs):
+            return self._orig_forward(*args, **kwargs)
+
+        def annotate_split_points(mod: torch.nn.Module, spec):
+            for qualname, split_type in spec.items():
+                atoms = qualname.split(".")
+                predecessor_module = mod
+                for i, atom in enumerate(atoms[:-1]):
+                    try:
+                        predecessor_module = getattr(predecessor_module, atom)
+                    except AttributeError as e:
+                        raise e
+                mod_to_wrap = getattr(predecessor_module, atoms[-1])
+                mod_to_wrap._orig_forward = mod_to_wrap.forward
+                mod_to_wrap.forward = MethodType(_split_after_forward, mod_to_wrap)
+
+        for problem in [Problem1, Problem2]:
+            m = problem()
+            m(torch.rand(64, 64))
+            # simpified torch.distributed.pipeline code
+            annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
+            gm = export(m, (torch.rand(64, 64),))
+            torch.export.unflatten(gm)
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -995,6 +1197,135 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    def test_output_node_name(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
+    def test_real_tensor_size_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            m, n = a.shape
+            return torch.empty(n, m)  # incorrectly permute
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # won't catch anything if dims are equal
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+            )
+            # catch concrete inequality
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                )
+            # same test with dynamic shapes
+            d0 = Dim("d0")
+            d1 = Dim("d1")
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+                dynamic_shapes={
+                    "a": (d0, d1),
+                    "b": (d0, d1),
+                },
+            )
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                    dynamic_shapes={
+                        "a": (d0, d1),
+                        "b": (d0, d1),
+                    },
+                )
+
+    def test_real_tensor_alias_dtype_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+
+        # test alias case
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_alias(a)
+
+        @torch.library.custom_op("mylib::foo_alias", mutates_args={})
+        def foo_alias(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_alias.register_fake
+        def foo_fake_impl(a):
+            return a
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found an aliasing mismatch between fake output (.*\n)*.* "
+                r"and real output (.*\n)*.* for func: mylib.foo_alias.default",
+            ):
+                ep = export(M(), (torch.randn(4, 4),))
+
+        # test dtype case
+        class N(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_dtype(a)
+
+        @torch.library.custom_op("mylib::foo_dtype", mutates_args={})
+        def foo_dtype(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_dtype.register_fake
+        def foo_fake_impl(a):
+            m, n = a.shape
+            return torch.empty([m, n], dtype=torch.int32)
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "
+                r"and real tensor (.*\n)*.* at output, for func: mylib.foo_dtype.default",
+            ):
+                ep = export(N(), (torch.randn(4, 4),))
+
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1003,15 +1334,584 @@ graph():
                 return max(x.shape[0], y.shape[0])
 
         model = Foo()
-        inputs = (torch.randn(64), torch.randn(64))
+        inputs = (torch.zeros(64), torch.ones(64))
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs)
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
         x = torch.zeros(64)
         y = torch.ones(64)
-        self.assertEqual(ep.module()(x, x), model(x, x))
+        # This seems to be a bug with old export because when we pass in x, x
+        # as input, runtime assertion should fail. This is because we would create
+        # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
+        # assertion.
+        if is_non_strict_test(self._testMethodName) and not is_non_strict_legacy_test(
+            self._testMethodName
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
+                ep.module()(x, x)
+        else:
+            self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_draft_export_checks_mutation_with_nan(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def _(x, y):
+            return x + y
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.full((64,), torch.nan), torch.full((64,), torch.nan))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_mutation(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "for argument 'y'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"y"})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_mutation_list(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                return foo(xs)
+
+        model = Foo()
+        inputs = ([torch.randn(64), torch.randn(64)],)
+        with self.assertRaisesRegex(RuntimeError, "for argument 'xs'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"xs"})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_aliasing(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecomp
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_draft_export_infers_fake_kernel(self):
+        with torch.library._scoped_library("export", "FRAGMENT") as lib:
+            lib.define("bar(Tensor x) -> Tensor")
+            lib.impl("bar", lambda x: x[0].clone(), "CPU")
+
+            @torch.library.custom_op("export::foo", mutates_args={})
+            def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x * y
+
+            class Foo(torch.nn.Module):
+                def forward(self, x, y):
+                    return foo(x, y), torch.ops.export.bar(y)
+
+            model = Foo()
+            inputs = (torch.randn(1, 3), torch.randn(2, 1))
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        # expecttest only works for the base TestExport class.
+        if self.__class__ != TestExport:
+            return
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x, y):
+    foo = torch.ops.export.foo.default(x, y);  x = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(foo, 0)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_3);  sym_constrain_range_for_size_default = None
+    ge_3 = sym_size_int_3 >= 0;  sym_size_int_3 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_default = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_4);  sym_constrain_range_for_size_default_1 = None
+    ge_4 = sym_size_int_4 >= 0;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u1 >= 0 on node 'ge_4'");  ge_4 = _assert_scalar_default_1 = None
+    bar = torch.ops.export.bar.default(y);  y = None
+    sym_size_int_5 = torch.ops.aten.sym_size.int(bar, 0)
+    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_5);  sym_constrain_range_for_size_default_2 = None
+    ge_5 = sym_size_int_5 >= 0;  sym_size_int_5 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_5'");  ge_5 = _assert_scalar_default_2 = None
+    return (foo, bar)""",
+        )
+
+    def test_draft_export_fake_kernel_inference_errors(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.expand(32, 3).contiguous()[4]
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(1, 3), torch.randn(2, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "non-zero storage offset"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.randn(3, 3).diagonal()
+
+        with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    def test_subclasses_parameterization(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4))
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export_for_training(m, (ref_x,))
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_1,)""",
+        )
+
+        ep = export(m, (ref_x,)).run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
+    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original0), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original1), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_2,), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_3,)""",
+        )
+        res = ep.module()(ref_x)
+
+        self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    def test_subclasses_parameterization_nested(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(
+                        CustomTensorPlainOut(
+                            torch.Tensor([[0, 0], [0, 1]]),
+                            torch.Tensor([[0, 0], [1, 0]]),
+                        ),
+                        CustomTensorPlainOut(
+                            torch.Tensor([[1, 0], [0, 0]]),
+                            torch.Tensor([[0, 1], [0, 0]]),
+                        ),
+                    )
+                )
+
+            def forward(self, x):
+                a = (x + 2 * self.p1 + self.p2).sum().sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(2, 2)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=2] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sum_1,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_2), kwargs = {})
+    return (add_2,)""",
+        )
+
+        ep = export(m, (ref_x,))
+        ep = ep.run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
+    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %p_parametrizations_p2_original2 : [num_users=1] = placeholder[target=p_parametrizations_p2_original2]
+    %p_parametrizations_p2_original3 : [num_users=1] = placeholder[target=p_parametrizations_p2_original3]
+    %x : [num_users=2] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
+    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_4, %add_5), kwargs = {})
+    %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_6), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_7,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sum_1,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_2), kwargs = {})
+    return (add_8,)""",
+        )
+        res = ep.module()(ref_x)
+        self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = (2 * self.p1 + self.p2).sum()
+                return x + res.get_elem_a().b
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, b), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_38), kwargs = {})
+    return (add_1,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.constant_attribute
+                return x + res2.elem.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.constant_attribute
+                return x + res2.elem.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.a.elem + res.b.constant_attribute
+                return x + res2.a.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%add, a), kwargs = {})
+    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, elem), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %getattr_38), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, 4), kwargs = {})
+    %getattr_45 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_2, a), kwargs = {})
+    %getattr_50 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_45, elem), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_50), kwargs = {})
+    return (add_3,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_complicated_metadata(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = x + 2 * self.p1 + self.p2
+                return res.elem.elem + self.p2.get_complicated_metadata().foo
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
+    %getattr_21 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_26 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_21, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_26, 4), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    def test_real_tensor_errors_on_aliasing_custom_op(self):
+        @torch.library.custom_op("export::foo_alias", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.export.foo_alias(x) * 2
+
+        model = Foo()
+        inputs = (torch.randn(4, 4),)
+        error_type = (
+            RuntimeError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            (
+                r"The output of this custom operator \(1\) must not also be an input "
+                r"to this custom operator and \(2\) may not alias any inputs to this "
+                r"custom operator or other returns"
+            ),
+        ):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
 
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     @testing.expectedFailureSerDerNonStrict
@@ -1055,6 +1955,8 @@ graph():
                     self.assertEqual(ep.module()(sample_input), nz)
                     print(ep)
 
+    @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
+    @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -1220,44 +2122,13 @@ graph():
         )
         check_users_for_graph(ep.graph)
 
-    @unittest.skipIf(IS_FBCODE, "Broken in fbcode")
-    def test_export_predispatch_custom_ops_warnings(self):
-        @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            return x.sin()
-
-        @foo.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return foo(x)
-
-        x = torch.randn(3)
-
-        # Assert no warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            torch.export.export(Foo(), (x,))
-
+    def test_export_custom_op_lib(self):
         ops_registered_before = set(torch.ops.mylib)
 
         # Assert warning for CompositeImplictAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
             lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
-
-            class Bar(torch.nn.Module):
-                def forward(self, x):
-                    return torch.ops.mylib.foo123(x)
-
-            with self.assertWarnsRegex(
-                UserWarning, "CompositeImplicitAutograd and have functional schema"
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    torch.export.export(Bar(), (x,))
 
         ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
@@ -1280,12 +2151,7 @@ graph():
                     return torch.ops.mylib.foo123(lin)
 
             x = torch.randn(4, 4)
-            if IS_FBCODE:
-                ep = export(Bar(), (x,)).run_decompositions(
-                    decomp_table=None, _preserve_ops=(torch.ops.aten.linear.default,)
-                )
-            else:
-                ep = export(Bar(), (x,)).run_decompositions(table)
+            ep = export(Bar(), (x,)).run_decompositions(table)
 
             self.assertExpectedInline(
                 str(ep.graph_module.code).strip(),
@@ -1307,14 +2173,9 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
         ep = torch.export.export(Foo(), (torch.randn(3, 3),))
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.linear.default,)
-            )
-        else:
-            decomp_table = _decomp_table_to_post_autograd_aten()
-            del decomp_table[torch.ops.aten.linear.default]
-            ep = ep.run_decompositions(decomp_table)
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.linear.default]
+        ep = ep.run_decompositions(decomp_table)
 
         gm = ep.graph_module
         # linear is CompositeImplicitAutograd functional op so we should preserve it
@@ -1324,10 +2185,10 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             """\
 def forward(self, p_linear_weight, p_linear_bias, x):
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
-    getitem = split[0]
-    getitem_1 = split[1]
-    getitem_2 = split[2];  split = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(linear, [1, 1, 1]);  linear = None
+    getitem = split_with_sizes[0]
+    getitem_1 = split_with_sizes[1]
+    getitem_2 = split_with_sizes[2];  split_with_sizes = None
     return (getitem, getitem_1, getitem_2)""",
         )
 
@@ -1367,6 +2228,52 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ("sin_1", "method_descriptor.sin"),
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
+
+    def test_is_exporting(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                def f(x):
+                    return x.sin() if torch.compiler.is_exporting() else x.cos()
+
+                y = f(x)
+
+                def true_fn(x):
+                    return f(x) - 1 if torch.compiler.is_exporting() else f(x) + 1
+
+                def false_fn(x):
+                    return f(x) + 1 if torch.compiler.is_exporting() else f(x) - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,)) * y
+
+        ep = export(
+            Mod(),
+            (
+                torch.tensor(False),
+                torch.randn(3, 4),
+            ),
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        FileCheck().check_count("torch.ops.higher_order.cond", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+        # True graph should contain sin and sub
+        FileCheck().check_count("torch.ops.aten.sub", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+
+        # False graph should contain sin and add
+        FileCheck().check_count("torch.ops.aten.add", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
 
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
@@ -1770,13 +2677,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        if IS_FBCODE:
-            ep_has_linear_convd = ep.run_decompositions(
-                {},
-                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-            )
-        else:
-            ep_has_linear_convd = ep.run_decompositions({})
+        ep_has_linear_convd = ep.run_decompositions({})
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -1791,19 +2692,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep.run_decompositions(
-                _preserve_ops=(
-                    torch.ops.aten.conv2d.default,
-                    torch.ops.aten.conv1d.default,
-                )
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            del decomp_table[torch.ops.aten.conv1d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        del decomp_table[torch.ops.aten.conv1d.default]
 
-            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1819,15 +2712,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
-        if IS_FBCODE:
-            ep_has_convd = ep_has_convd.run_decompositions(
-                _preserve_ops=(torch.ops.aten.conv2d.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
 
-            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1871,15 +2759,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
 
-        if IS_FBCODE:
-            ep_has_linear_convd = ep.run_decompositions(
-                {},
-                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-            )
-        else:
-            ep_has_linear_convd = ep.run_decompositions(
-                decomp_table={},
-            )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+        )
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -1894,19 +2776,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep.run_decompositions(
-                _preserve_ops=(
-                    torch.ops.aten.conv2d.default,
-                    torch.ops.aten.conv1d.default,
-                )
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            del decomp_table[torch.ops.aten.conv1d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        del decomp_table[torch.ops.aten.conv1d.default]
 
-            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1924,14 +2798,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep_has_convd.run_decompositions(
-                _preserve_ops=(torch.ops.aten.conv2d.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1961,6 +2830,20 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             "The op aten.index_put_.default",
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
+
+    def test_export_cond_warns_constant_pred(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                return torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+        mod = Mod()
+        with self.assertWarnsRegex(UserWarning, "Pred is a Python constant"):
+            ep = export(mod, (True, torch.randn(3, 3)))
+
+        nodes = ep.module().graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(len(nodes), 1)
 
     def test_export_custom_decomp_table_basic_pop(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -2033,14 +2916,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return x.sin() + x.sum()
 
         ep = export(Foo(), (torch.ones(3, 3),))
-        if IS_FBCODE:
-            ep_preserve_sum = ep.run_decompositions(
-                _preserve_ops=(torch.ops.aten.sum.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.sum.default]
-            ep_preserve_sum = ep.run_decompositions(decomp_table)
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.sum.default]
+        ep_preserve_sum = ep.run_decompositions(decomp_table)
 
         # Even though we are decomposing to core aten which should make
         # sum into sum.dim_IntList, we explicitly marked it to not do that.
@@ -2454,7 +3332,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -2626,6 +3503,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
     @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -2898,9 +3776,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(20),),
             fixes=[
                 # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check(((i//2)) != 0)",
+                "torch._check((i // 2) != 0)",
                 # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check(((i//2)) != 1)",
+                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -3004,7 +3882,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return x.cos() + y.cos()
 
         foo = Module()
-        gm = export(foo, (torch.tensor([2, 3, 5]),))
+        gm = export(foo, (torch.tensor([2, 3, 5]),)).run_decompositions({})
 
         view_count = 0
         for node in gm.graph.nodes:
@@ -3088,7 +3966,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dont_duck_size_for_auto_dynamic(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -3152,7 +4029,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
-    @testing.expectedFailureRetraceabilityNonStrict
+    def test_dim_dynamic_divisibility(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x.size(0) % 2 == 0:
+                    return x.clone() * 2
+                else:
+                    return x.clone() * 0
+
+        input1 = (torch.randn(4),)
+        model = M()
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.DYNAMIC},
+        }
+        export(model, input1, dynamic_shapes=dynamic_shapes)
+
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -3163,7 +4054,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -3177,7 +4067,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -3199,6 +4088,48 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
+    def test_kwargs_reorder(self):
+        class M(torch.nn.Module):
+            def forward(self, *, x, y, z):
+                return x + y + z
+
+        ep = export(
+            M(), (), {"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)}
+        )
+        ep.module()(**{"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)})
+        ep.module()(z=torch.ones(3), y=torch.ones(3), x=torch.ones(3))
+        ep.module()(x=torch.ones(3), z=torch.ones(3), y=torch.ones(3))
+
+    def test_set_example_inputs(self):
+        class M(torch.nn.Module):
+            def forward(self, a, *, x, y, z):
+                return a, x + y + z
+
+        inp = (
+            (torch.ones(3),),
+            {"z": torch.ones(3), "y": torch.ones(3), "x": torch.ones(3)},
+        )
+        ep = export(M(), inp[0], inp[1])
+        ep.module()(*ep.example_inputs[0], **ep.example_inputs[1])
+
+        ep.example_inputs = (
+            (torch.ones(3),),
+            {"x": torch.ones(3), "z": torch.ones(3), "y": torch.ones(3)},
+        )
+        ep.module()(*ep.example_inputs[0], **ep.example_inputs[1])
+
+        with self.assertRaisesRegex(ValueError, "Example inputs should be a tuple"):
+            ep.example_inputs = (torch.ones(3),)
+
+        with self.assertRaisesRegex(ValueError, "Ran into a kwarg keyword mismatch"):
+            ep.example_inputs = ((torch.ones(3),), {})
+
+        with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
+            ep.example_inputs = (
+                (),
+                {"x": torch.ones(3), "z": torch.ones(3), "y": torch.ones(3)},
+            )
+
     def test_export_func_with_var_postional_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args):
@@ -3208,7 +4139,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -3219,7 +4149,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -3263,12 +4192,78 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = torch.export.export(M(), inputs)
+        ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_sequential_slicing(self):
+        # See https://github.com/pytorch/pytorch/issues/137455
+
+        class TestModule1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # seq_last as local variable works
+                seq_last = self.seq[1:]
+                return seq_last(x)
+
+        class TestModule2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+                # seq_last as initialized submodule works
+                self.seq_last = self.seq[1:]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.seq_last(x)
+
+        inp = (torch.randn(4, 4),)
+        for mod in [TestModule1(), TestModule2()]:
+            epm = export(mod, inp).module()
+            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
+
+    def test_unflatten_isinstance(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                return self.n(x + 1, True) + self.n(x + 1, False)
+
+        x = torch.zeros(4)
+        types = {"n": N}
+        ep = export(
+            M(),
+            (x,),
+            preserve_module_call_signature=tuple(types.keys()),
+        )
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(x), x + 5))
+        for fqn, mod in ufm.named_modules(remove_duplicate=False):
+            if cls := types.get(fqn):
+                ty = f"{cls.__module__}.{cls.__qualname__}"
+                self.assertTrue(ty, mod.type_name())
 
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
@@ -3314,7 +4309,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -3339,10 +4333,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
+    @testing.expectedFailureCppSerDes  # we don't save placeholder metadata
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -4057,7 +5053,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        ep = export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -4075,7 +5071,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             Module(),
             (torch.tensor([1, 2], device="cpu"),),
             dynamic_shapes={"x": {0: Dim("i")}},
-        )
+        ).run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -4094,14 +5090,16 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
-            export(Module(), (torch.tensor(1, device="cpu"),))
+            export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x.float()
 
-        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
+            {}
+        )
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -4120,7 +5118,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
-            export(Module(), (torch.tensor(1, dtype=torch.float),))
+            export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
+                {}
+            )
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
@@ -4258,80 +5258,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "torch.ops.aten._assert_async.msg", 1, exactly=True
         ).run(ep.graph_module.code)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_decomp_item_in_prim_after_decomposition(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
                 return x
 
-        decomp_table = {**_decomp_table_to_post_autograd_aten(), **decomposition_table}
+        decomp_table = {**default_decompositions(), **decomposition_table}
 
-        ep = export(M(), (torch.randn(2, 2),)).run_decompositions(decomp_table)
+        ep = export_for_training(M(), (torch.randn(2, 2),)).run_decompositions(
+            decomp_table
+        )
 
-        # The difference seems fine because export_for_training catches const tensor little differently.
-        # Training IR produces:
-        # graph():
-        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        #     %x : [num_users=1] = placeholder[target=x]
-        #     %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        #     %detach_ : [num_users=1] = call_function[target=torch.ops.aten.detach_.default](args = (%lift_fresh_copy,), kwargs = {})
-        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach_, Fail), kwargs = {})
-        #     return (x,)
-        #
-        # Pre-dispatch functionalization produces:
-        # graph():
-        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        #     %x : [num_users=1] = placeholder[target=x]
-        #     %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        #     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
-        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach, Fail), kwargs = {})
-        #     return (x,)
-        #
-        # Retracing:
-        # graph():
-        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        #     %x : [num_users=1] = placeholder[target=x]
-        #     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        #     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
-        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach, Fail), kwargs = {})
-        #     return (x,)
-        # The difference comes from the fact that prim has registration for aten.detach while not for aten.detach_.
-        # The diference in retracing comes from the fact that we retrace at pre-dispatch level while the usual flow
-        # traces to post-dispatch.
-        if is_training_ir_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep.graph_module.code).strip(),
-                """\
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
 def forward(self, c_lifted_tensor_0, x):
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
     _assert_async = torch.ops.aten._assert_async.msg(lift_fresh_copy, 'Fail');  lift_fresh_copy = _assert_async = None
     return (x,)""",
-            )
-        elif is_retracebility_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep.graph_module.code).strip(),
-                """\
-def forward(self, c_lifted_tensor_0, x):
-    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
-    view_of = torch.ops.prims.view_of.default(clone);  clone = None
-    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
-    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
-    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
-    return (x,)""",
-            )
-        else:
-            self.assertExpectedInline(
-                str(ep.graph_module.code).strip(),
-                """\
-def forward(self, c_lifted_tensor_0, x):
-    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
-    view_of = torch.ops.prims.view_of.default(lift_fresh_copy);  lift_fresh_copy = None
-    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
-    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
-    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
-    return (x,)""",
-            )
+        )
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
@@ -4349,7 +5295,7 @@ def forward(self, c_lifted_tensor_0, x):
         mod.eval()
         inp = torch.randn(1, 1, 3, 3)
 
-        gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
+        gm = torch.export.export_for_training(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -4363,13 +5309,12 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
-    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
-    return pytree.tree_unflatten((getitem,), self._out_spec)""",
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
         mod.train()
-        gm_train = _export(mod, (inp,), pre_dispatch=True).module()
+        gm_train = torch.export.export_for_training(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm_train.code).strip(),
             """\
@@ -4383,15 +5328,9 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
-    getitem = _native_batch_norm_legit_functional[0]
-    getitem_3 = _native_batch_norm_legit_functional[3]
-    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = copy__default = None
-    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = copy__default_1 = None
-    copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = copy__default_2 = None
-    return pytree.tree_unflatten((getitem,), self._out_spec)""",
+    add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
     def test_constrain_size_in_eager(self):
@@ -4617,7 +5556,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = torch.export.export(M(), (torch.tensor(1),))
+        ep = export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -5032,7 +5971,7 @@ def forward(self, b_a_buffer, x):
             def forward(self, x):
                 return torch.ops.aten.lift_fresh_copy(x)
 
-        ep = export(M(), (torch.ones(6, 4),))
+        ep = export(M(), (torch.ones(6, 4),)).run_decompositions({})
         found = False
 
         op = "torch.ops.aten.clone.default"
@@ -5170,6 +6109,28 @@ def forward(self, b_a_buffer, x):
 
         inp = (torch.tensor(5),)
         self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+
+        class Boo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.tensor(True)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(False), torch.tensor(True)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Boo(), (torch.tensor(False),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
+
+        inp = (torch.tensor(True),)
+        self.assertTrue(torch.allclose(ep.module()(*inp), Boo()(*inp)))
 
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
@@ -5648,7 +6609,6 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -5664,16 +6624,14 @@ graph():
                 return m(x) * x
 
         inps = (torch.randn(3, 3),)
-        ep = export(M2(), inps)
+        ep = export_for_training(M2(), inps).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
-
-        if is_training_ir_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep.graph).strip(),
-                """\
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
@@ -5681,20 +6639,7 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lift_fresh_copy), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul,)""",
-            )
-        else:
-            self.assertExpectedInline(
-                str(ep.graph).strip(),
-                """\
-graph():
-    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-    %x : [num_users=2] = placeholder[target=x]
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %detach), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
-    return (mul,)""",
-            )
+        )
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
@@ -5716,7 +6661,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         # Strict export segfaults (Issue #128109)
-        ep = torch.export.export(M2(), inps, strict=False)
+        ep = export_for_training(M2(), inps, strict=False).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -5730,10 +6675,13 @@ graph():
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
     %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
+    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul_1,)""",
@@ -5742,7 +6690,21 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureRetraceabilityNonStrict
+    def test_module_dict_key(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Linear(10, 10)
+
+            def forward(self, x, d):
+                d = {m: d[name] for name, m in self.named_children()}
+                return x + d[self.mod]
+
+        m = Module()
+        sample_inputs = (torch.randn(10), {"mod": torch.randn(10)})
+        ep = export(m, sample_inputs)
+        self.assertEqual(ep.module()(*sample_inputs), m(*sample_inputs))
+
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
             def initialize_parameters(self, *args, **kwargs):
@@ -6164,8 +7126,6 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
-    @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 
@@ -6413,6 +7373,1190 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_unflatten_random_dag_5(self):
+        # dag: {0: [1, 2, 3], 1: [2, 4], 2: [4], 3: [], 4: []}
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n4 = N4()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = self.n3.n4(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(epm(*inp), eager))
+        self.assertTrue(torch.allclose(ufm(*inp), eager))
+
+    def test_unflatten_random_dag_6(self):
+        # dag: {0: [1, 2, 4, 5], 1: [3, 5], 2: [4, 5], 3: [], 4: [5], 5: []}
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = self.n5(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n4 = N4()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(epm(*inp), eager))
+        self.assertTrue(torch.allclose(ufm(*inp), eager))
+
+    def test_unflatten_random_dag_buf_8(self):
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = self.n7(x + 1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.n7.buf
+                x = self.n6(x + 1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.n4.n5.n6.n7.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                x = self.n2.n3.n4.n5.n6.n7(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_4(self):
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = self.n3(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                self.n1.buf.add_(1)
+                self.n1.n2.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_6(self):
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                self.n5.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = self.n4(x + 1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.n5.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                self.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.n4.buf
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.buf.add_(1)
+                self.n2.n3.n4.n5.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.n4.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_9(self):
+        class N8(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n8 = N8()
+
+            def forward(self, x):
+                x = self.n8(x + 1)
+                self.n8.buf.add_(1)
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = x + self.n7.buf
+                x = x + self.n7.n8.buf
+                x = self.n7.n8(x + 1)
+                self.n7.buf.add_(1)
+                self.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.n7.buf
+                x = self.n6.n7(x + 1)
+                self.n6.buf.add_(1)
+                self.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                x = x + self.n5.n6.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6.n7(x + 1)
+                x = self.n5.n6.n7.n8(x + 1)
+                self.n5.n6.n7.buf.add_(1)
+                self.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = x + self.n4.n5.n6.n7.n8.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                self.n4.n5.n6.n7.buf.add_(1)
+                self.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.n4.n5.n6.buf
+                x = x + self.n3.n4.n5.n6.n7.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8(x + 1)
+                self.n3.n4.buf.add_(1)
+                self.n3.n4.n5.buf.add_(1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                self.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.n8.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.n4.n5.n6.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.n7.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_preserving_4(self):
+        # {0: [1, 2, 3], 1: [2], 2: [], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_4(self):
+        # {0: [2, 3], 1: [2], 2: [3], 3: []}
+        # {0: [], 1: [3], 2: [3], 3: []}
+        # {0: [2, 3], 1: [2], 2: [3], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = self.n3(x + 1)
+                self.n3.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = self.n2(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_4_1(self):
+        # {0: [2], 1: [3], 2: [3], 3: []}
+        # {0: [2, 3], 1: [3], 2: [3], 3: []}
+        # {0: [1], 1: [3], 2: [], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                self.n3.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = self.n2.n3(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = self.n1(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_5(self):
+        # {0: [1, 2, 3], 1: [3, 4], 2: [3, 4], 3: [4], 4: []}
+        # {0: [3], 1: [4], 2: [3, 4], 3: [4], 4: []}
+        # {0: [1, 2], 1: [2, 3], 2: [3, 4], 3: [], 4: []}
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                self.n4.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                self.n3.buf.add_(1)
+                self.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                self.n2.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_7(self):
+        # {0: [3, 4, 5, 6], 1: [2, 3, 4, 5, 6], 2: [3, 4, 5], 3: [5, 6], 4: [6], 5: [6], 6: []}
+        # {0: [2, 4, 5, 6], 1: [3, 4, 6], 2: [6], 3: [5], 4: [], 5: [], 6: []}
+        # {0: [1, 2, 3, 4, 5, 6], 1: [2, 3, 4], 2: [4, 5, 6], 3: [4, 5, 6], 4: [5, 6], 5: [6], 6: []}
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.buf
+                x = self.n6(x + 1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.n6.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.n5.buf
+                x = x + self.n4.n5.n6.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                self.n4.n5.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = x + self.n3.n4.n5.buf
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6(x + 1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.buf
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                self.n2.n3.buf.add_(1)
+                self.n2.n3.n4.buf.add_(1)
+                self.n2.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = x + self.n1.n2.n3.n4.n5.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.n4.buf.add_(1)
+                self.n1.n2.n3.n4.n5.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_10(self):
+        class N9(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N8(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n9 = N9()
+
+            def forward(self, x):
+                x = x + self.n9.buf
+                self.n9.buf.add_(1)
+                return x + 1
+
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n8 = N8()
+
+            def forward(self, x):
+                x = self.n8(x + 1)
+                x = self.n8.n9(x + 1)
+                self.n8.buf.add_(1)
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = x + self.n7.n8.buf
+                x = self.n7(x + 1)
+                x = self.n7.n8.n9(x + 1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.buf
+                x = x + self.n6.n7.buf
+                x = x + self.n6.n7.n8.buf
+                x = self.n6(x + 1)
+                x = self.n6.n7.n8.n9(x + 1)
+                self.n6.n7.buf.add_(1)
+                self.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.n6.buf
+                x = x + self.n5.n6.n7.n8.buf
+                x = x + self.n5.n6.n7.n8.n9.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                x = self.n5.n6.n7.n8(x + 1)
+                x = self.n5.n6.n7.n8.n9(x + 1)
+                self.n5.buf.add_(1)
+                self.n5.n6.buf.add_(1)
+                self.n5.n6.n7.buf.add_(1)
+                self.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = x + self.n4.n5.n6.n7.n8.n9.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                x = self.n4.n5.n6.n7.n8(x + 1)
+                x = self.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n4.n5.n6.buf.add_(1)
+                self.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = x + self.n3.n4.n5.n6.n7.n8.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n3.buf.add_(1)
+                self.n3.n4.buf.add_(1)
+                self.n3.n4.n5.buf.add_(1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                self.n3.n4.n5.n6.n7.buf.add_(1)
+                self.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.n8.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                x = self.n2.n3.n4.n5.n6(x + 1)
+                x = self.n2.n3.n4.n5.n6.n7(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.n5.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.n7.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7.n8(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+            "n1.n2.n3.n4.n5.n6.n7",
+            "n1.n2.n3.n4.n5.n6.n7.n8",
+            "n1.n2.n3.n4.n5.n6.n7.n8.n9",
+        )
+        ep = export(
+            N0(),
+            inp,
+            strict=False,  # strict export is slow with large random dags
+            preserve_module_call_signature=fqns,
+        )
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_const_preserving_3(self):
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.const
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.const
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_const_preserving_3_1(self):
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.const
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.const
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
 
@@ -6428,7 +8572,15 @@ graph():
                 else:
                     return x + 2 * (self.buf + 1) - self.const
 
-        class M(torch.nn.Module):
+        class K(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x0):
+                return self.n(x0, True)
+
+        class P(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.n = N()
@@ -6439,29 +8591,27 @@ graph():
                 x2 = self.n(x0, False)
                 return x1 + x2
 
-        m = M()
-        eager_result = m(*inp)
+        class Q(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.k = K()
 
-        def test(ep, swap):
-            epm = ep.module()
-            ufm = torch.export.unflatten(ep)
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.k.n(x0, True)
+                x2 = self.k.n(x0, False)
+                return x1 + x2
 
-            exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+        class R(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.k = K()
 
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-            for fqn, mod in swap.items():
-                ufm.set_submodule(fqn, mod)
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-        if not is_retracebility_test(self._testMethodName):
-            test(
-                export(M(), inp, preserve_module_call_signature=("n",)),
-                swap={"n": N(), "n@1": N()},
-            )
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.k(x0)
+                x2 = self.k.n(x0, False)
+                return x1 + x2
 
         class _N(torch.nn.Module):
             def forward(self, x):
@@ -6471,10 +8621,36 @@ graph():
             def forward(self, x):
                 return x + 6
 
-        test(
-            export(M(), inp),
-            swap={"n": _N(), "n@1": _N_1()},
-        )
+        for Mod, path_n in [(P, "n"), (Q, "k.n"), (R, "k.n")]:
+            m = Mod()
+            eager_result = m(*inp)
+
+            def test(ep, swap):
+                epm = ep.module()
+                ufm = torch.export.unflatten(ep)
+
+                exported_result = epm(*inp)
+                self.assertTrue(torch.allclose(exported_result, eager_result))
+
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            if not is_retracebility_test(self._testMethodName):
+                # swapping will not work with retrace
+                test(
+                    export(Mod(), inp, preserve_module_call_signature=(path_n,)),
+                    swap={path_n: N()},
+                )
+
+            test(
+                export(Mod(), inp),
+                swap={path_n: _N(), path_n + "@1": _N_1()},
+            )
 
     def test_preserve_module_call_signature_unflatten_specialization(self):
         class N(torch.nn.Module):
@@ -6499,6 +8675,7 @@ graph():
         eager_result = m(*inp)
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             ep = export(M(), inp, preserve_module_call_signature=("n",))
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
@@ -6512,6 +8689,55 @@ graph():
             ufm.set_submodule("n", N())
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+    def test_unflatten_multiple_graphs_dispatch(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = x + 3
+                x = self.n(x, True)
+                x = x + 4
+                x = self.n(x, True)
+                x = x + 5
+                x = self.n(x, False)
+                x = x + 6
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        def test(ep):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+        if is_training_ir_test(self._testMethodName):
+            test(
+                torch.export.export_for_training(
+                    M(),
+                    inp,
+                    strict=not is_non_strict_test(self._testMethodName),
+                    preserve_module_call_signature=("n",),
+                )
+            )
+
+        test(export(M(), inp, preserve_module_call_signature=("n",)))
 
     def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
         class N(torch.nn.Module):
@@ -6538,7 +8764,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6548,12 +8774,21 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            # swapping will not work with retrace
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
 
         test(export(M(), inp))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -6586,7 +8821,7 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
+        def test(ep, swap=None):
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
 
@@ -6596,24 +8831,77 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
+            if swap:
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            # swapping will not work with retrace
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
             # running decompositions again should work for all IRs
             ep = export(M(), inp, preserve_module_call_signature=("n",))
-            test(ep.run_decompositions({}))
-            if is_training_ir_test(self._testMethodName):
-                # since we run decompositions by default when testing training IR,
-                # also test training IR without running decompositions
-                strict = not is_non_strict_test(self._testMethodName)
-                ept = torch.export.export_for_training(
-                    M(),
-                    inp,
-                    strict=strict,
-                    preserve_module_call_signature=("n",),
-                )
-                test(ept)
+            test(ep.run_decompositions({}), swap={"n": N()})
 
         test(export(M(), inp))
+
+        strict = not is_non_strict_test(self._testMethodName)
+        ept = torch.export.export_for_training(
+            M(),
+            inp,
+            strict=strict,
+            preserve_module_call_signature=("n",),
+        )
+        test(ept)
+
+    def test_set_grad_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, a, b):
+                with torch.no_grad():
+                    return a + b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, a, b):
+                return self.m1(a, b)
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_cond_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    return x + y
+
+                def false_fn(x, y):
+                    return x - y
+
+                return torch.cond(p, true_fn, false_fn, [a, b])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, p, a, b):
+                return self.m1(p, a, b)
+
+        inp = (torch.tensor(False), torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
@@ -6694,6 +8982,14 @@ graph():
                     self.assertEqual(
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
+
+            ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+            exported_result = ep.module()(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened = torch.export.unflatten(ep)
+            unflattened_result = unflattened(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
@@ -6789,7 +9085,7 @@ graph():
         ep = export(
             Foo(),
             (torch.randn(4, 4),),
-        )
+        ).run_decompositions({})
         # check correct lines are in stack trace
         trace_mul = [node for node in ep.graph.nodes if node.name == "mul"][0].meta.get(
             "stack_trace", ""
@@ -6904,6 +9200,36 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+    def test_modules_access_for_deleted_submodule(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.foo = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                for name, mod in self._modules.items():
+                    if mod is None:
+                        continue
+                    pass
+                return self.linear(x)
+
+        mod = Foo()
+        mod.foo = None
+        mod(torch.randn(10, 10))
+        export(mod, (torch.randn(10, 10),), strict=False)
+
+    def test_profiling_code(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                with torch.profiler.record_function("foo"):
+                    return x.sin()
+
+        ep = export(Foo(), (torch.randn(5, 5),), strict=True)
+        FileCheck().check_count(
+            "torch.ops.profiler._record_function_enter_new.default", 0, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
@@ -7044,6 +9370,25 @@ def forward(self, x, b_t, y):
         ep = export(copied_m, (torch.randn(N, C, H, W),))
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
+
+    def test_module_list_slice(self):
+        class ModuleListTruncated(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fcs = torch.nn.ModuleList(
+                    [torch.nn.Linear(1, 1) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                for fc in self.fcs[:1]:
+                    x = fc(x)
+                return x
+
+        x = torch.rand(2, 1)
+        mod = ModuleListTruncated()
+
+        epm = export(mod, (x,)).module()
+        self.assertTrue(torch.allclose(mod(x), epm(x)))
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
@@ -7247,6 +9592,28 @@ def forward(self, x, b_t, y):
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
 
+    def test_constant_no_user_inp(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(4, 4)
+
+            def forward(self, x):
+                return x.sin()
+
+        a = torch.ones(4, 4)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.register_buffer("buf", torch.ones(4, 4))
+
+            def forward(self):
+                return self.bar(self.bar.a) + a + self.bar.a + self.buf
+
+        export(Foo(), (), strict=False)
+
     def test_compiling_state(self):
         class TestModule1(torch.nn.Module):
             def forward(self, x):
@@ -7299,7 +9666,8 @@ def forward(self, x, b_t, y):
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.testlib.returns_tensor_symint(x)[0]
+                a, b = torch.ops.testlib.returns_tensor_symint(x)
+                return a, b
 
         self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
 
@@ -7340,19 +9708,7 @@ def forward(self, x, b_t, y):
 
         inps = (torch.ones(5),)
 
-        ep = torch.export.export(M(), inps)
-        self.assertExpectedInline(
-            str(ep.graph_module.code.strip()),
-            """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
-    getitem_3 = auto_functionalized[3];  auto_functionalized = None
-    cos_1 = torch.ops.aten.cos.default(getitem_3)
-    return (getitem_3, getitem_3, cos_1)""",
-        )
-
-        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        ep = export_for_training(M(), inps).run_decompositions({})
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -7570,9 +9926,7 @@ def forward(self, x):
                 return y + y_sum + unbacked_shape.sum()
 
         inps = (torch.tensor(4), torch.randn(5, 5))
-        from torch.export import _trace
-
-        ep_pre = _trace._export(Foo(), inps, pre_dispatch=True, strict=False)
+        ep_pre = torch.export.export_for_training(Foo(), inps, strict=False)
         self.assertExpectedInline(
             str(ep_pre.graph_module.submod_1.code).strip(),
             """\
@@ -7580,13 +9934,13 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
     ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le = item <= 5
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u0 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
     lt_1 = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return (foo_unbacked,)""",
         )
@@ -7600,9 +9954,9 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -7639,7 +9993,6 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -7760,6 +10113,7 @@ def forward(self, x, y):
 
     # TODO requires_grad doesn't seem to work with serialization.
     @testing.expectedFailureSerDer
+    @testing.expectedFailureCppSerDes
     @testing.expectedFailureSerDerNonStrict
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
@@ -7967,7 +10321,6 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -7984,7 +10337,7 @@ def forward(self, x, y):
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-        )
+        ).run_decompositions({})
         # test that shape is from size compute, not sym_size call
         add_node = [node for node in ep.graph.nodes if node.target == operator.add][0]
         self.assertTrue(add_node.args[0].target == operator.mul)
@@ -8005,13 +10358,7 @@ def forward(self, x, y):
             for node in ep.graph.nodes
             if node.target == torch.ops.aten.repeat.default
         ]
-        self.assertEqual(
-            len(repeat_nodes),
-            1
-            if is_non_strict_test(self._testMethodName)
-            and not is_training_ir_test(self._testMethodName)
-            else 0,
-        )
+        self.assertEqual(len(repeat_nodes), 0)
 
     def test_checks_to_constrain_range(self):
         class Foo(torch.nn.Module):
@@ -8098,6 +10445,9 @@ def forward(self, x, y):
             ep.graph_module.code
         )
 
+    @testing.expectedFailureCppSerDes
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
     def test_slice_with_floordiv(self):
         # slice operation emits runtime assert s0//2 <= s1
         class M1(torch.nn.Module):
@@ -8142,7 +10492,9 @@ def forward(self, x, y):
                 w_transpose = torch.transpose(self.w_pre, 0, 1)
                 w_relu = torch.nn.functional.relu(w_transpose)
                 w = w_relu + self.b
-                return torch.matmul(x, w)
+                return (
+                    torch.matmul(x, w) + self.b + torch.arange(4, dtype=torch.float16)
+                )
 
         example_inputs = (torch.randn(4, 4),)
         mod = Model()
@@ -8158,17 +10510,38 @@ def forward(self, x, y):
             for n, spec in zip(placeholder_nodes, new_sig.input_specs)
             if spec.target is not None
         }
-        const_gm, _ = split_const_gm(new_gm, lifted_constants)
+        # [self.w_pre, self.b]
+        lifted_constant_names = list(lifted_constants)
+        lifted_constant_values = [lifted_constants[n] for n in lifted_constant_names]
+        const_gm, _ = split_const_gm(new_gm, False, lifted_constant_names)
         counter = 0
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
                 counter += 1
-        self.assertTrue(counter > 0)
+        self.assertTrue(counter == 4)
+        counter = 0
+        for n in new_gm.graph.nodes:
+            if n.op == "placeholder":
+                counter += 1
+        # expect 3 existing placeholders and 2 folded constant
+        self.assertTrue(counter == 5)
+        # return (self.b, folded_const, folded_const)
+        const_folded_value = const_gm(*lifted_constant_values)
+
         test_input = torch.randn(4, 4)
-        expected = new_gm(None, None, test_input)[0]
-        actual = mod(test_input)
+        # new_gm(c_w_pre, b, x, folded_const, folded_const)
+        actual = new_gm(
+            lifted_constant_values[0],
+            const_folded_value[0],
+            test_input,
+            const_folded_value[1],
+            const_folded_value[2],
+        )[0]
+        expected = mod(test_input)
         self.assertEqual(actual, expected)
-        const_gm, _ = split_const_gm(ep.graph_module, lifted_constants, lambda x: True)
+        const_gm, _ = split_const_gm(
+            ep.graph_module, False, lifted_constant_names, lambda x: True
+        )
         counter = 0
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
@@ -8199,14 +10572,10 @@ def forward(self, x, y):
                 return torch.ops.testlib.foo_mutated.default(y)
 
         decomp_table = torch.export.default_decompositions()
+        del decomp_table[torch.ops.testlib.foo_functional.default]
 
-        # FIXME (We need to design a proper way that doesn't need _preserve_ops)
         ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
             decomp_table,
-            _preserve_ops=(
-                torch.ops.testlib.foo_functional.default,
-                torch.ops.testlib.foo_mutated.default,
-            ),
         )
 
         self.assertExpectedInline(
@@ -8241,14 +10610,9 @@ def forward(self, x):
             },
         )
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.linear.default,)
-            )
-        else:
-            table = torch.export.default_decompositions()
-            del table[torch.ops.aten.linear.default]
-            ep = ep.run_decompositions(table)
+        table = torch.export.default_decompositions()
+        del table[torch.ops.aten.linear.default]
+        ep = ep.run_decompositions(table)
 
         comp_mod = ep.module()
         inp1 = torch.randn(3, 4)
@@ -8256,7 +10620,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -8328,7 +10691,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_constant_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -8374,7 +10736,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_linear_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -8652,9 +11013,37 @@ def forward(self, x):
             }
             _load_dynamic_shapes(spec, from_dict=True)
 
-    @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureRetraceabilityNonStrict
+    # Previously export run_decomp would dispatch
+    # sdpa to math backend which doesn't guarantee
+    # to return contiguous tensor. As a result, downstream
+    # view op would fail. In eager (or normal export), sdpa
+    # decomps to flash_attention which has correct handling
+    # for non-contiguous output. Since in normal export, we
+    # dispatch to flash_attention, we also force run_decomp
+    # to follow flash_attention.
+    def test_attention(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_dim = 768
+                self.num_heads = 12
+                self.dropout = 0.0
+                self.batch_first = True
+                self.self_attention = torch.nn.MultiheadAttention(
+                    self.embed_dim,
+                    self.num_heads,
+                    dropout=self.dropout,
+                    batch_first=self.batch_first,
+                )
+
+            def forward(self, input1: torch.Tensor):
+                x, _ = self.self_attention(input1, input1, input1, need_weights=False)
+                return x
+
+        inps = (torch.randn(1, 224, 768, device="cpu"),)
+        export(Foo(), inps)
+
+    @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
@@ -8735,6 +11124,7 @@ def forward(self, x):
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
     def test_hints_wrapper(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -8763,7 +11153,40 @@ def forward(self, x):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        ep = export(M(), (x, y))
+        ep_for_training = torch.export.export_for_training(M(), (x, y))
+        self.assertExpectedInline(
+            normalize_gm(
+                ep_for_training.graph_module.print_readable(print_output=False)
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x: "f32[2, 4]", y: "f32[4]"):
+        add: "f32[2, 4]" = torch.ops.aten.add.Tensor(x, y);  x = None
+
+        hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
+        hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_graph_0, (add, y), {}, hints = {'outer_body': True});  hints_wrapper_body_graph_0 = add = y = None
+        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (getitem,)
+
+    class hints_wrapper_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
+            hints_wrapper_body_graph_0 = self.hints_wrapper_body_graph_0
+            hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_graph_0, (arg0_1, arg1_1), {}, hints = {'inner_body': True});  hints_wrapper_body_graph_0 = arg0_1 = arg1_1 = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+
+            abs_1: "f32[2, 4]" = torch.ops.aten.abs.default(getitem);  getitem = None
+            return (abs_1,)
+
+        class hints_wrapper_body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "f32[2, 4]", arg1_1: "f32[4]"):
+                relu: "f32[2, 4]" = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
+
+                add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
+                return (add,)
+""",
+        )
+
+        ep = export(M(), (x, y)).run_decompositions({})
         export_res = ep.module()(x, y)
         ref_res = M()(x, y)
         self.assertEqual(export_res, ref_res)
@@ -8878,6 +11301,35 @@ class GraphModule(torch.nn.Module):
             state_dict.keys(),
         )
 
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_sym_round(self):
+        class ModuleWithSymRound(torch.nn.Module):
+            def forward(self, x):
+                out_size = round(x.shape[0] / 2.0)
+                return x[:out_size]
+
+        dim_min = 5
+        dim_max = 10
+        dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
+
+        module = ModuleWithSymRound()
+        inp = (torch.randn(8),)
+        ep = export(module, inp, dynamic_shapes=dynamic_shapes)
+
+        # Expect builtin round in the export graph
+        round_nodes = [
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+        ]
+        self.assertEqual(len(round_nodes), 1)
+
+        # Check pre/post-export equality
+        for i in range(dim_min, dim_max + 1):
+            dyn_inp = (torch.randn(i),)
+            export_res = ep.module()(*dyn_inp)
+            ref_res = module(*dyn_inp)
+            self.assertEqual(export_res, ref_res)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -8960,7 +11412,8 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        if SM90OrLater and not torch.version.hip:
+        # TODO(eqy): this needs to stay in sync with default SDPA priority order
+        if (False and SM90OrLater) and not torch.version.hip:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
@@ -9438,15 +11891,12 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(_preserve_ops=(torch.ops.aten.elu.default,))
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.elu.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.elu.default]
 
-            ep = ep.run_decompositions(
-                decomp_table=decomp_table,
-            )
+        ep = ep.run_decompositions(
+            decomp_table=decomp_table,
+        )
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
@@ -9468,16 +11918,11 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                _preserve_ops=(torch.ops.aten.upsample_bilinear2d.vec,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
-            ep = ep.run_decompositions(
-                decomp_table=decomp_table,
-            )
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
+        ep = ep.run_decompositions(
+            decomp_table=decomp_table,
+        )
 
         FileCheck().check_count(
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True

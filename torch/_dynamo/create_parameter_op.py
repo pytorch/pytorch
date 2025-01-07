@@ -5,6 +5,8 @@ from typing import Any, Generator, Tuple
 import torch
 
 
+# See [Note: Metadata mutation in proxy tracing] for why sacrificial parameter mutates
+# metadata during proxy tracing and we should remove the sacrificial parameter logic.
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
 with AOTAutograd.  We instead create a placeholder torch.nn.Parameter before the graph, which
