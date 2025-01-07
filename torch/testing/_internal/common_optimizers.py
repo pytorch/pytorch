@@ -570,7 +570,7 @@ def optim_inputs_func_adam(device, dtype=None):
                 params=None,
                 kwargs={"betas": (0.0, 0.999)},
                 desc="zero-beta1",
-            )
+            ),
         ]
         + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])

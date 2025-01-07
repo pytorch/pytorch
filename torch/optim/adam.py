@@ -253,7 +253,7 @@ class Adam(Optimizer):
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs if beta1 > 0 else grads,
+                torch.cond(beta1 > 0, lambda: exp_avgs, lambda: grads),
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
@@ -433,7 +433,7 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        if device_beta1 > 0: 
+        if device_beta1 > 0:
             exp_avg.lerp_(grad, 1 - device_beta1)
 
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
