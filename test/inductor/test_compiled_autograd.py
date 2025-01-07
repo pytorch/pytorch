@@ -2817,6 +2817,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             not in logs.getvalue()
         )
 
+    def test_logs_aot_bwd_reuse(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x.sum()
+
+        with compiled_autograd._enable(compiler_fn):
+            x = torch.randn(4, 4, requires_grad=True)
+            y = torch.randn(4, 4, requires_grad=True)
+            z = torch.randn(4, 4, requires_grad=True)
+            # reuse the same AOT bwd graph 3 times
+            out = fn(x) + fn(y) + fn(z)
+            out.backward()
+        # should not RuntimeError: Node redefined name aot0_expand!
+
     @xfailIfS390X
     def test_verbose_logs_graph(self):
         def fn():
