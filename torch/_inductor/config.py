@@ -1,5 +1,6 @@
 import os  # noqa: C101
 import sys
+import typing
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -25,6 +26,33 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
         "TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE",
         True if not is_fbcode() else None,
     )
+
+
+def fx_compile_mode_default() -> Optional["torch._inductor.compile_fx.CompileMode"]:
+    name = "TORCHINDUCTOR_FX_COMPILE_MODE"
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    # Importing this here causes a circular import...
+    # from torch._inductor.compile_fx import CompileMode
+    modes = {
+        "normal": 0, # CompileMode.NORMAL,
+        "serialize": 1, # CompileMode.SERIALIZE,
+        "subprocess": 2, # CompileMode.SUBPROCESS,
+        "async": 3, # CompileMode.ASYNC,
+    }
+    if value in modes:
+        return typing.cast("torch._inductor.compile_fx.CompileMode", modes[value])
+    import logging
+    log = logging.getLogger(__name__)
+    log.error(
+        "Invalid value for %s. Expected one of %s. Using default.",
+        name,
+        ', '.join(sorted(modes.keys()))
+    )
+    # Remove from the environment so subprocesses don't ALSO complain.
+    os.environ.pop(name)
+    return None
 
 
 # Enable auto_functionalized_v2 (enabled by default)
@@ -56,6 +84,12 @@ fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 bundle_triton_into_fx_graph_cache: Optional[
     bool
 ] = bundle_triton_into_fx_graph_cache_default()
+
+# use async compile to compile fx graphs
+# False: Disabled - compile in-process
+# True: Enabled - compile out-of-process
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_async_compile: Optional["torch._inductor.compile_fx.CompileMode"] = fx_compile_mode_default()
 
 # Enable autotune local cache.
 #

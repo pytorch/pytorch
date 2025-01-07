@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     parametrize,
     serialTest,
+    skip_if_async_compile,
     skipIfNNModuleInlined,
     skipIfRocm,
     skipIfWindows,
@@ -714,6 +715,8 @@ def _run_and_assert_no_indirect_indexing(
 
 
 def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
+    from torch._inductor.compile_fx import compile_mode, CompileMode
+    assert compile_mode == CompileMode.NORMAL, "TODO: Bad async compile (disable this test)"
     if config.triton.multi_kernel:
         # when multi_kernel is enabled, we generated both persistent reduction
         # and non-persistent reduction kernels for the same node schedule.
@@ -872,6 +875,16 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    @patch("torch._inductor.compile_fx._debug_serde_compile", True)
+    def test_serde_compile(self):
+        # Make sure that compiling works when we pass the input + output from
+        # fx_codegen_and_compile() through serde.
+
+        def fn(a, b):
+            return a + b
+
+        self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
@@ -1229,6 +1242,7 @@ class CommonTemplate:
             self.assertEqual(ref_with_min, res_with_min)
             self.assertEqual(ref_with_min_max, res_with_min_max)
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_add_const_int(self):
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
@@ -1242,6 +1256,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(32),))
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_add_inplace_permuted(self):
         def fn(x, y):
             return x.add_(y)
@@ -1274,6 +1289,7 @@ class CommonTemplate:
         fn(x)
         self.assertEqual(x, y)
 
+    @skip_if_async_compile  # run_and_get_code
     def test_add_complex4(self):
         @torch.compile
         def fn(a, b):
@@ -1304,6 +1320,7 @@ class CommonTemplate:
             else:
                 self.assertEqual(code.count("aten.view"), 3)
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_add_complex5(self):
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
@@ -1313,6 +1330,7 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_add_complex6(self):
         # Fix https://github.com/pytorch/pytorch/issues/125745.
         # Add complex tensors with broadcasting.
@@ -1334,6 +1352,7 @@ class CommonTemplate:
 
         self.common(fn, (x, y, z))
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
@@ -1341,6 +1360,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(17),))
 
     @xfail_if_triton_cpu
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_angle(self):
         def fn(a, b, c):
             return torch.angle(a), torch.angle(b), torch.angle(c)
@@ -1431,6 +1451,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_vertical_fusion1(self):
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -1467,6 +1488,7 @@ class CommonTemplate:
 
     @config.patch({"fx_graph_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -1495,6 +1517,7 @@ class CommonTemplate:
             self, 1 if not is_cpp_backend(self.device) else 2
         )
 
+    @skip_if_async_compile  # run_and_get_code
     def test_index_propagation(self):
         def copy(x):
             i = torch.arange(x.size(0), device=x.device)
@@ -1530,6 +1553,7 @@ class CommonTemplate:
         actual = nested_opt(*example_inputs)
         self.assertEqual(expect, actual)
 
+    @skip_if_async_compile  # run_and_get_code
     def test_index_propagation_flip(self):
         def flip(x):
             i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -1542,6 +1566,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @skip_if_async_compile  # run_and_get_code
     def test_index_propagation_floordiv(self):
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
@@ -1560,6 +1585,7 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat_interleave(x, 3))
 
+    @skip_if_async_compile  # run_and_get_code
     def test_index_propagation_remainder(self):
         def repeat(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
@@ -1579,6 +1605,7 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
 
+    @skip_if_async_compile  # run_and_get_code
     def test_index_propagation_abs(self):
         def reflection_pad_left(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [3, 2, 1, 2, 3]
@@ -1597,6 +1624,7 @@ class CommonTemplate:
         expect = reflection_pad_left(x, 3)
         self.assertEqual(expect, actual)
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_index_propagation_device_assert_masked(self):
         def fn(a):
             idx = torch.arange(a.size(0), device=a.device)
@@ -1606,6 +1634,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    @skip_if_async_compile("cuda")  # run_and_get_code
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1717,6 +1746,7 @@ class CommonTemplate:
             vectorize=False,  # There's no loop to vectorize!
         )
 
+    @skip_if_async_compile  # run_and_get_code
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -1729,6 +1759,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
             return aten._unsafe_masked_index(a, mask, idx, 1)
@@ -1742,6 +1773,7 @@ class CommonTemplate:
             ),
         )
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test__unsafe_masked_index_put_accumulate(self):
         def fn(a, mask, idx, values):
             return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
@@ -3840,6 +3872,7 @@ class CommonTemplate:
             )
 
     @skipIfRocm
+    @skip_if_async_compile("cuda")  # run_and_get_code
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest(f"{GPU_TYPE} only test")
@@ -4490,6 +4523,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile("dynamic-shapes")  # AssertionError: expected size 2==2...
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -4514,6 +4548,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4528,6 +4563,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile("dynamic-shapes")  # AssertionError: expected size 2==2...
     def test_adaptive_max_pool2d1(self):
         def fn(x):
             return aten.adaptive_max_pool2d(x, (6, 6))
@@ -4550,6 +4586,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_adaptive_max_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -4589,6 +4626,7 @@ class CommonTemplate:
             fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
         )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_fractional_max_pool2d2(self):
         # fallback for larger kernel size
 
@@ -4794,9 +4832,11 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            buffer._version + 1
-            if k in ["m.running_mean", "m.running_var"]
-            else buffer._version
+            (
+                buffer._version + 1
+                if k in ["m.running_mean", "m.running_var"]
+                else buffer._version
+            )
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -4885,6 +4925,7 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_max_pool2d6(self):
         # Too big kernel size, use fallback
         def fn(x):
@@ -4911,6 +4952,7 @@ class CommonTemplate:
         )
 
     # From https://github.com/pytorch/pytorch/issues/93384
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_max_pool2d8(self):
         # dialtion is not 1, use fallback
         def fn(x):
@@ -4994,6 +5036,7 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_avg_pool2d7(self):
         # Large kernel size, use fallback
         def fn(x):
@@ -5325,6 +5368,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2, rtol=1e-3, atol=1e-3)
 
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
@@ -5363,6 +5407,7 @@ class CommonTemplate:
 
         self.common(foo, (inp, weight), check_lowp=False)
 
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -5373,6 +5418,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     @patch.object(config.triton, "persistent_reductions", True)
     def test_softmax_one_kernel_persist(self):
         def fn(x):
@@ -5386,6 +5432,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     @patch.object(config.triton, "persistent_reductions", False)
     def test_softmax_one_kernel_loop(self):
         def fn(x):
@@ -5398,6 +5445,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5461,6 +5509,7 @@ class CommonTemplate:
         self.common(fn, (*inp,))
 
     @skip_if_gpu_halide  # incorrect result on CUDA
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
@@ -5481,6 +5530,7 @@ class CommonTemplate:
             assertGeneratedKernelCountEqual(self, 1)
 
     @skip_if_gpu_halide  # misaligned address error
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
             return a.copy_(torch.flip(a, (0,)))
@@ -5499,6 +5549,7 @@ class CommonTemplate:
             a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
 
+    @skip_if_async_compile("cuda")  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -5525,6 +5576,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 2)
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     @config.patch(max_fusion_size=1)
     def test_no_mega_fusion_during_lowering(self):
         n = 50
@@ -5544,6 +5596,7 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -5981,6 +6034,7 @@ class CommonTemplate:
 
     @skip_if_gpu_halide
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skip_if_async_compile  # run_and_get_code
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
@@ -6855,6 +6909,7 @@ class CommonTemplate:
             rtol=1e-3,
         )
 
+    @skip_if_async_compile  # run_and_get_code
     def test_float_index_expression(self):
         # Test that index propagation doesn't generate bad index_expr calls like
         # ops.index_expr(0.5*x, dtype) where the expression is not integral
@@ -6870,6 +6925,7 @@ class CommonTemplate:
                 re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
             )
 
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_float_index_expression_type_promotion(self):
         # Test that float indexing expressions participate in type promotion
         def fn(x):
@@ -7649,6 +7705,7 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_index_put_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7661,6 +7718,7 @@ class CommonTemplate:
         self.common(fn, (a, idx))
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_index_put_failed_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7893,6 +7951,7 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
@@ -8569,6 +8628,7 @@ class CommonTemplate:
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
+    @skip_if_async_compile  # run_and_get_code
     # Already on by default, just want to make sure
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_reuse_buffers_with_aliasing(self):
@@ -8792,6 +8852,7 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
     @skip_if_halide  # hangs forever
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -8819,6 +8880,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 1)
 
     @expectedFailureXPU
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_max_pool2d_with_indices_backward5(self):
         # Window size is too big. Should fallback
         def fn(a, b, c):
@@ -8847,6 +8909,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_max_pool2d_with_indices_backward6(self):
         # dilation is not 1. Should fallback
         def fn(a, b, c):
@@ -8923,6 +8986,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_avg_pool2d_backward3(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -8946,6 +9010,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_avg_pool2d_backward4(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -9013,6 +9078,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9036,6 +9102,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_avg_pool3d_backward4(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9089,6 +9156,7 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
+    @skip_if_async_compile  # run_and_get_code
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -9148,6 +9216,7 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
+    @skip_if_async_compile
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -9174,6 +9243,7 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
+    @skip_if_async_compile  # run_and_get_code
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
@@ -10156,6 +10226,7 @@ class CommonTemplate:
         self.assertEqual(inductor_out, eager_out)
 
     @skipIfRocm
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual
     def test_require_stride_expanded(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -10196,6 +10267,7 @@ class CommonTemplate:
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
+    @skip_if_async_compile("cuda")  # run_and_get_code
     def test_sdpa(self, use_block_ptr: bool, prefer_nd_tiling: bool):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
@@ -10274,6 +10346,7 @@ class CommonTemplate:
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
     )
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_sdpa_unaligned_mask(self):
         def foo(
             arg0_1: "f32[8, 8, 16, 16]",
@@ -10973,6 +11046,7 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_bucketize_add_autotune(self):
         # Causes a @pointwise(size_hints) where size_hints is 2D
@@ -11601,6 +11675,7 @@ class CommonTemplate:
         pt2_optimizer_step(o)
 
     @skip_if_gpu_halide
+    @skip_if_async_compile("dynamic-shapes-cuda")  # run_and_get_code
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
         def fn(x):
@@ -11646,6 +11721,7 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
+    @skip_if_async_compile  # assertGeneratedKernelCountEqual, run_and_get_code
     def test_dtypeview_fusion(self):
         @torch.compile
         def fn(x):
@@ -11660,6 +11736,7 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 1)
 
     @expectedFailureCodegenDynamic
+    @skip_if_async_compile  # run_and_get_code
     def test_reinterpret_dtypeview(self):
         @torch.compile
         def fn(x, x2):
@@ -12381,6 +12458,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 
+        @skip_if_async_compile  # run_and_get_code
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
@@ -12393,6 +12471,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @skip_if_async_compile  # run_and_get_code
         @config.patch({"fx_graph_remote_cache": False})
         def test_optimize_indexing_dtype_with_constraint(self):
             def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -12531,6 +12610,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 )
                 torch._inductor.aot_compile(traced, inputs)
 
+        @skip_if_async_compile  # run_and_get_code
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
                 self.assertTrue(
@@ -12608,6 +12688,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 # We cannot elide he assert in this case
                 has_assert(code, lower=True, upper=True)
 
+        @skip_if_async_compile  # run_and_get_code
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
@@ -12627,6 +12708,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @skip_if_async_compile  # run_and_get_code
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
@@ -12680,6 +12762,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             out2_np.backward()
             self.assertEqual(x.grad, x2_np.grad)
 
+        @skip_if_async_compile  # run_and_get_code
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
@@ -12709,6 +12792,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
+        @skip_if_async_compile  # run_and_get_code
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
@@ -12738,6 +12822,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertEqual(fn_opt(), fn())
 
         # https://github.com/pytorch/pytorch/issues/130335
+        @skip_if_async_compile  # run_and_get_code
         def test_ctr_not_moved_to_cuda_when_used_in_index_put(self):
             @torch.compile
             def f(x, mask):
@@ -12758,6 +12843,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
 
+        @skip_if_async_compile  # run_and_get_code
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
@@ -12790,6 +12876,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
 
+        @skip_if_async_compile  # run_and_get_code
         @config.patch("triton.use_block_ptr", True)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
@@ -12823,6 +12910,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
+        @skip_if_async_compile  # run_and_get_code
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)
         def test_computed_indirect_mask(self):
@@ -12884,6 +12972,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertTrue("ymask = yindex < ynumel" in code)
                 self.assertTrue("xmask = xindex < xnumel" in code)
 
+        @skip_if_async_compile  # run_and_get_code
         def test_kernel_names_descriptive(self):
             @torch.compile(backend="inductor")
             def fn1(x):
@@ -12927,9 +13016,11 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_layer_norm_relu"
-                    if torch._dynamo.config.inline_inbuilt_nn_modules
-                    else "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -12947,6 +13038,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 func_and_kernel_torch
             )
 
+        @skip_if_async_compile  # run_and_get_code
         @patch.object(config, "profile_bandwidth", True)
         def test_bandwidth_profiler(self):
             @torch.compile(backend="inductor")
@@ -12964,6 +13056,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("start_graph" in code)
             self.assertTrue("end_graph" in code)
 
+        @skip_if_async_compile  # run_and_get_code
         def test_comment_graph_fragment(self):
             @torch.compile(backend="inductor")
             def fn(x):
@@ -13041,6 +13134,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             ):
                 test(fn, 2, dyn_shape)
 
+        @skip_if_async_compile  # run_and_get_code
         @patch("torch._inductor.config.comment_origin", True)
         @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
@@ -13168,6 +13262,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
+        @skip_if_async_compile  # run_and_get_code
         def test_non_blocking_copy_codegen(self):
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
@@ -13184,6 +13279,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             else:
                 FileCheck().check("copy_").check_same("True").run(code)
 
+        @skip_if_async_compile  # run_and_get_code
         def test_layer_norm_inplaces_after_matmul(self):
             # https://github.com/pytorch/pytorch/issues/132826
             batch_size = 32
@@ -13442,6 +13538,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             model(x)
 
     class NanCheckerTest(TestCase):
+        @skip_if_async_compile  # run_and_get_code
         @config.patch("nan_asserts", True)
         def test_nan_checker_pass(self):
             def f(x):

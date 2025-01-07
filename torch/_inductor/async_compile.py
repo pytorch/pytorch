@@ -26,7 +26,7 @@ from torch._inductor.codecache import (
     TritonCodeCache,
     TritonFuture,
 )
-from torch._inductor.compile_worker.subproc_pool import SubprocPool
+from torch._inductor.compile_worker.subproc_pool import SubprocKind, SubprocPool
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
@@ -122,6 +122,9 @@ def get_compile_threads() -> int:
     """
     if config.compile_threads is None:
         config.compile_threads = config.decide_compile_threads()
+    if config.fx_graph_async_compile:
+        # TODO: fix this - but it's much faster because of the caching or something?
+        return 2
     return config.compile_threads
 
 
@@ -143,10 +146,17 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> SubprocPool:
+        import torch.fx._graph_pickler
+
         assert get_compile_threads() > 1
         # Wrapper around ProcessPoolExecutor forks in a new process we control
         log.info("Creating subprocess pool with %d workers", get_compile_threads())
-        pool = SubprocPool(get_compile_threads())
+        # "fork" causes CUDA problems.
+        pool = SubprocPool(
+            get_compile_threads(),
+            pickler=torch.fx._graph_pickler.SubprocGraphPicker(),
+            kind=SubprocKind.SPAWN,
+        )
 
         # Set an attribute we can check to see if the pool is ready.
         pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[attr-defined]
