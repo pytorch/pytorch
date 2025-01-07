@@ -1695,6 +1695,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("gemm_num", (2, 3))
     @dtypes(
         torch.bfloat16,
+        torch.float16,
     )
     def test_grouped_linear(
         self,
@@ -1719,12 +1720,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         counters.clear()
-        assert dtype == torch.bfloat16
         mod = M(in_features, out_features, gemm_num).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
-        v = torch.randn(*B, in_features).to(torch.bfloat16)
+        v = torch.randn(*B, in_features).to(dtype)
         with verify(dtype) as (atol, rtol), torch.autocast(
-            device_type="cpu"
+            device_type="cpu", dtype=dtype
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
