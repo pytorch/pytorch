@@ -9,14 +9,9 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
+from torch.utils.pytree import tree_map_only
 
 from . import _functional_collectives_impl as fun_col_impl
-
-
-try:
-    from torch.utils._cxx_pytree import tree_map_only
-except ImportError:
-    from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
 
 if torch._running_with_deploy():
@@ -435,6 +430,12 @@ def reduce_scatter_tensor_coalesced(
 # Today, this maps 1:1 with "aten ops that are views".
 def _is_view_op(tgt):
     assert isinstance(tgt, torch._ops.OpOverload)
+    # Don't apply the view optimization to any `CompositeImplicitAutograd` ops.
+    # See issue: https://github.com/pytorch/pytorch/issues/133421
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        tgt.name(), torch.DispatchKey.CompositeImplicitAutograd
+    ):
+        return False
     schema = tgt._schema
     if len(schema.arguments) > 0:
         first_arg = schema.arguments[0]

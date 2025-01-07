@@ -26,7 +26,7 @@ from torch.distributed._shard.sharding_spec.api import (
     _has_custom_op,
 )
 from torch.distributed.remote_device import _remote_device
-from torch.utils import _pytree as pytree
+from torch.utils import pytree
 
 from .metadata import ShardedTensorMetadata, TensorProperties
 from .reshard import reshard_local_shard, reshuffle_local_shard

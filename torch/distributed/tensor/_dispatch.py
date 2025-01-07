@@ -27,15 +27,12 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils import pytree
 
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
-try:
-    from torch.utils import _cxx_pytree as pytree
-except ImportError:
-    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
@@ -74,7 +71,7 @@ def found_inf_reduce_handler(
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(List[object], op_info.local_args), op_info.args_tree_spec
+        cast(List[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
     )
     local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)

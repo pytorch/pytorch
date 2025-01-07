@@ -26,7 +26,7 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree import tree_iter, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -136,7 +136,7 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu"]:
+            if self._device.type in ["cuda", "hpu", "xpu"]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -327,8 +327,7 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
+        for t in tree_iter(output):
             if torch.is_tensor(t) and t.requires_grad:
                 t.register_hook(self._pre_backward)
         return output

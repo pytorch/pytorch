@@ -22,6 +22,7 @@ import logging
 import math
 import operator
 import os
+import pathlib
 import platform
 import random
 import re
@@ -97,7 +98,7 @@ from torch.testing._comparison import (
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
-import torch.utils._pytree as pytree
+from torch.utils import pytree
 from torch.utils import cpp_extension
 try:
     import pytest
@@ -988,9 +989,9 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path.cwd())
-CI_PT_ROOT = str(Path(CI_TEST_PREFIX).parent)
-CI_FUNCTORCH_ROOT = str(Path(CI_PT_ROOT) / "functorch")
+CI_TEST_PREFIX = str(Path(os.getcwd()))
+CI_PT_ROOT = str(Path(os.getcwd()).parent)
+CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1590,11 +1591,17 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 
+
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
+def xfailIfPy312Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
 def xfailIfLinux(func):
@@ -4351,7 +4358,7 @@ class TestCase(expecttest.TestCase):
 
     def _attempt_load_from_subprocess(
         self,
-        file: Path,
+        file: pathlib.Path,
         import_string: str,
         expected_failure_message: Optional[str] = None
     ) -> None:
@@ -4360,7 +4367,7 @@ class TestCase(expecttest.TestCase):
         weights_only `torch.load` works as expected without global imports.
 
         Args:
-            file (Path): The path to the checkpoint to load.
+            file (pathlib.Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
             exected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
@@ -5003,11 +5010,11 @@ def disable_gc():
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
     # else the file in the build folder
-    torch_root = Path(torch.__file__).absolute().parent
+    torch_root = Path(torch.__file__).resolve().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).absolute().parents[2]
+    torch_root = Path(__file__).resolve().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
@@ -5225,11 +5232,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_leaves(outs):
+    for out in pytree.tree_iter(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_leaves(inps):
+    grads = [inp.grad for inp in pytree.tree_iter(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_iter(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

@@ -93,8 +93,8 @@ if _TYPE_CHECKING:
         "FlattenFunc",
         "UnflattenFunc",
         "FlattenWithKeysFunc",
-        "FromDumpableContextFunc",
         "ToDumpableContextFunc",
+        "FromDumpableContextFunc",
     ]
 
 
@@ -125,7 +125,7 @@ if PYTORCH_USE_CXX_PYTREE:
     implementation = PyTreeImplementation(module=cxx, name="cxx")
 
 
-def register_pytree_node(
+def register_pytree_node(  # type: ignore[no-any-unimported]
     cls: _Type[_Any],
     /,
     # intentionally use `*_func` over `*_fn` to match annotations
