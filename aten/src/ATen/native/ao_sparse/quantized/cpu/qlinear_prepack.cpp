@@ -146,7 +146,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
       weight, bias, out_features_block_size, in_features_block_size);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,

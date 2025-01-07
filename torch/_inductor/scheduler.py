@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -50,6 +51,7 @@ from . import comms, config, dependencies, ir, metrics
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
+from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -419,7 +421,7 @@ class BaseSchedulerNode:
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
         """
-        from .codegen.wrapper import buffer_reuse_key
+        from .codegen.wrapper import can_match_buffer_size
 
         if not (
             isinstance(self, SchedulerNode)
@@ -491,8 +493,7 @@ class BaseSchedulerNode:
                             )
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
-                        and buffer_reuse_key(input_buf.node)
-                        == buffer_reuse_key(buf.node)
+                        and can_match_buffer_size(input_buf.node, buf.node)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -1144,15 +1145,30 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
+    def pointwise_or_reduction_read_writes(
+        self, pointwise: bool = True
+    ) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in either the pointwise or the reduction axes.
+        """
+        keep_sizes, ignore_sizes = self._sizes if pointwise else reversed(self._sizes)
+        return dependencies.extract_read_writes(
+            self._body, keep_sizes, hidden_args=[[sympy.S.Zero] * len(ignore_sizes)]
+        )
+
     @cache_on_self
     def pointwise_read_writes(self) -> dependencies.ReadWrites:
         """
-        Get the memory dependencies in the non-reduction axis.
+        Get the memory dependencies in the non-reduction axes.
         """
-        sizes, reduction_sizes = self._sizes
-        return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
-        )
+        return self.pointwise_or_reduction_read_writes(pointwise=True)
+
+    @cache_on_self
+    def reduction_read_writes(self) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in the reduction axes.
+        """
+        return self.pointwise_or_reduction_read_writes(pointwise=False)
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
@@ -2508,7 +2524,7 @@ class Scheduler:
 
     def generate_kernel_code_from_nodes(
         self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
-    ) -> Any:
+    ) -> str:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -2667,6 +2683,9 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
+        device = node_list_fused[0].get_device()
+        assert device is not None
+
         def log_fusion(ms_fused: float, ms1: float, ms2: float) -> None:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
@@ -2712,8 +2731,6 @@ class Scheduler:
             choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
 
-            non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
-
             # Eagerly compile and benchmark non-template nodes
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
@@ -2751,6 +2768,9 @@ class Scheduler:
                 with multi_node.swap_as_triton_caller(choice):
                     future_choices.append((choice, *compile_kernel(node_list_fused)))
 
+            if len(future_choices) == 0:
+                return False
+
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
@@ -2760,7 +2780,7 @@ class Scheduler:
                     future.result()
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, node_list_fused[0].get_device()
+                            mod_fused, device
                         )
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
@@ -2788,8 +2808,6 @@ class Scheduler:
                     future_and_mod_l1[0].result()
                     future_and_mod_l2[0].result()
                     future_and_mod_l1_fused[0].result()
-                    device = node_list_fused[0].get_device()
-                    assert device is not None
 
                     ms1, path1 = self.benchmark_codegened_module(
                         future_and_mod_l1[1], device
@@ -2841,6 +2859,10 @@ class Scheduler:
 
             return benchmark_when_ready
 
+    def get_fused_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
+        "Look up the node in Scheduler name_to_fused_node"
+        return self.name_to_fused_node[node.get_first_name()]
+
     def fuse_nodes_once(
         self, nodes: List[BaseSchedulerNode]
     ) -> List[BaseSchedulerNode]:
@@ -2857,21 +2879,20 @@ class Scheduler:
             for node in fused_nodes:
                 fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
 
+        # These are potential fusions which we are async compiling,
+        # and which we will benchmark profitability of.
         pending_fusions: Dict[
             BaseSchedulerNode,
             Tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
         ] = {}
-
-        def get_fused_node(node: BaseSchedulerNode) -> BaseSchedulerNode:
-            return self.name_to_fused_node[node.get_first_name()]
 
         def fuse_two_nodes(
             node1: BaseSchedulerNode, node2: BaseSchedulerNode
         ) -> BaseSchedulerNode:
             fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
 
-            # above can_fuse asserts that node2 has the same device
             device = node1.get_device()
+            assert node2.get_device() == device
             node3 = self.get_backend(device).fuse(node1, node2)
             fused_nodes.remove(node1)
             fused_nodes.remove(node2)
@@ -2881,15 +2902,16 @@ class Scheduler:
             )
             return node3
 
-        for node1, node2 in self.get_possible_fusions(nodes):
+        def resolve_pending_fusions(
+            node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        ) -> None:
             while (
-                get_fused_node(node1) in pending_fusions
-                or get_fused_node(node2) in pending_fusions
+                self.get_fused_node(node1) in pending_fusions
+                or self.get_fused_node(node2) in pending_fusions
             ):
-                fused_node1 = get_fused_node(node1)
-                fused_node2 = get_fused_node(node2)
                 pending_fusion = pending_fusions.get(
-                    fused_node1, pending_fusions.get(fused_node2, None)
+                    self.get_fused_node(node1),
+                    pending_fusions.get(self.get_fused_node(node2), None),
                 )
                 assert pending_fusion is not None
 
@@ -2897,13 +2919,18 @@ class Scheduler:
                 pending_fusions.pop(node_key1, None)
                 pending_fusions.pop(node_key2, None)
 
-                if not is_speedup():
+                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
                     continue
 
                 fuse_two_nodes(node_key1, node_key2)
 
-            node1 = get_fused_node(node1)
-            node2 = get_fused_node(node2)
+        for node1, node2 in self.get_possible_fusions(nodes):
+            # if either node is in a pending fusion, resolve it.
+            # since we iterate on potential fusions based on profitability
+            # the first potential fusion should take precedence.
+            resolve_pending_fusions(node1, node2)
+            node1 = self.get_fused_node(node1)
+            node2 = self.get_fused_node(node2)
 
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
@@ -2920,13 +2947,13 @@ class Scheduler:
                 fuse_two_nodes(node1, node2)
 
         seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
-        for is_speedup, node_key1, node_key2 in pending_fusions.values():
-            if is_speedup in seen_pair_speedup_fn:
+        for is_speedup_fn, node_key1, node_key2 in pending_fusions.values():
+            if is_speedup_fn in seen_pair_speedup_fn:
                 continue
 
-            seen_pair_speedup_fn.add(is_speedup)
+            seen_pair_speedup_fn.add(is_speedup_fn)
 
-            if is_speedup():
+            if is_speedup_fn() and not self.will_fusion_create_cycle(node1, node2):
                 fuse_two_nodes(node_key1, node_key2)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
@@ -3751,13 +3778,9 @@ class Scheduler:
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
-                raise RuntimeError(
-                    f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
-                )
-            elif is_gpu(device.type):
-                raise RuntimeError(
-                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
-                )
+                raise GPUTooOldForTriton(device_props, inspect.currentframe())
+            elif is_gpu(device.type) and not device.type == "mps":
+                raise TritonMissing(inspect.currentframe())
 
         return device_scheduling(self)
 
@@ -4067,7 +4090,12 @@ class BaseScheduling:
         """
         raise NotImplementedError
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def generate_kernel_code_from_nodes(
+        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
+    ) -> str:
+        """
+        Generate a kernel given a list of pre-fused nodes.
+        """
         raise NotImplementedError
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:

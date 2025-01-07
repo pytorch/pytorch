@@ -394,7 +394,6 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
                 getitem_node = n
         assert conv_node is not None
         assert bn_node is not None
-        # getitem_node might be None in new training IR
         return (conv_node, bn_node, getitem_node)
 
     def _get_q_dq_nodes(n: Node) -> Tuple[Node, Node, Node]:
@@ -414,24 +413,12 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
     r_conv, r_bn, r_getitem = _get_nodes(r.replacements)
 
     # Create the mapping from original node to replacement node
-    if o_getitem is None:
-        # getitem is None is new training IR
-        assert r_getitem is None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-        }
-    else:
-        # TODO: This branch is going through a deprecated branch and should be deleted soon,
-        # after capture_pre_autograd_graph fully migrate to training IR
-        # T199018392
-        assert r_getitem is not None
-        assert o_getitem is not None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-            "getitem": (o_getitem, r_getitem),
-        }
+    assert o_getitem is None
+    assert r_getitem is None
+    mapping = {
+        "conv": (o_conv, r_conv),
+        "bn": (o_bn, r_bn),
+    }
 
     # Extract conv input and weight
     # Note: here we extract the original nodes indirectly through the pattern nodes

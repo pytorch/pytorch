@@ -152,6 +152,7 @@ endif()
 set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
+set(AT_KLEIDIAI_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -996,31 +997,6 @@ endif()
 
 # ---[ HIP
 if(USE_ROCM)
-  # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
-  # Currently only active for Ubuntu 20.04 and greater versions.
-  if(UNIX AND EXISTS "/etc/os-release")
-    file(STRINGS /etc/os-release OS_RELEASE)
-    set(DISTRO_NAME "")
-    set(DISTRO_VERSION "")
-    foreach(line ${OS_RELEASE})
-      string(REGEX MATCH "^NAME=" DISTRO_NAME_MATCH ${line})
-      if(NOT DISTRO_NAME_MATCH STREQUAL "")
-        string(REGEX REPLACE "^NAME=\"(.*)\"" "\\1" DISTRO_NAME ${line})
-      endif()
-      string(REGEX MATCH "^VERSION_ID=" DISTRO_VERSION_MATCH ${line})
-      if(NOT DISTRO_VERSION_MATCH STREQUAL "")
-        string(REGEX REPLACE "^VERSION_ID=\"(.*)\"" "\\1" DISTRO_VERSION ${line})
-      endif()
-    endforeach()
-    if(DISTRO_NAME STREQUAL "Ubuntu" AND DISTRO_VERSION VERSION_GREATER_EQUAL "20.04")
-      find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
-      if(LIBTINFO_LOC)
-        get_filename_component(LIBTINFO_LOC_PARENT ${LIBTINFO_LOC} DIRECTORY)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath-link,${LIBTINFO_LOC_PARENT}")
-      endif()
-    endif()
-  endif()
-
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -1045,8 +1021,12 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     if(HIP_NEW_TYPE_ENUMS)
       list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
+    endif()
+    if(WIN32)
+      add_definitions(-DROCM_ON_WINDOWS)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1478,6 +1458,35 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
+  endif()
+
+  if(USE_KLEIDIAI)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported Clang version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported GCC version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+    set(AT_KLEIDIAI_ENABLED 1)
+    set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
+    set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+    add_subdirectory(${KLEIDIAI_SRC})
+    set(KLEIDIAI_INCLUDE_DIRS
+    ${KLEIDIAI_SRC}/
+    ${KLEIDIAI_SRC}/kai/
+    ${KLEIDIAI_SRC}/kai/ukernels/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/
+    )
+    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
+    # Recover build options.
+    set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
   endif()
 
   if(UNIX AND NOT APPLE)
