@@ -816,6 +816,7 @@ class CKGemmTemplate(CKTemplate):
         alpha=1,
         beta=0,
         input_reorder=None,
+        autotune_arg_order=None
     ):
         """
         Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
@@ -829,10 +830,14 @@ class CKGemmTemplate(CKTemplate):
         )
         ops = template.gen_ops()
         for op in ops:
-            template.maybe_append_choice(
+            # Forward the autotune_arg_order to the choice we just appended
+            e = template.maybe_append_choice(
                 choices,
                 op=op,
             )
+            if e is None:
+                # This means we successfully added a choice
+                choices[-1].autotune_arg_order = autotune_arg_order
 
     def size_args(self):
         X = self.input_nodes[0]

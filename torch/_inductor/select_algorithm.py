@@ -1982,6 +1982,15 @@ class AlgorithmSelectorCache(PersistentCache):
             is_extern = isinstance(choice, ExternKernelCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
+            if choice.autotune_arg_order is not None:
+                # reorder the input choices
+                if len(choice.autotune_arg_order) != len(inpts):
+                    # can't really do anything, just report infinity as the choice is invalid
+                    log.error(f"invalid autotune_arg_order for choice {choice.name}, got {choice.autotune_arg_order} but expected {len(inpts)} args. Skipping.")
+                    return float("inf")
+                else:
+                    # reorder the inputs
+                    inpts = [inpts[i] for i in choice.autotune_arg_order]
             output.zero_()
             result = choice.benchmark(*inpts, out=output)
             device_type = next(

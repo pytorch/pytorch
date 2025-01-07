@@ -4373,6 +4373,17 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        # The order in which arguments are passed through for autotuning.
+        # Note: this is similar, but different from the `input_reorder`
+        # present in some choices. Here, we're just concerned with ordering
+        # the input nodes when benchmarking for autotuning
+        # For example
+        # - some choices expect (X, W, Bias)
+        # - others expect (Bias, X, W)
+        # configuring the choice here with |autotune_arg_order| = (2,0,1)
+        # allows all choices to be called with the same list of parameters,
+        # and the choice to know internally how to pass its own arguments down
+        self.autotune_arg_order = None
 
     def benchmark(self, *args, out) -> float:  # type: ignore[no-untyped-def]
         algo = self.to_callable()

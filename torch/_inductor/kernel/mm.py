@@ -567,6 +567,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
+            # As you can see below, we pass Bias, X, W for the benchmarking
+            # but configure the kernel with X, W, Bias
+            # indicate this here for the ChoiceCaller
+            autotune_arg_order=(1,2,0)
         )
 
     if use_cpp_gemm_template(layout, mat1, mat2):

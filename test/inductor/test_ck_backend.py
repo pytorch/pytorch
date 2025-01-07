@@ -410,6 +410,33 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    def test_addmm(self):
+        # This test, more than accuracy, is designed to catch issues with
+        # CK's addmm signature vs pytorch's (X, W, B) vs (B, X, W)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        M, N, K = 1024, 1024, 16384
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        X = torch.randn(M, K, **tensor_options)
+        W = torch.randn(K, N, **tensor_options)
+        B = torch.randn(M, N, **tensor_options)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CK",
+                "autotune_in_subproc": False,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 2,
+            }
+        ):
+            @torch.compile(dynamic=False)
+            def compiled_addmm(b, x, w):
+                return torch.addmm(b, x, w)
+
+            _ = compiled_addmm(B, X, W)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_bmm(
