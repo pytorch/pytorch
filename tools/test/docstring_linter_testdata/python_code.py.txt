@@ -1,0 +1,102 @@
+class ShortWithDocstring:
+    """This docstring, while short, is enough"""
+    pass
+
+
+class Short:
+    pass
+
+
+class LongWithDocstring:
+    """This docstring, while short, is enough"""
+
+    def short1(self):
+        pass
+
+
+class LongWithoutDocstring:
+    # A comment isn't a docstring
+
+    def short1(self):
+        pass
+
+
+class LongWithShortDocstring:
+    """TODO"""
+
+    def short1(self):
+        pass
+
+
+class _Protected:
+    """TODO"""
+
+    def short1(self):
+        pass
+
+
+def short():
+    #
+    #
+    #
+    pass
+
+
+def long():
+    """This docstring, while short, is enough"""
+    #
+    #
+    #
+    #
+    pass
+
+
+def long_without_docstring():
+    #
+    #
+    #
+    #
+    pass
+
+
+class ImpossibleCombo(
+    set,
+    tuple,
+    int,
+):
+    # We could have comments
+    # before the doc comment
+    """This docstring, while short, is enough"""
+
+    def needs_docs(self):
+        def not_short():
+            class Long:
+                a = 1
+                b = 1
+                c = 1
+                d = 1
+                e = 1
+
+            class Short:
+                pass
+
+
+class NotDocstring:
+    def short1(self):
+        pass
+
+    """This is not a docstring"""
+
+    def short2(self):
+        pass
+
+    def short3(self):
+        pass
+
+
+def long_with_omit():  # noqa: docstring_linter
+    #
+    #
+    #
+    #
+    pass
