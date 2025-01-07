@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Dict, Union
+from typing import Any, Dict, Tuple, Union
 
 import torch
 from torch.types import Device
@@ -178,10 +178,27 @@ def max_memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
+def mem_get_info(device: _device_t = None) -> Tuple[int, int]:
+    r"""Return the global free and total GPU memory for a given device.
+
+    Args:
+        device (torch.device or int or str, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.xpu.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Returns:
+        int: the memory available on the device in units of bytes.
+        int: the total memory on the device in units of bytes
+    """
+    device = _get_device_index(device, optional=True)
+    return torch._C._xpu_getMemoryInfo(device)
+
+
 __all__ = [
     "empty_cache",
     "max_memory_allocated",
     "max_memory_reserved",
+    "mem_get_info",
     "memory_allocated",
     "memory_reserved",
     "memory_stats",

@@ -5978,6 +5978,21 @@ def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
     raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
 
 
+def _check_key_padding_mask(
+    key_padding_mask: torch.Tensor, src_len: int, bsz: int
+) -> None:
+    torch._check_with(
+        AssertionError,
+        key_padding_mask.shape[0] == bsz,
+        lambda: f"Expected key_padded_mask.shape[0] to be {bsz}, but got {key_padding_mask.shape[0]}",
+    )
+    torch._check_with(
+        AssertionError,
+        key_padding_mask.shape[1] == src_len,
+        lambda: f"Expected key_padded_mask.shape[1] to be {src_len}, but got {key_padding_mask.shape[1]}",
+    )
+
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -6316,10 +6331,9 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert key_padding_mask.shape == (
-            bsz,
-            src_len,
-        ), f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+        if not torch.jit.is_scripting() and not torch.jit.is_tracing():
+            _check_key_padding_mask(key_padding_mask, src_len, bsz)
+
         key_padding_mask = (
             key_padding_mask.view(bsz, 1, 1, src_len)
             .expand(-1, num_heads, -1, -1)

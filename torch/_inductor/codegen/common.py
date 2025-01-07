@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import enum
@@ -18,9 +20,15 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Tuple,
+    TYPE_CHECKING,
     Union,
 )
+
+from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from typing import Never
 
 import sympy
 
@@ -29,7 +37,6 @@ import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -353,6 +360,7 @@ def init_backend_registration():
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
+    from .mps import MetalScheduling
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -366,7 +374,9 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -383,6 +393,14 @@ def init_backend_registration():
         register_backend_for_device(
             "xpu",
             TritonScheduling,
+            PythonWrapperCodegen,
+            CppWrapperGpu,
+        )
+
+    if get_scheduling_for_device("mps") is None:
+        register_backend_for_device(
+            "mps",
+            MetalScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
@@ -424,7 +442,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
-        from . import cpu_device_op_overrides  # noqa: F401
+        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
@@ -603,50 +621,15 @@ class PythonPrinter(_PythonPrinter):
         return super().doprint(expr)
 
 
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
-
-    @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
-        if (
-            isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
-        ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
-            return string
-        return f"({string})"
-
-    def __getattr__(self, item):
-        return getattr(self._parent, item)
+class OpDecompositions:
+    """
+    Decomposes inductor ops
+    """
 
     @staticmethod
     def identity(value):
         # used to trigger cse
         return value
-
-    @staticmethod
-    def constant(value, dtype):
-        return repr(value)
 
     @staticmethod
     def reciprocal(x):
@@ -690,13 +673,84 @@ class OpOverrides:
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
+
+
+class OpOverrides(OpDecompositions):
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    @staticmethod
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
+        if (
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
+            or string == ""
+        ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
+            return string
+        return f"({string})"
+
+    def __getattr__(self, item):
+        return getattr(self._parent, item)
+
+    @staticmethod
+    def constant(value, dtype):
+        return repr(value)
+
+    @staticmethod
     def libdevice_sigmoid(x):
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def relu(x):
-        return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
     def libdevice_abs(x):
@@ -751,36 +805,6 @@ class OpOverrides:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
-    def remainder(a, b):
-        r = ops.mod(a, b)
-        cond = ops.and_(
-            ops.ne(r, ops.constant(0, torch.int32)),
-            ops.ne(ops.signbit(r), ops.signbit(b)),
-        )
-        return ops.where(cond, ops.add(r, b), r)
-
-    @staticmethod
-    def fma(x, y, z):
-        # for backends that don't override this (halide)
-        return ops.add(ops.mul(x, y), z)
-
-    @staticmethod
-    def trunc_to_int(a, dtype):
-        return ops.to_dtype(ops.trunc(a), dtype)
-
-    @staticmethod
-    def floor_to_int(a, dtype):
-        return ops.to_dtype(ops.floor(a), dtype)
-
-    @staticmethod
-    def ceil_to_int(a, dtype):
-        return ops.to_dtype(ops.ceil(a), dtype)
-
-    @staticmethod
-    def round_to_int(a, dtype):
-        return ops.to_dtype(ops.round(a), dtype)
-
-    @staticmethod
     def int_truediv(a, b):
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
@@ -793,7 +817,7 @@ class OpOverrides:
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target):
-        assert target in {"triton", "cpp", "cppvec"}, target
+        assert target in ("triton", "cpp", "cppvec"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
@@ -954,7 +978,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_polygamma({y}, {x})",
+        cpp=lambda x, y: f"{x} == 0 ? calc_digamma({y}) : calc_polygamma({y}, {x})",
         name="polygamma",
     ),
     # psi - alias to digamma
@@ -1449,10 +1473,10 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
+        self.invalidated_stores = OrderedSet[str]()
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: OrderedSet[str]):
+    def invalidate(self, keep_vars: Union[OrderedSet[str], OrderedSet[Never]]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1561,7 +1585,9 @@ class CSE:
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
     ) -> CSEVariable:
-        assert name not in self.varname_map, "duplicate name"
+        torch._check_value(
+            name not in self.varname_map, lambda: f"duplicate name: {name}"
+        )
         var = V.kernel.create_cse_var(name, bounds, dtype)
         self.varname_map[name] = var
         return var
@@ -1623,16 +1649,16 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
+        self.must_keep_buffers = OrderedSet[str]()
+        self.store_buffer_names = OrderedSet[str]()
         self._load_mask = None
         self._load_other = None
         # OrderedSet in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
+        self.removed_buffers = OrderedSet[str]()
+        self.inplaced_to_remove = OrderedSet[str]()
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -1705,27 +1731,27 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         raise NotImplementedError
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
+        dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[
-            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
-        values: Tuple[CSEVariable, ...],
-    ) -> Tuple[CSEVariable, ...]:
+        values: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def sort(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[CSEVariable, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[CSEVariable, ...]:
+    ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def var_ranges(self):
@@ -1734,11 +1760,11 @@ class Kernel(CodeGen):
     def bucketize(
         self,
         values: CSEVariable,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
@@ -1812,6 +1838,8 @@ class Kernel(CodeGen):
                                 config.cpu_backend == "triton"
                                 if device_str == "cpu"
                                 else config.cuda_backend == "triton"
+                                if device_str != "mps"
+                                else False
                             )
                         else:
                             triton_backend = False
@@ -2009,39 +2037,39 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 src_dtype: torch.dtype,
                 reduction_type: ReductionType,
-                value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                value: Union[CSEVariable, tuple[CSEVariable, ...]],
+            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
                 self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
             def scan(
-                dtypes: Tuple[torch.dtype, ...],
+                dtypes: tuple[torch.dtype, ...],
                 combine_fn: Callable[
-                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
-                    Tuple[CSEVariable, ...],
+                    [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
+                    tuple[CSEVariable, ...],
                 ],
-                values: Tuple[CSEVariable, ...],
-            ) -> Tuple[CSEVariable, ...]:
+                values: tuple[CSEVariable, ...],
+            ) -> tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def sort(
-                dtypes: Tuple[torch.dtype, ...],
-                values: Tuple[CSEVariable, ...],
+                dtypes: tuple[torch.dtype, ...],
+                values: tuple[CSEVariable, ...],
                 stable: bool,
                 descending: bool,
-            ) -> Tuple[CSEVariable, ...]:
+            ) -> tuple[CSEVariable, ...]:
                 return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(
                 values: CSEVariable,
-                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: CSEVariable,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter: Optional[tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[CSEVariable] = None,
             ) -> CSEVariable:
                 """
@@ -2145,7 +2173,7 @@ class Kernel(CodeGen):
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
-        names_to_remove: OrderedSet[str] = OrderedSet()
+        names_to_remove = OrderedSet[str]()
         for name in self.store_buffer_names:
             if (
                 name not in self.must_keep_buffers
@@ -2316,7 +2344,7 @@ class KernelTemplate:
         except NotImplementedError as e:
             return e
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

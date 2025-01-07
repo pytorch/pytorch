@@ -21,6 +21,7 @@ from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
     ConstDictKeySource,
+    DictGetItemSource,
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
@@ -131,18 +132,18 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = {
         "module_type",
         "module_key",
-        "module",
+        "value",
         "nn_module_stack_source",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
+        self, module_type: type, module_key: str, value: torch.nn.Module, **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
-        self.module = module
+        self.value = value
         assert self.source
         self.nn_module_stack_source = self.source
 
@@ -1060,7 +1061,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
                 # value. This removes the reliance on the actual key value.
                 source_key = ConstDictKeySource(hooks_dict_source, i)
-                source_value = GetItemSource(hooks_dict_source, source_key)
+                source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value)
                 return key, value
 
