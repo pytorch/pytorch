@@ -288,7 +288,7 @@ class TestAttention(TestCase):
 
         return inputs_p
 
-    def test_attention_all(self):
+    def test_attention(self):
         inputs = self.create_inputs(16, 992)
         inputs_p = self.pad_inputs(inputs, 16)
 

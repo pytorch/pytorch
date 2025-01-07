@@ -45,7 +45,23 @@ def extract_tensors_from_padded(args, kwargs):
     return tensor_args, tensor_kwargs
 
 
-class SlicingOp:
+class RegularOp:
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shape(self, args, kwargs):
+        raise NotImplementedError
+
+    def modify_out_shape(self, out, args, kwargs):
+        return out
+
+    def modify_args(self, args, kwargs):
+        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
+
+        return args, kwargs, tensor_args, tensor_kwargs
+
+
+class SliceRunRepadOp(RegularOp):
     def __init__(self) -> None:
         pass
 
@@ -71,27 +87,8 @@ class SlicingOp:
 
         return args, kwargs, tensor_args, tensor_kwargs
 
-    def modify_results(self, results):
-        return results
 
-
-class NonSlicingOp(SlicingOp):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def infer_shape(self, args, kwargs):
-        raise NotImplementedError
-
-    def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
-
-        return args, kwargs, tensor_args, tensor_kwargs
-
-    def modify_results(self, results):
-        return results
-
-
-class OnesLikeOp(NonSlicingOp):
+class OnesLikeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -100,7 +97,7 @@ class OnesLikeOp(NonSlicingOp):
         return [input_shape]
 
 
-class ViewOp(SlicingOp):
+class ViewOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -165,6 +162,9 @@ class ViewOp(SlicingOp):
 
         return [torch.Size(orig_output_shape)]
 
+    def modify_out_shape(self, out, args, kwargs):
+        return [torch.Size(args[1])]
+
     def modify_args(self, args, kwargs):
         tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
         inp, shape = tensor_args
@@ -219,7 +219,7 @@ class ViewOp(SlicingOp):
         return args, kwargs, (inp, shape), tensor_kwargs
 
 
-class ViewAsRealOp(SlicingOp):
+class ViewAsRealOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -228,7 +228,7 @@ class ViewAsRealOp(SlicingOp):
         return [input_shape + (2,)]
 
 
-class UnsqueezeOp(NonSlicingOp):
+class UnsqueezeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -242,7 +242,7 @@ class UnsqueezeOp(NonSlicingOp):
         return [input_shape[:dim] + (1,) + input_shape[dim:]]
 
 
-class PolarOp(NonSlicingOp):
+class PolarOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -251,7 +251,7 @@ class PolarOp(NonSlicingOp):
         return [input_shape]
 
 
-class TransposeOp(SlicingOp):
+class TransposeOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -272,7 +272,7 @@ class TransposeOp(SlicingOp):
         return [torch.Size(input_shape)]
 
 
-class ExpandOp(SlicingOp):
+class ExpandOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -283,7 +283,7 @@ class ExpandOp(SlicingOp):
         return [torch.Size(shape)]
 
 
-class ElementwiseUnaryOp(NonSlicingOp):
+class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -292,7 +292,7 @@ class ElementwiseUnaryOp(NonSlicingOp):
         return [input_shape]
 
 
-class ElementwiseBinaryOp(SlicingOp):
+class ElementwiseBinaryOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -349,7 +349,7 @@ class ElementwiseBinaryOp(SlicingOp):
     #    return args, kwargs, tensor_args, tensor_kwargs
 
 
-class MatmulOp(NonSlicingOp):
+class MatmulOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -357,7 +357,7 @@ class MatmulOp(NonSlicingOp):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
 
-class BmmOp(NonSlicingOp):
+class BmmOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -371,7 +371,7 @@ class BmmOp(NonSlicingOp):
         return [torch.Size([b1, n1, p2])]
 
 
-class MeanOp(SlicingOp):
+class MeanOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -388,7 +388,7 @@ class MeanOp(SlicingOp):
         return [torch.Size(list(input_shape[:dim]) + [1])]
 
 
-class ScaledDotProductAttentionOp(SlicingOp):
+class ScaledDotProductAttentionOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -418,7 +418,7 @@ class ScaledDotProductAttentionOp(SlicingOp):
     #    return args, kwargs, tensor_args, tensor_kwargs
 
 
-class IndexOp(NonSlicingOp):
+class IndexOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -438,7 +438,7 @@ class IndexOp(NonSlicingOp):
         return [torch.Size(input_shape_mod)]
 
 
-class SelectOp(NonSlicingOp):
+class SelectOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -455,7 +455,7 @@ class SelectOp(NonSlicingOp):
         return [input_shape[:dim] + input_shape[dim + 1 :]]
 
 
-class IndexPutOp(SlicingOp):
+class IndexPutOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -464,7 +464,7 @@ class IndexPutOp(SlicingOp):
         return [torch.Size(input_shape)]
 
 
-class SplitWithSizesOp(SlicingOp):
+class SplitWithSizesOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -499,7 +499,7 @@ class SplitWithSizesOp(SlicingOp):
     #    return args, kwargs, tensor_args, tensor_kwargs
 
 
-class CatOp(SlicingOp):
+class CatOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -508,7 +508,7 @@ class CatOp(SlicingOp):
         return [input_shape]
 
 
-class StackOp(NonSlicingOp):
+class StackOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -522,7 +522,7 @@ class StackOp(NonSlicingOp):
         return [input[0].orig_shape[:dim] + (len(input),) + input[0].orig_shape[dim:]]
 
 
-class DetachOp(NonSlicingOp):
+class DetachOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -531,7 +531,7 @@ class DetachOp(NonSlicingOp):
         return [input_shape]
 
 
-class EmbeddingOp(NonSlicingOp):
+class EmbeddingOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -545,16 +545,13 @@ class EmbeddingOp(NonSlicingOp):
         return [torch.Size(out_shape)]
 
 
-class NoOp(NonSlicingOp):
+class NoOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
     def infer_shape(self, args, kwargs):
         input_shape = args[0].orig_shape
         return [input_shape]
-
-    def modify_results(self, results):
-        return results
 
 
 class OpDatabase:
@@ -821,21 +818,17 @@ class PaddedTensor(torch.Tensor):
         args = tuple(args_new)
 
         # Infer shape
-        orig_shape_out = op.infer_shape(args, kwargs)
-        # log_function_with_shapes(func, args, args, orig_shape_out)
+        orig_shape = op.infer_shape(args, kwargs)
+        # log_function_with_shapes(func, args, args, orig_shape)
 
-        # Modify args
+        # Modify args and shape
         args, kwargs, tensor_args, tensor_kwargs = op.modify_args(args, kwargs)
-        if "view" in func._opname:
-            orig_shape_out = [torch.Size(args[1])]
+        orig_shape = op.modify_out_shape(orig_shape, args, kwargs)
 
         # Run function
         out = func(*tensor_args, **tensor_kwargs)
 
-        log_function_with_shapes(func, args, tensor_args, out, orig_shape_out)
-
-        # Modify results
-        out = op.modify_results(out)
+        log_function_with_shapes(func, args, tensor_args, out, orig_shape)
 
         # Merge arguments view_shape_stacks
         view_shape_stack = list(
@@ -848,8 +841,8 @@ class PaddedTensor(torch.Tensor):
 
         out_flat_padded = []
         for idx, t in enumerate(out_flat):
-            if type(t) is torch.Tensor and idx < len(orig_shape_out):
-                s = orig_shape_out[idx]
+            if type(t) is torch.Tensor and idx < len(orig_shape):
+                s = orig_shape[idx]
                 out_flat_padded.append(
                     PaddedTensor(t, multipliers, s, view_shape_stack)
                 )
