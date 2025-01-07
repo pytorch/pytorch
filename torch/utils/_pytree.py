@@ -1480,7 +1480,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
             f"Available protocols: {list(_SUPPORTED_PROTOCOLS.keys())}",
         )
 
-    str_spec = json.dumps((protocol, dataclasses.asdict(json_spec)))
+    str_spec = json.dumps((protocol, dataclasses.asdict(json_spec)), cls=EnumEncoder)
     return str_spec
 
 
