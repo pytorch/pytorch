@@ -310,20 +310,23 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  PyObject* ctx_stream = nullptr;
-  if (PyDict_GetItemStringRef(self->context, "_ctx_stream", &ctx_stream) < 0) {
+  THPObjectPtr ctx_stream;
+  if (PyDict_GetItemStringRef(self->context, "_ctx_stream", &ctx_stream.get()) <
+      0) {
     throw python_error();
   }
-  TORCH_CHECK(ctx_stream, "ctx_stream should be initialized.");
-  PyObject* ctx_device_index = nullptr;
+  TORCH_INTERNAL_ERROR(
+      ctx_stream.get(), "ctx_stream should be present on the context dict.");
+  THPObjectPtr* ctx_device_index = nullptr;
   if (PyDict_GetItemStringRef(
-          self->context, "_ctx_device_index", &ctx_device_index) < 0) {
+          self->context, "_ctx_device_index", &ctx_device_index.get()) < 0) {
     throw python_error();
   }
-  TORCH_CHECK(ctx_device_index, "ctx_device_index should be initialized.");
-  auto prev_stream = (THPStream*)(THPObjectPtr(ctx_stream).get());
-  auto prev_device_index =
-      THPUtils_unpackDeviceIndex(THPObjectPtr(ctx_device_index).get());
+  TORCH_INTERNAL_ERROR(
+      ctx_device_index,
+      "ctx_device_index should be present on the context dict.");
+  auto prev_stream = (THPStream*)(ctx_stream.get());
+  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
