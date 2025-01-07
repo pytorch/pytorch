@@ -92,6 +92,15 @@ bool init_amx() {
 #endif
 }
 
+
+bool is_arm_sve_bf16_supported() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  return cpuinfo_initialize() && cpuinfo_has_arm_sve_bf16();
+#else
+  return false;
+#endif
+}
+
 static uint32_t get_cache_size(int level) {
 #if !defined(__s390x__) && !defined(__powerpc__)
   if (!cpuinfo_initialize()) {
