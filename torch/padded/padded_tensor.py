@@ -7,10 +7,7 @@ import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
-
-def log(*msgs):
-    msg = " ".join([str(x) for x in msgs])
-    print(msg)
+from utils import *
 
 
 def slice_nd(input, start_idxs, end_idxs):
@@ -37,7 +34,7 @@ def slice_nd(input, start_idxs, end_idxs):
     return input.clone()
 
 
-def padded_to_tensor(args, kwargs):
+def extract_tensors_from_padded(args, kwargs):
     if kwargs is None:
         kwargs = {}
     tensor_args, tensor_kwargs = pytree.tree_map_only(
@@ -86,7 +83,7 @@ class NonSlicingOp(SlicingOp):
         raise NotImplementedError
 
     def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
 
         return args, kwargs, tensor_args, tensor_kwargs
 
@@ -101,17 +98,6 @@ class OnesLikeOp(NonSlicingOp):
     def infer_shape(self, args, kwargs):
         input_shape = args[0].orig_shape
         return [input_shape]
-
-
-def infer_minus_1_shape(input_shape, output_shape):
-    input_shape_prod = math.prod(input_shape)
-    output_shape_prod = math.prod(output_shape) * -1
-
-    for idx, output_dim in enumerate(output_shape):
-        if output_dim == -1:
-            output_shape[idx] = input_shape_prod // output_shape_prod
-            break
-    return output_shape
 
 
 class ViewOp(SlicingOp):
@@ -180,8 +166,18 @@ class ViewOp(SlicingOp):
         return [torch.Size(orig_output_shape)]
 
     def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
         inp, shape = tensor_args
+
+        def infer_minus_1_shape(input_shape, output_shape):
+            input_shape_prod = math.prod(input_shape)
+            output_shape_prod = math.prod(output_shape) * -1
+
+            for idx, output_dim in enumerate(output_shape):
+                if output_dim == -1:
+                    output_shape[idx] = input_shape_prod // output_shape_prod
+                    break
+            return output_shape
 
         if len(args[0].shape) > len(args[1]):
             prefix = strip_common_suffix(args[0].orig_shape, args[1])
@@ -314,7 +310,7 @@ class ElementwiseBinaryOp(SlicingOp):
         return [torch.Size(reversed(new_shape))]
 
     # def modify_args(self, args, kwargs):
-    #    tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+    #    tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
 
     #    def is_broadcastable(shape1, shape2):
     #        # Broadcastable means that at each dimension, either the shapes are equal or one of them is 1
@@ -493,7 +489,7 @@ class SplitWithSizesOp(SlicingOp):
     #    if dim < 0:
     #        dim += len(args[0].orig_shape)
 
-    #    tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+    #    tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
 
     #    # Slice the input tensor to the correct shape
     #    tensor_args[0] = torch.ops.aten.slice(
