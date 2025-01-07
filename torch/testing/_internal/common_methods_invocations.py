@@ -12186,7 +12186,7 @@ op_db: List[OpInfo] = [
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfGPU=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           torch.bfloat16),
+                                          torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
@@ -12201,8 +12201,8 @@ op_db: List[OpInfo] = [
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                      *[torch.bfloat16]
+                                                      if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -12232,7 +12232,8 @@ op_db: List[OpInfo] = [
            ],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE,
+                            active_if=not SM53OrLater),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -12242,10 +12243,10 @@ op_db: List[OpInfo] = [
     OpInfo('baddbmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfGPU=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           torch.bfloat16),
+                                          torch.bfloat16),
            backward_dtypesIfGPU=floating_types_and(torch.float16,
-                                                    *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
-                                                    torch.complex64, torch.complex128),
+                                                   *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
+                                                   torch.complex64, torch.complex128),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            gradcheck_fast_mode=True,
@@ -12304,8 +12305,8 @@ op_db: List[OpInfo] = [
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                      *[torch.bfloat16]
+                                                      if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
@@ -12313,7 +12314,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE,
+                            active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out")
            ),
@@ -14113,8 +14115,8 @@ op_db: List[OpInfo] = [
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                      *[torch.bfloat16]
+                                                      if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
@@ -14126,7 +14128,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=False),
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE,
+                            active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE,
@@ -15053,7 +15056,7 @@ op_db: List[OpInfo] = [
            aliases=('conv_transpose1d',),
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       torch.bfloat16),
+                                                      torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15098,7 +15101,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       torch.bfloat16),
+                                                      torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            # Runs very slowly on slow-gradcheck for complex.
            gradcheck_fast_mode=True,
@@ -15205,7 +15208,7 @@ op_db: List[OpInfo] = [
            aten_name='conv1d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       torch.bfloat16),
+                                                      torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv1d,
            error_inputs_func=error_inputs_conv1d,
@@ -15243,7 +15246,7 @@ op_db: List[OpInfo] = [
            aten_name='conv2d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       torch.bfloat16),
+                                                      torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_conv2d),
            error_inputs_func=error_inputs_conv2d,
@@ -16039,14 +16042,15 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bilinear,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfGPU=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
+                                          *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-03, rtol=1.3e-03)}),
                             'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ),
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE,
+                            active_if=not SM53OrLater),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -17514,8 +17518,8 @@ op_db: List[OpInfo] = [
            op=torch.Tensor.__rmatmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfGPU=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                      *[torch.bfloat16]
+                                                      if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -17526,7 +17530,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE,
+                            active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
