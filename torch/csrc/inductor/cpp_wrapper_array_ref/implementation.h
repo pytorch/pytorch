@@ -1,5 +1,4 @@
-#ifndef TORCH_CSRC_INDUCTOR_CPP_WRAPPER_ARRAY_REF_IMPLEMENTATION
-#define TORCH_CSRC_INDUCTOR_CPP_WRAPPER_ARRAY_REF_IMPLEMENTATION
+#pragma once
 
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
@@ -86,5 +85,3 @@ void assert_numel(const ArrayRefTensor<T>& tensor, uint64_t numel) {
   }
 }
 } // namespace torch::aot_inductor
-
-#endif // TORCH_CSRC_INDUCTOR_CPP_WRAPPER_ARRAY_REF_IMPLEMENTATION
