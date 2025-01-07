@@ -35,6 +35,13 @@ endfunction()
 
 ################################################################################
 
+# -- [ Deterine commit hash
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "from tools.generate_torch_version import get_sha;print(get_sha('.'), end='')"
+    OUTPUT_VARIABLE COMMIT_SHA
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+)
+
 # ---[ Write the macros file
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/../caffe2/core/macros.h.in

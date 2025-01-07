@@ -379,7 +379,7 @@ Value& OrderedDict<Key, Value>::insert(Key key, Value&& value) {
 template <typename Key, typename Value>
 void OrderedDict<Key, Value>::update(OrderedDict&& other) {
   reserve(size() + other.size());
-  for (auto& item : other) {
+  for (auto&& item : std::move(other)) {
     // We want to call `insert()` to prevent duplicate keys.
     insert(std::move(item.key()), std::move(item.value()));
   }

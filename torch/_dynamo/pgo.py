@@ -7,7 +7,6 @@ import enum
 import logging
 import os
 import pickle
-import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
@@ -16,7 +15,12 @@ import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
-from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    dynamo_timed,
+    set_feature_use,
+    warn_once,
+)
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
 
@@ -322,9 +326,8 @@ def update_automatic_dynamic(
             entry.scalar,
             old_entry.scalar,
         )
-        get_chromium_event_logger().log_instant_event(
+        CompileEventLogger.instant(
             "automatic_dynamic",
-            time.time_ns(),
             {
                 "name": name,
                 "dim_changed": "scalar",
@@ -361,9 +364,8 @@ def update_automatic_dynamic(
             entry_tup,
             old_entry_tup,
         )
-        get_chromium_event_logger().log_instant_event(
+        CompileEventLogger.instant(
             "automatic_dynamic",
-            time.time_ns(),
             {
                 "name": name,
                 "dim_changed": "all" if i is None else i,
@@ -458,6 +460,8 @@ def get_cache_key() -> Optional[str]:
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
 
+    tag = torch.compiler.config.cache_key_tag
+
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
     if (r := torch.compiler.config.job_id) is not None:
@@ -467,11 +471,11 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}"
+        return f"{r}:{rank}:{tag}"
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
 
     return None
 
@@ -539,8 +543,6 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     if _CODE_STATE is not None:
         return _CODE_STATE
 
-    chromium_log = get_chromium_event_logger()
-
     # Initialize it (even if we don't look up profile)
     _CODE_STATE = defaultdict(CodeState)
 
@@ -557,6 +559,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
+        set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
@@ -566,13 +569,13 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         with dynamo_timed(
             name := "pgo.get_local_code_state", log_pt2_compile_event=True
         ):
-            chromium_log.add_event_data(name, cache_key=cache_key)
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # Read lock not necessary as we always write atomically write to
             # the actual location
             with open(path, "rb") as f:
                 try:
                     _CODE_STATE = pickle.load(f)
-                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
+                    CompileEventLogger.pt2_compile(name, cache_size_bytes=f.tell())
                 except Exception:
                     log.warning(
                         "get_code_state failed while reading %s", path, exc_info=True
@@ -586,7 +589,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         with dynamo_timed(
             name := "pgo.get_remote_code_state", log_pt2_compile_event=True
         ):
-            chromium_log.add_event_data(name, cache_key=cache_key)
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
             try:
                 cache_data = remote_cache.get(cache_key)
@@ -601,7 +604,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                         data = cache_data["data"]
                         assert isinstance(data, str)
                         payload = base64.b64decode(data)
-                        chromium_log.add_event_data(name, cache_size_bytes=len(payload))
+                        CompileEventLogger.pt2_compile(
+                            name, cache_size_bytes=len(payload)
+                        )
                         _CODE_STATE = pickle.loads(payload)
                     except Exception:
                         log.warning(
@@ -640,8 +645,7 @@ def put_code_state() -> None:
 
 def put_local_code_state(cache_key: str) -> None:
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
-        chromium_log = get_chromium_event_logger()
-        chromium_log.add_event_data(name, cache_key=cache_key)
+        CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
         path = code_state_path(cache_key)
@@ -657,14 +661,14 @@ def put_local_code_state(cache_key: str) -> None:
         lock_path = path + ".lock"
         # We /mostly/ don't need the lock but the tmp file could be clobbered
         # TODO: use a safe tempfile create to eliminate lock
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         with FileLock(lock_path, timeout=LOCK_TIMEOUT):
             with open(tmp_path, "wb") as f:
                 pickle.dump(_CODE_STATE, f)
-                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
+                CompileEventLogger.pt2_compile(name, cache_size_bytes=f.tell())
             os.rename(tmp_path, path)
             log.info(
                 "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
@@ -678,8 +682,7 @@ def put_local_code_state(cache_key: str) -> None:
 
 def put_remote_code_state(cache_key: str) -> None:
     with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
-        chromium_log = get_chromium_event_logger()
-        chromium_log.add_event_data(name, cache_key=cache_key)
+        CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
         remote_cache = get_remote_cache()
@@ -689,7 +692,7 @@ def put_remote_code_state(cache_key: str) -> None:
             return
 
         content = pickle.dumps(_CODE_STATE)
-        chromium_log.add_event_data(name, cache_size_bytes=len(content))
+        CompileEventLogger.pt2_compile(name, cache_size_bytes=len(content))
         cache_data: JsonDataTy = {
             "data": base64.b64encode(content).decode("ascii"),
         }

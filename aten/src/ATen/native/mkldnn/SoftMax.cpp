@@ -27,8 +27,7 @@ Tensor mkldnn_softmax(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_softmax(
     const Tensor& self,
@@ -45,7 +44,6 @@ Tensor mkldnn_softmax(
                                  self.options().device_opt());
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

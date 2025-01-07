@@ -662,7 +662,7 @@ static MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   return erfTensor;
 }
 
-TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, const Tensor& output) {
+TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, std::string_view approximate, const Tensor& output) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
@@ -711,7 +711,7 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_mps)
-(const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input) {
+(const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input) {
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
@@ -1426,6 +1426,12 @@ TORCH_IMPL_FUNC(softshrink_out_mps)
                                      truePredicateTensor:[mpsGraph additionWithPrimaryTensor:inputTensor
                                                                              secondaryTensor:lambdTensor
                                                                                         name:nil]
+                                    falsePredicateTensor:outputTensor
+                                                    name:nil];
+      MPSGraphTensor* isNanTensor = [mpsGraph isNaNWithTensor:inputTensor name:nil];
+
+      outputTensor = [mpsGraph selectWithPredicateTensor:isNanTensor
+                                     truePredicateTensor:inputTensor
                                     falsePredicateTensor:outputTensor
                                                     name:nil];
 

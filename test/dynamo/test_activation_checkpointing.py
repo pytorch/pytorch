@@ -159,7 +159,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(cloned_fn, fullgraph=fullgraph, backend=backend)
         ctx = contextlib.nullcontext()
         if compiled_autograd:
-            ctx = torch._dynamo.compiled_autograd.enable(
+            ctx = torch._dynamo.compiled_autograd._enable(
                 lambda gm: torch.compile(gm, fullgraph=fullgraph, backend=backend)
             )
         with ctx:
@@ -1260,7 +1260,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 super().__init__()
 
             def forward(self, x, ys):
-                a = torch.sin(x)
+                a = torch.sin(x)  # noqa: F841
                 b = torch.cos(ys[0])
                 c = torch.cos(ys[1])
                 return (x, [b, c])

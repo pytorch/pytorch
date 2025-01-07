@@ -16,8 +16,7 @@ void _fused_adam_mps_impl_(
     const double eps,
     const bool maximize,
     const std::optional<Tensor>& grad_scale,
-    const std::optional<Tensor>& found_inf
-);
+    const std::optional<Tensor>& found_inf);
 
 void _fused_adam_mps_impl_(
     TensorList params,
@@ -32,6 +31,5 @@ void _fused_adam_mps_impl_(
     const double eps,
     const bool maximize,
     const std::optional<Tensor>& grad_scale,
-    const std::optional<Tensor>& found_inf
-);
+    const std::optional<Tensor>& found_inf);
 } // namespace at::native::mps

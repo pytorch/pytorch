@@ -410,7 +410,7 @@ def _broadcast_shapes(*_shapes):
         assert isinstance(shape, Sequence)
 
     # Computes common shape
-    common_shape = [
+    common_shape: List[Union[int, torch.SymInt]] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
@@ -476,12 +476,13 @@ def _make_elementwise_unary_reference(
     *,
     aten_op=infer_aten_op,
     extra_meta=None,
+    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper()
+        @out_wrapper(exact_dtype=exact_dtype)
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -545,7 +546,10 @@ def _make_inplace(fn):
     return _fn
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    exact_dtype=True,
+)
 def abs(a):
     return prims.abs(a)
 
@@ -585,7 +589,10 @@ def bitwise_not(a):
     return prims.bitwise_not(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def ceil(a):
     return prims.ceil(a)
 
@@ -679,12 +686,18 @@ def zero(input: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(input)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def floor(a):
     return prims.floor(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
@@ -719,7 +732,10 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isposinf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -730,7 +746,10 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isneginf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -920,7 +939,10 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sgn(a):
     if utils.is_complex_dtype(a.dtype):
         a_abs = a.abs()
@@ -929,12 +951,18 @@ def sgn(a):
         return a.sign()
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sign(a):
     return prims.sign(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def signbit(a):
     return prims.signbit(a)
 
@@ -980,7 +1008,10 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def trunc(a):
     return prims.trunc(a)
 
@@ -3024,9 +3055,7 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     full_chunks = math.floor(length / chunk_size)
     tail_chunk_size = length % chunk_size
 
-    result = []
-    for i in range(full_chunks):
-        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+    result = [narrow(a, dim, i * chunk_size, chunk_size) for i in range(full_chunks)]
 
     if tail_chunk_size != 0:
         result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
@@ -3047,7 +3076,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3269,10 +3298,15 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type == "cpu":
+    if input.device.type in ["cpu", "mtia"]:
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
+
+
+@torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
+def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
+    return native_layer_norm(*args)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
@@ -3381,7 +3415,6 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3654,7 +3687,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
     enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
-    permute_order, sorted_stride = zip(*enumerated_stride)
+    permute_order, _sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
     repeat_xtensor = a.expand(urtensor_shape)
@@ -3765,7 +3798,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
