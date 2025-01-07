@@ -1274,7 +1274,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             qconv2d_unary_matcher_nodes=11,
         )
 
-    def _qconv2d_add_test_helper(self, device="cpu", use_relu=False, int8_mixed_bf16=False):
+    def _qconv2d_add_test_helper(
+        self, device="cpu", use_relu=False, int8_mixed_bf16=False
+    ):
         r"""
         This testcase will quantize a Conv2d->Add pattern as:
                  X
@@ -1321,9 +1323,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
             mod = M(add_fn, use_relu).eval().to(device=device)
-            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
-                1
-            ).to(device=device)
+            v = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False)
+                .add(1)
+                .to(device=device)
+            )
 
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 4
@@ -1344,7 +1348,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             )
 
-    def _qconv2d_add_test_helper2(self, device="cpu", use_relu=False, int8_mixed_bf16=False):
+    def _qconv2d_add_test_helper2(
+        self, device="cpu", use_relu=False, int8_mixed_bf16=False
+    ):
         r"""
         This testcase will quantize two Conv2d->Add patterns as:
 
@@ -1406,9 +1412,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             quantization_add_fn_list + quantization_inplace_add_fn_list, [False, True]
         ):
             mod = M(add_fn, use_relu, swap_inputs).eval().to(device=device)
-            x = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False, device=device)
-            x2 = torch.randn((1, 6, 6, 6), dtype=torch.float32, requires_grad=False, device=device)
-            x3 = torch.randn((1, 6, 4, 4), dtype=torch.float32, requires_grad=False, device=device)
+            x = torch.randn(
+                (1, 3, 8, 8), dtype=torch.float32, requires_grad=False, device=device
+            )
+            x2 = torch.randn(
+                (1, 6, 6, 6), dtype=torch.float32, requires_grad=False, device=device
+            )
+            x3 = torch.randn(
+                (1, 6, 4, 4), dtype=torch.float32, requires_grad=False, device=device
+            )
 
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
@@ -2268,9 +2280,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_test_helper(
-            (torch.randn((2, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_unary_test_helper((torch.randn((2, 4)),), int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2287,9 +2297,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_test_helper(
-            (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_unary_test_helper((torch.randn((2, 3, 4)),), int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2325,7 +2333,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     def _qlinear_add_test_helper(
-        self, device="cpu", use_relu=False, int8_mixed_bf16=False, is_qat=True, is_dynamic=True
+        self,
+        device="cpu",
+        use_relu=False,
+        int8_mixed_bf16=False,
+        is_qat=True,
+        is_dynamic=True,
     ):
         r"""
         This testcase will quantize two consecutive Linear->Add(->relu) patterns as:
@@ -2401,7 +2414,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         cases = itertools.product(add_fn_list, fake_quant_x2_list)
         for add_fn, fq_x2 in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
-            v = torch.randn((4, 4), dtype=torch.float32, requires_grad=False, device=device).add(1)
+            v = torch.randn(
+                (4, 4), dtype=torch.float32, requires_grad=False, device=device
+            ).add(1)
 
             def matcher_check_fn():
                 # 1. Dequant-linear pattern matched in quantization weight prepack * 4
