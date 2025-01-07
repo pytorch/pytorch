@@ -383,7 +383,11 @@ def should_pad_mm_bf16(dtype, M, N, K):
 
 
 def should_pad_bench(*args, **kwargs):
-    with dynamo_timed("pad_mm_benchmark"):
+    with dynamo_timed(
+        "pad_mm_benchmark",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="compile_time_autotune_time_us",
+    ):
         return _should_pad_bench(*args, **kwargs)
 
 
@@ -392,7 +396,6 @@ def _should_pad_bench(
 ) -> bool:
     m_padded_length = 0
     n_padded_length = 0
-    batchsize = 1
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]
@@ -402,7 +405,6 @@ def _should_pad_bench(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
-            batchsize = mat1.shape[0]
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
@@ -587,6 +589,9 @@ def _should_pad_bench(
                 return ah_should_pad
 
         if ori_time is None:
+            # if we can, we should benchmark the original and padded kernels
+            # together since grouped benchmarking has better accuracy with
+            # lower overhead (since GPU warmups are shared)
             ori_time, pad_time = benchmarker.benchmark_many_gpu(
                 [orig_bench_fn, pad_bench_fn], warmup=5
             )

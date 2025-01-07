@@ -633,7 +633,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
         return g, lookup
 
     def verify(self, tree, subnodes, min_fuse, max_fuse, expected):
-        g, lookup = self.build_graph(tree)
+        _, lookup = self.build_graph(tree)
         subnodes = [lookup[n] for n in subnodes]
         expected = [[lookup[n] for n in sub] for sub in expected]
         opts = {
