@@ -126,7 +126,7 @@ Why is compilation slow?
   optimizations, and expresses these assumptions as guards that check
   particular values at runtime. If any of these guards fail, Dynamo will
   recompile that function (or part) up to
-  ``torch._dynamo.config.cache_size_limit`` times. If your program is
+  ``torch._dynamo.config.recompile_limit`` times. If your program is
   hitting the cache limit, you will first need to determine which guard is
   failing and what part of your program is triggering it. The
   `recompilation profiler <#recompilation-profiler>`__ automates the

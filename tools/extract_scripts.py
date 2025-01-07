@@ -6,13 +6,13 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from typing_extensions import TypedDict  # Python 3.11+
 
 import yaml
 
 
-Step = Dict[str, Any]
+Step = dict[str, Any]
 
 
 class Script(TypedDict):
