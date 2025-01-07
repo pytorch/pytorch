@@ -21,10 +21,10 @@ Tensor q_linear_pointwise(
     c10::string_view post_op_name,
     torch::List<std::optional<at::Scalar>> post_op_args,
     c10::string_view post_op_algorithm) {
-
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
+  TORCH_CHECK(dim == 2, "qliner XPU: input dim should be 2, but got", dim);
   int64_t K = act.size(dim - 1);
   int64_t M = act.numel() / K;
   // [M, K] x [K, N]
@@ -34,53 +34,55 @@ Tensor q_linear_pointwise(
   std::vector<int64_t> dst_dims = {M, N};
 
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
-  auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
   Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
-    act.contiguous(),
-    act_scale,
-    act_zero_point,
-    weight.contiguous(),
-    weight_scales,
-    weight_zero_points,
-    b_raw,
-    qout,
-    output_scale,
-    output_zero_point,
-    output_dtype,
-    /*other*/ std::nullopt,
-    /*other scale*/ 1.0,
-    /*other zp*/0,
-    /*binary post op*/ "none",
-    /*binary alpha*/1.0,
-    post_op_name,
-    post_op_args,
-    post_op_algorithm
-  );
+      act.contiguous(),
+      act_scale,
+      act_zero_point,
+      weight.contiguous(),
+      weight_scales,
+      weight_zero_points,
+      b_raw,
+      qout,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      post_op_name,
+      post_op_args,
+      post_op_algorithm);
 
   return qout;
 }
 
 Tensor q_linear_pointwise_tensor(
-  Tensor act,
-  Tensor act_scale,
-  Tensor act_zero_point,
-  Tensor weight,
-  Tensor weight_scales,
-  Tensor weight_zero_points,
-  std::optional<Tensor> bias,
-  double output_scale,
-  int64_t output_zero_point,
-  std::optional<c10::ScalarType> output_dtype,
-  c10::string_view post_op_name,
-  torch::List<std::optional<at::Scalar>> post_op_args,
-  c10::string_view post_op_algorithm
-){
+    Tensor act,
+    Tensor act_scale,
+    Tensor act_zero_point,
+    Tensor weight,
+    Tensor weight_scales,
+    Tensor weight_zero_points,
+    std::optional<Tensor> bias,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    c10::string_view post_op_name,
+    torch::List<std::optional<at::Scalar>> post_op_args,
+    c10::string_view post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
+  TORCH_CHECK(dim == 2, "qliner XPU: input dim should be 2, but got", dim);
   int64_t K = act.size(dim - 1);
   int64_t M = act.numel() / K;
   // [M, K] x [K, N]
@@ -90,56 +92,56 @@ Tensor q_linear_pointwise_tensor(
   std::vector<int64_t> dst_dims = {M, N};
 
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
-  auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
   Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
-    act.contiguous(),
-    act_scale.item().toDouble(),
-    act_zero_point.item().toLong(),
-    weight.contiguous(),
-    weight_scales,
-    weight_zero_points,
-    b_raw,
-    qout,
-    output_scale,
-    output_zero_point,
-    output_dtype,
-    /*other*/ std::nullopt,
-    /*other scale*/ 1.0,
-    /*other zp*/0,
-    /*binary post op*/ "none",
-    /*binary alpha*/1.0,
-    post_op_name,
-    post_op_args,
-    post_op_algorithm
-  );
+      act.contiguous(),
+      act_scale.item().toDouble(),
+      act_zero_point.item().toLong(),
+      weight.contiguous(),
+      weight_scales,
+      weight_zero_points,
+      b_raw,
+      qout,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      post_op_name,
+      post_op_args,
+      post_op_algorithm);
 
   return qout;
 }
 
 Tensor q_linear_pointwise_binary(
-  Tensor act,
-  double act_scale,
-  int64_t act_zero_point,
-  Tensor weight,
-  Tensor weight_scales,
-  Tensor weight_zero_points,
-  std::optional<at::Tensor> other,
-  std::optional<Tensor> bias,
-  double output_scale,
-  int64_t output_zero_point,
-  std::optional<c10::ScalarType> output_dtype,
-  double other_scale,
-  int64_t other_zero_point,
-  c10::string_view binary_post_op,
-  double binary_alpha,
-  c10::string_view unary_post_op,
-  torch::List<std::optional<at::Scalar>> unary_post_op_args,
-  c10::string_view unary_post_op_algorithm
-){
-
+    Tensor act,
+    double act_scale,
+    int64_t act_zero_point,
+    Tensor weight,
+    Tensor weight_scales,
+    Tensor weight_zero_points,
+    std::optional<at::Tensor> other,
+    std::optional<Tensor> bias,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    double other_scale,
+    int64_t other_zero_point,
+    c10::string_view binary_post_op,
+    double binary_alpha,
+    c10::string_view unary_post_op,
+    torch::List<std::optional<at::Scalar>> unary_post_op_args,
+    c10::string_view unary_post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -151,57 +153,56 @@ Tensor q_linear_pointwise_binary(
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
-  auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
   Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
-    act.contiguous(),
-    act_scale,
-    act_zero_point,
-    weight.contiguous(),
-    weight_scales,
-    weight_zero_points,
-    b_raw,
-    qout,
-    output_scale,
-    output_zero_point,
-    output_dtype,
-    /*other*/ other,
-    /*other scale*/ other_scale,
-    /*other zp*/other_zero_point,
-    /*binary post op*/ binary_post_op,
-    /*binary alpha*/binary_alpha,
-    unary_post_op,
-    unary_post_op_args,
-    unary_post_op_algorithm
-  );
+      act.contiguous(),
+      act_scale,
+      act_zero_point,
+      weight.contiguous(),
+      weight_scales,
+      weight_zero_points,
+      b_raw,
+      qout,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      /*other*/ other,
+      /*other scale*/ other_scale,
+      /*other zp*/ other_zero_point,
+      /*binary post op*/ binary_post_op,
+      /*binary alpha*/ binary_alpha,
+      unary_post_op,
+      unary_post_op_args,
+      unary_post_op_algorithm);
 
   return qout;
 }
 
-
 Tensor q_linear_pointwise_binary_tensor(
-  Tensor act,
-  Tensor act_scale,
-  Tensor act_zero_point,
-  Tensor weight,
-  Tensor weight_scales,
-  Tensor weight_zero_points,
-  std::optional<at::Tensor> other,
-  std::optional<Tensor> bias,
-  double output_scale,
-  int64_t output_zero_point,
-  std::optional<c10::ScalarType> output_dtype,
-  double other_scale,
-  int64_t other_zero_point,
-  c10::string_view binary_post_op,
-  double binary_alpha,
-  c10::string_view unary_post_op,
-  torch::List<std::optional<at::Scalar>> unary_post_op_args,
-  c10::string_view unary_post_op_algorithm
-){
-
+    Tensor act,
+    Tensor act_scale,
+    Tensor act_zero_point,
+    Tensor weight,
+    Tensor weight_scales,
+    Tensor weight_zero_points,
+    std::optional<at::Tensor> other,
+    std::optional<Tensor> bias,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    double other_scale,
+    int64_t other_zero_point,
+    c10::string_view binary_post_op,
+    double binary_alpha,
+    c10::string_view unary_post_op,
+    torch::List<std::optional<at::Scalar>> unary_post_op_args,
+    c10::string_view unary_post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -213,31 +214,33 @@ Tensor q_linear_pointwise_binary_tensor(
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
-  auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
   Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
-    act.contiguous(),
-    act_scale.item().toDouble(),
-    act_zero_point.item().toLong(),
-    weight.contiguous(),
-    weight_scales,
-    weight_zero_points,
-    b_raw,
-    qout,
-    output_scale,
-    output_zero_point,
-    output_dtype,
-    /*other*/ other,
-    /*other scale*/ other_scale,
-    /*other zp*/other_zero_point,
-    /*binary post op*/ binary_post_op,
-    /*binary alpha*/binary_alpha,
-    unary_post_op,
-    unary_post_op_args,
-    unary_post_op_algorithm
-  );
+      act.contiguous(),
+      act_scale.item().toDouble(),
+      act_zero_point.item().toLong(),
+      weight.contiguous(),
+      weight_scales,
+      weight_zero_points,
+      b_raw,
+      qout,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      /*other*/ other,
+      /*other scale*/ other_scale,
+      /*other zp*/ other_zero_point,
+      /*binary post op*/ binary_post_op,
+      /*binary alpha*/ binary_alpha,
+      unary_post_op,
+      unary_post_op_args,
+      unary_post_op_algorithm);
 
   return qout;
 }
@@ -251,20 +254,20 @@ at::Tensor q_linear_prepack_onednn(
 
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
-    TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
-    TORCH_FN(q_linear_pointwise));
+      TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
+      TORCH_FN(q_linear_pointwise));
   m.impl(
-    TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
-    TORCH_FN(q_linear_pointwise_tensor));
+      TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
+      TORCH_FN(q_linear_pointwise_tensor));
   m.impl(
-    TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"),
-    TORCH_FN(q_linear_prepack_onednn));
+      TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"),
+      TORCH_FN(q_linear_prepack_onednn));
   m.impl(
-    TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary"),
-    TORCH_FN(q_linear_pointwise_binary));
+      TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary"),
+      TORCH_FN(q_linear_pointwise_binary));
   m.impl(
-    TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary_tensor"),
-    TORCH_FN(q_linear_pointwise_binary_tensor));
+      TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary_tensor"),
+      TORCH_FN(q_linear_pointwise_binary_tensor));
 }
 
 } // namespace at::native::xpu
