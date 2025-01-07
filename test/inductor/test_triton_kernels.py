@@ -3877,6 +3877,47 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(dst[0].item(), triton_dst[0].item())
         self.assertEqual(dst[1].item(), triton_dst[1].item())
 
+        # @triton.heuristics cannot return non-constant values
+        # check for the exception
+        if not non_strict:
+
+            @triton.autotune(
+                configs=[
+                    triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                    triton.Config(kwargs={"BLOCK_SIZE": 64}),
+                ],
+                key=["N"],
+            )
+            # torch.randin(...)[0] will produce a non-constant value
+            @triton.heuristics({"EVEN_N": lambda nargs: torch.randint(1, (1, 1))[0]})
+            @triton.jit
+            def heuristics_kernel(
+                dst,
+                src,
+                N,
+                BLOCK_SIZE: tl.constexpr,
+                EVEN_N: tl.constexpr,
+            ):
+                tl.store(dst, N)
+
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+
+            def f(
+                dst: torch.Tensor,
+                src: torch.Tensor,
+                N: int,
+            ) -> None:
+                grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+                heuristics_kernel[grid](dst, src, N=N)
+
+            compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+            N = 1023
+            src = torch.empty(N, device=GPU_TYPE)
+            dst = torch.zeros(N, device=GPU_TYPE)
+            msg = "Values in triton configs must be constant values."
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+                compiled_f(dst, src, N=N)
+
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)

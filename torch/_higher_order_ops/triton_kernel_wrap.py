@@ -1295,7 +1295,7 @@ class TritonHOPifier:
             # Iterate through all of the heuristics wrappers that come after the autotune wrapper
             iter_kernel = variable.kernel.fn
             while isinstance(iter_kernel, Heuristics):
-                # For each config, apply the heuristic fn
+                # For each config, apply the heuristic fn(s)
                 for config_idx in range(len(new_configs)):
                     for kwarg_key, heuristic_fn in iter_kernel.values.items():
                         # Run heuristics on the combined configs + kwargs
@@ -1312,7 +1312,9 @@ class TritonHOPifier:
                             tx,
                             variable,
                         )
+
                         # Update the kwargs in each config
+                        # maybe_unpack_heuristic_result raises unsupported if the value is non-constant
                         new_configs[config_idx].__dict__["kwargs"][
                             kwarg_key
                         ] = self.maybe_unpack_heuristic_result(heuristic_result)
