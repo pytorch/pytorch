@@ -2252,6 +2252,12 @@ Letting `*` be zero or more batch dimensions,
     more numerically stable way than performing the computations separately.
 
 .. note::
+    Even if :attr:`A` is not full rank, but the system has a solution (i.e. when the columns
+    of :attr:`B` are in the linear span of the columns of :attr:`A` when solving :math:`XA = B`),
+    the method is still likely to converge. However, the returned solution is not guaranteed to be orthogonal
+    to the kernel of :attr:`A` and, as a result, it is not guaranteed to be min-norm.
+
+.. note::
     It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
