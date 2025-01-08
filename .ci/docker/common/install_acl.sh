@@ -1,6 +1,6 @@
 set -euo pipefail
 
-readonly version=v24.04
+readonly version=v24.09
 readonly src_host=https://review.mlplatform.org/ml
 readonly src_repo=ComputeLibrary
 
