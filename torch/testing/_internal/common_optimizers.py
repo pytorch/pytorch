@@ -2308,7 +2308,7 @@ class TensorTracker:
 
     def add(self, tensor):
         """
-        Add a clone().detach()'d version of the tensor
+        Add a detach().clone()'d version of the tensor
         """
         self.tensors.append(tensor.detach().clone())
 
