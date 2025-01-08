@@ -1981,22 +1981,19 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
-        ) -> float:
+        ) -> Union[LazyBenchmark, float]:
             is_extern = isinstance(choice, ExternKernelCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
             output.zero_()
-            # we can't postpone benchmarking if we need to verify the results
-            lazy = not VERIFY
-            result = choice.benchmark(*inpts, out=output, lazy=lazy)
             device_type = next(
                 (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
                 "cuda",
             )
-            device_interface = get_interface_for_device(device_type)
-            if device_interface.is_available():
-                device_interface.synchronize()  # shake out any CUDA errors
-
+            # we can't postpone benchmarking if we need to verify the results,
+            # also weirdly broken on CPU for some cases
+            lazy = VERIFY == {} and device_type == "cuda"
+            result = choice.benchmark(*inpts, out=output, lazy=lazy)
             if VERIFY and autotune_args.expected is not None:
                 autotune_args.verify(**VERIFY)
             return result
