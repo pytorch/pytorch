@@ -79,6 +79,13 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.current_stream(other_device)
 
+    def test_pin_memory_on_non_blocking_copy(self):
+        t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
+        t_host = t_acc.to("cpu", non_blocking=True)
+        torch.accelerator.synchronize()
+        self.assertTrue(t_host.is_pinned())
+        self.assertEqual(t_acc.cpu(), t_host)
+
 
 if __name__ == "__main__":
     run_tests()
