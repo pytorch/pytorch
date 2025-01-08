@@ -456,6 +456,8 @@ TORCH_LIBRARY_IMPL(aten, XPU, m) {
 }
 } // namespace at::native::xpu
 
+namespace at::native {
+
 TORCH_IMPL_FUNC(addmm_out_xpu)
 (const Tensor& self,
  const Tensor& mat1,
@@ -510,3 +512,4 @@ TORCH_IMPL_FUNC(addmv_out_xpu)
  const Tensor& result) {
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
+} // namespace at::native
