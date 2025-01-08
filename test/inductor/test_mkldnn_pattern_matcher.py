@@ -2167,6 +2167,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. QLinear Unary fusion in post-grad fusion pass
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
+                    2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_unary_lower_count"],
                     0 if TEST_ACL else 2,
                 )
 
@@ -2443,7 +2447,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 3. QLinear Unary fusion in post-grad fusion pass * 1
             self.assertEqual(
                 counters["inductor"]["qlinear_unary_matcher_count"],
-                0 if TEST_ACL else 1,
+                1,
             )
 
         self._test_common(
@@ -3706,7 +3710,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
-                    3 if annotate_matmul and not TEST_ACL else 0,
+                    3 if annotate_matmul else 0,
                 )
 
             quantizer = X86InductorQuantizer()
