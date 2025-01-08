@@ -3616,10 +3616,13 @@ Examples::
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
-    >>> b = torch.randn(2, 5, 4)
-    >>> torch.diagonal(b, 1, 2)
-    tensor([[-0.3008,  0.0224, -0.1028,  0.4461],
-            [ 0.2887,  1.8640,  1.6997,  1.7034]])
+    >>> b = torch.randn(2, 5)
+    >>> b
+    tensor([[-0.6810, -0.0242,  0.7675, -1.5120,  0.1802],
+            [-0.7581, -0.2491,  0.4611, -1.7361,  0.6854]])
+
+    >>> torch.diagonal(b, 1, 0)
+    tensor([-0.0242,  0.4611])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
