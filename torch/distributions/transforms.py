@@ -776,7 +776,7 @@ class AffineTransform(Transform):
     def sign(self) -> int:
         if isinstance(self.scale, numbers.Real):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
-        return self.scale.sign()
+        return int(self.scale.sign().prod().item())  # type: ignore[union-attr]
 
     def _call(self, x):
         return self.loc + self.scale * x
