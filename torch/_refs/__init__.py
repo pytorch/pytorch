@@ -6542,7 +6542,11 @@ def _recursive_build(
 
     # seq can be a list of tensors
     seq = obj
-    return torch.stack([_recursive_build(scalarType, item) for item in seq])
+    return (
+        torch.empty(0)
+        if not seq
+        else torch.stack([_recursive_build(scalarType, item) for item in seq])
+    )
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
