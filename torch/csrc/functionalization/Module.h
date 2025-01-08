@@ -13,13 +13,9 @@ namespace torch::functionalization {
 // as pickle methods.
 template <class T>
 void create_binding_with_pickle(py::module m) {
-  py::class_<T, std::shared_ptr<T>, at::functionalization::ViewMeta>(m, T::name())
+  py::class_<T, std::shared_ptr<T>, at::functionalization::ViewMeta>(
+      m, T::name())
       .def(py::init<typename T::SerializableTuple>())
-      .def_property_readonly(
-          "has_symbolic_inputs",
-          [](const std::shared_ptr<T>& meta) {
-            return meta->has_symbolic_inputs;
-          })
       .def(
           "as_tuple",
           [](const std::shared_ptr<T>& meta) {

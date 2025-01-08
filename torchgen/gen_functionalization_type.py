@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Callable, Optional, TYPE_CHECKING
 
@@ -442,7 +441,6 @@ def emit_view_functionalization_body(
 """
 
         else:
-            is_multi_output_view = isinstance(f.func.returns[0].type, ListType)
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
@@ -1003,6 +1001,7 @@ def gen_functionalization_view_meta_classes(
     tags_path: str,
     selector: SelectiveBuilder,
     install_dir: str,
+    template_dir: str,
 ) -> None:
     from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
 
@@ -1021,8 +1020,6 @@ def gen_functionalization_view_meta_classes(
         for g in native_functions_with_view_groups
         if isinstance(g, NativeFunctionsViewGroup)
     ]
-
-    template_dir = os.path.join(install_dir, "templates")
 
     fm = FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=False)
     fm.write(

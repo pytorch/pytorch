@@ -1080,6 +1080,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         base,
                         view_tensor,
                         view_tensor.requires_grad,
+                        replay_views=config.view_replay_for_aliased_outputs,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner

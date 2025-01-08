@@ -29,7 +29,6 @@ from torch.utils._python_dispatch import (
 )
 
 from .functional_utils import (
-    ViewMetaSequence,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -37,6 +36,7 @@ from .functional_utils import (
     has_metadata_mutation,
     MetadataKey,
     to_fun,
+    ViewMetaSequence,
     was_inductor_storage_resized,
 )
 from .schemas import (

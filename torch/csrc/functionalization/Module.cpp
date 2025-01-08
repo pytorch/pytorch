@@ -1,6 +1,7 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/functionalization/Module.h>
+#include <torch/csrc/utils/pybind.h>
 
+#include <ATen/FunctionalStorageImpl.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalizeFallbackKernel.h>
 #include <memory>
@@ -50,7 +51,12 @@ void initModule(PyObject* module) {
   py::class_<
       at::functionalization::ViewMeta,
       std::shared_ptr<at::functionalization::ViewMeta>>(
-      functionalization, "ViewMeta");
+      functionalization, "ViewMeta")
+      .def_property_readonly(
+          "has_symbolic_inputs",
+          [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
+            return meta->has_symbolic_inputs;
+          });
 
   // Bindings for `ViewMeta` specializations manually implemented.
   create_binding_with_pickle<at::functionalization::resize__ViewMeta>(

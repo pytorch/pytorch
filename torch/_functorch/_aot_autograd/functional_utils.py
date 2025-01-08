@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
+from torch._C import _functionalization
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -251,9 +252,8 @@ def gen_alias_from_base(
         and target_view_meta_sequence is not None
         and not all(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
     ):
-        out = torch._C._functionalization.apply_view_meta_sequence(
-            aliased_base_tensor,
-            target_view_meta_sequence.sequence
+        out = _functionalization.apply_view_meta_sequence(
+            aliased_base_tensor, target_view_meta_sequence.sequence
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
@@ -359,7 +359,7 @@ class MetadataKey:
         )
 
 
-# Recursively compare the equality of 2 different objects, assuming that in 
+# Recursively compare the equality of 2 different objects, assuming that in
 # the outer call, both `lhs` and `rhs` will be ViewMeta instances.
 def _view_meta_equals(lhs: object, rhs: object) -> bool:
     # Both `lhs` and `rhs` should be of the same type.
@@ -368,9 +368,9 @@ def _view_meta_equals(lhs: object, rhs: object) -> bool:
 
     # If they are ViewMeta derived objects, compare their innards by
     # calling `as_tuple`.
-    ViewMeta = torch._C._functionalization.ViewMeta
+    ViewMeta = _functionalization.ViewMeta
     if isinstance(lhs, ViewMeta) and isinstance(rhs, ViewMeta):
-        return _view_meta_equals(lhs.as_tuple(), rhs.as_tuple())  # type: ignore
+        return _view_meta_equals(lhs.as_tuple(), rhs.as_tuple())  # type: ignore[attr-defined]
 
     # If they are ListLike objects, compare each of their elements.
     ListLike = (list, tuple)
@@ -392,15 +392,15 @@ def _view_meta_equals(lhs: object, rhs: object) -> bool:
     raise ValueError(f"_view_meta_equals: unsupported type: {type(lhs)}")
 
 
-# ViewMeta sequence wrapper for equality comparisons. 
+# ViewMeta sequence wrapper for equality comparisons.
 class ViewMetaSequence:
     def __init__(self, tensor: torch.Tensor) -> None:
         assert torch._is_functional_tensor(tensor)
-        self.sequence = torch._C._functionalization.get_view_meta_sequence(tensor)
+        self.sequence = _functionalization.get_view_meta_sequence(tensor)
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
-        # the ViewMeta sequence. One example is when we update the view metadata by 
+        # the ViewMeta sequence. One example is when we update the view metadata by
         # calling: create_synthetic_base_metadata.
         if other is None:
             return True

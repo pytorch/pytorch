@@ -106,7 +106,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   }
 
   // Retrieves the ViewMeta sequence of this tensor.
-  const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas() const;
+  const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas()
+      const;
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -143,7 +144,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // from the base tensor. This method is used by inplace-view ops like
   // transpose_. It appends a ViewMeta to the existing stack, and refreshes the
   // tensor by replaying the views off of the alias.
-  void mutate_view_meta(const std::shared_ptr<at::functionalization::ViewMeta>& meta);
+  void mutate_view_meta(
+      const std::shared_ptr<at::functionalization::ViewMeta>& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);

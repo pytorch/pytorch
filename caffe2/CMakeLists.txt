@@ -374,7 +374,7 @@ add_custom_command(
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
-    "${TORCH_ROOT}/torch/csrc/functionalization/generated/templates/ViewMetaClassesPythonBinding.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/ViewMetaClassesPythonBinding.cpp"
     ${autograd_python}
     ${autograd_yaml}
     ${autograd_templates}
