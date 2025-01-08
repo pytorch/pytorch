@@ -41,7 +41,7 @@ class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
-    def infer_device_type(fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]) -> Any:
+    def infer_device_type(self: Self, fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]) -> Any:
         inferred_device = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
@@ -459,4 +459,6 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         ]
 
 
-benchmarker = GroupedInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+benchmarker = (
+    GroupedInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+)
