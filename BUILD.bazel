@@ -1084,6 +1084,7 @@ test_suite(
         "aten/src/ATen/templates/LazyNonNativeIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
         "aten/src/ATen/templates/RegisterDispatchDefinitions.ini",
+        "aten/src/ATen/templates/ViewMetaClassesPythonBinding.cpp",
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
         "aten/src/ATen/native/ts_native_functions.yaml",

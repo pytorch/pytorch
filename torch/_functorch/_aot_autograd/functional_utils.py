@@ -250,7 +250,7 @@ def gen_alias_from_base(
     if (
         replay_views
         and target_view_meta_sequence is not None
-        and not all(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
+        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
     ):
         out = _functionalization.apply_view_meta_sequence(
             aliased_base_tensor, target_view_meta_sequence.sequence

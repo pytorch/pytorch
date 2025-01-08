@@ -117,6 +117,7 @@ def define_targets(rules):
             ":LazyNonNativeIr.h",
             ":RegisterDispatchDefinitions.ini",
             ":RegisterDispatchKey.cpp",
+            ":ViewMetaClassesPythonBinding.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
             ":tags.yaml",
