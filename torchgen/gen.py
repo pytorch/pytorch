@@ -2327,7 +2327,7 @@ def gen_source_files(
         ) -> Dict[str, list[str]]:
             return {
                 "dispatch_definitions": get_native_function_definitions(
-                    fm=fm,
+                    fm=fm,  # noqa: F821
                     grouped_native_functions=[gnf],
                     dispatch_key=dispatch_key,
                     backend_idx=backend_index,
