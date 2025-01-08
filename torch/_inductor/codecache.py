@@ -1662,15 +1662,19 @@ class AotCodeCompiler:
                 "use_absolute_path": use_absolute_path,
                 "use_mmap_weights": use_mmap_weights,
             }
-            precompiled_header = _precompile_header(
-                header_file, vec_isa_cmd_line, compile_command
-            )
-
             object_build_options = CppTorchDeviceOptions(
                 compile_only=True,
                 **compile_command,  # type: ignore[arg-type]
             )
-            object_build_options.set_precompiled_header(precompiled_header)
+            object_build_options.set_precompiled_header(
+                _precompile_header(
+                    header_file,
+                    vec_isa_cmd_line,
+                    object_build_options.get_compiler(),
+                    compile_command,
+                )
+            )
+
             object_builder = CppBuilder(
                 name=str(cpp_path_operator.stem),
                 sources=cpp_path,
@@ -1959,50 +1963,46 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
-# If we precompile headers with a given set of flags, the precompiled output will
-# persist for the life of the program, rather than just for the life of the inductor
-# cache.
-_HEADER_DIR = tempfile.TemporaryDirectory()
-_HEADER_CACHE: Dict[str, str] = {}
+# Precompiled headers are persistent past program runtime, but associated with one
+# specific compiler version and set of flags.  We explicitly use default_cache_dir here
+# because these headers need to be global, rather than ignored by fresh_inductor_cache.
+_HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
+_COMPILED_HEADERS: OrderedSet[str] = OrderedSet()
 
 
 def _precompile_header(
-    header: str, hashable_cmd_line: str, compile_command: dict[str, Any]
+    header: str, hashable_cmd_line: str, compiler: str, compile_command: dict[str, Any]
 ) -> str:
-    global _HEADER_DIR, _HEADER_CACHE
-
-    hash = get_hash(header, hashable_cmd_line)
-    if hash in _HEADER_CACHE:
-        return _HEADER_CACHE[hash]
-
-    # Create a dummy header that includes the header we want to precompile.
-    header_to_compile = tempfile.NamedTemporaryFile(
-        buffering=0,
-        suffix=".h",
-        dir=_HEADER_DIR.name,
-        delete=False,
-    )
-    header_to_compile.write(f'#include "{header}"\n'.encode())
-    header_to_compile.close()
-
-    header_build_option = CppTorchDeviceOptions(
-        precompiling=True,
-        **compile_command,
-    )
-    cpp_builder = CppBuilder(
-        name=header_to_compile.name,
-        sources=header_to_compile.name,
-        BuildOption=header_build_option,
-    )
-    _worker_compile_cpp(
-        os.path.join(get_lock_dir(), f"{hash}.lock"),
-        cpp_builder,
-        header_to_compile.name,
-        cpp_builder.get_target_file_path(),
+    compiler_version = get_compiler_version_info(compiler)
+    header_hash, header_full_path = write(
+        content=f'#include "{header}"\n',
+        extension="h",
+        extra=f"{hashable_cmd_line} {compiler_version}",
+        specified_dir=_HEADER_DIR,
     )
 
-    _HEADER_CACHE[hash] = header_to_compile.name
-    return header_to_compile.name
+    if header_hash not in _COMPILED_HEADERS:
+        header_build_option = CppTorchDeviceOptions(
+            precompiling=True,
+            **compile_command,
+        )
+        cpp_builder = CppBuilder(
+            name=header_full_path,
+            sources=header_full_path,
+            BuildOption=header_build_option,
+        )
+        # _worker_compile_cpp will automatically ignore any compilation whose result
+        # already exists, so this is safe to do anytime the hash is not in
+        # _COMPILED_HEADERS.
+        _worker_compile_cpp(
+            os.path.join(get_lock_dir(), f"{header_hash}.lock"),
+            cpp_builder,
+            header_full_path,
+            cpp_builder.get_target_file_path(),
+        )
+        _COMPILED_HEADERS.add(header_hash)
+
+    return header_full_path
 
 
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
@@ -2105,7 +2105,12 @@ class CppCodeCache:
             # if requested, pre-compile any headers
             if header_file := cls._get_uncompiled_header(device_type):
                 cpp_build_option.set_precompiled_header(
-                    _precompile_header(header_file, vec_isa_cmd, compile_command)
+                    _precompile_header(
+                        header_file,
+                        vec_isa_cmd,
+                        cpp_build_option.get_compiler(),
+                        compile_command,
+                    )
                 )
 
             cpp_builder = CppBuilder(

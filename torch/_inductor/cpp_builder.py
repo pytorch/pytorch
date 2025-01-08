@@ -265,6 +265,7 @@ def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
+@functools.lru_cache(None)
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
