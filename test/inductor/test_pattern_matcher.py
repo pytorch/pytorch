@@ -175,6 +175,46 @@ class TestPatternMatcher(TestCase):
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul_epilogue(self):
+        def fn1(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c) * 0.5
+            ).relu()
+
+        def fn2(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
+                    torch.bfloat16
+                )
+                * 0.5
+            ).relu()
+
+        args_list = [
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE) * 0 + 0.5,
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.bfloat16, device=GPU_TYPE),
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.float32, device=GPU_TYPE),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_fused_int_mm_mul_impl(fn1, args, True)
+            self._test_fused_int_mm_mul_impl(fn2, args, True)
+
+    @skipIfRocm
+    @skipIfXpu
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
