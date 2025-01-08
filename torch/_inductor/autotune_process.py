@@ -616,7 +616,9 @@ class GPUDeviceBenchmarkMixin:
             device_idx = device_interface.current_device()
         with device_interface.device(device_idx):  # type: ignore[attr-defined]
             if lazy:
-                out = benchmarker.lazy_benchmark_gpu(fn)
+                out = benchmarker.lazy_benchmark_gpu(
+                    fn, pruning_key="max-autotune-gemm"
+                )
             else:
                 out = benchmarker.benchmark_gpu(fn)
 
