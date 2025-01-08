@@ -18,7 +18,7 @@ def foo({", ".join(args)}):
 """
 
 exec(fn_str, globals())
-torch._dynamo.config.cache_size_limit = 16
+torch._dynamo.config.recompile_limit = 16
 
 
 def bench(name, fn):
