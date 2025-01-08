@@ -40,26 +40,26 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
              l_inp, "dimensions.");
 
 
-    bool all_pads_non_positive = true;
+    bool all_pads_negative = true;
 
     auto c_input = self;
     for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] < 0) {
             c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
-        } else if (pad[pad_idx] != 0) {
-            all_pads_non_positive = false;
+        } else {
+            all_pads_negative = false;
         }
         if (pad[pad_idx + 1] < 0) {
             c_input = c_input.narrow(i, 0, c_input.size(i) + pad[pad_idx + 1]);
-        } else if (pad[pad_idx + 1] != 0) {
-            all_pads_non_positive = false;
+        } else {
+            all_pads_negative = false;
         }
     }
 
     // if none of the pads are positive we can optimize and just return the result
     // of calling .narrow() on the input
-    if (all_pads_non_positive) {
+    if (all_pads_negative) {
         return c_input.clone();
     }
 
@@ -96,10 +96,10 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
     auto c_output = output;
     for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
-        if (pad[pad_idx] > 0) {
+        if (pad[pad_idx] >= 0) {
             c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx]);
         }
-        if (pad[pad_idx + 1] > 0) {
+        if (pad[pad_idx + 1] >= 0) {
             c_output = c_output.narrow(i, 0, c_output.size(i) - pad[pad_idx + 1]);
         }
     }
