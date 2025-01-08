@@ -3315,6 +3315,12 @@ class ShapeEnv:
     def allow_complex_guards_as_runtime_asserts(self) -> bool:
         return self.settings.allow_complex_guards_as_runtime_asserts
 
+    def stringify_metadata(self) -> str:
+        return f"""
+        var_to_val: {str(self.var_to_val)}
+        var_to_range: {str(self.var_to_sources)}
+        var_to_sources: {str(self.var_to_sources)}"""
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
