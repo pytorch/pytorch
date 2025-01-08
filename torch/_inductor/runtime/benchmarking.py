@@ -277,4 +277,6 @@ class InductorBenchmarker(TritonBenchmarker):
         return min(estimated_timing, benchmarked_timing)
 
 
-benchmarker = InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+benchmarker = (
+    InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+)
