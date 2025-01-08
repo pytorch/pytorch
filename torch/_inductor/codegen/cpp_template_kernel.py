@@ -12,11 +12,11 @@ from torch.utils._sympy.symbol import SymT
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
 from ..loop_body import LoopBody
+from ..runtime.benchmarking import LazyBenchmark
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import CppWrapperKernelArgs
-from ..runtime.benchmarking import LazyBenchmark
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 from .cpp_wrapper_cpu import CppWrapperCpu
