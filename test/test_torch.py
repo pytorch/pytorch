@@ -4410,7 +4410,6 @@ else:
         c = torch.rand((2, 2), device=device)
         scalar = torch.rand([], device="cpu")
 
-
         with self.assertRaisesRegex(ValueError, r'CPU Scalar support for tensor1 argument'):
             torch.addcdiv(a, scalar, c, value=alpha)
         with self.assertRaisesRegex(ValueError, r'CPU Scalar support for self argument'):
