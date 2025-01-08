@@ -45,19 +45,15 @@ if torch._C._has_mkldnn:
         2. All the GEMM nodes share the same activation.
         3. All the GEMM nodes have same weight size but different wgt node.
         4. Inductor Group GEMM config has been turned on.
-        5. <TODO> Only BF16 has been supported and tested, extend to other data types.
         """
         computation_op = mkldnn._linear_pointwise.default
-        assert all(node.target == computation_op for node in computation_nodes)
-        first_computation_node = computation_nodes[0]
-        act = first_computation_node.args[0]
-        wgt = first_computation_node.args[1]
+        act = computation_nodes[0].args[0]
+        wgt = computation_nodes[0].args[1]
         wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
-        if len(computation_nodes) < 2:
-            return False
-        if any(
+        if len(computation_nodes) < 2 or any(
             (
-                node.args[0] != act
+                node.target != computation_op
+                or node.args[0] != act
                 or (node.args[1].meta.get("val").size() != wgt_size)
                 or (node.args[1] == wgt and gemm_idx != 0)
                 or node.args[2]  # <TODO> support bias through epilogue fusion
@@ -83,13 +79,15 @@ if torch._C._has_mkldnn:
         from ..mkldnn_lowerings import grouped_gemm_lowering
 
         for node in graph.find_nodes(op="call_function", target=computation_op):
-            if node in graph.nodes:  # the node might be fused
-                with graph.inserting_before(node):
-                    act = node.args[0]
-                    users = list(act.users)
-                    if all(user.target == computation_op for user in users):
-                        if not _is_valid_grouped_gemm_fusion(users):
-                            continue
+            if (
+                not node._erased
+                and isinstance(node.meta.get("val"), torch.Tensor)
+                and node.meta["val"].device.type == "cpu"
+            ):
+                act = node.args[0]
+                users = list(act.users)
+                if _is_valid_grouped_gemm_fusion(users):
+                    with graph.inserting_before(node):
                         grouped_gemm_node = graph.create_node(
                             "call_function",
                             grouped_gemm_lowering,

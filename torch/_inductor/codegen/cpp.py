@@ -26,6 +26,7 @@ from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
+    ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     Scheduler,
@@ -76,7 +77,6 @@ from .cpp_utils import (
     unify_mask_base_type,
     value_to_cpp,
 )
-from .wrapper import AllocateLine
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -4911,12 +4911,16 @@ class CppScheduling(BaseScheduling):
             ):
                 # For Grouped GEMM, allocate buffers for each GEMM
                 assert (
-                    template_node.node.outputs
-                ), "Grouped GEMM Template should with output buffers"
-                for buffer in template_node.node.outputs:
-                    V.graph.wrapper_code.writeline(
-                        AllocateLine(V.graph.wrapper_code, buffer)
-                    )
+                    len(template_node.outputs) == 1
+                ), "Grouped GEMM has 1 output template buffer"
+                for user in template_node.outputs[0].users:
+                    assert isinstance(
+                        user.node, ExternKernelSchedulerNode
+                    ), "Grouped GEMM should be with ExternKernelSchedulerNode"
+                    assert isinstance(
+                        user.node.node, ir.MultiOutput
+                    ), "Grouped GEMM has multi users with MultiOutput"
+                    user.node.mark_run()
             else:
                 template_node.mark_run()  # type: ignore[attr-defined]
             for node in epilogue_nodes:
