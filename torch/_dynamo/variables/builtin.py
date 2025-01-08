@@ -717,7 +717,13 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
-        if inspect.isclass(fn) and issubclass(fn, Exception):
+        if inspect.isclass(fn) and (
+            issubclass(fn, Exception)
+            # GeneratorExit doens't inherit from Exception
+            # >>> issubclass(GeneratorExit, Exception)
+            # False
+            or fn is GeneratorExit
+        ):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
@@ -1200,6 +1206,12 @@ class BuiltinVariable(VariableTracker):
                 "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
+        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            value = self.fn(
+                a.as_python_constant(),
+                b.as_python_constant(),
+            )
+            return ConstantVariable(value)
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -1298,6 +1310,13 @@ class BuiltinVariable(VariableTracker):
                 mutation_type=ValueMutationNew(),
             )
 
+    def _call_iter_tuple_generator(self, tx, obj, *args, **kwargs):
+        cls = variables.BaseListVariable.cls_for(self.fn)
+        return cls(
+            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
+            mutation_type=ValueMutationNew(),
+        )
+
     def _call_tuple_list(self, tx, obj=None, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
@@ -1305,6 +1324,8 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
+        elif isinstance(obj, variables.GeneratorObjectVariable):
+            return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
@@ -1384,6 +1405,7 @@ class BuiltinVariable(VariableTracker):
                     TupleVariable,
                     ListIteratorVariable,
                     variables.IteratorVariable,
+                    variables.GeneratorObjectVariable,
                 ),
             ):
                 items = dict(
