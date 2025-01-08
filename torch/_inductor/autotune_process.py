@@ -553,7 +553,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = self.do_bench(fn, *input_tensors, output_tensor, lazy=True)
+        out = self.do_bench(fn, *input_tensors, output_tensor, lazy=lazy)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
