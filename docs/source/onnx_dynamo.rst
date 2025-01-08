@@ -96,6 +96,9 @@ They slightly differ in the way they produce the :class:`torch.export.ExportedPr
 from TorchScript to TorchDynamo. To call the former function,
 the last line of the previous example can be replaced by the following one.
 
+.. note::
+    :func:`torch.onnx.dynamo_export` will be deprecated in the future. Please use :func:`torch.onnx.export` with the parameter ``dynamo=True`` instead.
+
 .. code-block:: python
 
   onnx_program = torch.onnx.dynamo_export(model, tensor_x)
@@ -127,4 +130,21 @@ API Reference
 .. autofunction:: torch.onnx.dynamo_export
 
 .. autoclass:: torch.onnx.ONNXProgram
+    :members:
+
+.. autoclass:: torch.onnx.ExportOptions
+    :members:
+
+.. autofunction:: torch.onnx.enable_fake_mode
+
+.. autoclass:: torch.onnx.ONNXRuntimeOptions
+    :members:
+
+.. autoclass:: torch.onnx.OnnxExporterError
+    :members:
+
+.. autoclass:: torch.onnx.OnnxRegistry
+    :members:
+
+.. autoclass:: torch.onnx.DiagnosticOptions
     :members:
