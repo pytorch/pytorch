@@ -10,7 +10,6 @@ from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
 from torch._dynamo.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_HPU
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
