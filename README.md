@@ -42,6 +42,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 - [License](#license)
+- [How to Run the Script](#how-to-run-the-script)
 
 <!-- tocstop -->
 
@@ -488,4 +489,9 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 
 ## License
 
-PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) test file.
+PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE)  file.
+
+## How to Run the Script
+1. 安裝所需的依賴：
+   ```bash
+   pip install -r requirements.txt
