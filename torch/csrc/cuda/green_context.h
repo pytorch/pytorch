@@ -64,7 +64,7 @@ public:
         CUDA_CHECK(cuCtxFromGreenCtx(&context_, green_ctx_));
     }
 
-    static std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
+    std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
         return std::make_unique<GreenContext>(device_id, num_sms);
     }
 
