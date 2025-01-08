@@ -584,8 +584,12 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        if TEST_WITH_ROCM and not unbatched:
-            self.skipTest("Flaky on ROCm with unbatched=False")
+        if (
+            TEST_WITH_ROCM
+            and not unbatched
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        ):
+            self.skipTest("Flaky on MI300 with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
