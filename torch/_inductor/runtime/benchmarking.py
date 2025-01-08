@@ -159,7 +159,7 @@ class Benchmarker:
         fns_args: List[Tuple[Any, ...]],
         fns_kwargs: List[Dict[str, Any]],
         **kwargs: Any,
-    ) -> float:
+    ) -> List[float]:
         """Benchmark `fn(*fn_args, *fn_kwargs)` for `fn`, `fn_args`, and `fn_kwargs` in `fns`,
         `fns_args`, and `fns_kwargs`, and return the runtimes, in milliseconds (the actual runtime
         calculation is dictated by the benchmarking implementation, but may be one of [mean, median,
@@ -206,7 +206,7 @@ class Benchmarker:
         return [
             self.benchmark_cpu(_callable, *args, **kwargs) for _callable in callables
         ]
-    
+
     @time_and_count
     def benchmark_many_gpu(
         self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
@@ -515,14 +515,14 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             # pruned the callables we can assume the maximum duration of any callable
             # is equivalent to `target_timing`
             benchmark_iters = max(
-                min(benchmark_iters, max_benchmark_duration // target_timing), 1
+                min(benchmark_iters, int(max_benchmark_duration // target_timing)), 1
             )
         else:
             callables_to_benchmark = callables
             # in the case that we haven't pruned the callables, we can take the average
             # of the estimated timings to determine the appropriate number of iterations
             benchmark_iters = max(
-                min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
+                min(benchmark_iters, int(max_benchmark_duration // mean(estimated_timings))), 1
             )
 
         # do the memory warmup
