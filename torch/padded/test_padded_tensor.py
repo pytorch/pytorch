@@ -47,10 +47,12 @@ class TestAttention(TestCase):
 
         return k_cache, v_cache
 
-    def are_outputs_equal(self, outputs, outputs_p):
+    def are_equal(self, outputs, outputs_p):
         for x, x_p in zip(outputs, outputs_p):
+            x_p = x_p.tensor if isinstance(x_p, PaddedTensor) else x_p
+
             slice_idx = [slice(0, s) for s in x.shape]
-            self.assertEqual(x, x_p.tensor[tuple(slice_idx)])
+            self.assertEqual(x, x_p[tuple(slice_idx)])
 
     def run_unpadded_padded(self, fn, inputs, inputs_p):
         # Run the function on unpadded and padded inputs
@@ -58,51 +60,46 @@ class TestAttention(TestCase):
         outputs_p = fn(*inputs_p)
 
         # Check the outputs are equal
-        self.are_outputs_equal(outputs, outputs_p)
+        self.are_equal(outputs, outputs_p)
 
     def run_unpadded_padded_bench(self, fn, inputs, inputs_p, outputs_p_shapes):
-        # Eager: Run the function on unpadded and padded inputs
-        times_unpadded = []
-        for _ in range(10):
-            start = time.time()
-            outputs = fn(*inputs)
-            times_unpadded.append(time.time() - start)
+        # Precondition: Are inputs and inputs_p equal?
+        self.are_equal(inputs, inputs_p)
 
-        times_padded = []
-        for _ in range(10):
-            start = time.time()
-            outputs_p = fn(*inputs_p)
-            times_padded.append(time.time() - start)
-
-        # Check the outputs are equal
-        self.are_outputs_equal(outputs, outputs_p)
-
-        # Compiled: Run the function on unpadded and padded inputs
-        fn_compiled = torch.compile(fn, mode="reduce-overhead")
-
-        times_compiled_unpadded = []
-        for _ in range(10):
-            start = time.time()
-            outputs = fn_compiled(*inputs)
-            times_compiled_unpadded.append(time.time() - start)
-
-        times_compiled_padded = []
-        for _ in range(10):
-            start = time.time()
-            outputs_p = fn_compiled(*inputs_p)
-            times_compiled_padded.append(time.time() - start)
-
-        # Check the outputs are equal
-        self.are_outputs_equal(outputs, outputs_p)
-
-        # Report the results
         def median(x):
             return sorted(x)[len(x) // 2]
 
-        print(f"Unpadded time (eager): {median(times_unpadded)}")
-        print(f"Padded time (eager): {median(times_padded)}")
-        print(f"Unpadded time (compiled): {median(times_compiled_unpadded)}")
-        print(f"Padded time (compiled): {median(times_compiled_padded)}")
+        def bench(fn, inputs, n_iter=10):
+            times = []
+            outputs = None
+
+            for _ in range(n_iter):
+                start = time.time()
+                outputs = fn(*inputs)
+                times.append(time.time() - start)
+
+            return median(times), outputs
+
+        # Benchmark eager
+        time_eager, outputs_eager = bench(fn, inputs)
+        time_eager_padded, outputs_eager_padded = bench(fn, inputs_p)
+
+        self.are_equal(outputs_eager, outputs_eager_padded)
+
+        # Benchmark compiled
+        fn_compiled = torch.compile(fn, mode="reduce-overhead")
+
+        time_compiled, outputs_compiled = bench(fn_compiled, inputs)
+        time_compiled_padded, outputs_compiled_padded = bench(fn_compiled, inputs_p)
+
+        self.are_equal(outputs_eager, outputs_compiled)
+        self.are_equal(outputs_eager, outputs_compiled_padded)
+
+        # Report results
+        print(f"Unpadded time (eager): {time_eager}")
+        print(f"Padded time (eager): {time_eager_padded}")
+        print(f"Unpadded time (compiled): {time_compiled}")
+        print(f"Padded time (compiled): {time_compiled_padded}")
 
     def f_1(self, idx):
         x = self.tok_embeddings(idx)
@@ -295,10 +292,11 @@ class TestAttention(TestCase):
         self.run_unpadded_padded(self.f_attention, inputs, inputs_p)
 
     def test_attention_bench(self):
-        inputs = self.create_inputs(16, 992)
-        inputs_p = self.pad_inputs(inputs, 16)
+        with torch.no_grad():
+            inputs = self.create_inputs(16, 992)
+            inputs_p = self.pad_inputs(inputs, 16)
 
-        self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)
+            self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)
 
 
 if __name__ == "__main__":
