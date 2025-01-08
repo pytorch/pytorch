@@ -2491,11 +2491,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
-        raise RuntimeError("Dynamo is not supported on Python 3.14+")
-    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
-        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:

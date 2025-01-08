@@ -117,7 +117,11 @@ class Benchmarker:
 
     @time_and_count
     def benchmark_cpu(
-        self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
+        self: Self,
+        _callable: Callable[[], Any],
+        warmup: int = 20,
+        rep: int = 100,
+        **kwargs: Any,
     ) -> float:
         """Benchmark the CPU callable, `_callable`, and return the median runtime,
         in milliseconds.
@@ -130,6 +134,8 @@ class Benchmarker:
         before benchmarking starts.
         - rep: Optionally, the duration, in milliseconds, to run `_callable`
         during benchmarking.
+        - kwargs: Any additional kwargs that may be passed, for example `ranking_key`
+        or `pruning_key` if the experimental benchmarker is disabled.
 
         Returns:
         - The median runtime of `_callable`, in milliseconds.
@@ -635,7 +641,5 @@ class LazyInductorBenchmarker(GroupedInductorBenchmarker):
 
 
 benchmarker = (
-    LazyInductorBenchmarker()
-    if use_experimental_benchmarker
-    else TritonBenchmarker()
+    LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
 )
