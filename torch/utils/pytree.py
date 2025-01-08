@@ -13,6 +13,7 @@ collection support for PyTorch APIs.
 """
 
 import os as _os
+import sys as _sys
 from dataclasses import dataclass as _dataclass
 from typing import (
     Any as _Any,
@@ -138,6 +139,10 @@ if PYTORCH_USE_CXX_PYTREE:
     implementation = PyTreeImplementation.cxx
 
 
+_sys.modules[f"{__name__}.python"] = python
+_sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
+
+
 def register_pytree_node(
     cls: _Type[_Any],
     /,
@@ -242,6 +247,13 @@ del PyTreeImplementation
 
 # Use the __getattr__ function allowing us to change the underlying `implementation` at runtime.
 def __getattr__(name: str) -> _Any:
+    if name == "cxx":
+        import torch.utils._cxx_pytree as cxx
+
+        globals()["cxx"] = cxx
+        _sys.modules[f"{__name__}.cxx"] = cxx
+        return cxx
+
     name = {"PyTreeSpec": "TreeSpec"}.get(name, name)
     try:
         return getattr(implementation.module, name)
