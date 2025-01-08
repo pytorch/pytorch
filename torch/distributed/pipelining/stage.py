@@ -637,7 +637,19 @@ class _PipelineStageBase(ABC):
                     )
                 )
                 result = perform_backward(backward_type)()
+                # Assuming this is invoked from a unit test with PP=2, DP=2, and zero-bubble enabled,
+                # we observe the scaling is working as expected (after = before / 8) but we see different values
+                # for 0.net1.weight on different DP ranks, which suggests the DDP AllReduce is not running.
+                # A possible place to look for this is that the above 'prepare_for_backward' call is traversing
+                # the autograd graph to find parameters to reduce, but zero-bubble uses autograd differently from
+                # a usual backward pass
+                for name, p in self.submod.named_parameters():
+                    if "0.net1.weight" in name and self.stage_index == 1:
+                        print(f"before: {name} {p.grad}")
                 perform_pp_grad_scaling()
+                for name, p in self.submod.named_parameters():
+                    if "0.net1.weight" in name and self.stage_index == 1:
+                        print(f"after: {name} {p.grad}")
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
