@@ -11,12 +11,14 @@ from torch.utils._config_module import get_tristate_env, install_config_module
 def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
+
 def vec_isa_ok_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "0":
         return False
     return None
+
 
 def autotune_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
