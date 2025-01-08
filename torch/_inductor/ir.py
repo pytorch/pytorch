@@ -6844,6 +6844,10 @@ class MultiOutput(ExternKernel):
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self) -> bool:
+        if len(self.inputs) == 1 and (
+            isinstance(self.inputs[0], CppTemplateBuffer)  # Grouped GEMM
+        ):
+            return True
         return False
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
