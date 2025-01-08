@@ -477,7 +477,8 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
 }
 
 inline bool hasCUDA() {
-  return globalContext().hasCUDA() && detail::getCUDAHooks().deviceCount();
+  return globalContext().hasCUDA() &&
+      (detail::getCUDAHooks().deviceCount() > 0);
 }
 
 inline bool hasMTIA() {
