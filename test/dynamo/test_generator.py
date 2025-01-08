@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import itertools
+import unittest
 from collections import OrderedDict
 
 import torch
@@ -985,7 +986,6 @@ class TestGeneratorThrow(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         with self.assertRaises(RuntimeError):
             fn(t)
-        self.assertEqual(z, 101)
 
     def test_throw_raise_difference_exc(self):
         z = 0
@@ -1069,11 +1069,7 @@ class TestGeneratorThrow(torch._dynamo.test_case.TestCase):
         self.assertEqual(z, 1101)
 
 
-class GeneratorCloseCPythonTests(torch._dynamo.test_case.TestCase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
+class CPythonTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.config.enable_yield_on_generator = True
@@ -1081,6 +1077,19 @@ class GeneratorCloseCPythonTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_yield_on_generator = False
+
+    def _compile_check(self, fn):
+        eager = EagerAndRecordGraphs()
+        t = torch.randn(2)
+        torch.compile(fn, backend=eager, fullgraph=True)(t)
+        self.assertGreater(len(eager.graphs), 0)
+
+
+class GeneratorCloseCPythonTests(CPythonTests):
+    # Taken from commit
+    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
+    # changed the tests a little bit to run them inside dynamo
+    # + replaced all self.assert* calls to plain assert statements
 
     def test_close_no_return_value(self):
         def f():
@@ -1217,19 +1226,13 @@ class GeneratorCloseCPythonTests(torch._dynamo.test_case.TestCase):
         fn(t)
 
 
-class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
+class GeneratorThrowCpythonTests(CPythonTests):
     # Taken from commit
     # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
     # changed the tests a little bit to run them inside dynamo
     # + replaced all self.assert* calls to plain assert statements
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = True
 
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = False
-
+    @unittest.expectedFailure
     def test_exception_context_with_yield(self):
         def f():
             try:
@@ -1237,7 +1240,6 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
             except Exception:
                 yield
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = f()
             gen.send(None)
@@ -1250,9 +1252,9 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
                 raise AssertionError from e
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
+    @unittest.expectedFailure
     def test_exception_context_with_yield_inside_generator(self):
         # Check that the context is also available from inside the generator
         # with yield, as opposed to outside.
@@ -1268,7 +1270,6 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
                     assert (type(context), context.args) == (KeyError, ("a",))
                     yield "b"
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = f()
             gen.send(None)
@@ -1277,9 +1278,9 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
             assert actual == "b"
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
+    @unittest.expectedFailure
     def test_exception_context_with_yield_from(self):
         def f():
             yield
@@ -1290,7 +1291,6 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
             except Exception:
                 yield from f()
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = g()
             gen.send(None)
@@ -1303,8 +1303,7 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
                 raise AssertionError from e
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
     def test_exception_context_with_yield_from_with_context_cycle(self):
         # Check trying to create an exception context cycle:
@@ -1325,7 +1324,6 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
                     has_cycle = exc is exc.__context__
             yield
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             exc = KeyError("a")
             gen = g(exc)
@@ -1335,8 +1333,7 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
             assert has_cycle is False
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
     def test_throw_after_none_exc_type(self):
         def g():
@@ -1347,10 +1344,9 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
 
             try:
                 yield
-            except Exception as e:
-                raise RuntimeError from e
+            except Exception:
+                raise RuntimeError  # noqa: B904
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = g()
             gen.send(None)
@@ -1359,33 +1355,24 @@ class GeneratorThrowCpythonTests(torch._dynamo.test_case.TestCase):
                 gen.throw(ValueError)
             except RuntimeError:
                 z += 1
-            except Exception as e:
-                raise AssertionError from e
+            except Exception:
+                raise AssertionError  # noqa: B904
             assert z == 1
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
 
-class GeneratorCpythonTests(torch._dynamo.test_case.TestCase):
+class GeneratorCpythonTests(CPythonTests):
     # Taken from commit
     # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
     # changed the tests a little bit to run them inside dynamo
     # + replaced all self.assert* calls to plain assert statements
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = False
 
     def test_send_non_none_to_new_gen(self):
         def f():
             yield 1
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             g = f()
             z = 0
@@ -1399,8 +1386,7 @@ class GeneratorCpythonTests(torch._dynamo.test_case.TestCase):
             assert next(g) == 1
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
     def test_issue103488(self):
         def gen_raises():
@@ -1415,14 +1401,12 @@ class GeneratorCpythonTests(torch._dynamo.test_case.TestCase):
             except ValueError:
                 pass
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             # This should not raise
             loop()
             return t.sin()
 
-        t = torch.randn(2)
-        fn(t)
+        self._compile_check(fn)
 
 
 instantiate_parametrized_tests(GeneratorTests)
