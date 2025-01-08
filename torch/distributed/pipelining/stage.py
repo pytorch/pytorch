@@ -617,8 +617,8 @@ class _PipelineStageBase(ABC):
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
 
         def perform_pp_grad_scaling():
-            # Important to scale gradients after performing last backward, but before performing any data-parallel
-            # reduction.  PP scales only for its own contribution (microbatches), but relies on DP to scale further
+            # Scale gradients after performing last backward.
+            # PP scales only for its own contribution (microbatches), but relies on DP to scale further
             # for DP degree.
             for name, p in self.submod.named_parameters():
                 assert p.grad is not None, name
@@ -648,7 +648,6 @@ class _PipelineStageBase(ABC):
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
             if last_backward:
-                perform_pp_grad_scaling()
                 # Manually call post backward for FSDP
                 def run_post_backward(fsdp_module: FSDPModule) -> None:
                     fsdp_module.set_is_last_backward(True)
@@ -659,6 +658,12 @@ class _PipelineStageBase(ABC):
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
+                # TODO(whc) logically it should be OK to perform scaling in either order (PP then DP or vice-versa)
+                # however there are two confounding issues
+                # 1) when mixed-precision is enabled in FSDP, pp scaling of param.grad itself is not working since
+                #    fsdp maintains a separate grad accumulator internally.  We'd have to scale that instead to make this work
+                # 2) when performing pp scaling after fsdp scaling, test_pp_dp unit test is showing numeric issues.
+                perform_pp_grad_scaling()
                 run_post_backward(self.submod)
         else:
             # Non-DP submodule, regular backward
