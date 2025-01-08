@@ -9,9 +9,9 @@ import tempfile
 import onnx
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.onnx._internal.exporter import _compat
 from torch.testing._internal import common_utils
-from torch.utils import _pytree
 
 
 class SampleModelForDynamicShapes(torch.nn.Module):
@@ -485,8 +485,8 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
 
         # NOTE: torch.export.Dim being an object makes it impossible to compare the objects directly.
         # And it's unrealistic to test whole model, so we are testing the structure of the dynamic_shapes.
-        _, tree1 = _pytree.tree_flatten(dynamic_shapes)
-        _, tree2 = _pytree.tree_flatten(expected_dynamic_shapes)
+        _, tree1 = pytree.tree_flatten(dynamic_shapes)
+        _, tree2 = pytree.tree_flatten(expected_dynamic_shapes)
         self.assertEqual(tree1, tree2)
 
 

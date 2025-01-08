@@ -19,7 +19,7 @@ from torch._inductor.decomposition import decompositions
 from torch._inductor.lowering import lowerings
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import gen_gm_and_inputs
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 aten = torch.ops.aten

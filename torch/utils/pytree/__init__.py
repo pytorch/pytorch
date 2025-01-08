@@ -12,6 +12,8 @@ inside some nested collection. pytrees are helpful for implementing nested
 collection support for PyTorch APIs.
 """
 
+from __future__ import annotations
+
 import os as _os
 import sys as _sys
 from dataclasses import dataclass as _dataclass
@@ -19,8 +21,6 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     Literal as _Literal,
-    Optional as _Optional,
-    Type as _Type,
     TYPE_CHECKING as _TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
@@ -109,7 +109,7 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 class PyTreeImplementation:
     """The underlying implementation for PyTree utilities."""
 
-    module: "ModuleType" = python
+    module: ModuleType = python
     name: _Literal["python", "cxx"] = "python"
 
     @_classproperty  # type: ignore[misc]
@@ -144,17 +144,17 @@ _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  #
 
 
 def register_pytree_node(
-    cls: _Type[_Any],
+    cls: type[_Any],
     /,
     # intentionally use `*_func` over `*_fn` to match annotations
-    flatten_func: "FlattenFunc",
-    unflatten_func: "UnflattenFunc",
+    flatten_func: FlattenFunc,
+    unflatten_func: UnflattenFunc,
     *,
-    serialized_type_name: _Optional[str] = None,
-    to_dumpable_context: _Optional["ToDumpableContextFunc"] = None,
-    from_dumpable_context: _Optional["FromDumpableContextFunc"] = None,
+    serialized_type_name: str | None = None,
+    to_dumpable_context: ToDumpableContextFunc | None = None,
+    from_dumpable_context: FromDumpableContextFunc | None = None,
     # intentionally use `*_func` over `*_fn` to match annotations
-    flatten_with_keys_func: _Optional["FlattenWithKeysFunc"] = None,
+    flatten_with_keys_func: FlattenWithKeysFunc | None = None,
 ) -> None:
     """Register a container-like type as pytree node.
 

@@ -1,7 +1,7 @@
 from typing import Dict, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.export.exported_program import ExportedProgram
 
 
