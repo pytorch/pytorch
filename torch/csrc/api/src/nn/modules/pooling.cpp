@@ -287,13 +287,13 @@ void FractionalMaxPool2dImpl::reset() {
         "FractionalMaxPool2d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != std::nullopt &&
-      options.output_ratio() != std::nullopt) {
+  if (options.output_size().has_value() && options.output_ratio().has_value()) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != std::nullopt) {
+  if (options.output_ratio().has_value()) {
     at::ArrayRef<double> output_ratio =
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
           output_ratio[1] < 1)) {
@@ -346,13 +346,13 @@ void FractionalMaxPool3dImpl::reset() {
         "FractionalMaxPool3d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != std::nullopt &&
-      options.output_ratio() != std::nullopt) {
+  if (options.output_size().has_value() && options.output_ratio().has_value()) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != std::nullopt) {
+  if (options.output_ratio().has_value()) {
     at::ArrayRef<double> output_ratio =
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
           output_ratio[1] < 1 && 0 < output_ratio[2] && output_ratio[2] < 1)) {

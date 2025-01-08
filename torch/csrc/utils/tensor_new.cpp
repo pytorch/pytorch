@@ -986,14 +986,14 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT));
-    if (required_layout) {
+    if (required_layout.has_value()) {
       TORCH_CHECK(
-          layout.value() == required_layout.value(),
+          layout.has_value() && layout == required_layout,
           name,
           ": layout must be ",
           required_layout.value(),
           " but got ",
-          layout.value());
+          layout);
     }
     return at::sparse_compressed_tensor(
                compressed_indices,
@@ -1042,14 +1042,14 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT1, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT1));
-    if (required_layout) {
+    if (required_layout.has_value()) {
       TORCH_CHECK(
-          layout.value() == required_layout.value(),
+          layout == required_layout,
           name,
           ": layout must be ",
           required_layout.value(),
           " but got ",
-          layout.value());
+          layout);
     }
     return at::sparse_compressed_tensor(
                compressed_indices,
@@ -1458,8 +1458,8 @@ Tensor tensor_ctor(
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(
           PyExc_UserWarning,
-          "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-          "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).",
+          "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
+          "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).",
           1);
       if (ret != 0)
         throw python_error();

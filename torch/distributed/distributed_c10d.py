@@ -76,6 +76,7 @@ __all__ = [
     "gather_object",
     "get_backend_config",
     "get_backend",
+    "get_default_backend_for_device",
     "get_rank",
     "get_world_size",
     "get_pg_count",
@@ -89,6 +90,7 @@ __all__ = [
     "is_nccl_available",
     "is_torchelastic_launched",
     "is_ucc_available",
+    "is_xccl_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -132,6 +134,7 @@ _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
+_XCCL_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -195,6 +198,14 @@ try:
 except ImportError:
     _UCC_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupXCCL
+
+    ProcessGroupXCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupXCCL"]
+except ImportError:
+    _XCCL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
@@ -224,7 +235,7 @@ class Backend(str):
     """
     An enum-like class for backends.
 
-    Available backends: GLOO, NCCL, UCC, MPI, and other registered backends.
+    Available backends: GLOO, NCCL, UCC, MPI, XCCL, and other registered backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -244,22 +255,25 @@ class Backend(str):
     NCCL = "nccl"
     UCC = "ucc"
     MPI = "mpi"
+    XCCL = "xccl"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: Dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: Dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
+        "xpu": XCCL,
     }
 
     backend_capability: Dict[str, List[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
+        XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
     }
@@ -268,6 +282,7 @@ class Backend(str):
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
+        XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
     }
@@ -360,16 +375,18 @@ class BackendConfig:
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
-            # default config when backend is not specified
-            # supported since PyTorch 2.0
-            for device, default_backend in Backend.default_device_backend_map.items():
-                if is_backend_available(default_backend):
-                    if (
-                        default_backend == Backend.NCCL
-                        and not torch.cuda.is_available()
-                    ):
-                        continue
-                    self.device_backend_map[device] = Backend(default_backend)
+            # Detect the accelerator on the machine. If no accelerator is
+            # available, it returns CPU.
+            device_type = torch._C._get_accelerator().type
+            try:
+                backend_str = Backend.default_device_backend_map[device_type]
+                self.device_backend_map[device_type] = Backend(backend_str)
+            except KeyError:
+                raise ValueError(
+                    f"We detected accelerator {device_type} on your machine. "
+                    f"But we don't know which communication backend to use for this accelerator. "
+                    f"Please specify the `backend` argument in the `init_process_group` call."
+                ) from None
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -469,57 +486,61 @@ class P2POp:
             The type of ``op`` is either ``torch.distributed.isend`` or
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
-        peer (int): Destination or source rank.
+        peer (int, optional): Destination or source rank.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with recv.
+        group_peer (int, optional): Destination or source rank.
     """
 
     def __init__(
         self,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int] = None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int] = None,
     ):
         """Init."""
         self.op = op
         self.tensor = tensor
-        self.peer = peer
-        self.group = group
+        self.group = _group_or_default_group(group)
+        self.peer = _canonicalize_group_rank(
+            self.group, peer, group_peer, return_global=True
+        )
         self.tag = tag
+        self.group_peer = _canonicalize_group_rank(self.group, peer, group_peer)
 
     def __new__(
         cls,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int] = None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int] = None,
     ):
         """Create and return a new instance of the class."""
         _check_op(op)
         _check_single_tensor(tensor, "tensor")
+
         return object.__new__(cls)
 
     def __repr__(self):
         my_group_rank = get_rank(self.group)
-        peer_group_rank = (
-            get_group_rank(self.group, self.peer) if self.group else self.peer
-        )
         op_name = self.op.__name__
         group_name = self.group.group_name if self.group else "default_pg"
         if "send" in op_name:
             s = my_group_rank
-            d = peer_group_rank
+            d = self.group_peer
         elif "recv" in op_name:
-            s = peer_group_rank
+            s = self.group_peer
             d = my_group_rank
         else:
             return super().__repr__()
 
-        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
+        return f"P2POp({op_name} pg={group_name}, group_src={s}, group_dst={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 
 class _CollOp:
@@ -949,8 +970,9 @@ def _store_based_barrier(
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
             logger.debug(
-                "Waiting in store based barrier to initialize process group for "
+                "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                time.time() - start,
                 rank,
                 store_key,
                 world_size,
@@ -1223,6 +1245,11 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
+def is_xccl_available() -> bool:
+    """Check if the XCCL backend is available."""
+    return _XCCL_AVAILABLE
+
+
 def is_backend_available(backend: str) -> bool:
     """
     Check backend availability.
@@ -1340,6 +1367,29 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     return Backend(not_none(pg_store)[0])
 
 
+def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
+    """
+    Return the default backend for the given device.
+
+    Args:
+        Union[str, torch.device]: The device to get the default backend for.
+
+    Returns:
+        The default backend for the given device as a lower case string.
+
+    """
+    if isinstance(device, torch.device):
+        device_str = device.type
+    else:
+        device_str = device.split(":")[0]
+
+    backend = Backend.default_device_backend_map.get(device_str)
+    if backend is None:
+        raise ValueError(f"Default backend not registered for device : {device}")
+
+    return backend
+
+
 def _get_process_group_uid(pg: ProcessGroup) -> int:
     backend = None
     try:
@@ -1371,9 +1421,9 @@ def _get_all_pg_configs() -> List[Dict[str, Any]]:
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = []
-    for pg in _world.pg_map.keys():
-        config_info.append(_get_pg_config(pg))
+    config_info: List[Dict[str, Any]] = [
+        _get_pg_config(pg) for pg in _world.pg_map.keys()
+    ]
     return config_info
 
 
@@ -1511,15 +1561,22 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
-            and ``nccl`` backend will be created, see notes below for how multiple
-            backends are managed. This field can be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
-            multiple processes per machine with ``nccl`` backend, each process
-            must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks. ``ucc`` backend is
-            experimental.
+            ``nccl``, ``ucc``, or one that is registered by a third-party
+            plugin.
+            Since 2.6, if ``backend`` is not provided, c10d will use a backend
+            registered for the device type indicated by the `device_id` kwarg
+            (if provided). The known default registrations today are: ``nccl``
+            for ``cuda``, ``gloo`` for ``cpu``.
+            If neither ``backend`` nor ``device_id`` is provided, c10d will
+            detect the accelerator on the run-time machine and use a backend
+            registered for that detected accelerator (or ``cpu``).
+            This field can be given as a lowercase string (e.g., ``"gloo"``),
+            which can also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``).
+            If using multiple processes per machine with ``nccl`` backend, each
+            process must have exclusive access to every GPU it uses, as sharing
+            GPUs between processes can result in deadlock or NCCL invalid usage.
+            ``ucc`` backend is experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -1935,6 +1992,13 @@ def _new_process_group_helper(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
             backend_type = ProcessGroup.BackendType.UCC
+        elif backend_str == Backend.XCCL:
+            if not is_xccl_available():
+                raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_class = ProcessGroupXCCL(
+                backend_prefix_store, group_rank, group_size
+            )
+            backend_type = ProcessGroup.BackendType.XCCL
         else:
             assert (
                 backend_str.upper() in Backend._plugins
@@ -2508,9 +2572,7 @@ def _coalescing_manager(
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if op0 == all_reduce:
-            tensors = []
-            for op in op_list:
-                tensors.append(op.tensor)
+            tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
@@ -2546,7 +2608,7 @@ def _coalescing_manager(
         work.wait()  # type: ignore[possibly-undefined]
 
 
-def batch_isend_irecv(p2p_op_list):
+def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
@@ -2589,17 +2651,33 @@ def batch_isend_irecv(p2p_op_list):
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
+
+    def peer_kwarg(op: P2POp) -> Dict[str, int]:
+        key = "group_dst" if op.op == isend else "group_src"
+        return {key: op.group_peer}
+
     if device.type == "cuda":
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
-                p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+                p2p_op.op(
+                    p2p_op.tensor,
+                    group=p2p_op.group,
+                    tag=p2p_op.tag,
+                    **peer_kwarg(p2p_op),
+                )
+
         return cm.works
     else:
         # Backward support for Gloo
         reqs = []
         for p2p_op in p2p_op_list:
-            work = p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+            work = p2p_op.op(
+                p2p_op.tensor,
+                group=p2p_op.group,
+                tag=p2p_op.tag,
+                **peer_kwarg(p2p_op),
+            )
             if work:
                 reqs.append(work)
         return reqs
@@ -4434,7 +4512,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
 
 @_exception_logger
-def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
+def barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD, async_op=False, device_ids=None
+):
     """
     Synchronize all processes.
 
@@ -4476,7 +4556,11 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         work.wait()
 
 
-def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
+def monitored_barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD,
+    timeout=None,
+    wait_all_ranks=False,
+):
     """
     Synchronize processes similar to ``torch.distributed.barrier``, but consider a configurable timeout.
 
@@ -4546,7 +4630,9 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
+    return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
+        timeout, wait_all_ranks=wait_all_ranks
+    )
 
 
 def _create_process_group_wrapper(

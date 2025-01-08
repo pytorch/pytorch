@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import itertools
 import operator
+import time
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -11,7 +14,13 @@ from torch._dynamo.external_utils import (
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
+from torch._dynamo.utils import (
+    counters,
+    get_chromium_event_logger,
+    lazy_format_graph_code,
+    set_locals_to_steal,
+)
+from torch._guards import compile_context, CompileContext, CompileId
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -28,6 +37,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
 
 
@@ -55,6 +65,31 @@ def maybe_clone(x):
     return x
 
 
+_graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+_impure_targets = OrderedSet(
+    [
+        call_hook,
+        call_backward,
+        FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+        torch.ops.inductor.accumulate_grad_.default,
+    ]
+)
+
+COMPILE_COUNTER = itertools.count()
+
+
+def make_compile_context(compiled_autograd_id):
+    return compile_context(
+        CompileContext(
+            CompileId(
+                compiled_autograd_id=compiled_autograd_id,
+                frame_id=None,
+                frame_compile_id=None,
+            )
+        )
+    )
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -69,7 +104,6 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
-        self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -87,6 +121,17 @@ class AutogradCompilerInstance:
         origins: List[List[Tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
+        self.id = next(COMPILE_COUNTER)
+        self.compile_context = make_compile_context(self.id)
+        self.compile_context.__enter__()
+        self.start_time_ns = time.time_ns()
+        get_chromium_event_logger().log_event_start(
+            "compiled_autograd",
+            self.start_time_ns,
+            {"graph_id": self.id},
+            log_pt2_compile_event=True,
+        )
+
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -94,7 +139,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.tensor_attrs = {}
         args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
-            for name in self.graph_placeholders
+            for name in _graph_placeholders
         )
 
         self.stack.enter_context(preserve_node_meta())
@@ -265,7 +310,7 @@ class AutogradCompilerInstance:
         inputs = nodes[0]
         inputs_users = list(inputs.users.keys())
         # input access nodes should immediately follow placeholder nodes
-        first_getitem_idx = len(self.graph_placeholders)
+        first_getitem_idx = len(_graph_placeholders)
         assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
@@ -305,18 +350,25 @@ class AutogradCompilerInstance:
             in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
         )
 
-    def remove_dead_sym_nodes(self):
-        for node in reversed(list(self.fx_tracer.graph.nodes)):
-            if (
-                node.op == "call_function"
-                and node.target == operator.eq
-                and (self.is_sym_node(node.args[0]) or self.is_sym_node(node.args[1]))
-            ):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
-            if self.is_sym_node(node):
-                if len(node.users) == 0:
-                    self.fx_tracer.graph.erase_node(node)
+    def dce(self):
+        # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
+        # Remove some of these nodes earlier to improve compilation speed
+
+        # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
+        unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+            unpack_nodes.update(node.users.keys())
+        assert i == len(_graph_placeholders) - 1
+
+        def is_impure(node):
+            return (
+                node in unpack_nodes
+                or node.op == "placeholder"
+                or node.op == "output"
+                or (node.op == "call_function" and node.target in _impure_targets)
+            )
+
+        self.fx_tracer.graph.eliminate_dead_code(is_impure)
 
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
@@ -349,13 +401,13 @@ class AutogradCompilerInstance:
         # ```
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
-        self.remove_dead_sym_nodes()
+        self.dce()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
+            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
         )
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -379,11 +431,19 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                with disable():
+                with _disable(), make_compile_context(self.id):
                     return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
 
+        get_chromium_event_logger().log_event_end(
+            "compiled_autograd",
+            time.time_ns(),
+            {"graph_id": self.id},
+            self.start_time_ns,
+            log_pt2_compile_event=True,
+        )
+        self.compile_context.__exit__(None, None, None)
         return runtime_wrapper, self.compiler_fn(graph)
 
     def rename_aot_dispatcher_nodes(self):
@@ -421,10 +481,16 @@ class AutogradCompilerInstance:
                 and len(ca.all_input_nodes) == len(aot.all_input_nodes)
             )
 
+        # number of times we saw this AOT backward graph, used to dedup reused graphs
+        aot_id_counter: Dict[int, int] = defaultdict(int)
         for nodecall_index, info in self.aot_graph_infos.items():
             ca_node_start_idx = info["ca_node_start_idx"]
             aot_id = info["aot_id"]
+            aot_id_postfix = ""
             aot_graph = info["aot_gm"].graph
+            if aot_id_counter[aot_id]:
+                aot_id_postfix = f"_{aot_id_counter[aot_id]}"
+            aot_id_counter[aot_id] += 1
 
             # 1. Find the first op from user code in the AOT graph
             aot_it = iter(aot_graph.nodes)
@@ -461,9 +527,11 @@ class AutogradCompilerInstance:
                         # So any deviation is an error
                         raise StopIteration
 
-                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    ca_node.name = f"aot{aot_id}{aot_id_postfix}_{aot_node.name}"
                     for i, inp in enumerate(aot_node.all_input_nodes):
-                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+                        ca_node.all_input_nodes[
+                            i
+                        ].name = f"aot{aot_id}{aot_id_postfix}_{inp.name}"
 
                     aot_node = next(aot_it)
                     ca_node = next(ca_it)
@@ -478,10 +546,8 @@ class AutogradCompilerInstance:
 
     @staticmethod
     def get_all_nodes(args):
-        nodes = []
-        for n in args:
-            if type(n) is torch.fx.Node:  # filter out non-Node args, like None
-                nodes.append(n)
+        # filter out non-Node args, like None
+        nodes = [n for n in args if type(n) is torch.fx.Node]
         return nodes
 
     @staticmethod
@@ -671,13 +737,15 @@ class AutogradCompilerInstance:
             input_nodes_and_users = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
-                for user in list(input_node.users.keys()):
+                input_nodes_and_users.extend(
+                    user
+                    for user in list(input_node.users.keys())
                     if not (
                         user.op == "call_function"
                         and user.target == call_hook
                         and node.kwargs.get("hook_type", None) == "post_hook"
-                    ):
-                        input_nodes_and_users.append(user)
+                    )
+                )
 
             arg = max(input_nodes_and_users)  # last input users
             if (
@@ -779,7 +847,10 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def enable(compiler_fn):
+def _enable(compiler_fn, dynamic=False):
+    if dynamic:
+        assert type(dynamic) is bool
+
     from torch._dynamo import eval_frame
 
     if eval_frame._stance.stance == "force_eager":
@@ -796,8 +867,11 @@ def enable(compiler_fn):
         # we need to lazily import it, because of circular dependencies
         import torch._inductor.cudagraph_trees
 
-        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-            functools.partial(AutogradCompilerInstance, compiler_fn)
+        (
+            prior_compiler,
+            prior_dynamic,
+        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            functools.partial(AutogradCompilerInstance, compiler_fn), dynamic
         )
         if snapshot_verbose_logging_enabled():
             torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
@@ -807,22 +881,29 @@ def enable(compiler_fn):
             with torch.autograd.set_multithreading_enabled(False):
                 yield
         finally:
-            if not prior:
+            if not prior_compiler:
                 compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+                prior_compiler, prior_dynamic
+            )
 
 
 @contextlib.contextmanager
-def disable():
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+def _disable():
+    (
+        prior_compiler,
+        prior_dynamic,
+    ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
     try:
         yield
     finally:
-        if prior:
+        if prior_compiler:
             compiled_autograd_enabled = True
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            prior_compiler, prior_dynamic
+        )
 
 
 # return to starting state of a new process
@@ -830,5 +911,8 @@ def reset() -> None:
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+    torch._C._dynamo.compiled_autograd.clear_cache()
+    global COMPILE_COUNTER
+    COMPILE_COUNTER = itertools.count()
