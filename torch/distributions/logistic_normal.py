@@ -2,7 +2,7 @@
 from typing import Optional, Union
 
 from torch import Tensor
-from torch.distributions import constraints
+from torch.distributions import constraints, Independent
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import StickBreakingTransform
@@ -37,7 +37,7 @@ class LogisticNormal(TransformedDistribution):
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.simplex
     has_rsample = True
-    base_dist: Normal
+    base_dist: Independent[Normal]
 
     def __init__(
         self,

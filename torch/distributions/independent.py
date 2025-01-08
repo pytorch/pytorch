@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Generic, Optional, TypeVar
 
 import torch
 from torch import Size, Tensor
@@ -12,7 +12,10 @@ from torch.types import _size
 __all__ = ["Independent"]
 
 
-class Independent(Distribution):
+D = TypeVar("D", bound=Distribution)
+
+
+class Independent(Distribution, Generic[D]):
     r"""
     Reinterprets some of the batch dims of a distribution as event dims.
 
@@ -42,10 +45,11 @@ class Independent(Distribution):
             reinterpret as event dims
     """
     arg_constraints: dict[str, constraints.Constraint] = {}
+    base_dist: D
 
     def __init__(
         self,
-        base_distribution: Distribution,
+        base_distribution: D,
         reinterpreted_batch_ndims: int,
         validate_args: Optional[bool] = None,
     ) -> None:
