@@ -19,7 +19,7 @@ import sys
 import textwrap
 import unittest
 import weakref
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -30,7 +30,7 @@ from torch.profiler import _utils, profile
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-Json = Dict[str, Any]
+Json = dict[str, Any]
 
 from torch._C._profiler import _ExtraFields_PyCall
 
@@ -455,7 +455,7 @@ class TestTorchTidyProfiler(TestCase):
 
         nodes = p.profiler.kineto_results.experimental_event_tree()
 
-        def find_chain(names: List[str]):
+        def find_chain(names: list[str]):
             out = []
             for name in names:
                 root = [out[-1]] if out else nodes
