@@ -62,10 +62,14 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
-        if val == torch.inf:
-            return "HUGE_VALF"
-        elif val == -torch.inf:
-            return "-HUGE_VALF"
+        if isinstance(val, float):
+            if val == torch.inf:
+                return "HUGE_VALF"
+            elif val == -torch.inf:
+                return "-HUGE_VALF"
+            elif val != val:  # Only float that not equal to self is nan
+                return "NAN"
+            return str(val)
         elif isinstance(val, bool):
             return "true" if val else "false"
         return str(val)
@@ -103,12 +107,21 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
-        # TODO: Fix nan propagation, see https://github.com/pytorch/pytorch/issues/143976
-        return f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
+        max_res = f"metal::max({typecast_a}, {typecast_b})"
+        return f"{nan_check} ? {nan_value} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
-        return f"metal::min(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
+        min_res = f"metal::min({typecast_a}, {typecast_b})"
+        return f"{nan_check} ? {nan_value} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -125,6 +138,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def isinf(x: CSEVariable) -> str:
         return f"metal::isinf({x})"
+
+    @staticmethod
+    def log(x: CSEVariable) -> str:
+        return f"metal::log({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -172,6 +189,14 @@ class MetalOverrides(OpOverrides):
         quot = f"{a} / {b}"
         rem = f"{a} % {b}"
         return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+
+    @staticmethod
+    def floor(x: CSEVariable) -> str:
+        return f"metal::floor({x})"
+
+    @staticmethod
+    def sign(x: CSEVariable) -> str:
+        return f"metal::sign({x})"
 
 
 class MetalKernel(SIMDKernel):
@@ -247,7 +272,7 @@ class MetalKernel(SIMDKernel):
             with code.indent():
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
-                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
+                        code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
