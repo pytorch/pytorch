@@ -3629,7 +3629,7 @@ test_custom_ops = load_test_module("test_custom_ops")
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 if torch.distributed.is_available() and HAS_CUDA:
-    test_dtensor = load_test_module("distributed/_tensor/test_dtensor_compile")
+    test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
     )
