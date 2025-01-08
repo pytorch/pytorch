@@ -90,12 +90,14 @@ def run_and_compare(
 
 class BlockPointerTestBase(InductorTestCase):
     def _discontiguous_tensor(
-        self, view_size: Tuple[int, ...], device=torch.device(GPU_TYPE)
+        self, view_size: Tuple[int, ...], device: torch.device | str
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
         The strides correspond to a tensor that is twice as large in each dimension.
         """
+        if isinstance(device, str):
+            device = torch.device(device)
         full_size = tuple(2 * dim for dim in view_size)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
@@ -242,7 +244,9 @@ class CommonTemplate:
             b = y * 2
             return a + b
 
-        x, y = (self._discontiguous_tensor(size) for size in (x_size, y_size))
+        x, y = (
+            self._discontiguous_tensor(size, self.device) for size in (x_size, y_size)
+        )
 
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
@@ -401,7 +405,7 @@ class CommonTemplate:
 
         device = torch.device(self.device)
 
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         if num_triton_kernels == 2 and config.triton.cooperative_reductions:
             # fewer kernels with cooperative reductions
@@ -440,7 +444,9 @@ class CommonTemplate:
         def foo(x, y):
             return torch.sum(x + y)
 
-        inputs = [self._discontiguous_tensor(view_size) for input_idx in range(2)]
+        inputs = [
+            self._discontiguous_tensor(view_size, self.device) for input_idx in range(2)
+        ]
 
         # Expect 2 block pointers: inputs
         result, (code,) = run_and_compare(
@@ -606,7 +612,7 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -627,7 +633,7 @@ class CommonTemplate:
         Tests a 2D reduction without an "x" dimension.
         """
         # We need a size to get no x dim.
-        view = self._discontiguous_tensor((2, 346))
+        view = self._discontiguous_tensor((2, 346), self.device)
 
         # Expect 1 block pointer for the input.
         result, (code,) = run_and_compare(
@@ -670,7 +676,7 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        view = self._discontiguous_tensor(size)
+        view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
@@ -697,7 +703,7 @@ class CommonTemplate:
         """
         # Use a "bad" size that's not evenly divisible by the launch grid.
         # This won't decompose into a block pointer.
-        view = self._discontiguous_tensor((259, 311))
+        view = self._discontiguous_tensor((259, 311), self.device)
 
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
@@ -721,7 +727,7 @@ class CommonTemplate:
         won't generate a block pointer, since we don'allow enough tiling dimensions.
         """
         # Use odd shapes to frustrate block pointer analysis.
-        view = self._discontiguous_tensor((3, 7, 11))
+        view = self._discontiguous_tensor((3, 7, 11), self.device)
 
         result, (code,) = run_and_compare(
             self,
@@ -739,7 +745,7 @@ class CommonTemplate:
         """
         Test a 2D reduction in multi kernel mode.
         """
-        view = self._discontiguous_tensor((2, 4, 1024))
+        view = self._discontiguous_tensor((2, 4, 1024), self.device)
 
         def foo(x):
             """
@@ -777,7 +783,7 @@ class CommonTemplate:
             return torch.sum(x) + torch.argmax(x)
 
         view_size = (5, 7)
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         # Expect at least 1 block pointer for the input.
         result, (code,) = run_and_compare(
@@ -806,7 +812,7 @@ class CommonTemplate:
             return sum(reduction_op(arg) for arg in args)
 
         view_size = (5, 7)
-        arg0 = self._discontiguous_tensor(view_size)
+        arg0 = self._discontiguous_tensor(view_size, self.device)
         arg1 = torch.empty(view_size)
 
         # No guarantees on the number of kernels or pointers.
@@ -829,7 +835,7 @@ class CommonTemplate:
         """
         Tests enabling and disabling tiled reductions.
         """
-        view = self._discontiguous_tensor((9, 11))
+        view = self._discontiguous_tensor((9, 11), self.device)
 
         # If tiled, we expect 1 block pointer for the input.
         result, (code,) = run_and_compare(
