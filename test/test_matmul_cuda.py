@@ -352,11 +352,9 @@ class TestFP8MatmulCuda(TestCase):
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        if torch.version.hip is None:
-            with self.assertRaises(RuntimeError):
-                self._test_tautological_mm(device, e5m2_type, e5m2_type)
-        else:
-            # supported on ROCm
+        # supported on ROCm but fails on CUDA
+        ctx = self.assertRaises(RuntimeError) if torch.version.hip is None else contextlib.nullcontext()
+        with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
         self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
