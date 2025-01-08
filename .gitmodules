@@ -136,4 +136,4 @@
 	url = https://git.gitlab.arm.com/kleidi/kleidiai.git
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
-	url = git@github.com:Dao-AILab/flash-attention.git
+	url = https://github.com/drisspg/flash-attention.git
