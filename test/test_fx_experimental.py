@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# ruff: noqa: F841
 
 import functools
 import math
@@ -18,6 +19,7 @@ import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.partitioner_utils import (
     Device,
@@ -49,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -819,6 +821,23 @@ terrible spacing
             split(x), traced(x)
         )
 
+    def test_split_module_return_node(self):
+        def foo(x):
+            x.add_(1)
+
+        gm = make_fx(foo, tracing_mode="fake")(torch.randn(3,))
+
+        def cb(_):
+            return 1
+
+        sp_gm = split_module(gm, None, cb)
+        submod_gm = sp_gm.submod_1
+        for node in submod_gm.graph.nodes:
+            if node.op == "output":
+                break
+        else:
+            raise RuntimeError("Expected the subgraph to have an output node.")
+
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
@@ -874,6 +893,34 @@ terrible spacing
 
         x = torch.randn(50, 512)
         torch.testing.assert_close(split(x), traced(x))
+
+    def test_split_module_keep_original_order_and_noop_graph(self):
+        # Verify that split_module returns a similar no-op graph
+        # for `keep_original_order={True|False}`.
+        def fn(x):
+            return (x,)
+
+        g = make_fx(fn, tracing_mode="fake")(torch.randn(3, 3))
+
+        # g.graph.print_tabular()
+        # opcode       name    target    args       kwargs
+        # -----------  ------  --------  ---------  --------
+        # placeholder  x_1     x_1       ()         {}
+        # output       output  output    ((x_1,),)  {}
+
+        def _test_split_graph(split_gm):
+            # Verify that the split_gm has same structure as original
+            self.assertEqual(len(split_gm.graph.nodes), 2)
+
+            nodes = list(split_gm.graph.nodes)
+            self.assertEqual(nodes[0].op, "placeholder")
+            self.assertEqual(nodes[1].op, "output")
+
+        # `keep_original_order=False`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=False))
+
+        # `keep_original_order=True`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=True))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -960,7 +1007,7 @@ terrible spacing
         Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
-        for test_params in module_tests + new_module_tests:
+        for test_params in module_tests + get_new_module_tests():
             if "constructor" not in test_params:
                 constructor = getattr(torch.nn, test_params["module_name"])
             else:
@@ -1153,7 +1200,30 @@ class {test_classname}(torch.nn.Module):
                 inp3_y = inp3.y
                 return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
 
+        class MyModule2(torch.nn.Module):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
         my_module = MyModule()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+
+        my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
 
         # by default, fx transform loses type annotation of getitem nodes.
@@ -1729,7 +1799,7 @@ if TEST_Z3:
     import torch._dynamo.config
 
     from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
-    from torch.utils._sympy.functions import FloorDiv, Mod
+    from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
 
     class TestTranslationValidation(TestCase):
         def _prepare_for_translation_validation(self):
@@ -1783,6 +1853,8 @@ if TEST_Z3:
                         (sympy.Ge, operator.ge),
                     )
                 ],
+                # Bitwise operations.
+                (BitwiseFn_bitwise_and(s0, s1), z3.BV2Int(z3.Int2BV(z0, 64) & z3.Int2BV(z1, 64))),
                 # Other operations.
                 (
                     s0 - s1,
@@ -1826,6 +1898,18 @@ if TEST_Z3:
             # Solutions for target is a subset of the solutions for the source.
             validator.add_target_expr(s0 > 20)
             validator.add_target_expr(s1 > s0**2)
+
+            validator.validate()
+
+        def test_sat_bitwise(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z3.BV2Int(z3.Int2BV(z0, 64) & z3.Int2BV(z1, 64)) == 5)
+            validator.add_source_expr(z0 == 0b110101)
 
             validator.validate()
 

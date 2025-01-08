@@ -11,10 +11,15 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
 from typing_extensions import ParamSpec
+
+
+if TYPE_CHECKING:
+    from torch.export.decomp_utils import CustomDecompTable
 
 import torch
 import torch.library
@@ -31,7 +36,7 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
-    "_special_op_to_preserve_cia",
+    "_should_decompose_because_unsafe_op",
 ]
 
 _T = TypeVar("_T")
@@ -46,6 +51,24 @@ global_decomposition_table: Dict[
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
+
+
+def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
+    """
+    Returns True if the op must always decompose in export/compile tracing system
+
+    In export, we always decompose certain CIA ops that are tagged with
+    maybe_aliasing_or_mutating because we statically need to know if the op is
+    mutating or not. But these CIA ops could have different behaviour in runtime.
+
+    native_batch_norm is a prim op which has a wrong schema and it needs to be replaced
+    with correct schema. But until then, we will force decompose it via this tag.
+    """
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+    if torch.Tag.maybe_aliasing_or_mutating in op.tags:
+        return True
+    return op == torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -262,25 +285,17 @@ import torch._decomp.decompositions
 import torch._refs
 
 
+def core_aten_decompositions() -> "CustomDecompTable":
+    from torch.export.exported_program import default_decompositions
+
+    return default_decompositions()
+
+
 # See NOTE [Core ATen Ops]
 #
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
-    # If it is fbcode change, we return the old decomposition list
-    from torch._export.utils import (
-        _collect_all_valid_cia_ops_for_aten_namespace,
-        _get_decomp_for_cia,
-    )
-
-    # Entry without functional CIA ops
-    decomp_table = _core_aten_decompositions_post_autograd()
-    for op in _collect_all_valid_cia_ops_for_aten_namespace():
-        decomp_table[op] = _get_decomp_for_cia(op)
-    return decomp_table
-
-
 def _core_aten_decompositions_post_autograd() -> (
     Dict[torch._ops.OperatorBase, Callable]
 ):
@@ -304,6 +319,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
             aten.block_diag,
+            aten.bernoulli.p,
+            aten.bernoulli.default,
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,

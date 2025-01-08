@@ -1,13 +1,21 @@
 # Owner(s): ["module: inductor"]
+import unittest
+from typing import Any, Dict, List, Type
+
+import sympy
+
 import torch
 import torch._inductor
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -53,8 +61,10 @@ class CooperativeReductionTests(TestCase):
         ],
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
-    @skipIfRocm
     def test_reduction_fns(self, name, dtype):
+        if IS_SM89 and dtype == torch.float64 and name in ["std", "var_mean"]:
+            raise unittest.SkipTest("Timeouts on SM89")
+
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
@@ -62,7 +72,6 @@ class CooperativeReductionTests(TestCase):
         args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
         self.run_and_check(fn, args)
 
-    @skipIfRocm
     def test_bool_reduction_fns(self):
         def fn(x, y):
             return [
@@ -84,7 +93,6 @@ class CooperativeReductionTests(TestCase):
 
     @parametrize("bs", [1, 2, 5, 15])
     @parametrize("count", [1024**2 + 1, 1024**2 - 1, 1024])
-    @skipIfRocm
     def test_non_power_of_2(self, bs, count):
         def fn(x):
             return x.mean(), x.std() + x.min()
@@ -92,7 +100,6 @@ class CooperativeReductionTests(TestCase):
         args = [torch.randn([bs, count], device="cuda")]
         self.run_and_check(fn, args)
 
-    @skipIfRocm
     def test_chained_reductions(self):
         def fn(x):
             for _ in range(8):
@@ -104,9 +111,8 @@ class CooperativeReductionTests(TestCase):
         if "async_compile.multi_kernel" in source_code:
             return
         self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
-        self.assertEqual(source_code.count("empty_strided_cuda"), 8)
+        self.assertEqual(source_code.count("empty_strided_cuda"), 5)
 
-    @skipIfRocm
     def test_reduce_split(self):
         def fn(a, b):
             a1 = torch.linalg.vector_norm(a)
@@ -128,6 +134,54 @@ class NoPersistCooperativeReductionTests(CooperativeReductionTests):
 @config.patch("triton.multi_kernel", int(not config.triton.multi_kernel))
 class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
     pass
+
+
+@config.patch(
+    {
+        "triton.cooperative_reductions": True,
+    }
+)
+@instantiate_parametrized_tests
+class TestFixedConfigs(TestCase):
+    @parametrize(
+        "persistent,cooperative,cfg",
+        [
+            (False, False, {"XBLOCK": 1, "R0_BLOCK": 128}),
+            (False, False, {"XBLOCK": 2, "R0_BLOCK": 128}),
+            (True, False, {"XBLOCK": 1}),
+            (True, False, {"XBLOCK": 2}),
+            (False, True, {"XBLOCK": 1, "R0_BLOCK": 128, "RSPLIT": 16}),
+            (False, True, {"XBLOCK": 2, "R0_BLOCK": 128, "RSPLIT": 16}),
+            (True, True, {"XBLOCK": 1, "RSPLIT": 16}),
+            (True, True, {"XBLOCK": 2, "RSPLIT": 16}),
+        ],
+    )
+    def test_fixed_configs(self, persistent, cooperative, cfg):
+        class MyHeuristics(InductorChoices):
+            def triton_kernel_kwargs(
+                self,
+                kernel_cls: Type[TritonKernel],
+                features: SIMDKernelFeatures,
+                groups: List[sympy.Expr],
+                kernel_kwargs: Dict[str, Any],
+            ) -> Dict[str, Any]:
+                return {
+                    **kernel_kwargs,
+                    "override_cooperative_reduction": cooperative,
+                    "override_persistent_reduction": persistent,
+                    "fixed_config": FixedTritonConfig(cfg),
+                }
+
+        def fn(x):
+            return torch.softmax(x + 1, dim=-1) + x
+
+        args = [torch.randn(8, 8000, device="cuda")]
+        with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
+            expected = fn(*args)
+            fn = torch.compile(fn, fullgraph=True)
+            result, (source_code,) = run_and_get_code(fn, *args)
+            self.assertEqual(result, expected)
+            self.assertIn("@triton_heuristics.fixed_config(", source_code)
 
 
 if __name__ == "__main__":

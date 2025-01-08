@@ -45,6 +45,7 @@ struct SomeChildClass : SomeBaseClass {
   SomeChildClass(int v) : SomeBaseClass(v) {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class DestructableMock : public intrusive_ptr_target {
  public:
   DestructableMock(bool* resourcesReleased, bool* wasDestructed)

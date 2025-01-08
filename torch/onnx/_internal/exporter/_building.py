@@ -354,6 +354,14 @@ def _process_python_constants(
     return named_inputs  # type: ignore[return-value]
 
 
+def _reshape_to_1d_tensor(opset: onnxscript.values.Opset, arg: ir.Value) -> ir.Value:
+    """Reshape the input to a 1D tensor."""
+
+    return opset.Reshape(
+        arg, opset.Constant(value=ir.tensor([-1], dtype=ir.DataType.INT64))
+    )
+
+
 def _process_python_sequences(
     signature: _schemas.OpSignature,
     named_inputs: dict[str, AllowedArgType],
@@ -418,21 +426,24 @@ def _process_python_sequences(
             # 3. Concat the list as a single input
             # E.g. [Value, 42] should be converted to op.Concat(Value, Constant(42))
             # when the expected input type is INT64
-            # We assume this only happens for 1D cases
+            # We assume this only happens for 0D cases
             if all(isinstance(val, ir.Value) for val in arg):
-                named_inputs[name] = opset.Concat(*arg, axis=0)
+                expanded_args = [_reshape_to_1d_tensor(opset, val) for val in arg]
+                named_inputs[name] = opset.Concat(*expanded_args, axis=0)
                 continue
 
             dtype = _determine_input_dtype(param, arg, type_binding)
             new_args = []
             for val in arg:
                 if isinstance(val, ir.Value):
-                    new_args.append(val)
+                    new_args.append(_reshape_to_1d_tensor(opset, val))
                 elif val is None:
                     # Skip None values
                     continue
                 elif isinstance(val, (ir.Tensor, ir.TensorProtocol)):
-                    new_args.append(opset.Constant(value=val))
+                    new_args.append(
+                        _reshape_to_1d_tensor(opset, opset.Constant(value=val))
+                    )
                 else:
                     # Turn the Python constant into 1D tensor for the constant
                     assert isinstance(
@@ -492,18 +503,21 @@ def _construct_node(
         inputs=inputs,
         attributes=attributes,
         outputs=outputs,
+        version=signature.opset_version,
     )
 
 
 class OpRecorder(evaluator.Evaluator):
-    """An onnxscript Evaluator that captures the graph into torchscript."""
+    """An onnxscript Evaluator that captures the graph into ONNX IR."""
 
     def __init__(
         self, opset: onnxscript.values.Opset, constant_farm: dict[Any, ir.Value]
     ):
         self.nodes: list[ir.Node] = []
         self.opset = opset
-        self.functions: dict[ir.OperatorIdentifier, onnxscript.OnnxFunction] = {}
+        self.functions: dict[
+            ir.OperatorIdentifier, onnxscript.OnnxFunction | ir.Function
+        ] = {}
         self.constant_farm = constant_farm
 
     def _call_op(
@@ -644,7 +658,10 @@ class OpRecorder(evaluator.Evaluator):
                 op_signature = function.signature
             else:
                 op_signature = _schemas.OpSignature.from_function(
-                    function, function.function_ir.domain, function.name
+                    function,
+                    function.function_ir.domain,
+                    function.name,
+                    opset_version=function.opset.version,
                 )
 
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
@@ -660,9 +677,34 @@ class OpRecorder(evaluator.Evaluator):
                     name: attr.value if isinstance(attr, ir.Attr) else attr
                     for name, attr in named_attrs.items()
                 }
-                return function.function(**named_inputs, **named_attrs)
 
-            outputs = self._call_op(op_signature, named_inputs, named_attrs)
+                # Use the type binding to resolve the dtypes of the inputs, and
+                # convert Python constants to Constant nodes
+                type_binding = _resolve_parameter_dtypes(op_signature, named_inputs)
+                try:
+                    # _process_python_sequences is not here because we want to preserve python list
+                    # properties for the function call
+                    converted_named_inputs = _process_python_constants(
+                        op_signature,
+                        named_inputs,
+                        type_binding,
+                        self.constant_farm,
+                        self.opset,
+                    )
+
+                except Exception as e:
+                    raise _errors.GraphConstructionError(
+                        f"Error processing Python constants for operator '{op_signature.domain}::{op_signature.name}'. "
+                        f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
+                    ) from e
+
+                return function.function(**converted_named_inputs, **named_attrs)
+
+            outputs = self._call_op(
+                op_signature,
+                named_inputs,
+                named_attrs,
+            )
 
             self.functions[(function.function_ir.domain, function.name, "")] = function
             if len(outputs) == 1:

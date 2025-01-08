@@ -29,7 +29,7 @@ struct BooleanRefinementMapping {
       ListRefinement true_refine,
       ListRefinement false_refine)
       : true_refine_(std::move(true_refine)),
-        false_refine_(std::move(false_refine)){};
+        false_refine_(std::move(false_refine)) {}
   BooleanRefinementMapping() = default; // empty
 
   static BooleanRefinementMapping FalseRefinements(

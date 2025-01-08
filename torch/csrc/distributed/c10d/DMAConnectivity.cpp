@@ -65,7 +65,7 @@ class DetectorMap {
       cached_;
 };
 
-}; // namespace
+} // namespace
 
 namespace c10d {
 

@@ -25,8 +25,10 @@ from torch._dynamo.debug_utils import (
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    extra_deps,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -36,7 +38,9 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
+from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._inductor.output_code import OutputCode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -48,8 +52,7 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
-    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.utils import InputType
 
 
@@ -65,9 +68,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallableEx",
+    unconfigured_compiler_fn: "_CompileFxCallable",
     compiler_name: str,
-) -> "_CompileFxCallableEx":
+) -> "_CompileFxCallable":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -80,8 +83,8 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargsEx"],
-    ) -> Union["CompiledFxGraph", str]:
+        **kwargs: Unpack["_CompileFxKwargs"],
+    ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -98,7 +101,7 @@ def wrap_compiler_debug(
             # Call the compiler_fn - which is either aot_autograd or inductor
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
-        except Exception as e:
+        except Exception:
             # TODO: Failures here are troublesome because no real inputs,
             # need a different serialization strategy
             if config.repro_after == "aot":
@@ -195,7 +198,7 @@ def wrap_compiler_debug(
                             torch.cuda.synchronize()
                             break
                     return out
-                except Exception as e:
+                except Exception:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
@@ -225,11 +228,44 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def maybe_fbcode_instructions():
+    if is_fbcode:
+        extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
+        if len(extra_deps_formatted) > 0:
+            extra_deps_formatted = "\n" + extra_deps_formatted
+        return f"""\
+\"\"\"
+To run this script in fbcode:
+- Create a directory (//scripts/{{your_unixname}}/repro)
+- Put this file in scripts/{{your_unixname}}/repro/fx_graph_runnable.py
+- Add a TARGETS file that looks like the following
+- `buck2 run //scripts/{{your_unixname}}/repro:repro`
+
+NOTE: you may need additional deps to actually be able to run the script.
+```
+# Contents of TARGETS file
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "repro",
+    main_src = "fx_graph_runnable.py",
+    deps = [
+        "//caffe2:torch",{extra_deps_formatted}
+    ],
+)
+```
+\"\"\"
+"""
+    else:
+        return ""
+
+
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 from torch import tensor, device
 import torch.fx as fx
@@ -243,6 +279,7 @@ isolate_fails_code_str = None
 
 {extra_imports}
 
+{maybe_fbcode_instructions()}
         """
     )
     if not stable_output:
@@ -269,7 +306,9 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+            # It's better to produce a slightly wrong repro string than none
+            # at all
+            writer.unsupported(placeholder, arg)
 
     model_str += "\n".join(writer.lines()) + "\n"
 

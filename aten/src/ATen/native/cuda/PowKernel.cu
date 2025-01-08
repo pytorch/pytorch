@@ -203,7 +203,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
-REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel)
+REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel)
 
 } // namespace at::native

@@ -49,7 +49,7 @@ class DataShuttle {
       --in_flight_jobs_;
       return result;
     }
-    return nullopt;
+    return std::nullopt;
   }
 
   /// Discards any jobs that are not yet in flight, and waits for all in-flight

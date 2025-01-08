@@ -59,8 +59,8 @@ void remove_padding_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 void remove_padding_transform0213_kernelLauncher(
@@ -69,8 +69,8 @@ void remove_padding_transform0213_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 void add_padding_kernelLauncher(

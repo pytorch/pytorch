@@ -114,7 +114,7 @@ void _nested_op_dense_esuhm_cuda(Tensor& result, const Tensor& self, const Tenso
   });
 }
 
-REGISTER_CUDA_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cuda);
+REGISTER_CUDA_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cuda)
 
 } // namespace native
 } // namespace at

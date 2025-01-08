@@ -19,12 +19,14 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
+#define build_grouped_gemm
+#endif
+
+#ifdef build_grouped_gemm
 #include <cutlass/gemm/device/default_gemm_configuration.h>
 #include <cutlass/gemm/device/gemm_grouped.h>
 #include <cutlass/gemm/kernel/default_gemm_grouped.h>
-#endif
 #endif
 
 #include <ATen/NestedTensorImpl.h>
@@ -154,8 +156,8 @@ void remove_padding_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size) {
+    int64_t output_dim,
+    const int64_t batch_size) {
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
@@ -188,8 +190,8 @@ void remove_padding_transform0213_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size) {
+    int64_t output_dim,
+    const int64_t batch_size) {
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
@@ -214,8 +216,8 @@ template void remove_padding_kernelLauncher<float>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_kernelLauncher<c10::Half>(
     const c10::Half* input,
@@ -223,8 +225,8 @@ template void remove_padding_kernelLauncher<c10::Half>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_transform0213_kernelLauncher<float>(
     const float* input,
@@ -232,8 +234,8 @@ template void remove_padding_transform0213_kernelLauncher<float>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template void remove_padding_transform0213_kernelLauncher<c10::Half>(
     const c10::Half* input,
@@ -241,8 +243,8 @@ template void remove_padding_transform0213_kernelLauncher<c10::Half>(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 __global__ void add_padding_1(

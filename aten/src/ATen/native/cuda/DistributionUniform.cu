@@ -10,6 +10,6 @@ void uniform_kernel(TensorIteratorBase& iter, double from, double to, std::optio
   templates::cuda::uniform_kernel(iter, from, to, generator);
 }
 
-REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
+REGISTER_DISPATCH(uniform_stub, &uniform_kernel)
 
 } // namespace at::native

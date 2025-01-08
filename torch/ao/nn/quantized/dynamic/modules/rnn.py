@@ -149,7 +149,7 @@ class RNNBase(torch.nn.Module):
 
         _all_weight_values = []
         for layer in range(num_layers):
-            for direction in range(num_directions):
+            for _ in range(num_directions):
                 layer_input_size = (
                     input_size if layer == 0 else hidden_size * num_directions
                 )
@@ -479,7 +479,7 @@ class RNNBase(torch.nn.Module):
                 key_name2 = f"weight_hh_l{layer}{suffix}"
                 # packed weights are part of torchbind class, CellParamsSerializationType
                 # Within the packed weight class, the weight and bias are accessible as Tensors
-                packed_weight_bias = self._all_weight_values[
+                packed_weight_bias = self._all_weight_values[  # type: ignore[index]
                     count
                 ].param.__getstate__()[0][4]
                 weight_bias_dict["weight"][key_name1] = packed_weight_bias[

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 from glob import glob
-
-from setuptools import distutils  # type: ignore[import]
 
 from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
+
+
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils  # type: ignore[import]
+
+        return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
@@ -34,7 +42,7 @@ def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
                 "emulation is enabled!"
             )
 
-    vc_env: dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    vc_env = _get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.
@@ -71,7 +79,7 @@ def _create_build_env() -> dict[str, str]:
     return my_env
 
 
-def build_caffe2(
+def build_pytorch(
     version: str | None,
     cmake_python_library: str | None,
     build_python: bool,
@@ -87,8 +95,3 @@ def build_caffe2(
     if cmake_only:
         return
     cmake.build(my_env)
-    if build_python:
-        caffe2_proto_dir = os.path.join(cmake.build_dir, "caffe2", "proto")
-        for proto_file in glob(os.path.join(caffe2_proto_dir, "*.py")):
-            if proto_file != os.path.join(caffe2_proto_dir, "__init__.py"):
-                shutil.copy(proto_file, os.path.join("caffe2", "proto"))
