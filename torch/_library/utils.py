@@ -6,7 +6,7 @@ import warnings
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
 
