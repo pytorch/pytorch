@@ -84,7 +84,7 @@ class Pattern:
         )
         return (
             f"{self.name}: {len(events)} events matched. "
-            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time/new_time, 2)}X)"
+            f"Total Estimated Speedup: {format_time(original_time - new_time)} ({round(original_time / new_time, 2)}X)"
         )
 
     def match(self, event: _ProfilerEvent):
@@ -622,7 +622,7 @@ def report_all_anti_patterns(
     ]
     reported = set()
     summaries = []
-    message_list = [f"{'-'*40}TorchTidy Report{'-'*40}"]
+    message_list = [f"{'-' * 40}TorchTidy Report{'-' * 40}"]
     message_list.append("Matched Events:")
 
     for anti_pattern in anti_patterns:
@@ -657,6 +657,6 @@ def report_all_anti_patterns(
 
     message_list.append("Summary:")
     message_list += summaries
-    message_list.append(f"{'-'*40}TorchTidy Report{'-'*40}")
+    message_list.append(f"{'-' * 40}TorchTidy Report{'-' * 40}")
     if print_enable:
         print("\n".join(message_list))

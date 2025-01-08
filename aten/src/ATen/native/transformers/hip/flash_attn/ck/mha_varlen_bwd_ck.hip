@@ -43,7 +43,7 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                                           const at::Tensor v,
                                           const at::Tensor seqlens_q,
                                           const at::Tensor seqlens_k,
-                                          c10::optional<at::Tensor> &alibi_slopes_,
+                                          std::optional<at::Tensor> &alibi_slopes_,
                                           const at::Tensor out,
                                           const at::Tensor softmax_lse,
                                           const at::Tensor dout,
@@ -209,12 +209,12 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
                   const at::Tensor &v,                      // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                   const at::Tensor &out,                    // total_q x num_heads x head_size
                   const at::Tensor &softmax_lse,            // b x h x s   softmax logsumexp
-                  c10::optional<at::Tensor> &dq_,           // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-                  c10::optional<at::Tensor> &dk_,           // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-                  c10::optional<at::Tensor> &dv_,           // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                  std::optional<at::Tensor> &dq_,           // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+                  std::optional<at::Tensor> &dk_,           // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                  std::optional<at::Tensor> &dv_,           // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                   const at::Tensor &cu_seqlens_q,           // b+1
                   const at::Tensor &cu_seqlens_k,           // b+1
-                  c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+                  std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
                   const int max_seqlen_q,
                   const int max_seqlen_k, // max sequence length to choose the kernel
                   const float p_dropout,  // probability to drop
@@ -412,6 +412,13 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
 #if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
+#else
+        TORCH_CHECK(
+            false,
+            "CK Flash Attention is not compiled with the right GPU arch. "
+            "Either remove USE_CK_FLASH_ATTENTION or compile with the "
+            "GPU arch that CK attention supports."
+        )
 #endif
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
