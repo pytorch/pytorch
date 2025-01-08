@@ -9,6 +9,7 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -29,8 +30,6 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._stats import count_label
 
-
-pytree = torch.utils._pytree
 
 __all__ = [
     "op_implementations_checks",

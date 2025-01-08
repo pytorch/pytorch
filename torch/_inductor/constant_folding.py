@@ -2,7 +2,7 @@ import collections
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.utils._ordered_set import OrderedSet
 
 

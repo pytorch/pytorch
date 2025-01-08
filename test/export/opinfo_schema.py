@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import TestCase
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 # Simplified naming for C++ classes

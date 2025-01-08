@@ -2,8 +2,8 @@
 
 import torch
 from copy import deepcopy
-from torch.utils._pytree import tree_map
-import torch.utils._pytree as pytree
+from torch.utils.pytree.python import tree_map
+import torch.utils.pytree.python as pytree
 
 
 # TODO: Move LoggingTensor here.

@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
