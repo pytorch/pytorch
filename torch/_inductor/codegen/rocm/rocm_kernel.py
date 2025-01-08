@@ -5,8 +5,8 @@ from typing import Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Unio
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
-from ...virtualized import V
 from ...runtime.benchmarking import LazyBenchmark
+from ...virtualized import V
 from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest

@@ -1,7 +1,7 @@
-from random import randint
 import time
 from functools import cached_property, wraps
 from itertools import chain
+from random import randint
 from statistics import mean, median
 from typing import Any, Callable, Dict, List, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
@@ -60,7 +60,9 @@ class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
-    def infer_device_type(self: Self, fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]) -> Any:
+    def infer_device_type(
+        self: Self, fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]
+    ) -> Any:
         inferred_device = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
@@ -151,7 +153,7 @@ class Benchmarker:
     @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
-    
+
     @time_and_count
     def benchmark_many(
         self: Self,
@@ -188,17 +190,18 @@ class Benchmarker:
             if inferred_device is None:
                 inferred_device = this_inferred_device
             elif this_inferred_device != inferred_device:
-                raise ValueError(
-                    "Multiple device types inferred from `fns`."
-                )
-        callables = [lambda: fn(*fn_args, **fn_kwargs) for fn, fn_args, fn_kwargs in zip(fns, fns_args, fns_kwargs)]  # noqa: E731
+                raise ValueError("Multiple device types inferred from `fns`.")
+        callables = [
+            lambda: fn(*fn_args, **fn_kwargs)
+            for fn, fn_args, fn_kwargs in zip(fns, fns_args, fns_kwargs)
+        ]  # noqa: E731
         if inferred_device == torch.device("cpu"):
             return self.benchmark_many_cpu(callables, **kwargs)
         # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
         # implementation which was written specifically with CUDA devices in mind, we may want to
         # explore alternate implementations for other device types.
-        return self.benchmark_gpu(callables, **kwargs)
-    
+        return self.benchmark_many_gpu(callables, **kwargs)
+
     @time_and_count
     def benchmark_many_cpu(
         self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
@@ -214,7 +217,7 @@ class Benchmarker:
         return [
             self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
         ]
-    
+
     @time_and_count
     def lazy_benchmark(
         self: Self,
@@ -415,7 +418,10 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         """Get the interleaved minimum timings, in milliseconds, for an interleaved
         grouping of CUDA event pairs.
         """
-        return [self.get_event_pairs_min_timing(list(event_pairs)) for event_pairs in zip(*interleaved_event_pairs)]
+        return [
+            self.get_event_pairs_min_timing(list(event_pairs))
+            for event_pairs in zip(*interleaved_event_pairs)
+        ]
 
     @time_and_count
     def benchmark_many_gpu(
@@ -480,7 +486,10 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         # alloted `max_benchmark_duration` per-callable, so we can just take the average
         # of the estimated timings
         benchmark_iters = max(
-            min(benchmark_iters, int(max_benchmark_duration // mean(estimated_timings))), 1
+            min(
+                benchmark_iters, int(max_benchmark_duration // mean(estimated_timings))
+            ),
+            1,
         )
 
         # do the memory warmup
