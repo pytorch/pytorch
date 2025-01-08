@@ -45,7 +45,7 @@ verbose_progress = False
 #fx_graph_cache = (
 #    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
 #)
-fx_graph_cache = False
+fx_graph_cache = True
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
