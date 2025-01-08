@@ -214,7 +214,12 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {}
+inductor_skips["xpu"] = {
+    # Assertion failed: helper.isSupportedLayout() && "Unexpected srcLayout in ReduceOpConversion"
+    # https://github.com/pytorch/pytorch/issues/144367
+    "nanquantile": {b8, f16, f32, f64, i32, i64},
+    "quantile": {b8, f16, f32, f64, i32, i64},
+}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
