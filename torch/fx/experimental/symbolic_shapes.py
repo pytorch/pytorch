@@ -898,9 +898,7 @@ def find_symbol_binding_fx_nodes(
 
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
-class ConvertIntKey(pytree.KeyEntry):
-    entry: None = None
-
+class ConvertIntKey:
     def __str__(self) -> str:
         return ".cast_symbool_to_symint_guardless()"
 
@@ -910,12 +908,8 @@ class ConvertIntKey(pytree.KeyEntry):
 
 
 @dataclass(frozen=True)
-class CallMethodKey(pytree.KeyEntry):
-    entry: str
-
-    @property
-    def name(self) -> str:
-        return self.entry
+class CallMethodKey:
+    name: str
 
     def __str__(self) -> str:
         return f".{self.name}()"
@@ -926,12 +920,8 @@ class CallMethodKey(pytree.KeyEntry):
 
 
 @dataclass(frozen=True)
-class InnerTensorKey(pytree.KeyEntry):
-    entry: str
-
-    @property
-    def inner_name(self) -> str:
-        return self.entry
+class InnerTensorKey:
+    inner_name: str
 
     def __str__(self) -> str:
         return f".{self.inner_name}"
@@ -942,12 +932,8 @@ class InnerTensorKey(pytree.KeyEntry):
 
 
 @dataclass(frozen=True)
-class DivideByKey(pytree.KeyEntry):
-    entry: Union[int, SymInt]
-
-    @property
-    def divisor(self) -> Union[int, SymInt]:
-        return self.entry
+class DivideByKey:
+    divisor: Union[int, SymInt]
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"

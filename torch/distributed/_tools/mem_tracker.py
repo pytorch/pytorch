@@ -30,7 +30,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils.pytree import tree_iter, tree_map_only
+from torch.utils.pytree.python import tree_flatten, tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
 
@@ -826,7 +826,7 @@ class MemTracker(TorchDispatchMode):
             *external (Union[nn.Module, optim.Optimizer, torch.Tensor]): The external modules, optimizers, and
                                                                          tensors to be tracked.
         """
-        flat_external = tree_iter(external)
+        flat_external, _ = tree_flatten(external)
         for obj in flat_external:
             if isinstance(obj, torch.Tensor):
                 self._update_and_maybe_create_winfos(

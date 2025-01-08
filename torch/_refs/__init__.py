@@ -26,6 +26,7 @@ from typing import (
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
+import torch.utils.pytree.python as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
@@ -58,7 +59,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.utils.pytree import tree_map
 
 
 # Experimental module containing prototype Python references for existing
@@ -2260,7 +2260,7 @@ def _make_copy_from_view(fn):
         if out is not None:
             return result
 
-        return tree_map(
+        return pytree.tree_map(
             lambda x: x.clone(memory_format=torch.contiguous_format),
             result,
         )

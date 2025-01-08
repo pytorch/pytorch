@@ -2,8 +2,8 @@
 import functools
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
-from torch.utils.pytree import tree_iter
 
 
 # dependency on `functional_call` means that this can't be exposed in utils
@@ -64,8 +64,9 @@ def call_for_per_sample_grads(
             return og_tensor
 
     def compute_batch_size(*args, **kwargs):
+        args_and_kwargs = pytree.arg_tree_leaves(*args, **kwargs)
         batch_size = None
-        for arg in tree_iter((args, kwargs)):
+        for arg in args_and_kwargs:
             if not isinstance(arg, torch.Tensor):
                 continue
 

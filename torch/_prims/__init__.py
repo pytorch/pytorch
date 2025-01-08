@@ -30,6 +30,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
+from torch.utils.pytree.python import tree_flatten, tree_map, tree_unflatten
 
 
 prim = torch.library.Library("prims", "DEF")

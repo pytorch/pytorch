@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import torch
-from torch.utils.pytree import tree_map
+from torch.utils.pytree.python import tree_map
 from typing import Iterator, List, Optional
 import logging
 import contextlib

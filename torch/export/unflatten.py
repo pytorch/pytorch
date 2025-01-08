@@ -571,7 +571,7 @@ class UnflattenedModule(torch.nn.Module):
                 # which we don't have keypaths for. For now, just create a dummy
                 # keypath to associate with the arg.
                 new_flat_args_with_path = [  # type: ignore[var-annotated]
-                    ((SequenceKey(0), GetAttrKey("<unknown location>")), arg)
+                    ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
                     for arg in flat_args
                 ]
             else:

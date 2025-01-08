@@ -30,9 +30,9 @@ from typing import (
 )
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
-from torch.utils.pytree import tree_iter
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -1047,7 +1047,8 @@ def detect_fake_mode(inputs: Any = None):
         if isinstance(m, FakeTensorMode):
             fake_modes.append((m, "active fake mode", i))
 
-    for i, flat_input in enumerate(tree_iter(inputs)):
+    flat_inputs = pytree.tree_leaves(inputs)
+    for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
 

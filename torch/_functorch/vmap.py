@@ -12,7 +12,7 @@ import itertools
 import os
 import threading
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -23,16 +23,13 @@ from torch._C._functorch import (
     _vmap_increment_nesting,
     is_batchedtensor,
 )
-from torch.utils.pytree import (
+from torch.utils.pytree.python import (
     _broadcast_to_and_flatten,
     tree_flatten,
     tree_map_,
     tree_unflatten,
+    TreeSpec,
 )
-
-
-if TYPE_CHECKING:
-    from torch.utils.pytree import PyTreeSpec
 
 
 in_dims_t = Union[int, Tuple]
@@ -94,7 +91,7 @@ def _as_tuple(
 
 def _process_batched_inputs(
     in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], "PyTreeSpec"]:
+) -> Tuple[int, List[Any], List[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "

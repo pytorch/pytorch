@@ -455,9 +455,9 @@ def dynamo_export(
     # NOTE: The new exporter is experimental and is not enabled by default.
     import warnings
 
+    import torch.utils.pytree.python as pytree
     from torch.onnx import _flags
     from torch.onnx._internal.exporter import _compat
-    from torch.utils import pytree
 
     if isinstance(model, torch.export.ExportedProgram):
         return _compat.export_compat(
@@ -492,7 +492,10 @@ def dynamo_export(
                     return None
 
             # model_args could be nested
-            dynamic_shapes = pytree.tree_map(_to_dynamic_shape, model_args)
+            dynamic_shapes = pytree.tree_map(
+                _to_dynamic_shape,
+                model_args,
+            )
         else:
             dynamic_shapes = None
 

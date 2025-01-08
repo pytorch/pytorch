@@ -7,6 +7,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
+import torch.utils.pytree.python as pytree
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
@@ -36,7 +37,6 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
-from torch.utils.pytree import tree_map_
 
 
 _T = TypeVar("_T")
@@ -55,7 +55,7 @@ def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
-        tree_map_(register, op)
+        pytree.tree_map_(register, op)
         return fn
 
     return wrapper

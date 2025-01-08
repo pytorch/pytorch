@@ -12,7 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.utils import pytree
+import torch.utils.pytree.python as pytree
 
 
 if TYPE_CHECKING:
@@ -270,7 +270,7 @@ class JitTraceConvertStrategy(CaptureStrategy):
                 results = self.model(*unflattened_args, **unflattened_kwargs)
                 if not isinstance(results, tuple):
                     results = (results,)
-                flattened_results = pytree.tree_leaves(results)
+                flattened_results, _ = pytree.tree_flatten(results)
                 if len(flattened_results) == 1:
                     return flattened_results[0]
                 return tuple(flattened_results)
@@ -341,7 +341,8 @@ class LegacyDynamoStrategy(CaptureStrategy):
             torch.__version__,
         )
 
-        flattened_args = tuple(pytree.tree_iter((args, kwargs)))
+        flattened_args, _ = pytree.tree_flatten((args, kwargs))
+        flattened_args = tuple(flattened_args)
 
         # ONNX does not support views and mutations.
         # Functionalize to get a semantically equivalent graph without mutations.

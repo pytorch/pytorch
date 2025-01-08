@@ -24,7 +24,7 @@ from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._ops
-import torch.utils.pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir

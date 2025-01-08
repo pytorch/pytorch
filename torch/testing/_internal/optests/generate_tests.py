@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._dynamo
+import torch.utils.pytree.python as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
 from torch._subclasses.schema_check_mode import SchemaCheckMode
@@ -24,7 +25,6 @@ from torch.testing._internal.optests import (
     autograd_registration_check,
     fake_check,
 )
-from torch.utils.pytree import tree_any_only, tree_map_only
 
 
 def dontGenerateOpCheckTests(reason: str):
@@ -52,7 +52,7 @@ def safe_schema_check(
 ) -> Any:
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
-    if tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
     with SchemaCheckMode():
         result = op(*args, **kwargs)
@@ -66,12 +66,14 @@ def safe_autograd_registration_check(
     *,
     copy_inputs: bool = True,
 ) -> None:
-    if tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
     # Don't perform autograd_registration_check if none of the inputs require grad.
-    if not tree_any_only(torch.Tensor, lambda x: x.requires_grad, (args, kwargs)):
+    if not pytree.tree_any_only(
+        torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
+    ):
         return
     return autograd_registration_check(op, args, kwargs)
 
@@ -83,7 +85,7 @@ def safe_fake_check(
     *,
     copy_inputs: bool = True,
 ) -> None:
-    if tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
@@ -100,11 +102,11 @@ def safe_aot_autograd_check(
 ) -> Any:
     # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
     # inputs.
-    if tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
     def func(*args, **kwargs):
-        args, kwargs = tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
+        args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
         return op(*args, **kwargs)
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
@@ -113,7 +115,7 @@ def safe_aot_autograd_check(
 
 
 def deepcopy_tensors(inputs: Any) -> Any:
-    return tree_map_only(torch.Tensor, clone_input, inputs)
+    return pytree.tree_map_only(torch.Tensor, clone_input, inputs)
 
 
 # Test util requirements

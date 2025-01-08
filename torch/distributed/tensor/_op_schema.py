@@ -1,18 +1,23 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import Placement
-from torch.utils.pytree import tree_leaves, tree_map_only
 
 
-if TYPE_CHECKING:
-    from torch.utils.pytree import PyTreeSpec
+try:
+    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
+except ImportError:
+    from torch.utils.pytree.python import (  # type: ignore[no-redef, assignment]
+        tree_leaves,
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases
@@ -446,7 +451,7 @@ class OpInfo:
     flat_args_schema: List[object]
     local_args: Sequence[object]
     local_kwargs: Dict[str, object]
-    args_tree_spec: Optional["PyTreeSpec"] = None
+    args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None
