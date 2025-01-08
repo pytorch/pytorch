@@ -581,7 +581,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-        lazy: bool = False
+        lazy: bool = False,
     ) -> Union[LazyBenchmark, float]:
         if self.value is None:
             raise Exception("Failed to run")  # noqa: TRY002

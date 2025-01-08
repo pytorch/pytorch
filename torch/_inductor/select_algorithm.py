@@ -33,7 +33,6 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
 from torch.utils._filelock import FileLock
@@ -70,7 +69,6 @@ from .runtime.hints import DeviceProperties
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
-    is_gpu,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -2042,17 +2040,18 @@ class AlgorithmSelectorCache(PersistentCache):
                         raise e from None
 
                 timings[choice] = timing
-            
+
             if has_lazy_benchmark:
                 # if we lazily benchmarked any values, we need to finalize
                 # those results by triggering the benchmark. this can be
                 # done by converting the lazy benchmark to a float
                 timings.update(
-                    {
-                        choice: float(timing)
-                        for choice, timing in timings.items()
-                    }
+                    {choice: float(timing) for choice, timing in timings.items()}
                 )
+
+            # mypy gets confused about types (since it does not realize that
+            # all lazy benchmarks will get finalized), so let's give it a hint
+            timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = timings
 
             return timings
 
