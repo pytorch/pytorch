@@ -23,11 +23,11 @@ from typing import (
 )
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,

@@ -9,8 +9,8 @@ from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
 
 import torch
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch.onnx._internal.fx import _pass, diagnostics
-from torch.utils import _pytree as pytree
 
 
 _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]

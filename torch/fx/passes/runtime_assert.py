@@ -15,7 +15,7 @@ else:
     ShapeEnv = Any
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import fx
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility

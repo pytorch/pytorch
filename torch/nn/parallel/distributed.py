@@ -21,7 +21,7 @@ from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.nn.modules import Module
 from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.pytree.python import tree_flatten, tree_unflatten
 
 
 RPC_AVAILABLE = False

@@ -22,8 +22,8 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import SAC_IGNORED_OPS
+from torch.utils.pytree.python import tree_flatten
 
 
 __all__ = ["SACEstimator", "SACStats", "MSPS", "SACTradeOffStats", "SACGreedyOrderMeta"]

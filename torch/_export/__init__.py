@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch.fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import compile_context

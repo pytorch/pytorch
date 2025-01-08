@@ -9,6 +9,7 @@ from functools import partial
 
 import torch._inductor.decomposition
 import torch.autograd
+import torch.utils.pytree.python as pytree
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
@@ -41,9 +42,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     unMarkDynamoStrictTest,
 )
-from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree.python import tree_flatten, tree_map, tree_unflatten
 
 
 aten = torch.ops.aten

@@ -17,7 +17,7 @@ from torch.ao.quantization.fx.match_utils import _MatchResult
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.fx import Graph, GraphModule, Node
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 SHADOW_NODE_NAME_PREFIX = "shadow"
