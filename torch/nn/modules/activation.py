@@ -974,7 +974,7 @@ class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 

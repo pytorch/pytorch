@@ -58,7 +58,7 @@ class Transformer(Module):
     r"""A transformer model.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
@@ -311,7 +311,7 @@ class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
@@ -534,7 +534,7 @@ class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
@@ -631,7 +631,7 @@ class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
@@ -952,7 +952,7 @@ class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
 
     .. note::
-        See :ref:`this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
