@@ -578,7 +578,10 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self.value = value
 
     def benchmark(
-        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None, lazy: bool = False
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        lazy: bool = False
     ) -> Union[LazyBenchmark, float]:
         if self.value is None:
             raise Exception("Failed to run")  # noqa: TRY002
@@ -616,11 +619,8 @@ class GPUDeviceBenchmarkMixin:
             device_idx = device_interface.current_device()
         with device_interface.device(device_idx):  # type: ignore[attr-defined]
             if lazy:
-                out = benchmarker.lazy_benchmark_gpu(fn)
-            else:
-                out = benchmarker.benchmark_gpu(fn)
-
-        return out
+                return benchmarker.lazy_benchmark_gpu(fn)
+            return benchmarker.benchmark_gpu(fn)
 
 
 class CPUDeviceBenchmarkMixin:
@@ -632,10 +632,8 @@ class CPUDeviceBenchmarkMixin:
         lazy: bool = False,
     ) -> Union[LazyBenchmark, float]:
         if lazy:
-            timing = benchmarker.lazy_benchmark_cpu(fn)
-        else:
-            timing = benchmarker.benchmark_cpu(fn)
-        return timing
+            return benchmarker.lazy_benchmark_cpu(fn)
+        return benchmarker.benchmark_cpu(fn)
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
