@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 import torch._subclasses.functional_tensor
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import _set_compilation_env, autograd_not_implemented

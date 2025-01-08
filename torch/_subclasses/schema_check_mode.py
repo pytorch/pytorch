@@ -5,10 +5,10 @@ from copy import deepcopy
 from itertools import combinations
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.fx.operator_schemas import normalize_function
-from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 # Named Tuples used within SchemaCheckMode
