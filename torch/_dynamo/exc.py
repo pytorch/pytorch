@@ -270,11 +270,17 @@ class ObservedAttributeError(ObservedException):
     pass
 
 
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
+    TypeError: ObservedTypeError,
 }
 
 

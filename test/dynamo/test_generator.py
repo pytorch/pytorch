@@ -653,13 +653,46 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t + sum(range(6)))
 
 
+class TestGeneratorSend(GeneratorTestsBase):
+    def test_send(self):
+        def double():
+            x = yield
+            yield x * 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = double()
+            next(gen)
+            return gen.send(t)
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t * 2)
+
+    def test_send_stop_iteration(self):
+        def double():
+            x = yield
+            yield x * 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = double()
+            next(gen)
+            a = gen.send(t)
+            b = gen.send(t)  # should result in StopIteration
+            return a + b
+
+        t = torch.randn(2)
+        with self.assertRaises(Unsupported):
+            fn(t)
+
+
 class GeneratorCPythonTests(GeneratorTestsBase):
     # Taken from commit
     # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
     # changed the tests a little bit to run them inside dynamo
     # + replaced all self.assert* calls to plain assert statements
 
-    @unittest.expectedFailure
     def test_send_non_none_to_new_gen(self):
         def f():
             yield 1
