@@ -298,6 +298,15 @@ GEMM_TEMPLATE = r"""
 def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
+def is_slice(node: ir.IRNode):
+    old_layout = node.data.get_layout()
+    new_layout = node.layout
+    return (
+        isinstance(node, ir.ReinterpretView)
+        and isinstance(node.data, ir.StorageBox)
+        and old_layout.size[-len(new_layout.size):] == new_layout.size
+        and len(old_layout.size) > len(new_layout.size)
+    )
 
 _T = TypeVar("_T", ir.IRNode, torch.Tensor)
 
@@ -836,10 +845,15 @@ class CppGemmTemplate(CppTemplate):
             # It shouldn't happen as viewing an mkldnn tensor, we can extend the
             # implementation if it does.
             assert not isinstance(new_inputs[1], ir.BaseView)
+        if is_slice(new_inputs[1]):
+            # If weight is a slice of a larger tensor, we need to use the layout of the whole tensor
+            view_layout = new_inputs[1].data.get_layout()
+        else:
+            view_layout = new_inputs[1].layout
         # Note that the layout of MKLDNN Tensor is with the wrong stride
-        view_size = new_inputs[1].layout.size
-        view_stride = new_inputs[1].layout.stride
-        view_offset = new_inputs[1].layout.offset
+        view_size = view_layout.size
+        view_stride = view_layout.stride
+        view_offset = view_layout.offset
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
