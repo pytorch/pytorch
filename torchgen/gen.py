@@ -2347,7 +2347,7 @@ def gen_source_files(
             env_callable=register_dispatch_key_env_callable,
             num_shards=4 if dispatch_key == DispatchKey.CPU else 1,
             base_env=register_dispatch_key_base_env,
-            sharded_keys={"dispatch_definitions"},
+            sharded_keys=frozenset({"dispatch_definitions"}),
         )
 
         for g in structured_native_functions:
@@ -2559,11 +2559,13 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             ),
         },
         num_shards=5,
-        sharded_keys={
-            "operator_headers",
-            "definitions",
-            "static_dispatch_extra_headers",
-        },
+        sharded_keys=frozenset(
+            {
+                "operator_headers",
+                "definitions",
+                "static_dispatch_extra_headers",
+            }
+        ),
     )
 
     cpu_fm.write("Functions.cpp", dict)
@@ -2661,13 +2663,15 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
         key_fn=key_func,
         env_callable=functionalization_env_callable,
         num_shards=4,
-        sharded_keys={
-            "ops_headers",
-            "func_definitions",
-            "func_registrations",
-            "func_add_back_views_definitions",
-            "func_add_back_views_registrations",
-        },
+        sharded_keys=frozenset(
+            {
+                "ops_headers",
+                "func_definitions",
+                "func_registrations",
+                "func_add_back_views_definitions",
+                "func_add_back_views_registrations",
+            }
+        ),
     )
 
     cpu_fm.write(

@@ -326,7 +326,7 @@ def gen_unboxing(
             else [],  # Only write header once
         },
         num_shards=1,
-        sharded_keys={"unboxed_kernels", "fn_header"},
+        sharded_keys=frozenset({"unboxed_kernels", "fn_header"}),
     )
 
 

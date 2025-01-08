@@ -208,7 +208,7 @@ class FileManager:
         env_callable: Callable[[T], dict[str, list[str]]],
         num_shards: int,
         base_env: dict[str, Any] | None = None,
-        sharded_keys: set[str],
+        sharded_keys: frozenset[str],
     ) -> None:
         self.write_sharded_with_template(
             filename,
@@ -231,7 +231,7 @@ class FileManager:
         env_callable: Callable[[T], dict[str, list[str]]],
         num_shards: int,
         base_env: dict[str, Any] | None = None,
-        sharded_keys: set[str],
+        sharded_keys: frozenset[str],
     ) -> None:
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
