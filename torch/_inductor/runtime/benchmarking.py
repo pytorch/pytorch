@@ -3,7 +3,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import mean, median
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -425,7 +425,7 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         memory_warmup_iters: int = 100,
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
-        ranking: bool = False,
+        ranking_key: Optional[str] = None,
         **kwargs: Any,
     ) -> List[float]:
         """Benchmark many GPU callables using a custom benchmarking implementation.
@@ -445,6 +445,11 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         the values of `memory_warmup_iters` and `benchmark_iters`, along with the
         estimated runtime of `_callable` and various other factors, and we then
         shrink `benchmark_iters` to fit in the alloted maximum duration.
+        - ranking_key: Optional string key that if set enables ranking. Ranking
+        is an early termination of the benchmarking process, returning results of
+        the estimation loop instead of processing a full benchmarking cycle. The
+        ranking key is set as a string, instead of a boolean, to ensure lazy benchmarks
+        are properly grouped if ranking is enabled.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
@@ -477,7 +482,7 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             interleaved_event_pairs
         )
 
-        if ranking:
+        if ranking_key is not None:
             del buffer
             return estimated_timings
 
@@ -585,4 +590,6 @@ class LazyInductorBenchmarker(GroupedInductorBenchmarker):
         return LazyBenchmark(benchmark)
 
 
-benchmarker = LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+benchmarker = (
+    LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+)
