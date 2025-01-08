@@ -54,7 +54,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfHpu,
     skipIfWindows,
-    TEST_HPU,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -6606,9 +6605,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda"]
-if TEST_HPU:
-    devices.append("hpu")
+devices = ["cuda", "hpu"]
 instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

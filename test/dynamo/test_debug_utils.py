@@ -196,9 +196,7 @@ class TestDebugUtilsDevice(TestCase):
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-devices = ["cuda"]
-if TEST_HPU:
-    devices.append("hpu")
+devices = ["cuda", "hpu"]
 instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows, TEST_HPU
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -846,9 +846,7 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref.device, res.device)
 
 
-devices = ["cuda"]
-if TEST_HPU:
-    devices.append("hpu")
+devices = ["cuda", "hpu"]
 instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
