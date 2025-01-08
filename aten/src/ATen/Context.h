@@ -558,8 +558,8 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
+    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
