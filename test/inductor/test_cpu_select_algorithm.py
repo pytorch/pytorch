@@ -2321,6 +2321,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x, w):
                 y = x @ w[2]
+                y = y @ w[:, 2]
                 return torch.mm(y[2], self.weight[2])
 
         counters.clear()
@@ -2335,7 +2336,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (x, w),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
