@@ -397,9 +397,12 @@ class CachingAutotuner(KernelInterface):
         self.launchers = launchers
 
     def prepare_for_pickle(self):
-        """drop stuff from triton.JITFunction that does not pickle"""
+        """Drop stuff from triton.JITFunction that does not pickle.
+        This must be called after precompile so that these things are no longer needed.
+        """
         self.fn.fn = None
         self.fn.__globals__ = None
+        self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
 
@@ -959,8 +962,8 @@ class TritonCompileResult:
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": binary.__class__.launch_enter_hook,
+            "launch_exit_hook": binary.__class__.launch_exit_hook,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1011,7 +1014,7 @@ class TritonCompileResult:
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.launch_enter_hook:
+            if binary.__class__.launch_enter_hook:
                 launch_metadata = (
                     f"bin.launch_metadata(grid, stream, {', '.join(call_args)})"
                 )
