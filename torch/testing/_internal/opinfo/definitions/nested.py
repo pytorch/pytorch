@@ -226,7 +226,7 @@ def _raggedness_matches(nt1, nt2):
 # as this causes autograd problems.
 def _clone(t):
     requires_grad = t.requires_grad
-    return t.clone().detach().requires_grad_(requires_grad)
+    return t.detach().clone().requires_grad_(requires_grad)
 
 
 # Helper function to update a sample with new kwargs / name
@@ -447,7 +447,6 @@ def reduction_reference(op, sample):
     assert op._extra_op_data.dim_args is not None
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
     assert single_dim_argname is not None
-    supports_dimlist = dimlist_argname is not None
 
     dim = sample.kwargs.get(
         dimlist_argname, sample.kwargs.get(single_dim_argname, None)
@@ -814,7 +813,6 @@ def sample_inputs_unary_dimwise(
 
 def batchwise_reference_chunk(op, sample):
     # reference for chunk() over dim=0
-    kwargs = sample.kwargs
     B = sample.input.size(0)
     num_chunks = sample.kwargs["chunks"]
     chunk_size = math.ceil(B / num_chunks)
@@ -1318,10 +1316,10 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
         # non-contiguous transposed
         yield njt.transpose(1, 3)
         # non-contiguous with holes
-        values = njt.values().clone().detach()
-        offsets = njt.offsets().clone().detach()
+        values = njt.values().detach().clone()
+        offsets = njt.offsets().detach().clone()
         # subtract 1 to cause holes
-        lengths = (offsets.diff() - 1).clone().detach()
+        lengths = (offsets.diff() - 1).detach().clone()
         yield torch.nested.nested_tensor_from_jagged(
             values=values,
             offsets=offsets,
