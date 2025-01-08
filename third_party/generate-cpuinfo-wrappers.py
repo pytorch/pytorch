@@ -86,9 +86,9 @@ if __name__ == "__main__":
                 print(file=wrapper)
 
                 if not condition:
-                    print(f"#include <{filename}>", file=wrapper)
+                    print("#include <%s>" % filename, file=wrapper)
                 else:
                     # Include source file only if condition is satisfied
-                    print(f"#if {condition}", file=wrapper)
-                    print(f"#include <{filename}>", file=wrapper)
-                    print(f"#endif /* {condition} */", file=wrapper)
+                    print("#if %s" % condition, file=wrapper)
+                    print("#include <%s>" % filename, file=wrapper)
+                    print("#endif /* %s */" % condition, file=wrapper)

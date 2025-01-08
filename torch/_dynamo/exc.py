@@ -1,12 +1,9 @@
-from __future__ import annotations
-
-import logging
+# mypy: allow-untyped-defs
 import os
 import textwrap
-import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, NoReturn, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
 
 import torch._guards
 
@@ -15,19 +12,18 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    import types
-
     from torch._guards import CompileId
 
-    from .types import DynamoFrameType
 
-
-def exportdb_error_message(case_name: str) -> str:
+def exportdb_error_message(case_name):
     return (
         "For more information about this error, see: "
         + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
         + case_name.replace("_", "-")
     )
+
+
+import logging
 
 
 log = logging.getLogger(__name__)
@@ -43,9 +39,9 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    restart_reason: Optional[str]
+    restart_reason: str
 
-    def __init__(self, *args: Any, restart_reason: Optional[str] = None) -> None:
+    def __init__(self, *args, restart_reason=None) -> None:
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -75,7 +71,7 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
+    def __init__(self, name) -> None:
         super().__init__(
             f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
         )
@@ -93,42 +89,16 @@ class ResetRequired(TorchDynamoException):
         )
 
 
-class ShortenTraceback(TorchDynamoException):
-    def __init__(
-        self, *args: Any, first_useful_frame: Optional[types.FrameType], **kwargs: Any
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.first_useful_frame = first_useful_frame
-
-    def remove_dynamo_frames(self) -> typing.Self:
-        tb = self.__traceback__
-        if (
-            self.first_useful_frame is None
-            or tb is None
-            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
-        ):
-            return self
-        while tb.tb_frame is not self.first_useful_frame:
-            tb = tb.tb_next
-            assert tb is not None, "internal error, please report a bug"
-        return self.with_traceback(tb)
-
-
-class BackendCompilerFailed(ShortenTraceback):
-    def __init__(
-        self,
-        backend_fn: Any,
-        inner_exception: Exception,
-        first_useful_frame: Optional[types.FrameType],
-    ) -> None:
+class BackendCompilerFailed(TorchDynamoException):
+    def __init__(self, backend_fn, inner_exception) -> None:
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
-        super().__init__(msg, first_useful_frame=first_useful_frame)
+        super().__init__(msg)
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg: str, *, case_name: Optional[str] = None) -> None:
+    def __init__(self, msg, *, case_name=None) -> None:
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
@@ -136,13 +106,13 @@ class Unsupported(TorchDynamoException):
         self.add_to_stats()
         self.case_name: Optional[str] = case_name
 
-    def remove_from_stats(self) -> None:
+    def remove_from_stats(self):
         assert self.category is not None
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
 
-    def add_to_stats(self, category: str = "unimplemented") -> None:
+    def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
 
@@ -152,12 +122,12 @@ class RecompileError(TorchDynamoException):
 
 
 class ArgsMismatchError(Unsupported):
-    def __init__(self, msg: str) -> None:
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
 class AttributeMutationError(Unsupported):
-    def __init__(self, msg: str) -> None:
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
@@ -166,7 +136,7 @@ class CondOpArgsMismatchError(ArgsMismatchError):
     Internal error from cond() due to arguments mismatch.
     """
 
-    def __init__(self, msg: str) -> None:
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
@@ -182,9 +152,7 @@ class UserErrorType(Enum):
 
 
 class UserError(Unsupported):
-    def __init__(
-        self, error_type: UserErrorType, msg: str, case_name: Optional[str] = None
-    ) -> None:
+    def __init__(self, error_type: UserErrorType, msg, case_name=None) -> None:
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
@@ -243,7 +211,7 @@ class ObservedUserStopIteration(ObservedException):
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__("unhandled `raise StopIteration`")
         if len(args) > 0:
             self.value = args[0]
@@ -273,7 +241,7 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e: Type[Exception], tx: Any) -> None:
+def raise_observed_exception(e, tx):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
@@ -283,7 +251,7 @@ def raise_observed_exception(e: Type[Exception], tx: Any) -> None:
     raise observed_exception_map[e]
 
 
-def handle_observed_exception(tx: Any) -> None:
+def handle_observed_exception(tx):
     # This is essentially exception handling code, equivalent of this pseudo code
     #
     # try:
@@ -320,9 +288,7 @@ exceptions_allowed_to_be_fallback = (
 )
 
 
-def unimplemented_with_warning(
-    e: Exception, code: types.CodeType, msg: str
-) -> NoReturn:
+def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
     # i.e., its very silent. This helper function is intended when an error is
@@ -364,7 +330,7 @@ def warning(msg: str) -> None:
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value) -> None:
         self.value = value
 
     def __str__(self) -> str:
@@ -424,7 +390,7 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
 
 
 def get_exc_message(
-    e: Exception, compile_id: CompileId
+    e: Exception, compile_id: "CompileId"
 ) -> Tuple[Optional[str], Optional[int]]:
     filename = None
     lineno = None
@@ -435,9 +401,7 @@ def get_exc_message(
     return filename, lineno
 
 
-def get_real_stack(
-    exc: Exception, frame: Optional[DynamoFrameType] = None
-) -> Optional[StackSummary]:
+def get_real_stack(exc: Exception, frame=None) -> Optional[StackSummary]:
     real_stack = getattr(exc, "real_stack", None)
     if real_stack is None:
         return None
@@ -446,6 +410,7 @@ def get_real_stack(
     # report a stack anyway because the stack_above_dynamo may still
     # be useful for debugging
 
+    stack_above_dynamo = []
     if frame is not None:
         # NB: frame is PyInterpreterFrame on Python 3.11 and later,
         # not a TRUE frame object.  You can't actually feed it
@@ -461,23 +426,17 @@ def get_real_stack(
         # get rid of all the dynamo frames.  For ease of testing
         # we apply this behavior to ALL Python versions
         stack_above_dynamo = filter_stack(extract_stack())
-    else:
-        stack_above_dynamo = StackSummary()
 
-    return StackSummary.from_list(stack_above_dynamo + real_stack)
+    return cast(StackSummary, stack_above_dynamo + real_stack)
 
 
 # filter out all frames after entering dynamo
-def filter_stack(stack: StackSummary) -> StackSummary:
-    user_stack = StackSummary()
+def filter_stack(stack):
+    user_stack = []
     for frame in stack:
-        if frame.filename is None:
-            continue
         if "convert_frame" in frame.filename:
             break
-        if "eval_frame" in frame.filename or (
-            frame.line and "torch._dynamo.optimize(" in frame.line
-        ):
+        if "eval_frame" in frame.filename or "torch._dynamo.optimize(" in frame.line:
             continue
         user_stack.append(frame)
 
@@ -485,10 +444,7 @@ def filter_stack(stack: StackSummary) -> StackSummary:
 
 
 def format_error_msg_verbose(
-    exc: Exception,
-    code: types.CodeType,
-    record_filename: Optional[str] = None,
-    frame: Optional[DynamoFrameType] = None,
+    exc: Exception, code, record_filename=None, frame=None
 ) -> str:
     msg = (
         f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
@@ -511,13 +467,13 @@ def format_error_msg_verbose(
     return msg
 
 
-def format_error_msg(
-    exc: Exception,
-    code: types.CodeType,
-    record_filename: Optional[str] = None,
-    frame: Optional[DynamoFrameType] = None,
-) -> str:
+def format_error_msg(exc: Exception, code, record_filename=None, frame=None) -> str:
+    msg = os.linesep * 2
+
     if config.verbose:
-        return format_error_msg_verbose(exc, code, record_filename, frame)
-    return f"WON'T CONVERT {code.co_name} {code.co_filename}\
+        msg = format_error_msg_verbose(exc, code, record_filename, frame)
+    else:
+        msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc()}"
+
+    return msg

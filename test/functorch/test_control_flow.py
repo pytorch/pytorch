@@ -6606,7 +6606,7 @@ class TestHopSchema(TestCase):
             x,
         )
         model = M()
-        torch.export.export(model, args, strict=True)
+        torch.export.export(model, args)
         graph_str = self._check_export(model, args, None)
         self.assertExpectedInline(
             graph_str,

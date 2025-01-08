@@ -1,5 +1,6 @@
 """Utility to lazily import modules."""
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import importlib
@@ -16,7 +17,7 @@ class _LazyModule:
     def __repr__(self) -> str:
         return f"<lazy module '{self._name}'>"
 
-    def __getattr__(self, attr: str) -> object:
+    def __getattr__(self, attr):
         if self._module is None:
             self._module = importlib.import_module(".", self._name)
         return getattr(self._module, attr)

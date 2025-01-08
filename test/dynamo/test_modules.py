@@ -538,7 +538,7 @@ class _DenseBlock(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module(f"denselayer{i + 1:d}", _Block())
+            self.add_module("denselayer%d" % (i + 1), _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -825,7 +825,7 @@ class EnumValues(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module(f"denselayer{i + 1:d}", _Block())
+            self.add_module("denselayer%d" % (i + 1), _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -842,7 +842,7 @@ class AccessByKeys(torch.nn.ModuleDict):
     ) -> None:
         super().__init__()
         for i in range(num_layers):
-            self.add_module(f"denselayer{i + 1:d}", _Block())
+            self.add_module("denselayer%d" % (i + 1), _Block())
 
     def forward(self, init_features):
         features = [init_features]
@@ -1036,7 +1036,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
     def __init__(self) -> None:
         super().__init__()
         for i in range(2):
-            self.add_module(f"l@yer-{i + 1:d}", BasicModule())
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
 
     def forward(self, x):
         for layer in self.values():
@@ -2428,6 +2428,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
+        self.assertRegex(failure_reason, r"___check_obj_id\(L\['m'\]._forward_hooks")
 
     @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)

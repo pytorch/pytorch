@@ -361,7 +361,6 @@ def init_backend_registration():
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
-    from .mps import MetalScheduling
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -394,14 +393,6 @@ def init_backend_registration():
         register_backend_for_device(
             "xpu",
             TritonScheduling,
-            PythonWrapperCodegen,
-            CppWrapperGpu,
-        )
-
-    if get_scheduling_for_device("mps") is None:
-        register_backend_for_device(
-            "mps",
-            MetalScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
@@ -443,7 +434,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
-        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
+        from . import cpu_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 

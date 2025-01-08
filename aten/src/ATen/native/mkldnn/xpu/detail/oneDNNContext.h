@@ -33,8 +33,6 @@ struct TORCH_XPU_API GpuEngineManager {
 
   GpuEngineManager(GpuEngineManager const&) = delete;
   GpuEngineManager& operator=(GpuEngineManager const&) = delete;
-  GpuEngineManager(GpuEngineManager&&) = default;
-  GpuEngineManager& operator=(GpuEngineManager&&) = default;
 
  protected:
   GpuEngineManager() {
@@ -46,7 +44,7 @@ struct TORCH_XPU_API GpuEngineManager {
               c10::xpu::get_raw_device(i), c10::xpu::get_device_context())));
     }
   }
-  ~GpuEngineManager() = default;
+  ~GpuEngineManager() {}
 
  private:
   std::vector<std::shared_ptr<dnnl::engine>> engine_pool;
@@ -73,8 +71,6 @@ struct TORCH_XPU_API GpuStreamManager {
 
   GpuStreamManager(GpuStreamManager const&) = delete;
   GpuStreamManager& operator=(GpuStreamManager const&) = delete;
-  GpuStreamManager(GpuStreamManager&&) = default;
-  GpuStreamManager& operator=(GpuStreamManager&&) = default;
 
  protected:
   GpuStreamManager() {
@@ -82,7 +78,7 @@ struct TORCH_XPU_API GpuStreamManager {
     TORCH_INTERNAL_ASSERT(device_count > 0);
     stream_pool.resize(device_count);
   }
-  ~GpuStreamManager() = default;
+  ~GpuStreamManager() {}
 
  private:
   using stream_hash_map =

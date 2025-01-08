@@ -24,7 +24,6 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -986,8 +985,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      ::c10d::C10dLoggingData& debugLog,
-      bool throwException = false);
+      bool throwException = false,
+      bool log = false);
 
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 

@@ -11466,6 +11466,103 @@ fn
 
         f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
 
+    def test_custom_iter_dict(self):
+        class ReversedDict(dict):
+            def __iter__(self):
+                return reversed(list(self.keys()))
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_keys_iter_dict(self):
+        class ReversedDict(dict):
+            def keys(self):
+                return ["bar", "foo"]
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_dict_guard_on_keys_order(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key, value in d.items():
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
+    def test_dict_guard_on_keys_order2(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key in d:
+                value = d[key]
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
     def test_contains_dunder_dict(self):
         class UserDefined:
             def __init__(self) -> None:
@@ -11952,48 +12049,6 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
-
-    def test_overridden_getattribute(self):
-        class Foo:
-            attribute_map = {}
-
-            def __init__(self):
-                self.attribute_map = {
-                    "a_premap": "a",
-                }
-
-            def __setattr__(self, key, value):
-                if key in super().__getattribute__("attribute_map"):
-                    key = super().__getattribute__("attribute_map")[key]
-                super().__setattr__(key, value)
-
-            def __getattribute__(self, key):
-                if key == "sentinel":
-                    raise AttributeError()
-                if key != "attribute_map" and key in super().__getattribute__(
-                    "attribute_map"
-                ):
-                    key = super().__getattribute__("attribute_map")[key]
-                return super().__getattribute__(key)
-
-            def __getattr__(self, key):
-                if key == "sentinel":
-                    return 5
-                raise AttributeError()
-
-        def get_foo():
-            f = Foo()
-            f.a_premap = 2
-            f.b = 3
-            return f
-
-        def fn(x, f):
-            return x * f.a_premap * f.a * f.b * f.sentinel
-
-        x = torch.randn(4)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
 
 class TestTracer(JitTestCase):

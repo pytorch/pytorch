@@ -1305,8 +1305,6 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_qat_pt2e(m, quantizer)
         else:
             m = prepare_pt2e(m, quantizer)
-        if is_debug_mode:
-            print("prepared model:", m)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
@@ -2929,22 +2927,6 @@ class TestHelperModules:
             z = x3 + x4
             w = torch.cat([z, y])
             return w
-
-    class Conv2dWithSplit(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv1 = torch.nn.Conv2d(3, 3, 3)
-            self.conv2 = torch.nn.Conv2d(3, 3, 3)
-
-        def forward(self, x):
-            x = self.conv1(x)
-            # use split so we get a list of Tensors
-            x1, x2 = torch.split(x, 2, dim=1)
-            y = torch.cat([x1, x2], dim=1)
-            return y
-
-        def example_inputs(self):
-            return (torch.randn(1, 3, 16, 16),)
 
     class ThreeAdd(torch.nn.Module):
         def forward(self, x1, x2, x3, x4):

@@ -197,7 +197,7 @@ Works only with Python3.\n A few examples:
             cpu_count += 1
             if cpu_count > 1:
                 raise ValueError(
-                    f"more than one CPU device is not allowed: {cpu_count:d}"
+                    "more than one CPU device is not allowed: %d" % (cpu_count)
                 )
             if device == "cpu":
                 continue

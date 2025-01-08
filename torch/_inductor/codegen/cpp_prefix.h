@@ -136,10 +136,10 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
 
 template <typename T>
 struct IndexValue {
-  int64_t index{};
+  int64_t index;
   T value;
-  IndexValue(int64_t idx, T val) :index(idx), value(val) {}
-  IndexValue() = default;
+  IndexValue(int64_t idx, T val) :index(idx), value(val) {};
+  IndexValue() {};
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
@@ -564,16 +564,16 @@ constexpr float uint32_to_uniform_float(uint32_t value) {
   return static_cast<float>(value & 0x7FFFFFFF) * scale;
 }
 
-inline float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
+float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
   return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
 }
 
-inline float randn_cpu(uint32_t seed, uint32_t offset) {
+float randn_cpu(uint32_t seed, uint32_t offset) {
   at::Philox4_32 engine(seed, 0, offset);
   return engine.randn(10);
 }
 
-inline int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
@@ -646,7 +646,7 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
 }
 #endif
 
-inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
+std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
   int count = 0;
   for (int64_t i = std::sqrt(number); i > 0; --i) {
     if (number % i == 0) {
@@ -664,7 +664,7 @@ inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) 
   return std::make_tuple(factors, count);
 }
 
-inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
+std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>> cache;
   auto it = cache.find(number);
   if (it != cache.end()) {
@@ -676,7 +676,7 @@ inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   }
 }
 
-inline void _mm_get_thread_blocking(
+void _mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -772,7 +772,7 @@ inline void _mm_get_thread_blocking(
   assert(Mt != 0);
 }
 
-inline void mm_get_thread_blocking(
+void mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -887,23 +887,25 @@ void mm_get_cache_blocking(
 }
 
 struct amx_tilecfg {
-  uint8_t palette_id{0};
-  uint8_t start_row{0};
-  uint8_t reserved_0[14]{};
-  uint16_t colsb[16]{};
-  uint8_t rows[16]{};
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
 };
 
 class AMXState {
  private:
-  amx_tilecfg tilecfg_{};
-  uint8_t rows_{0};
-  uint16_t colsb_{0};
-  uint8_t num_tile_rows_{0};
-  uint8_t num_tile_columns_{0};
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
 
  public:
-  AMXState() = default;
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
 
   inline void configure(
       uint8_t rows,

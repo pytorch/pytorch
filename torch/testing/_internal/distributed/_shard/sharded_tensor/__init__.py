@@ -44,7 +44,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             )
 
         rpc.init_rpc(
-            name=f"worker{self.rank:d}",
+            name="worker%d" % self.rank,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,

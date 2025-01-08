@@ -10,7 +10,6 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from inspect import currentframe
 from itertools import count
 from typing import (
     Any,
@@ -92,14 +91,12 @@ from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
-from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
-from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
@@ -701,12 +698,6 @@ def _compile_fx_inner(
                     triton_bundler_meta,
                 ) = TritonBundler.collect()
                 mb_compiled_graph.set_triton_bundle(triton_bundle)
-            except (ShortenTraceback, SkipFrame):
-                raise
-            except Exception as e:
-                raise InductorError(e, currentframe()).with_traceback(
-                    e.__traceback__
-                ) from None
             finally:
                 TritonBundler.end_compile()
             if triton_bundler_meta is not None:
@@ -1892,20 +1883,15 @@ def compile_fx(
         ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
-            try:
-                return aot_autograd(
-                    fw_compiler=fw_compiler,
-                    bw_compiler=bw_compiler,
-                    inference_compiler=inference_compiler,
-                    decompositions=decompositions,
-                    partition_fn=partition_fn,
-                    keep_inference_input_mutations=True,
-                    cudagraphs=cudagraphs,
-                )(model_, example_inputs_)
-            except ShortenTraceback as e:
-                # We will also shorten the traceback inside dynamo.
-                # This is only useful if inductor is called directly with an FX graph.
-                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+            return aot_autograd(
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                inference_compiler=inference_compiler,
+                decompositions=decompositions,
+                partition_fn=partition_fn,
+                keep_inference_input_mutations=True,
+                cudagraphs=cudagraphs,
+            )(model_, example_inputs_)
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:

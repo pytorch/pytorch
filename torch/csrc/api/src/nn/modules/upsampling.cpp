@@ -4,8 +4,8 @@ namespace F = torch::nn::functional;
 
 namespace torch::nn {
 
-UpsampleImpl::UpsampleImpl(UpsampleOptions options_)
-    : options(std::move(options_)) {}
+UpsampleImpl::UpsampleImpl(const UpsampleOptions& options_)
+    : options(options_) {}
 
 void UpsampleImpl::reset() {}
 
