@@ -87,13 +87,20 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     return x_fp8, inverse_scale
 
 
-def _fix_fp8_dtype_for_hip(dtype, device):
+def _fix_fp8_dtype_for_rocm(dtype, device):
+    # This function is used to change FP8 data types 
+    # with ROCm supported FP8 types if device is not a CPU:
+    #    e4m3fn -> e4m3fnuz
+    #    e5m2   -> e5m2fnuz
+    # Supports single, typle and list of dtypes
+    # Keeps the same test name for CUDA and ROCm
+    # Also it allows to enable FP8 inductor tests for CPU
     if torch.version.hip and device != "cpu":
         # HIP uses different float8 dtypes on GPU
         if isinstance(dtype, tuple):
-            return tuple(_fix_fp8_dtype_for_hip(x, device) for x in dtype)
+            return tuple(_fix_fp8_dtype_for_rocm(x, device) for x in dtype)
         if isinstance(dtype, list):
-            return [_fix_fp8_dtype_for_hip(x, device) for x in dtype]
+            return [_fix_fp8_dtype_for_rocm(x, device) for x in dtype]
         if dtype == torch.float8_e4m3fn:
             return torch.float8_e4m3fnuz
         elif dtype == torch.float8_e5m2:
@@ -131,7 +138,7 @@ class TestFP8Types(TestCase):
         weight_shape = (32, 16)
 
         e4m3_type = torch.float8_e4m3fn
-        e4m3_type = _fix_fp8_dtype_for_hip(e4m3_type, device="cuda")
+        e4m3_type = _fix_fp8_dtype_for_rocm(e4m3_type, device="cuda")
 
         def fp8_matmul_unwrapped(x):
             a_scale = torch.Tensor([1.0]).to(device="cuda")
@@ -171,7 +178,7 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
     @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
-        dst_types = _fix_fp8_dtype_for_hip(dst_types, device="cuda")
+        dst_types = _fix_fp8_dtype_for_rocm(dst_types, device="cuda")
         e4m3, e5m2 = dst_types
 
         def fp8_cast(x):
@@ -218,7 +225,7 @@ class TestFP8Types(TestCase):
     def test_to_fp8_saturated(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
     ):
-        dst_dtype = _fix_fp8_dtype_for_hip(dst_dtype, device="cuda")
+        dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device="cuda")
 
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
@@ -238,7 +245,7 @@ class TestFP8Types(TestCase):
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
-        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -263,7 +270,7 @@ class TestFP8Types(TestCase):
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
-        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -297,7 +304,7 @@ class TestFP8Types(TestCase):
     def test_layernorm_fp8_quant(
         self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str
     ):
-        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -342,7 +349,7 @@ class TestFP8Types(TestCase):
         shape: str,
         keepdim: bool,
     ):
-        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
