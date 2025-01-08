@@ -1112,7 +1112,7 @@ def _compile(
                 }
 
                 return {
-                    key: sorted(list(value)) if isinstance(value, set) else value
+                    key: sorted(value) if isinstance(value, set) else value
                     for key, value in d.items()
                     if key not in blocklist
                 }
