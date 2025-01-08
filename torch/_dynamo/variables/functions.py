@@ -448,6 +448,9 @@ class GeneratorObjectVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__next__":
             return self.next_variable(tx)
+        elif name == "__iter__":
+            # iter(gen) returns itself
+            return self
 
         super().call_method(tx, name, args, kwargs)
 
