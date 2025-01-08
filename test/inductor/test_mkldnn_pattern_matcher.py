@@ -2500,6 +2500,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfNoXPU
+    @config.patch({"fx_graph_cache": False})
     @parametrize("use_relu", [True])
     @parametrize("is_qat", [False])
     @parametrize("is_dynamic", [False])
@@ -2681,6 +2682,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfNoXPU
+    @config.patch({"fx_graph_cache": False})
     def test_qlinear_mul_xpu(self):
         r"""
         This testcase will quantize a Linear->Mul pattern.
