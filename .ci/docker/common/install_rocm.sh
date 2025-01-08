@@ -64,6 +64,8 @@ install_ubuntu() {
 
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+        # clr build needs CppHeaderParser but can only find it using conda's python
+        /opt/conda/bin/python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b rocm-6.3.x
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr -b release/rocm-rel-6.3-statco-hotfix
