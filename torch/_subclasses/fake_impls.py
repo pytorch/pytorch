@@ -27,9 +27,10 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-from torch.utils import _pytree as pytree
 from torch.utils._stats import count_label
 
+
+pytree = torch.utils._pytree
 
 __all__ = [
     "op_implementations_checks",

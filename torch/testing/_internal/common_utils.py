@@ -98,7 +98,7 @@ from torch.testing._comparison import (
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
-from torch.utils import pytree
+import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
 try:
     import pytest
@@ -5232,11 +5232,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_iter(outs):
+    for out in pytree.tree_leaves(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_iter(inps) if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_iter(inps):
+    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_leaves(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

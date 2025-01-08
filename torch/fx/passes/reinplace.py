@@ -10,7 +10,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils.pytree import tree_leaves, tree_map_, tree_map_only
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map_only
 
 
 __all__ = ["reinplace"]
@@ -522,7 +523,7 @@ def reinplace(gm, *sample_args):
                 if isinstance(x, FakeTensor):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
 
-            tree_map_(_add_to_map, n.meta["fake_result"])
+            pytree.tree_map_(_add_to_map, n.meta["fake_result"])
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
@@ -550,8 +551,8 @@ def reinplace(gm, *sample_args):
             # (We could potentially swizzle this into larger_tensor.add_(scalar_tensor),
             # this is probably an optimization to revisit later).
             self_arg = node.args[0]
-            self_flattened = tree_leaves(self_arg.meta["fake_result"])
-            node_flattened = tree_leaves(node.meta["fake_result"])
+            self_flattened = pytree.tree_leaves(self_arg.meta["fake_result"])
+            node_flattened = pytree.tree_leaves(node.meta["fake_result"])
             self_has_wrong_metadata = False
             if len(self_flattened) == len(node_flattened):
                 for self_meta, node_meta in zip(self_flattened, node_flattened):
@@ -695,8 +696,10 @@ def reinplace(gm, *sample_args):
                     )
 
                     # Second, update our storage_to_nodes data structure.
-                    old_flattened_res = tree_leaves(old.meta["fake_result"])
-                    node_flattened_res = tree_leaves(node_to_update.meta["fake_result"])
+                    old_flattened_res = pytree.tree_leaves(old.meta["fake_result"])
+                    node_flattened_res = pytree.tree_leaves(
+                        node_to_update.meta["fake_result"]
+                    )
 
                     old_res_storage = {
                         StorageWeakRef(x._typed_storage())
@@ -724,7 +727,7 @@ def reinplace(gm, *sample_args):
                         and len(node_res_storage) == 1
                         and old_res_storage == node_res_storage
                     ):
-                        new_flattened_res = tree_leaves(new.meta["fake_result"])
+                        new_flattened_res = pytree.tree_leaves(new.meta["fake_result"])
                         new_res_storage = {
                             StorageWeakRef(x._typed_storage())
                             for x in new_flattened_res

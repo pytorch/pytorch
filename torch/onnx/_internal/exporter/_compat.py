@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core, _onnx_program, _registration
-from torch.utils import pytree
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -154,8 +154,8 @@ def _unflatten_dynamic_shapes_with_inputs_tree(
     inputs: list[Any],
     dynamic_shapes: dict[str, Any | None],
 ) -> dict[str, Any | None]:
-    tree_structure = pytree.tree_structure(inputs)
-    return pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
+    _, tree_structure = _pytree.tree_flatten(inputs)
+    return _pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
 
 
 def _from_dynamic_shapes_to_dynamic_axes(
@@ -192,7 +192,7 @@ def _from_dynamic_shapes_to_dynamic_axes(
             for k, v in x.items()
         )
 
-    flat_dynamic_shapes = pytree.tree_leaves(dynamic_shapes, is_leaf=is_dict_axes)
+    flat_dynamic_shapes = _pytree.tree_leaves(dynamic_shapes, is_leaf=is_dict_axes)
 
     if len(input_names) < len(flat_dynamic_shapes):
         raise ValueError(

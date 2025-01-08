@@ -99,13 +99,17 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 
 class KeyEntry(Protocol):
-    entry: Any
+    def __hash__(self) -> int:
+        ...
+
+    def __eq__(self, other: object) -> bool:
+        ...
 
     def __str__(self) -> str:
-        raise NotImplementedError
+        ...
 
     def get(self, parent: Any) -> Any:
-        raise NotImplementedError
+        ...
 
 
 class EnumEncoder(json.JSONEncoder):
@@ -125,7 +129,7 @@ FromDumpableContextFn = Callable[[DumpableContext], Context]
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
 MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
 KeyPath = Tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Context]]
+FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 
 
 # A NodeDef holds two callables:
@@ -252,7 +256,6 @@ def register_pytree_node(
             serialized_type_name=serialized_type_name,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
-            flatten_with_keys_fn=flatten_with_keys_fn,
         )
     else:
         args = (cls, flatten_fn, unflatten_fn)
@@ -260,7 +263,6 @@ def register_pytree_node(
             "serialized_type_name": serialized_type_name,
             "to_dumpable_context": to_dumpable_context,
             "from_dumpable_context": from_dumpable_context,
-            "flatten_with_keys_fn": flatten_with_keys_fn,
         }
         _cxx_pytree_pending_imports.append((args, kwargs))
 
@@ -398,12 +400,8 @@ def _private_register_pytree_node(
 
 
 @dataclasses.dataclass(frozen=True)
-class SequenceKey(KeyEntry, Generic[T]):
-    entry: int
-
-    @property
-    def idx(self) -> int:
-        return self.entry
+class SequenceKey(Generic[T]):
+    idx: int
 
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
@@ -416,12 +414,8 @@ K = TypeVar("K", bound=Hashable)
 
 
 @dataclasses.dataclass(frozen=True)
-class MappingKey(KeyEntry, Generic[K, T]):
-    entry: K
-
-    @property
-    def key(self) -> K:
-        return self.entry
+class MappingKey(Generic[K, T]):
+    key: K
 
     def __str__(self) -> str:
         return f"[{self.key!r}]"
@@ -431,12 +425,8 @@ class MappingKey(KeyEntry, Generic[K, T]):
 
 
 @dataclasses.dataclass(frozen=True)
-class GetAttrKey(KeyEntry):
-    entry: str
-
-    @property
-    def name(self) -> str:
-        return self.entry
+class GetAttrKey:
+    name: str
 
     def __str__(self) -> str:
         return f".{self.name}"
@@ -754,12 +744,6 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def children(self) -> List["TreeSpec"]:
-        return self.children_specs.copy()
-
-    def child(self, index: int) -> "TreeSpec":
-        return self.children_specs[index]
-
     def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
         def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
             if treespec.is_leaf():
@@ -917,6 +901,11 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
+    if not isinstance(treespec, TreeSpec):
+        raise TypeError(
+            f"tree_unflatten(leaves, treespec): Expected `treespec` to be "
+            f"instance of TreeSpec but got item of type {type(treespec)}.",
+        )
     return treespec.unflatten(leaves)
 
 

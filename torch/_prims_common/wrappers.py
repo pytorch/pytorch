@@ -16,7 +16,8 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
 )
-from torch.utils.pytree import tree_flatten, tree_leaves, tree_unflatten
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 _T = TypeVar("_T")
@@ -126,7 +127,7 @@ class elementwise_type_promotion_wrapper:
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_leaves(type_promoting_args)
+            flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,

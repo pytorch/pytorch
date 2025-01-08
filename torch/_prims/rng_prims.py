@@ -2,6 +2,7 @@
 from typing import Optional, Tuple
 
 import torch
+import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -14,7 +15,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.types import _device, _dtype
-from torch.utils.pytree import tree_map
 
 
 def throw_on_non_cuda(device):
@@ -205,8 +205,8 @@ def register_run_and_save_rng_state_op():
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, **kwargs):
         out = impl_backend_select(op, *args, **kwargs)
-        proxy_args = tree_map(mode.tracer.unwrap_proxy, (op, *args))
-        proxy_kwargs = tree_map(mode.tracer.unwrap_proxy, kwargs)
+        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
         out_proxy = mode.tracer.create_proxy(
             "call_function", run_and_save_rng_state, proxy_args, proxy_kwargs
         )
@@ -269,8 +269,8 @@ def register_run_with_rng_state_op():
         # it
         with disable_proxy_modes_tracing():
             out = run_with_rng_state(rng_state, op, *args, **kwargs)
-        proxy_args = tree_map(mode.tracer.unwrap_proxy, (rng_state, op, *args))
-        proxy_kwargs = tree_map(mode.tracer.unwrap_proxy, kwargs)
+        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (rng_state, op, *args))
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
         out_proxy = mode.tracer.create_proxy(
             "call_function", run_with_rng_state, proxy_args, proxy_kwargs
         )

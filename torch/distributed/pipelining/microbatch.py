@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch.fx.node import map_aggregate
-from torch.utils.pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 __all__ = [

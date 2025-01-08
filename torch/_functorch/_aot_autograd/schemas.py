@@ -9,21 +9,10 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    NewType,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
 
 import torch
-import torch.utils.pytree as pytree
+import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
@@ -36,10 +25,6 @@ from .functional_utils import (
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
-
-
-if TYPE_CHECKING:
-    from torch.utils.pytree import PyTreeSpec
 
 
 zip = strict_zip
@@ -763,8 +748,8 @@ class GraphSignature:
     buffers_to_mutate: Dict[GraphOutputName, FQN]
     user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
 
-    in_spec: "PyTreeSpec"
-    out_spec: "PyTreeSpec"
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
 
     backward_signature: Optional[BackwardSignature]
 
@@ -775,8 +760,8 @@ class GraphSignature:
     def from_tracing_metadata(
         cls,
         *,
-        in_spec: "PyTreeSpec",
-        out_spec: "PyTreeSpec",
+        in_spec: pytree.TreeSpec,
+        out_spec: pytree.TreeSpec,
         graph_input_names: List[str],
         graph_output_names: List[str],
         view_mutation_metadata: ViewAndMutationMeta,

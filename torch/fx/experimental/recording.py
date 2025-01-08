@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from torch.utils.pytree import tree_map_only
+import torch.utils._pytree as pytree
 
 
 log = logging.getLogger(__name__)
@@ -111,11 +111,13 @@ class ShapeEnvEvent:
         kwargs = dict(self.kwargs or {})
 
         # Replace any argument of type ShapeEnv by the given one.
-        args, kwargs = tree_map_only(ShapeEnv, lambda _: shape_env, (args, kwargs))
+        args, kwargs = pytree.tree_map_only(
+            ShapeEnv, lambda _: shape_env, (args, kwargs)
+        )
 
         # Replace any argument of type SymTypes by a new instance,
         # replacing its ShapeEnv reference.
-        args, kwargs = tree_map_only(
+        args, kwargs = pytree.tree_map_only(
             lambda x: isinstance(x, SymTypes) and is_symbolic(x),
             lambda a: type(a)(a.node.with_shape_env(shape_env)),
             (args, kwargs),

@@ -6,7 +6,12 @@ import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor.placement_types import Placement
-from torch.utils import pytree
+
+
+try:
+    from torch.utils import _cxx_pytree as pytree
+except ImportError:
+    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 
 __all__ = ["local_map"]

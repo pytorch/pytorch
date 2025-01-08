@@ -5,7 +5,7 @@ from typing import Callable, Dict
 
 import torch
 from torch._decomp import decomposition_table
-from torch.utils.pytree import tree_map_only
+from torch.utils._pytree import tree_map_only
 
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}

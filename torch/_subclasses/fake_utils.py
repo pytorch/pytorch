@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Callable, List, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -14,7 +15,6 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.pytree import tree_iter, tree_leaves, tree_map_only
 
 
 aten = torch._ops.ops.aten
@@ -248,7 +248,7 @@ class CrossRefFakeMode(TorchDispatchMode):
             try:
                 # TODO: enable_python_dispatcher() here
                 with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
-                    fake_args, fake_kwargs = tree_map_only(
+                    fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
                         functools.partial(fake_mode.from_tensor, static_shapes=True),
                         (args, kwargs),
@@ -264,8 +264,8 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         r = func(*args, **kwargs)
         if fake_r is not None:
-            r_flat = tree_leaves(r)
-            f_flat = tree_leaves(fake_r)
+            r_flat = pytree.tree_leaves(r)
+            f_flat = pytree.tree_leaves(fake_r)
             assert len(f_flat) == len(
                 r_flat
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
@@ -275,7 +275,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                     context, r, (args, kwargs), fake_r, (fake_args, fake_kwargs)
                 )
 
-            for idx, (r_out, f_out) in enumerate(zip(tree_iter(r), tree_iter(fake_r))):
+            for idx, (r_out, f_out) in enumerate(
+                zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
+            ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     f_out, torch.Tensor

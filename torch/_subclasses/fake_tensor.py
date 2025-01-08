@@ -55,7 +55,6 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
-from torch.utils import _pytree as pytree
 from torch.utils._backport_slots import dataclass_slots
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
@@ -97,6 +96,7 @@ _UNASSIGNED = _Unassigned()
 
 DimList = List
 
+pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten

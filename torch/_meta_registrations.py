@@ -36,7 +36,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
-from torch.utils.pytree import tree_map_
+from torch.utils import _pytree as pytree
 
 
 _T = TypeVar("_T")
@@ -55,7 +55,7 @@ def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
-        tree_map_(register, op)
+        pytree.tree_map_(register, op)
         return fn
 
     return wrapper

@@ -22,7 +22,7 @@ from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
-from torch.utils import _python_dispatch, pytree
+from torch.utils import _python_dispatch, _pytree
 
 
 if TYPE_CHECKING:
@@ -199,7 +199,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *pytree.tree_iter((candidate_args.values(), candidate_kwargs)),
+            *_pytree.arg_tree_leaves(*candidate_args.values(), **candidate_kwargs),
             type_promotion_kind=self.promotion_kind,
         )
 
