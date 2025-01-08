@@ -1,7 +1,7 @@
 import pprint
 
 import torch
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils.pytree.python import tree_map, tree_map_only
 
 
 class OpenRegTensorMeta:

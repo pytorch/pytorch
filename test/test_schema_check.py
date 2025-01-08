@@ -4,7 +4,7 @@
 import os
 import sys
 import torch
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 import unittest
 
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
