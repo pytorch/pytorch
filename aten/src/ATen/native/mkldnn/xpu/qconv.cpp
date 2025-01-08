@@ -32,17 +32,17 @@ class QConvoneDNNXPU final {
       at::Tensor weight,
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
       double inv_output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
-      torch::List<c10::optional<at::Scalar>> scalars,
-      c10::optional<c10::string_view> algorithm) {
+      std::optional<c10::ScalarType> output_dtype,
+      std::string_view attr,
+      torch::List<std::optional<at::Scalar>> scalars,
+      std::optional<std::string_view> algorithm) {
     if (act.dim() == 3 || act.dim() == 5) {
       TORCH_CHECK(
           attr == "none",
@@ -55,7 +55,7 @@ class QConvoneDNNXPU final {
       TORCH_CHECK(
           attr == "none" || attr == "relu" || attr == "hardtanh" ||
               attr == "hardswish" || attr == "swish",
-          "We support quantized convolution without any post-ops or combinations for Quantized Conv + ReLU, Hardtanh, and Hardswish are supported. However, encountered unsupported post operation:",
+          "We support quantized convolution without any post-ops or combinations for Quantized Conv + ReLU, Hardtanh, GELU, Swish, and Hardswish are supported. However, encountered unsupported post operation:",
           attr,
           ".");
     }
@@ -95,12 +95,12 @@ class QConvoneDNNXPU final {
         output,
         inv_output_scale,
         output_zero_point,
-        /*accum*/ c10::nullopt,
+        /*accum*/ std::nullopt,
         /*accum_scale*/ 0.0,
         /*accum_zero_point*/ 0,
         /*output_dtype*/ output_dtype,
-        /*binary_attr*/ c10::nullopt,
-        /*binary_alpha*/ c10::nullopt,
+        /*binary_attr*/ std::nullopt,
+        /*binary_alpha*/ std::nullopt,
         /*unary_attr*/ attr,
         /*unary_scalars*/ scalars,
         /*unary_algorithm*/ algorithm);
@@ -114,7 +114,7 @@ class QConvoneDNNXPU final {
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
       at::Tensor accum,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -124,11 +124,11 @@ class QConvoneDNNXPU final {
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
       int64_t accum_zero_point,
-      c10::string_view binary_attr,
-      c10::optional<at::Scalar> alpha,
-      c10::optional<c10::string_view> unary_attr,
-      torch::List<c10::optional<at::Scalar>> unary_scalars,
-      c10::optional<c10::string_view> unary_algorithm) {
+      std::string_view binary_attr,
+      std::optional<at::Scalar> alpha,
+      std::optional<std::string_view> unary_attr,
+      torch::List<std::optional<at::Scalar>> unary_scalars,
+      std::optional<std::string_view> unary_algorithm) {
     TORCH_CHECK(
         act.dim() == 4 && binary_attr == "sum" &&
             (!unary_attr.has_value() ||
