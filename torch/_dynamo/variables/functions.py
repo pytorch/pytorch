@@ -548,7 +548,7 @@ class GeneratorObjectVariable(VariableTracker):
             except ObservedException:
                 # propagate the exception back to the parent caller
                 tx.exn_vt_stack.extend(tracer.exn_vt_stack)
-                return variables.ConstantVariable(None)
+                raise
 
             retval = self.next_variable(tx)
 
