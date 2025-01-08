@@ -315,7 +315,7 @@ def _preload_pypi_cuda_deps() -> None:
             import warnings
 
             warnings.warn(
-                f"Failed to load {lib_name} library, please check your environment.",
+                f"Failed to load {lib_name} library, please uninstall nvidia-* packages via python package manager and reinstall torch.",
             )
 
 
