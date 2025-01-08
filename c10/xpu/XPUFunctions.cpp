@@ -1,5 +1,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <vector>
@@ -27,6 +28,22 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
+void identifyDeviceType(
+    std::vector<sycl::device>& device_list,
+    std::vector<bool>& is_igpu,
+    std::vector<bool>& is_dgpu) {
+  for (const auto i : c10::irange(device_list.size())) {
+    const auto& device = device_list[i];
+    if (device.is_gpu()) {
+      if (device.get_info<sycl::info::device::host_unified_memory>()) {
+        is_igpu[i] = true;
+      } else {
+        is_dgpu[i] = true;
+      }
+    }
+  }
+}
+
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   auto platform_list = sycl::platform::get_platforms();
   // Enumerated GPU devices from the specific platform.
@@ -35,11 +52,25 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
       continue;
     }
     auto device_list = platform.get_devices();
-    for (const auto& device : device_list) {
-      if (device.is_gpu()) {
-        devices.push_back(std::make_unique<sycl::device>(device));
+    auto is_igpu = std::vector<bool>(device_list.size(), false);
+    auto is_dgpu = std::vector<bool>(device_list.size(), false);
+    identifyDeviceType(device_list, is_igpu, is_dgpu);
+    // First, enumerate dGPU devices.
+    for (const auto i : c10::irange(device_list.size())) {
+      if (is_dgpu[i]) {
+        devices.push_back(std::make_unique<sycl::device>(device_list[i]));
       }
     }
+    // Second, enumerate iGPU devices if no dGPU is found.
+    if (devices.empty()) {
+      for (const auto i : c10::irange(device_list.size())) {
+        if (is_igpu[i]) {
+          devices.push_back(std::make_unique<sycl::device>(device_list[i]));
+        }
+      }
+    }
+    // Only one ext_oneapi_level_zero platform is supported for now.
+    break;
   }
 }
 
