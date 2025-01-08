@@ -341,6 +341,13 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 #if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+#else
+        TORCH_CHECK(
+            false,
+            "CK Flash Attention is not compiled with the right GPU arch. "
+            "Either remove USE_CK_FLASH_ATTENTION or compile with the "
+            "GPU arch that CK attention supports."
+        )
 #endif
     }
     else {

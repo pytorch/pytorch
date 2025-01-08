@@ -1988,13 +1988,8 @@ class AlgorithmSelectorCache(PersistentCache):
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
             output.zero_()
-            device_type = next(
-                (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
-                "cuda",
-            )
-            # we can't postpone benchmarking if we need to verify the results,
-            # also weirdly broken on CPU for some cases
-            lazy = VERIFY == {} and device_type == "cuda"
+            # we can't postpone benchmarking if we need to verify the results
+            lazy = not VERIFY
             result = choice.benchmark(*inpts, out=output, lazy=lazy)
             if VERIFY and autotune_args.expected is not None:
                 autotune_args.verify(**VERIFY)
