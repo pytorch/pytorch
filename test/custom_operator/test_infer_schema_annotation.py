@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import typing
-from typing import List, Optional, Sequence, Union  # noqa: F401
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor, types
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 mutates_args = {}

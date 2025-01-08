@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
+from typing import Any, Callable, DefaultDict, Dict, Optional, Type
 
 import sympy
 
@@ -24,7 +24,7 @@ from .virtualized import V
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(
-    pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
+    pattern: tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
     node: torch.fx.node.Node,
     modules: Dict[str, torch.nn.modules.Module],
 ) -> bool:
@@ -208,7 +208,7 @@ def get_fake(x):
     return x
 
 
-def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, Any]]:
+def get_fake_args_kwargs(x: torch.fx.Node) -> tuple[bool, tuple[Any], Dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """
