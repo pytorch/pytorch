@@ -1612,7 +1612,10 @@ static PyObject* _dims(PyObject *self,
     }
     // note that this opcode was removed in 3.12
     #endif
+    // ???
+    #if !(IS_PYTHON_3_13_PLUS)
     decoder.next();
+    #endif
 
     if (relevant_op(decoder.opcode())) {
         found_ndims = 1;
