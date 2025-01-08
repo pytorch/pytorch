@@ -277,9 +277,7 @@ if sys.platform == "win32":
 
 def _preload_pypi_cuda_deps() -> None:
     """Try to preloads cuda deps if possible."""
-    # Only a Linux issue for now
-    if platform.system() != "Linux":
-        return
+    assert platform.system() == "Linux"
 
     cuda_libs: _Dict[str, str] = {
         "cublas": "libcublas.so.*[0-9]",
@@ -325,14 +323,15 @@ def _preload_pypi_cuda_deps() -> None:
 def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == "Windows":
         return
+    elif platform.system() == "Linux":
+        # Linux wheels may use CUDA runtime from pypi
+        _preload_pypi_cuda_deps()
 
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    _preload_pypi_cuda_deps()
 
     ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
