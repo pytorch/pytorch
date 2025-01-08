@@ -1427,7 +1427,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
-static void GreenCOntext(PyObject* module) {
+static void initGreenContext(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<GreenContext>(m, "GreenContext")
       .def_static("create", &GreenContext::create)
@@ -2150,7 +2150,7 @@ void initModule(PyObject* module) {
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   initCudaMethodBindings(module);
-  GreenCOntext(module);
+  initGreenContext(module);
 }
 
 } // namespace torch::cuda
