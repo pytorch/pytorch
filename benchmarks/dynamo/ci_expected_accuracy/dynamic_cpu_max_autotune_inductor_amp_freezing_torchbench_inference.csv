@@ -50,27 +50,27 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,42
+detectron2_fasterrcnn_r_101_c4,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,42
+detectron2_fasterrcnn_r_101_dc5,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,46
+detectron2_fasterrcnn_r_101_fpn,fail_accuracy,46
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,42
+detectron2_fasterrcnn_r_50_c4,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,42
+detectron2_fasterrcnn_r_50_dc5,fail_accuracy,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,46
+detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
@@ -338,7 +338,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,29
+vision_maskrcnn,fail_accuracy,29
 
 
 
