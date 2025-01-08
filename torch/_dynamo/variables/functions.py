@@ -19,6 +19,7 @@ from ..exc import (
     handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
+    ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
@@ -466,6 +467,73 @@ class GeneratorObjectVariable(VariableTracker):
             tracer = self._get_inline_tracer(tx)
             tracer.push_many(args)
             return self.next_variable(tx)
+        elif name == "close":
+            # * Raises a GeneratorExit at the point where the generator function was paused.
+            # * If the generator function catches the exception and returns a
+            # value, this value is returned from close() - Python 3.13+
+            # * If the generator function is already closed, or raises GeneratorExit
+            # (by not catching the exception), close() returns None.
+            # * If the generator yields a value, a RuntimeError is raised.
+            # * If the generator raises any other exception, it is propagated to the caller.
+            # * If the generator has already exited due to an exception or normal
+            # exit, close() returns None and has no other effect.
+
+            # Return None if close is called on a just-started generator
+            # See test GeneratorCloseCpythonTests::test_close_not_started
+
+            if self._is_generator_new() or self._is_generator_exhausted():
+                return variables.ConstantVariable(None)
+
+            tracer = self._get_inline_tracer(tx)
+
+            # Raise GeneratorExit to see if user code catches it. Any other exception
+            # is propagated to the parent frame.
+            if sys.version_info >= (3, 12):
+                # There's an extra block on Python 3.12+ to handle StopIteration
+                # see: https://github.com/python/cpython/blob/8f93dd8a8f237b277abad20d566df90c5cbd7f1e/Objects/genobject.c#L394-L397
+                #
+                #   1           0 RETURN_GENERATOR
+                #               2 POP_TOP
+                #               4 RESUME                   0
+
+                #   2           6 LOAD_CONST               1 (1)
+                #               8 YIELD_VALUE              1
+                #              10 RESUME                   1
+                #              12 POP_TOP
+                #              14 RETURN_CONST             0 (None)
+                #         >>   16 CALL_INTRINSIC_1         3 (INTRINSIC_STOPITERATION_ERROR)
+                #              18 RERAISE                  1
+                # ExceptionTable:
+                #   4 to 14 -> 16 [0] lasti
+                self._setup_exception(
+                    tx, variables.ExceptionVariable(GeneratorExit, ())
+                )
+                next_instruction = tracer.instructions[tracer.instruction_pointer]
+                if next_instruction.opname == "CALL_INTRINSIC_1":
+                    return variables.ConstantVariable(None)
+            else:
+                try:
+                    self._setup_exception(
+                        tx, variables.ExceptionVariable(GeneratorExit, ())
+                    )
+                except ObservedGeneratorExit:
+                    # If it doesn't catch, we just return None, as per the text above
+                    return variables.ConstantVariable(None)
+
+            try:
+                # Raise RuntimeError if the generator yields any other value
+                if self.next_variable(tx):
+                    raise_observed_exception(RuntimeError, tx)
+            except ObservedGeneratorExit:
+                tracer.generator_exhausted = True
+                return variables.ConstantVariable(None)
+            except ObservedUserStopIteration:
+                # In Python 3.13+, one can capture GeneratorExit and return a value
+                # See test_generator.py::test_close_capture_GeneratorExit_return
+                # https://discuss.python.org/t/let-generator-close-return-stopiteration-value/24786/26
+                # https://github.com/python/cpython/pull/104771
+                assert tracer.symbolic_result is not None
+                return tracer.symbolic_result
 
         super().call_method(tx, name, args, kwargs)
 
