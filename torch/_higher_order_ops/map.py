@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint

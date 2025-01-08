@@ -27,15 +27,12 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils import pytree
 
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
-try:
-    from torch.utils import _cxx_pytree as pytree
-except ImportError:
-    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)

@@ -20,7 +20,7 @@ from common_utils import decorate, decorateForModules, skip, skipOps, xfail
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,

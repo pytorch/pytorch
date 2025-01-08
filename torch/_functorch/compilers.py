@@ -14,7 +14,7 @@ import sympy
 import torch
 import torch.fx as fx
 import torch.nn as nn
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch import SymInt
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import bind_symbols
@@ -160,8 +160,8 @@ class DebugInterpreter(fx.Interpreter):
 
         r = super().run_node(n)
         if "val" in n.meta:
-            n_vals, _n_spec = pytree.tree_flatten(n.meta["val"])
-            r_vals, _r_spec = pytree.tree_flatten(r)
+            n_vals = pytree.tree_leaves(n.meta["val"])
+            r_vals = pytree.tree_leaves(r)
             # TODO: There is some sort of problem where we record that an
             # operator returned a tuple/list, and then later it turns out the
             # real version of the operator returned a list/tuple. Need to
