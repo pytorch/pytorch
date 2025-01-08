@@ -298,15 +298,18 @@ GEMM_TEMPLATE = r"""
 def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
+
 def is_slice(node: ir.IRNode):
-    old_layout = node.data.get_layout()
-    new_layout = node.layout
-    return (
-        isinstance(node, ir.ReinterpretView)
-        and isinstance(node.data, ir.StorageBox)
-        and old_layout.size[-len(new_layout.size):] == new_layout.size
-        and len(old_layout.size) > len(new_layout.size)
-    )
+    if isinstance(node, ir.ReinterpretView):
+        old_layout = node.data.get_layout()
+        new_layout = node.layout
+        return (
+            isinstance(node.data, ir.StorageBox)
+            and old_layout.size[-len(new_layout.size) :] == new_layout.size
+            and len(old_layout.size) > len(new_layout.size)
+        )
+    return False
+
 
 _T = TypeVar("_T", ir.IRNode, torch.Tensor)
 

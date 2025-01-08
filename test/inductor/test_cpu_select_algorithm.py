@@ -2312,6 +2312,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         except Exception:
             # skip this UT if import failed
             return
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2335,6 +2336,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
