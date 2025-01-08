@@ -2320,8 +2320,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.weight = torch.nn.Parameter(w, requires_grad=False)
 
             def forward(self, x, w):
+                # Test contiguous slice of weights
                 y = x @ w[2]
+                # Test non-contiguous slice of weights (will be copied)
                 y = y @ w[:, 2]
+                # Test mm slice of weight
                 return torch.mm(y[2], self.weight[2])
 
         counters.clear()

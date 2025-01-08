@@ -848,6 +848,7 @@ class CppGemmTemplate(CppTemplate):
             # It shouldn't happen as viewing an mkldnn tensor, we can extend the
             # implementation if it does.
             assert not isinstance(new_inputs[1], ir.BaseView)
+        # Note that the layout of MKLDNN Tensor is with the wrong stride
         view_size, view_stride, view_offset = cls.get_view_layout(new_inputs[1])
 
         def maybe_to_dense(inputs, layout_or_out):
