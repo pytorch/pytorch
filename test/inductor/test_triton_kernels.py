@@ -3805,10 +3805,11 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         @triton.autotune(
             configs=[
                 triton.Config(kwargs={"BLOCK_SIZE": 32}),
-                triton.Config(kwargs={"BLOCK_SIZE": 64}),
             ],
             key=["N"],
         )
+        # we should be able to modify existing keys in kwargs
+        @triton.heuristics({"BLOCK_SIZE": lambda nargs: nargs["BLOCK_SIZE"] * 2})
         # test kwargs
         @triton.heuristics({"EVEN_N": lambda nargs: nargs["N"] + 10})
         @triton.heuristics({"EVEN_N": lambda nargs: nargs["EVEN_N"] * 2})
@@ -3827,7 +3828,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             EVEN_N: tl.constexpr,
             NDIM_src: tl.constexpr,
         ):
-            tl.store(dst, EVEN_N)
+            tl.store(dst, EVEN_N + BLOCK_SIZE)
             tl.store(dst + 1, NDIM_src)
 
         grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
@@ -3867,10 +3868,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         triton_dst = torch.zeros(N, device=GPU_TYPE)
         heuristics_kernel[grid](triton_dst, triton_src, N=N)
 
-        # triton_dst[0].item() is 2056
-        # (1023 + 10) * 2 - 10 = 2056
+        # triton_dst[0].item() is 2120
+        # (1023 + 10) * 2 - 10 + BLOCK_SIZE = 2056 + 64 = 2120
         # this is to test that we apply the heuristics in the correct order
-        self.assertEqual(triton_dst[0].item(), 2056)
+        self.assertEqual(triton_dst[0].item(), 2120)
         self.assertEqual(triton_dst[1].item(), 0.0)
 
         # Results should match
@@ -3884,7 +3885,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             @triton.autotune(
                 configs=[
                     triton.Config(kwargs={"BLOCK_SIZE": 32}),
-                    triton.Config(kwargs={"BLOCK_SIZE": 64}),
                 ],
                 key=["N"],
             )
