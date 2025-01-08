@@ -342,8 +342,12 @@ def get_device_type(
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
-    return is_gpu(get_device_type(x))
-
+    device_type = get_device_type(x)
+    if is_gpu(device_type) and config.cuda_backend == "triton":
+        return True
+    if is_cpu(device_type) and config.cpu_backend == "triton":
+        return True
+    return False
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
