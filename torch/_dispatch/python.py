@@ -8,7 +8,7 @@ import torch
 import torch._C
 import torch._ops
 import torch.utils._python_dispatch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]

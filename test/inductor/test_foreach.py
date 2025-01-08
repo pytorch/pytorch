@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 
 aten = torch.ops.aten

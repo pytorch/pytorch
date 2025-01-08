@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload

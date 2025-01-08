@@ -6,8 +6,8 @@ from pathlib import Path
 
 import torch
 import torch.onnx
+import torch.utils.pytree.python as pytree
 from torch.testing._internal import common_utils
-from torch.utils import _pytree as torch_pytree
 
 
 sys.path.append(str(Path(__file__).absolute().parents[1]))
@@ -284,7 +284,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             count += 1
             return None
 
-        dynamic_shapes = torch_pytree.tree_map(dynamify_inp, inp)
+        dynamic_shapes = pytree.tree_map(dynamify_inp, inp)
         exported_program = torch.export.export(
             foo, inp, dynamic_shapes=dynamic_shapes, strict=True
         )

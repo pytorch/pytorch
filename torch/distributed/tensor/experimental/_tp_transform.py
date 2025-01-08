@@ -4,6 +4,7 @@ import operator
 from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -23,7 +24,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import Node
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-from torch.utils import _pytree as pytree
 
 
 __all__ = ["tensor_parallel_transformation"]
