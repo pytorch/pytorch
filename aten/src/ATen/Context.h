@@ -477,7 +477,7 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
 }
 
 inline bool hasCUDA() {
-  return globalContext().hasCUDA();
+  return globalContext().hasCUDA() && detail::getCUDAHooks().deviceCount();
 }
 
 inline bool hasMTIA() {
@@ -563,18 +563,14 @@ inline void manual_seed(uint64_t seed) {
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
-  // NB: Sometimes we build with CUDA, but we don't have any GPUs
-  // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
-  if (hasCUDA() && cuda_num_gpus > 0) {
-    for (const auto i : c10::irange(cuda_num_gpus)) {
-      auto cuda_gen = globalContext().defaultGenerator(
-          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
-        cuda_gen.set_current_seed(seed);
-      }
+
+  for (const auto i : c10::irange(detail::getCUDAHooks().deviceCount())) {
+    auto cuda_gen = globalContext().defaultGenerator(
+        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(cuda_gen.mutex());
+      cuda_gen.set_current_seed(seed);
     }
   }
 
