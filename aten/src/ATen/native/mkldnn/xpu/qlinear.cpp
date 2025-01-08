@@ -39,7 +39,7 @@ Tensor q_linear_pointwise(
   auto dst_dtype = fp32_output
       ? c10::kFloat
       : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
+  Tensor qout = at::empty(dst_dims, act.options().dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -97,7 +97,7 @@ Tensor q_linear_pointwise_tensor(
   auto dst_dtype = fp32_output
       ? c10::kFloat
       : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
+  Tensor qout = at::empty(dst_dims, act.options().dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
