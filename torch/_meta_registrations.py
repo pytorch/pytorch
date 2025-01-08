@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
 from functools import wraps
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -39,13 +39,16 @@ from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.utils import _pytree as pytree
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 
-def register_meta(op):
+def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def wrapper(fn):
         fn = _convert_out_params(fn)
 
@@ -2255,6 +2258,44 @@ def calc_conv_nd_return_shape(
 
 def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+
+
+@register_meta(aten.miopen_batch_norm.default)
+def meta_miopen_batch_norm(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    running_mean: Optional[torch.Tensor],
+    running_var: Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    # In batch norm the output is of the same shape as the input
+    out_shape = input_tensor.shape
+
+    # If tensor is provided for running_mean and running_var then use this. If these are not
+    # provded then we return the shape of weight tensor. Similar to how this is handled in the decomposition
+    save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
+    save_var_shape = running_var.shape if running_var is not None else weight.shape
+
+    def pick_memory_format():
+        if is_channels_last(input_tensor):
+            return torch.channels_last
+        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return torch.contiguous_format
+        return torch.contiguous_format
+
+    out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
+
+    if training:
+        save_mean = input_tensor.new_empty(save_mean_shape)
+        save_var = input_tensor.new_empty(save_var_shape)
+    else:
+        save_mean = input_tensor.new_empty((0,))
+        save_var = input_tensor.new_empty((0,))
+
+    return out, save_mean, save_var
 
 
 @register_meta(aten.convolution.default)
