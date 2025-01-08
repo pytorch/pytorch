@@ -4357,10 +4357,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # frame_count should stay at 1.
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -6462,6 +6458,10 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             torch.set_default_device(None)
 
     @skipIfHpu
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "flash attention not supported",
+    )
     def test_flash_attn_backward_mixed_strides(self, device):
         # in this repro, "grad_out" and "value" are transposed tensors,
         # but "key" and "value" are contiguous
