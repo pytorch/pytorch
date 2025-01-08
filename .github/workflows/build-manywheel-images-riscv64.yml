@@ -54,6 +54,11 @@ jobs:
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
           fi
+      # QEMU is used for compiling NumPy
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
       - name: Build Docker Image
         run: |
           .ci/docker/manywheel/build.sh manylinuxriscv64-builder:cpu-riscv64
