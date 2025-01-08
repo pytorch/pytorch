@@ -1,14 +1,11 @@
-// NOTE: Like interface.cpp, this file will be copied into AOTInductor
-// generated output. This file is intended to keep implementation
-// details separate from the implementation of the AOTI public
-// interface.
+#pragma once
+
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 template <typename T>
 void convert_output_to_handle(
     const ArrayRefTensor<T>& output,
@@ -82,9 +79,9 @@ template <typename T>
 void assert_numel(const ArrayRefTensor<T>& tensor, uint64_t numel) {
   if (tensor.numel() != numel) {
     std::stringstream err;
-    err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();
+    err << "incorrect numel for input tensor. expected " << numel << ", got "
+        << tensor.numel();
     throw std::runtime_error(err.str());
   }
 }
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor

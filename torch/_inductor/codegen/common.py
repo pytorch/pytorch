@@ -250,9 +250,6 @@ class DeviceOpOverrides:
     def kernel_driver(self):
         raise NotImplementedError
 
-    def abi_compatible_header(self):
-        raise NotImplementedError
-
     def cpp_stream_type(self):
         raise NotImplementedError
 
