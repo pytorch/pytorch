@@ -32,7 +32,6 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TYPE_CHECKING,
 )
@@ -437,11 +436,24 @@ def output_json(filename, headers, row):
                     "backend": current_backend,
                     "origins": [origin],
                 },
-                "metric": {
+            }
+
+            # NB: When the metric is accuracy, its value is actually a string, i.e. pass, and
+            # not a number. ClickHouse doesn't support mix types atm. It has a Variant type
+            # https://clickhouse.com/docs/en/sql-reference/data-types/variant, but this isn't
+            # recommended by CH team themselves. The workaround here is to store that value
+            # in the extra_info field instead.
+            if isinstance(value, str):
+                record["metric"] = {
+                    "name": header,
+                    "extra_info": {"benchmark_values": [value]},
+                }
+            else:
+                record["metric"] = {
                     "name": header,
                     "benchmark_values": [value],
-                },
-            }
+                }
+
             print(json.dumps(record), file=f)
 
 
@@ -733,7 +745,7 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1609,7 +1621,7 @@ def export(model, example_inputs):
     )
 
     ep = torch.export.export(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
 
     def opt_export(_, example_inputs):
