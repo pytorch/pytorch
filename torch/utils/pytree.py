@@ -23,15 +23,15 @@ from typing import (
     TYPE_CHECKING as _TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, Self as _Self
 
 import torch.utils._pytree as python
+from torch._utils import classproperty as _classproperty
 
 
 if _TYPE_CHECKING:
     from types import ModuleType
 
-    import torch.utils._cxx_pytree as cxx
     from torch.utils._cxx_pytree import (  # noqa: TC004
         _broadcast_to_and_flatten as _broadcast_to_and_flatten,
         FlattenFunc as FlattenFunc,
@@ -111,18 +111,31 @@ class PyTreeImplementation:
     module: "ModuleType" = python
     name: _Literal["python", "cxx"] = "python"
 
+    @_classproperty  # type: ignore[misc]
+    @classmethod
+    def python(cls) -> _Self:
+        """The Python implementation."""
+        return cls(module=python, name="python")
 
-implementation = PyTreeImplementation(module=python, name="python")
+    @_classproperty  # type: ignore[misc]
+    @classmethod
+    def cxx(cls) -> _Self:
+        """The C++ implementation."""
+        import torch.utils._cxx_pytree as cxx
+
+        return cls(module=cxx, name="cxx")
+
+
+implementation = PyTreeImplementation.python
 if PYTORCH_USE_CXX_PYTREE:
+    import torch.utils._cxx_pytree as cxx  # noqa: F401
+
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
             "Please install `optree` via `python -m pip install --upgrade optree`."
         )
-
-    import torch.utils._cxx_pytree as cxx
-
-    implementation = PyTreeImplementation(module=cxx, name="cxx")
+    implementation = PyTreeImplementation.cxx
 
 
 def register_pytree_node(  # type: ignore[no-any-unimported]
@@ -183,19 +196,19 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
 
 
 _P = _ParamSpec("_P")
-_T = _TypeVar("_T")
+_R = _TypeVar("_R")
 
 
-def _reexport(func: _Callable[_P, _T]) -> _Callable[_P, _T]:
+def _reexport(func: _Callable[_P, _R]) -> _Callable[_P, _R]:
     import functools
 
     name = func.__name__
 
     @functools.wraps(func)
-    def exported(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+    def exported(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         # Dynamically get the implementation function from the module to allow changing the
         # implementation at runtime.
-        impl: _Callable[_P, _T] = getattr(implementation.module, name)
+        impl: _Callable[_P, _R] = getattr(implementation.module, name)
         return impl(*args, **kwargs)
 
     exported.__module__ = __name__
