@@ -1336,6 +1336,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_silu_int8_mixed_bf16_xpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -2591,6 +2592,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfNoXPU
+    @config.patch({"fx_graph_cache": False})
     @parametrize("use_relu", [True])
     @parametrize("is_qat", [False])
     @parametrize("is_dynamic", [False])
@@ -2772,6 +2774,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfNoXPU
+    @config.patch({"fx_graph_cache": False})
     def test_qlinear_mul_xpu(self):
         r"""
         This testcase will quantize a Linear->Mul pattern.
