@@ -912,9 +912,7 @@ class FakeTensorTest(TestCase):
                 return input + np.random.randn(*input.shape)
 
         with FakeTensorMode():
-            ep = torch.export.export(
-                MyNumpyModel(), args=(torch.randn(1000),), strict=True
-            )
+            ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
     def test_unsqueeze_copy(self):

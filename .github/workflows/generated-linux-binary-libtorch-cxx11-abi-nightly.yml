@@ -25,6 +25,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
+  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -51,6 +52,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -72,6 +74,7 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -94,6 +97,7 @@ jobs:
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -115,6 +119,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -137,6 +142,7 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -160,6 +166,7 @@ jobs:
     needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -182,6 +189,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -204,6 +212,7 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -227,6 +236,7 @@ jobs:
     needs: libtorch-cuda12_4-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -249,6 +259,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -271,6 +282,7 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -294,6 +306,7 @@ jobs:
     needs: libtorch-cuda12_6-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -316,6 +329,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -339,6 +353,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -388,6 +403,7 @@ jobs:
     needs: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -410,6 +426,7 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -433,6 +450,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -482,6 +500,7 @@ jobs:
     needs: libtorch-rocm6_3-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

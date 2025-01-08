@@ -73,7 +73,8 @@ class TensorParallelTest(DTensorTestBase):
         with torch.no_grad():
             res = model(*inputs)
             exported_program = torch.export.export(
-                model, inputs, strict=True
+                model,
+                inputs,
             ).run_decompositions()
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -110,7 +111,8 @@ class TensorParallelTest(DTensorTestBase):
         with torch.inference_mode():
             res = model(*inputs)
             exported_program = torch.export.export(
-                model, inputs, strict=True
+                model,
+                inputs,
             ).run_decompositions()
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -145,7 +147,8 @@ class TensorParallelTest(DTensorTestBase):
         with torch.inference_mode():
             res = model(*inputs)
             exported_program = torch.export.export(
-                model, inputs, strict=True
+                model,
+                inputs,
             ).run_decompositions()
         tp_exported_program = tensor_parallel_transformation(
             exported_program,

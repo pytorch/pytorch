@@ -208,21 +208,23 @@ def main() -> None:
     write_test_cpp(test_result, options.generated_ops_test_cpp_path)
 
     print(
-        f"\ntotal grouped native ops: {len(gen.get_grouped_native_functions(native_functions)):d}"
+        "\ntotal grouped native ops: %d"
+        % len(gen.get_grouped_native_functions(native_functions))
     )
 
-    print(f"grouped native ops with out variant: {len(native_functions_groups):d}")
+    print("grouped native ops with out variant: %d" % len(native_functions_groups))
     supported_functions_num = sum(len(groups) for groups in supported_functions_groups)
-    print(f"generated functions groups with out variant: {supported_functions_num:d}")
+    print("generated functions groups with out variant: %d" % supported_functions_num)
 
-    print(f"\nview grouped native ops: {len(native_functions_view_groups):d}")
+    print("\nview grouped native ops: %d" % len(native_functions_view_groups))
     supported_view_functions_num = sum(
         len(groups) for groups in supported_functions_view_groups
     )
-    print(f"generated functions view groups: {supported_view_functions_num:d}")
+    print("generated functions view groups: %d" % supported_view_functions_num)
 
     print(
-        f"\noverall generated : {supported_functions_num + supported_view_functions_num:d}"
+        "\noverall generated : %d"
+        % (supported_functions_num + supported_view_functions_num)
     )
 
 

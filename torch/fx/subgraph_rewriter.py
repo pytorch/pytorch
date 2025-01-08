@@ -364,11 +364,9 @@ def _replace_pattern(
         user_nodes: Set[Node] = set()
         for n in match.returning_nodes:
             user_nodes.update(n.users)
+        assert user_nodes, "The returning_nodes should have at least one user node"
 
-        first_user_node = None
-        if len(user_nodes) == 0:
-            first_user_node = None
-        elif len(user_nodes) == 1:
+        if len(user_nodes) == 1:
             first_user_node = next(iter(user_nodes))
         else:
             # If there are multiple user nodes, we need to find the first user node
@@ -378,22 +376,7 @@ def _replace_pattern(
                     first_user_node = n
                     break
 
-        first_next_node = None
-        if first_user_node is None:
-            # no users, so we insert the replacement graph before the first next
-            # node of returning nodes
-            next_node = None
-            for n in reversed(original_graph.nodes):
-                if n in match.returning_nodes:
-                    first_next_node = next_node
-                    break
-                else:
-                    next_node = n
-        insert_point = (
-            first_user_node if first_user_node is not None else first_next_node
-        )
-        assert insert_point is not None, "The insert point can't be None"
-        with original_graph.inserting_before(insert_point):
+        with original_graph.inserting_before(first_user_node):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(
                 replacement_graph, val_map
             )

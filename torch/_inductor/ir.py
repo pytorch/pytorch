@@ -7149,7 +7149,7 @@ class InvokeSubgraph(ExternKernel):
         )
 
         def create_output(output: IRNode, ind: int):
-            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+            if isinstance(output, NoneAsConstantBuffer):
                 return output
             else:
                 return MultiOutput(
@@ -7165,6 +7165,7 @@ class InvokeSubgraph(ExternKernel):
                 )
 
         outputs = [create_output(output, i) for i, output in enumerate(outputs)]
+
         invoke_subgraph.outputs = outputs
         return outputs
 

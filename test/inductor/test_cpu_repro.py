@@ -2273,19 +2273,6 @@ class CPUReproTests(TestCase):
         self.assertEqual(res_aten_eager, res)
         check_metrics_vec_kernel_count(1)
 
-    @requires_vectorization
-    def test_frexp(self):
-        def fn(x):
-            x_frac, x_exp = torch.frexp(x)  # x_frac: int32, x_exp: float32
-            x = x_frac * x_exp
-            return x
-
-        x = torch.randn(64, 1)
-        torch._dynamo.reset()
-        metrics.reset()
-        self.common(fn, (x,))
-        check_metrics_vec_kernel_count(1)
-
     def test_bitwise_right_shift(self):
         x = torch.randint(-1, 0, (1, 1, 1), device="cpu", dtype=torch.int64)
         bit_num = 31
@@ -3295,7 +3282,7 @@ class CPUReproTests(TestCase):
         input_tensor = torch.zeros(shape[0], requires_grad=False, device="cpu")
         src_tensor = torch.ones(shape[1], requires_grad=False, device="cpu")
         with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError, r".*shape error in scatter op"
+            torch._dynamo.exc.BackendCompilerFailed, r".*shape error in scatter op"
         ):
             fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
 

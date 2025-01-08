@@ -20,11 +20,6 @@ To install the nightly binaries built with CUDA, you can pass in the flag --cuda
     $ ./tools/nightly.py checkout -b my-nightly-branch --cuda
     $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
-To install the nightly binaries built with ROCm, you can pass in the flag --rocm::
-
-    $ ./tools/nightly.py checkout -b my-nightly-branch --rocm
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-
 You can also use this tool to pull the nightly commits into the current branch as
 well. This can be done with::
 
@@ -45,7 +40,6 @@ import itertools
 import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -128,23 +122,17 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
+    "cuda-12.1": PipSource(
+        name="cuda-12.1",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu121",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
     "cuda-12.4": PipSource(
         name="cuda-12.4",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu124",
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
-    ),
-    "cuda-12.6": PipSource(
-        name="cuda-12.6",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "rocm-6.2.4": PipSource(
-        name="rocm-6.2.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.2.4",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
     ),
 }
 
@@ -262,28 +250,17 @@ class Venv:
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
             raise RuntimeError(
-                f"No site-packages directory found for executable {python}"
+                f"No site-packages directory found for excecutable {python}"
             )
         return candidates[0]
-
-    @property
-    def activate_script(self) -> Path:
-        """Get the activation script for the virtual environment."""
-        if WINDOWS:
-            # Assume PowerShell
-            return self.prefix / "Scripts" / "Activate.ps1"
-        # Assume POSIX-compliant shell: Bash, Zsh, etc.
-        return self.prefix / "bin" / "activate"
 
     @property
     def activate_command(self) -> str:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f'& "{self.activate_script}"'
-        # Assume Bash, Zsh, etc.
-        # POSIX standard should use dot `. venv/bin/activate` rather than `source`
-        return f"source {shlex.quote(str(self.activate_script))}"
+            return f"& {self.prefix / 'Scripts' / 'Activate.ps1'}"
+        return f"source {self.prefix}/bin/activate"
 
     @timed("Creating virtual environment")
     def create(self, *, remove_if_exists: bool = False) -> Path:
@@ -905,17 +882,6 @@ def make_parser() -> argparse.ArgumentParser:
             default=argparse.SUPPRESS,
             metavar="VERSION",
         )
-        subparser.add_argument(
-            "--rocm",
-            help=(
-                "ROCm version to install "
-                "(defaults to the latest version available on the platform)"
-            ),
-            dest="rocm",
-            nargs="?",
-            default=argparse.SUPPRESS,
-            metavar="VERSION",
-        )
     return parser
 
 
@@ -923,8 +889,6 @@ def parse_arguments() -> argparse.Namespace:
     parser = make_parser()
     args = parser.parse_args()
     args.branch = getattr(args, "branch", None)
-    if hasattr(args, "cuda") and hasattr(args, "rocm"):
-        parser.error("Cannot specify both CUDA and ROCm versions.")
     return args
 
 
@@ -937,32 +901,26 @@ def main() -> None:
         sys.exit(status)
 
     pip_source = None
-
-    for toolkit in ("CUDA", "ROCm"):
-        accel = toolkit.lower()
-        if hasattr(args, accel):
-            requested = getattr(args, accel)
-            available_sources = {
-                src.name[len(f"{accel}-") :]: src
-                for src in PIP_SOURCES.values()
-                if src.name.startswith(f"{accel}-")
-                and PLATFORM in src.supported_platforms
-            }
-            if not available_sources:
-                print(f"No {toolkit} versions available on platform {PLATFORM}.")
+    if hasattr(args, "cuda"):
+        available_sources = {
+            src.name[len("cuda-") :]: src
+            for src in PIP_SOURCES.values()
+            if src.name.startswith("cuda-") and PLATFORM in src.supported_platforms
+        }
+        if not available_sources:
+            print(f"No CUDA versions available on platform {PLATFORM}.")
+            sys.exit(1)
+        if args.cuda is not None:
+            pip_source = available_sources.get(args.cuda)
+            if pip_source is None:
+                print(
+                    f"CUDA {args.cuda} is not available on platform {PLATFORM}. "
+                    f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
+                )
                 sys.exit(1)
-            if requested is not None:
-                pip_source = available_sources.get(requested)
-                if pip_source is None:
-                    print(
-                        f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
-                    )
-                    sys.exit(1)
-            else:
-                pip_source = available_sources[max(available_sources, key=Version)]
-
-    if pip_source is None:
+        else:
+            pip_source = available_sources[max(available_sources, key=Version)]
+    else:
         pip_source = PIP_SOURCES["cpu"]  # always available
 
     with logging_manager(debug=args.verbose) as logger:

@@ -98,12 +98,12 @@ class _FSDPDeviceHandle:
             return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
-    def __getattr__(self, name: str, /) -> Any:
+    def __getattr__(self, __name: str) -> Any:
         try:
-            return getattr(self.__backend, name)
+            return getattr(self.__backend, __name)
         except AttributeError as exc:
             raise AttributeError(
-                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{name}'"
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
             ) from exc
 
 
@@ -111,7 +111,7 @@ class _UninitializedDeviceHandle(_FSDPDeviceHandle):
     def __init__(self) -> None:
         pass
 
-    def __getattribute__(self, name: str, /) -> Any:
+    def __getattribute__(self, __name: str) -> Any:
         raise RuntimeError("Trying to use an uninitialized device handle.")
 
 

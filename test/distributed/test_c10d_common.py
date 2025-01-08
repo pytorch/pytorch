@@ -106,7 +106,7 @@ class AbstractTimeoutTest:
         else:
             yield f"file://{f.name}"
             f.close()
-            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
+            yield "tcp://127.0.0.1:%d" % common.find_free_port()
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -339,7 +339,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,

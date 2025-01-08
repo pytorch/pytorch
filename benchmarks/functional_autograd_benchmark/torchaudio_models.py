@@ -314,7 +314,7 @@ class DeepSpeech(nn.Module):
                 rnn_type=rnn_type,
                 bidirectional=bidirectional,
             )
-            rnns.append((f"{x + 1:d}", rnn))
+            rnns.append(("%d" % (x + 1), rnn))
         self.rnns = nn.Sequential(OrderedDict(rnns))
         self.lookahead = (
             nn.Sequential(

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import dataclasses
 import enum
 from typing import Any, Optional, Union
@@ -85,7 +86,9 @@ def is_constant_source(source):
     return False
 
 
-def reconstruct_getitem(source: "GetItemSource", codegen, index_is_slice):
+def reconstruct_getitem(
+    source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
+):
     source.base.reconstruct(codegen)
     if isinstance(source.index, Source):
         source.index.reconstruct(codegen)
@@ -504,9 +507,7 @@ class GetItemSource(ChainedSource):
                 raise ValueError(
                     "GetItemSource index must be a constant, enum or ConstDictKeySource"
                 )
-            # TODO(anijain2305) - Consider separating out GetItemSource and DictGetItemSource.
-            # Prevent any overridden __getitem__ method call.
-            return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
+            return f"{self.base.name()}[{self.index.name()}]"
         elif self.index_is_slice:
             return f"{self.base.name()}[{self.unpack_slice()!r}]"
         elif isinstance(self.index, enum.Enum):
@@ -516,11 +517,9 @@ class GetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class ConstDictKeySource(ChainedSource):
-    index: Any
-
-    def guard_source(self):
-        return self.base.guard_source()
+class ConstDictKeySource(GetItemSource):
+    def is_dict_key(self):
+        return True
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
@@ -532,10 +531,7 @@ class ConstDictKeySource(ChainedSource):
 
     def name(self):
         # The list creation will be CSE'd by PyExprCSEPass
-        return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
-
-    def is_dict_key(self):
-        return True
+        return f"list({self.base.name()}.keys())[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -567,6 +563,35 @@ class TypeSource(ChainedSource):
 
     def name(self):
         return f"type({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
+class ODictGetItemSource(ChainedSource):
+    index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(collections.OrderedDict.__getitem__)
+            )
+        )
+        reconstruct_getitem(self, codegen, index_is_slice=False)
+        codegen.extend_output(create_call_function(2, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if isinstance(self.index, type):
+            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
+            return f"___odict_getitem({self.base.name()}, {rep})"
+        elif isinstance(self.index, Source):
+            return f"___odict_getitem({self.base.name()}, {self.index.name()})"
+        else:
+            return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
