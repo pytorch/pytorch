@@ -9,7 +9,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -122,7 +122,7 @@ def cur_node_has_non_foreach_users():
 # group by device, whether any of the inputs are dynamic
 # note arg_pairs may or may not be a pair
 # foreach_map for example just passes output buffers here
-def group_foreach_args(arg_pairs: Iterable[Union[Tuple[Any, Any], Any]]):
+def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
     out = defaultdict(list)
     unpack_args = False
     for i, args in enumerate(arg_pairs):
@@ -318,7 +318,7 @@ def transform_args(
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> tuple[List[Any], Dict[str, Any]]:
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -1231,7 +1231,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 def pointwise_cat(inputs, dim=0):
     # (inclusive, exclusive)
-    inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
+    inputs_ranges: List[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
         inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
@@ -2229,7 +2229,7 @@ def inductor_randint(
     )
 
 
-def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
     return (
         tb.get_name(),
         tb.get_size()[-1],
@@ -2238,7 +2238,7 @@ def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, symp
     )
 
 
-def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
 
 
@@ -3904,7 +3904,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 def upsample_nearestnd(
     x,
     output_size,
-    scales_x: Tuple[Optional[float], ...],
+    scales_x: tuple[Optional[float], ...],
     n: int = 2,
     exact: bool = False,
 ):
@@ -4034,7 +4034,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
-    bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
+    bounds_precomp: List[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
         bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 

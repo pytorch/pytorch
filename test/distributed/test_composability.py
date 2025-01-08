@@ -125,6 +125,8 @@ class ComposabilityTest(MultiProcContinousTest):
             # TODO: fix this or at least add an error msg when using them together
             return
 
+        # TODO(whc) test FSDP with mixed-precision
+
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")

@@ -628,7 +628,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
                 loss = self._maybe_get_loss(self._stage, i)
                 self._stage.backward_one_chunk(
-                    i, loss=loss, last_backward=i == self._n_microbatches - 1
+                    i, loss=loss, last_backward=i == self._n_microbatches - 1, grad_scale_factor=self._n_microbatches,
                 )
 
                 ops = self._stage.get_bwd_send_ops(i)
@@ -729,6 +729,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 bwd_mb_index,
                 loss=loss,
                 last_backward=bwd_mb_index == self._n_microbatches - 1,
+                grad_scale_factor=self._n_microbatches,
             )
 
             # Get the bwd send ops, but don't fire, to be fused with the 1F below
@@ -772,6 +773,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 bwd_mb_index,
                 loss=loss,
                 last_backward=bwd_mb_index == self._n_microbatches - 1,
+                grad_scale_factor=self._n_microbatches,
             )
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
@@ -1264,6 +1266,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             full_backward=True,
                             last_backward=backward_counter[stage_index]
                             == self._n_microbatches,
+                            grad_scale_factor=self._n_microbatches,
                         )
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_INPUT:
@@ -1285,6 +1288,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             mb_index,
                             last_backward=backward_counter[stage_index]
                             == self._n_microbatches,
+                            grad_scale_factor=self._n_microbatches,
                         )
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
@@ -1623,6 +1627,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         full_backward=True,
                         last_backward=backward_counter[stage_idx]
                         == self._n_microbatches,
+                        grad_scale_factor=self._n_microbatches,
                     )
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
