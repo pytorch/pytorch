@@ -1293,12 +1293,16 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            self.assertEqual(
-                " ".join(code).count(
-                    "view_dtype" if config.cpp_wrapper else "aten.view"
-                ),
-                3,
-            )
+            # cpp_wrapper falls back to Python function calls with complex inputs, so
+            # there are still two calls to aten.view when it's enabled.
+            code = " ".join(code)
+            if config.cpp_wrapper:
+                self.assertEqual(code.count("view_dtype"), 1)
+                # The additional 2 counts here come from error messages containing this
+                # string.
+                self.assertEqual(code.count("aten.view"), 4)
+            else:
+                self.assertEqual(code.count("aten.view"), 3)
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -5198,17 +5202,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
-    def test_var_mean(self):
+    @parametrize("tile_reduction", (False, True))
+    def test_var_mean(self, tile_reduction: bool):
         def fn(x):
             return (
                 *torch.var_mean(x, -1),
                 *torch.var_mean(x, [1, 3]),
             )
 
-        self.common(
-            fn,
-            (torch.randn([1, 2, 4, 8]),),
-        )
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": tile_reduction,
+                "triton.tile_reductions": tile_reduction,
+            }
+        ):
+            self.common(
+                fn,
+                (torch.randn([1, 2, 4, 8]),),
+            )
 
     def test_var_correction(self):
         def fn(x):
@@ -12152,6 +12163,25 @@ class CommonTemplate:
         run(9)
         self.assertEqual(cnts.frame_count, 4)
 
+    @dynamo_config.patch(error_on_recompile=True)
+    def test_no_specization_over_symbolic_value(self):
+        def fn(x):
+            s0 = x.shape[0]
+            y = torch.full((1,), s0)
+            return x + y
+
+        arg1 = torch.ones(10)
+        arg2 = torch.ones(11)
+        ref1 = fn(arg1)
+        ref2 = fn(arg2)
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True, backend="inductor")
+        res1 = opt_fn(arg1)
+        res2 = opt_fn(arg2)
+
+        self.assertEqual(res1, ref1)
+        self.assertEqual(res2, ref2)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -12760,6 +12790,23 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
 
+        @config.patch("triton.skip_l1_cache", True)
+        def test_skip_l1_cache(self):
+            @torch.compile
+            def f(a, b):
+                return a + b
+
+            N = 512
+            inps = (torch.randn(N, device=GPU_TYPE), torch.randn(N, device=GPU_TYPE))
+            code = run_and_get_triton_code(f, *inps)
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertExpectedInline(
+                "\n".join(lines),
+                """\
+    tmp0 = tl.load(in_ptr0 + (x0), xmask, cache_modifier='.cg')
+    tmp1 = tl.load(in_ptr1 + (x0), xmask, cache_modifier='.cg')""",
+            )
+
         @config.patch("triton.use_block_ptr", True)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
@@ -13208,6 +13255,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
 
+        # TODO: Enable this case after pad_mm is enabled on XPU.
+        @expectedFailureXPU
         @torch._functorch.config.patch("donated_buffer", True)
         @torch._inductor.config.patch("force_shape_pad", True)
         def test_donated_buffer_inplace_gpt(self):
@@ -13367,15 +13416,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
                     return loss
 
             B, T = 1, 1024
-            ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+            ctx = torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16)
 
             model = GPT(GPTConfig())
             model.train()
-            model.to("cuda")
+            model.to(GPU_TYPE)
             model = torch.compile(model)
 
-            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
-            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
+            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
+            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
 
             def wrapper(x, y):
                 with ctx:
@@ -13402,7 +13451,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def forward(self, x):
                 return self.gru(x)
 
-        @expectedFailureXPU
         def test_rnn_compile_safe(self):
             device = torch.device(GPU_TYPE)
             model = RNNTest.Model().to(device)

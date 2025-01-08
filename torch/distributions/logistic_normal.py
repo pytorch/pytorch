@@ -58,8 +58,8 @@ class LogisticNormal(TransformedDistribution):
 
     @property
     def loc(self) -> Tensor:
-        return self.base_dist.base_dist.loc  # type: ignore[attr-defined]
+        return self.base_dist.base_dist.loc
 
     @property
     def scale(self) -> Tensor:
-        return self.base_dist.base_dist.scale  # type: ignore[attr-defined]
+        return self.base_dist.base_dist.scale
