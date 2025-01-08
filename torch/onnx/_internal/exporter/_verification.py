@@ -12,7 +12,7 @@ import math
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.utils import pytree
+import torch.utils.pytree as pytree
 
 
 if TYPE_CHECKING:

@@ -15,8 +15,8 @@ import warnings
 from typing import Callable, Sequence, TYPE_CHECKING
 
 import torch
+import torch.utils.pytree as pytree
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
-from torch.utils import pytree
 
 
 # NOTE: DO NOT import module from torch.onnx._internal to this module in the global scope
