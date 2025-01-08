@@ -1489,6 +1489,18 @@ class InstructionTranslatorBase(
                 self._raise_exception_variable(inst)
             unimplemented("raise ... from ...")
 
+    def CLEANUP_THROW(self, inst):
+        tos = self.stack[-1]
+        assert isinstance(tos, ExceptionVariable)
+        if tos.exc_type is StopIteration:
+            unimplemented("CLEANUP_THROW")
+            # _type = self.pop()
+            # value = self.pop()
+            # _tb = self.pop()
+            # self.stack.append(value)
+        else:
+            self.RERAISE(inst)
+
     def RERAISE(self, inst):
         if sys.version_info >= (3, 11):
             # RERAISE is currently supported in a narrow case of `raise ... from None`

@@ -601,6 +601,37 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(i, 3)
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
+    @unittest.expectedFailure
+    def test_cleanup_throw(self):
+        def nested_generator():
+            try:
+                yield 1
+                yield 2
+            except StopIteration:
+                return 123  # noqa: B901
+
+        def outer_generator():
+            yield from nested_generator()
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer_generator()
+            next(gen)  # Start the outer generator and enter the nested generato
+
+            i = 0
+            try:
+                # Force an exception while the generator is running
+                i = gen.throw(StopIteration("stop"))
+            except RuntimeError:
+                pass
+            return (i, t.sin())
+
+        t = torch.randn(3)
+        i, y = fn(t)
+        self.assertEqual(i, 3)
+        self.assertEqual(y, t.sin())
+
 
 class GeneratorCPythonTests(GeneratorTestsBase):
     # Taken from commit
