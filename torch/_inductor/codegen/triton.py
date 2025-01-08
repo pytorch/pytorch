@@ -19,7 +19,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TYPE_CHECKING,
     Union,
@@ -1956,7 +1955,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         check = indexing.boundary_check()
         if not check:
             # workaround https://github.com/openai/triton/issues/2813
@@ -2100,6 +2099,26 @@ class TritonKernel(SIMDKernel):
         else:
             other = ""
 
+        """Check if the buffer we're about to load, has
+        more than one read dependency
+        NOTE: enabled with env variable TORCHINDUCTOR_SKIP_L1
+        """
+        has_read_deps = True
+        if config.triton.skip_l1_cache:
+            buffer_read_counts = self.features.buffer_read_counts()
+            has_read_deps = buffer_read_counts[name] > 1
+        """Skip L1 cache if we're (pretty?) sure the data is used only once
+        """
+        skip_l1_cache = (
+            not self.is_broadcasted(original_index)
+            and not self.inside_reduction
+            and not has_read_deps
+            and is_coalesced  # for indirect loads is_coalesced is False?
+        )
+        cachemod = ""
+        if skip_l1_cache:
+            cachemod = ", cache_modifier='.cg'"
+
         append_broadcast = None
         dtype = V.graph.get_dtype(name)
 
@@ -2108,7 +2127,7 @@ class TritonKernel(SIMDKernel):
         else:
             if isinstance(indexing, BlockPtrOptions):
                 block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
-                line = f"tl.load({block_ptr}{other}{ep})"
+                line = f"tl.load({block_ptr}{other}{ep}{cachemod})"
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
@@ -2117,7 +2136,7 @@ class TritonKernel(SIMDKernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
+                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
@@ -2202,11 +2221,11 @@ class TritonKernel(SIMDKernel):
     def bucketize(
         self,
         values: CSEVariable,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
@@ -2283,8 +2302,8 @@ class TritonKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
             # automatically promote to FP32 for accumulation. Additionally, max/min reductions
@@ -2722,7 +2741,7 @@ class TritonKernel(SIMDKernel):
         self,
         name: str,
         index: sympy.Expr,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ):
         assert self.inside_reduction
         self.inside_reduction = False
@@ -2760,7 +2779,7 @@ class TritonKernel(SIMDKernel):
 
         exit_stack.close()
 
-    def _lift_helper(self, fn, num_args, dtypes: Tuple[torch.dtype, ...]) -> str:
+    def _lift_helper(self, fn, num_args, dtypes: tuple[torch.dtype, ...]) -> str:
         # Lift IR function for scan operations into a triton function
         # in the global namespace
         helper = IndentedBuffer()
@@ -2814,12 +2833,12 @@ class TritonKernel(SIMDKernel):
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
+        dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[
-            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
-        values: Tuple[CSEVariable, ...],
-    ) -> Tuple[CSEVariable, ...]:
+        values: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -2923,11 +2942,11 @@ class TritonKernel(SIMDKernel):
 
     def sort(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[CSEVariable, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[CSEVariable, ...]:
+    ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)

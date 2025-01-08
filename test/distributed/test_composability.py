@@ -120,10 +120,9 @@ class ComposabilityTest(MultiProcContinousTest):
     )
     @parametrize("use_new_runtime", [False, True])
     def test_pp_dp(self, dp_type, ScheduleClass, use_new_runtime):
-        if dp_type == "DDP" and ScheduleClass == ScheduleInterleavedZeroBubble:
-            # DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
-            # TODO: fix this or at least add an error msg when using them together
-            return
+        # TODO: fix DDP+ZB or at least add an error msg when using them together
+
+        # TODO(whc) test FSDP with mixed-precision
 
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
