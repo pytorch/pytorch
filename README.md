@@ -496,4 +496,4 @@ PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE)  file.
    ```bash
    pip install -r requirements.txt
    ```
-   要執行pytorch相關函式應將其依賴項安裝後方能使用
+   要執行pytorch相關函式應將其依賴項安裝後方能使用。
