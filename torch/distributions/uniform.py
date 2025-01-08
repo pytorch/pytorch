@@ -2,7 +2,7 @@
 from numbers import Number
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -36,19 +36,19 @@ class Uniform(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return (self.high + self.low) / 2
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return nan * self.high
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return (self.high - self.low) / 12**0.5
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (self.high - self.low).pow(2) / 12
 
     def __init__(self, low, high, validate_args=None):
@@ -76,7 +76,7 @@ class Uniform(Distribution):
     def support(self):
         return constraints.interval(self.low, self.high)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
         return self.low + rand * (self.high - self.low)
