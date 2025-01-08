@@ -25,6 +25,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <torch/csrc/cuda/green_context.h>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -1491,6 +1492,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
+static void GreenCOntext(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<GreenContext>(m, "GreenContext")
+      .def_static("create", &GreenContext::create)
+      .def("make_current", &GreenContext::makeCurrent);
+}
 
 static void bindGetDeviceProperties(PyObject* module) {
   // Add method to torch.cuda
@@ -2229,6 +2236,7 @@ void initModule(PyObject* module) {
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   initCudaMethodBindings(module);
+  GreenCOntext(module);
 }
 
 } // namespace torch::cuda
