@@ -2,6 +2,7 @@
 
 import functools
 import unittest
+from typing import List, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -87,16 +88,22 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     return x_fp8, inverse_scale
 
 
-def _fix_fp8_dtype_for_rocm(dtype, device):
-    # This function is used to change FP8 data types 
-    # with ROCm supported FP8 types if device is not a CPU:
+def _fix_fp8_dtype_for_rocm(
+    dtype: Union[torch.dtype, List[torch.dtype], Tuple[torch.dtype]], device
+) -> Union[torch.dtype, List[torch.dtype], Tuple[torch.dtype]]:
+    # This function is used to change FP8 data types
+    # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz
     #    e5m2   -> e5m2fnuz
     # Supports single, typle and list of dtypes
     # Keeps the same test name for CUDA and ROCm
     # Also it allows to enable FP8 inductor tests for CPU
-    if torch.version.hip and device != "cpu":
-        # HIP uses different float8 dtypes on GPU
+    if (
+        torch.version.hip
+        and ("cuda" in device)
+        and ("gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0])
+    ):
+        # MI300 uses different float8 dtypes
         if isinstance(dtype, tuple):
             return tuple(_fix_fp8_dtype_for_rocm(x, device) for x in dtype)
         if isinstance(dtype, list):
