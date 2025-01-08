@@ -18,9 +18,9 @@ from ...ir import (
     PrimitiveInfoType,
     TensorBox,
 )
+from ...runtime.benchmarking import LazyBenchmark
 from ...utils import sympy_product
 from ...virtualized import V
-from ...runtime.benchmarking import LazyBenchmark
 from ..common import (
     IndentedBuffer,
     Kernel,
