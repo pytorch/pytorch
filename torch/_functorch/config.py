@@ -35,9 +35,10 @@ cse = True
 from torch._inductor.config import is_fbcode
 
 
-enable_autograd_cache = (
-    os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0" if is_fbcode() else "1") == "1"
-)
+#enable_autograd_cache = (
+#    os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0" if is_fbcode() else "1") == "1"
+#)
+enable_autograd_cache = False
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
