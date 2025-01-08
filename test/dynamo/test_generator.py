@@ -112,26 +112,6 @@ class GeneratorTests(GeneratorTestsBase):
         y = fn(t)
         self.assertEqual(y, list(zip(range(3), whoo(1))))
 
-    def test_iter(self):
-        def whoo():
-            i = 0
-            while True:
-                yield i
-                i += 1
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            s = 0
-            for i in whoo():
-                if i > 5:
-                    break
-                s += i
-            return t + s
-
-        t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(y, t + sum(range(6)))
-
     def test_graph_break_in_generator(self):
         def whoo():
             yield 1
@@ -620,6 +600,57 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(i, 3)
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+
+    @unittest.expectedFailure
+    def test_cleanup_throw(self):
+        def nested_generator():
+            try:
+                yield 1
+                yield 2
+            except StopIteration:
+                return 123  # noqa: B901
+
+        def outer_generator():
+            yield from nested_generator()
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer_generator()
+            next(gen)  # Start the outer generator and enter the nested generato
+
+            i = 0
+            try:
+                # Force an exception while the generator is running
+                i = gen.throw(StopIteration("stop"))
+            except RuntimeError:
+                pass
+            return (i, t.sin())
+
+        t = torch.randn(3)
+        i, y = fn(t)
+        self.assertEqual(i, 3)
+        self.assertEqual(y, t.sin())
+
+    def test_iter(self):
+        def whoo():
+            i = 0
+            while True:
+                yield i
+                i += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            s = 0
+            for i in whoo():
+                if i > 5:
+                    break
+                s += i
+            return t + s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + sum(range(6)))
 
 
 class TestGeneratorSend(GeneratorTestsBase):
@@ -1352,7 +1383,7 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
         self._compile_check(fn)
 
 
-class GeneratorCpythonTests(GeneratorTestsBase):
+class GeneratorCPythonTests(GeneratorTestsBase):
     # Taken from commit
     # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
     # changed the tests a little bit to run them inside dynamo

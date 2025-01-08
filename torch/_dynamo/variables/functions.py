@@ -448,10 +448,24 @@ class GeneratorObjectVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "__iter__":
+        if name == "__next__":
+            return self.next_variable(tx)
+        elif name == "__iter__":
             # iter(gen) returns itself
             return self
-        elif name == "__next__":
+        elif name == "send":
+            # Sends a value into the generator function. Returns the next value
+            # yielded by the generator, or raises StopIteration if the generator
+            # exits without yielding another value
+            if self._is_generator_new() and len(args):
+                # can't send non-None value to a just-started generator
+                if not all(
+                    isinstance(arg, ConstantVariable) and arg.value is None
+                    for arg in args
+                ):
+                    raise_observed_exception(TypeError, tx)
+            tracer = self._get_inline_tracer(tx)
+            tracer.push_many(args)
             return self.next_variable(tx)
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
@@ -520,20 +534,6 @@ class GeneratorObjectVariable(VariableTracker):
                 # https://github.com/python/cpython/pull/104771
                 assert tracer.symbolic_result is not None
                 return tracer.symbolic_result
-        elif name == "send":
-            # Sends a value into the generator function. Returns the next value
-            # yielded by the generator, or raises StopIteration if the generator
-            # exits without yielding another value
-            if self._is_generator_new() and len(args):
-                # can't send non-None value to a just-started generator
-                if not all(
-                    isinstance(arg, ConstantVariable) and arg.value is None
-                    for arg in args
-                ):
-                    raise_observed_exception(TypeError, tx)
-            tracer = self._get_inline_tracer(tx)
-            tracer.push_many(args)
-            return self.next_variable(tx)
         elif name == "throw":
             # * Raises an exception at the point where the generator was paused, and
             # returns the next value yielded by the generator.
@@ -563,6 +563,7 @@ class GeneratorObjectVariable(VariableTracker):
                 except ObservedUserStopIteration:
                     pass
             return retval
+
         super().call_method(tx, name, args, kwargs)
 
 
