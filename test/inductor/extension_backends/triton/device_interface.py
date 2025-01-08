@@ -109,7 +109,7 @@ class DeviceInterface(device_interface.DeviceInterface):
         pass
 
     @classmethod
-    def get_device_properties(cls, device = None) -> DeviceProperties:
+    def get_device_properties(cls, device=None) -> DeviceProperties:
         return cls.Worker.get_device_properties(device)
 
     # Can be mock patched by @patch decorator.
