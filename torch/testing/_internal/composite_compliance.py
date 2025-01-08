@@ -6,7 +6,7 @@ import itertools
 
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils import pytree
+import torch.utils.pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD

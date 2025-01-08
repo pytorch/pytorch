@@ -1,7 +1,7 @@
 import logging
 
 import torch
-from torch.utils._pytree import tree_any
+from torch.utils.pytree.python import tree_any
 
 
 log = logging.getLogger(__name__)

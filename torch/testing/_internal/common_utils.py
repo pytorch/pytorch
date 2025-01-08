@@ -98,7 +98,7 @@ from torch.testing._comparison import (
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
-from torch.utils import pytree
+import torch.utils.pytree as pytree
 from torch.utils import cpp_extension
 try:
     import pytest

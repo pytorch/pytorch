@@ -5,7 +5,7 @@ from typing import Dict, List
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 from ..._dynamo.utils import counters
 from ..ir import (

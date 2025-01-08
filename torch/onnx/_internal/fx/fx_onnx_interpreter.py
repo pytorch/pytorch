@@ -14,6 +14,7 @@ from onnxscript.function_libs.torch_lib import (
 
 import torch
 import torch.fx
+import torch.utils.pytree as pytree
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.fx import (
@@ -22,7 +23,6 @@ from torch.onnx._internal.fx import (
     onnxfunction_dispatcher,
     type_utils as fx_type_utils,
 )
-from torch.utils import pytree
 
 
 def _fx_node_to_onnx_message_formatter(

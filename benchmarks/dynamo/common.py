@@ -78,10 +78,10 @@ except ImportError:
     )
 
 import torch._functorch.config
+import torch.utils.pytree.python as pytree
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.utils import _pytree as pytree
 from torch.utils.pytree import tree_map, tree_map_only
 
 
