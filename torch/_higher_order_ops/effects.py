@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 from weakref import WeakKeyDictionary
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator

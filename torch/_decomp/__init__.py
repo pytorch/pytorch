@@ -23,10 +23,10 @@ if TYPE_CHECKING:
 
 import torch
 import torch.library
+import torch.utils.pytree.python as pytree
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch._subclasses.functional_tensor import FunctionalTensor
-from torch.utils import _pytree as pytree
 
 
 __all__ = [

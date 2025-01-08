@@ -9,6 +9,7 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -27,7 +28,6 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-from torch.utils import _pytree as pytree
 from torch.utils._stats import count_label
 
 

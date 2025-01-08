@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
