@@ -12,7 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.utils import pytree
+import torch.utils.pytree as pytree
 
 
 if TYPE_CHECKING:

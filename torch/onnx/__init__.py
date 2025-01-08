@@ -455,9 +455,9 @@ def dynamo_export(
     # NOTE: The new exporter is experimental and is not enabled by default.
     import warnings
 
+    import torch.utils.pytree as pytree
     from torch.onnx import _flags
     from torch.onnx._internal.exporter import _compat
-    from torch.utils import pytree
 
     if isinstance(model, torch.export.ExportedProgram):
         return _compat.export_compat(
