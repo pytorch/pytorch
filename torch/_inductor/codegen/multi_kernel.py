@@ -377,10 +377,12 @@ class MultiKernelCall:
 
             return inner
 
-        return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40)
-            for kernel in self.kernels
-        ]
+        # benchmarking the sub kernels together improves accuracy and
+        # decreases overhead (since GPU warmups are now shared)
+        return benchmarker.benchmark_many_gpu(
+            [wrap_fn(kernel) for kernel in self.kernels],
+            rep=40,
+        )
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
     # codegen. The first pass use record_choice to keep the choice and
