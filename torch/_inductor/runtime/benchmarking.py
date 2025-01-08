@@ -1,3 +1,4 @@
+import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
@@ -117,7 +118,11 @@ class Benchmarker:
 
     @time_and_count
     def benchmark_cpu(
-        self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
+        self: Self,
+        _callable: Callable[[], Any],
+        warmup: int = 20,
+        rep: int = 100,
+        **kwargs: Any,
     ) -> float:
         """Benchmark the CPU callable, `_callable`, and return the median runtime,
         in milliseconds.
@@ -130,6 +135,8 @@ class Benchmarker:
         before benchmarking starts.
         - rep: Optionally, the duration, in milliseconds, to run `_callable`
         during benchmarking.
+        - kwargs: Any additional kwargs that may be passed, for example `ranking_key`
+        or `pruning_key` if the experimental benchmarker is disabled.
 
         Returns:
         - The median runtime of `_callable`, in milliseconds.
@@ -285,6 +292,10 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        do_bench_params = inspect.signature(self.triton_do_bench).parameters
+        for kwarg in list(kwargs.keys()):
+            if kwarg not in do_bench_params:
+                del kwargs[kwarg]
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:
@@ -635,7 +646,5 @@ class LazyInductorBenchmarker(GroupedInductorBenchmarker):
 
 
 benchmarker = (
-    LazyInductorBenchmarker()
-    if use_experimental_benchmarker
-    else TritonBenchmarker()
+    LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
 )
