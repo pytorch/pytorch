@@ -54,7 +54,7 @@ runs:
         fi
 
     - name: Runner diskspace health check
-      uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
+      uses: ./.github/actions/diskspace-cleanup
       if: always()
 
     - name: Runner health check disconnect on failure
