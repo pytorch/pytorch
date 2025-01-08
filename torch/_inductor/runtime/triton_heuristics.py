@@ -16,7 +16,17 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Container, Dict, Hashable, List, Optional, Tuple, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Container,
+    Dict,
+    Hashable,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -250,14 +260,18 @@ class CachingAutotuner(KernelInterface):
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
-    def precompile(self, warm_cache_only=False):
+    def precompile(
+        self,
+        warm_cache_only=False,
+        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+    ):
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
             self._precompile_worker()
             self._make_launchers()
-            self._dynamic_scale_rblock()
+            self._dynamic_scale_rblock(reload_in_parent)
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -278,9 +292,11 @@ class CachingAutotuner(KernelInterface):
         self.compile_results = compile_results
         self.configs = None
 
-    def _dynamic_scale_rblock(self):
-        # TODO(jansel): we should find a way to move is (possible) extra compile into the worker process
-        # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg
+    def _dynamic_scale_rblock(
+        self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
+    ):
+        # TODO(jansel): we should find a way to move this extra compile into the worker process
+        # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
         if (
             self.inductor_meta.get("dynamic_scale_rblock", True)
@@ -369,6 +385,14 @@ class CachingAutotuner(KernelInterface):
                     triton_config,
                     new_config,
                 )
+                if self.fn.fn is None:
+                    """
+                    We are in the parent process, while this program was compiled in a worker
+                    and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+                    containing the real fn yet.
+                    """
+                    assert reload_in_parent
+                    self.fn = reload_in_parent().fn
                 self.compile_results.append(self._precompile_config(new_config))
 
             self._make_launchers()
