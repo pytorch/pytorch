@@ -138,8 +138,8 @@ void test_random_from_to(const at::Device& device) {
               from_case_covered = true;
             }
             // this is leaking details of implementation into test
-            // we are starting to use random64() at 2^25 to minimize skew due to %
-            if (range < (1ULL << 25)) {
+            // we are starting to use random64() at 2^28 to minimize skew due to %
+            if (range < (1ULL << 28)) {
               exp = static_cast<T>(static_cast<int64_t>((static_cast<uint32_t>(val) % range + from)));
             } else {
               exp = static_cast<T>(static_cast<int64_t>((val % range + from)));

@@ -40,7 +40,7 @@ struct uniform_int_from_to_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    if (range_ >= 1ULL << 25) // allow approx 1% skew in uniform int generation using %
+    if (range_ >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
     {
       return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {
