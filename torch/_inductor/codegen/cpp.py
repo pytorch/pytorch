@@ -26,6 +26,7 @@ from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
+    ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     Scheduler,
@@ -76,7 +77,6 @@ from .cpp_utils import (
     unify_mask_base_type,
     value_to_cpp,
 )
-from .wrapper import AllocateLine
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -4913,20 +4913,14 @@ class CppScheduling(BaseScheduling):
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,
         )
-        with kernel:
-            grouped_gemm_allocate_lines: List[AllocateLine] = []
-            if isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
+
+        def _is_grouped_gemm(template_node):
+            return isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
                 template_node.node.layout, ir.MultiOutputLayout
-            ):
-                # For Grouped GEMM, allocate buffers for each GEMM
-                assert (
-                    template_node.node.outputs
-                ), "Grouped GEMM Template should with output buffers"
-                for buffer in template_node.node.outputs:
-                    grouped_gemm_allocate_lines.append(
-                        AllocateLine(V.graph.wrapper_code, buffer)
-                    )
-            else:
+            )
+
+        with kernel:
+            if not _is_grouped_gemm(template_node):
                 template_node.mark_run()  # type: ignore[attr-defined]
             for node in epilogue_nodes:
                 node.mark_run()  # type: ignore[attr-defined]
@@ -4935,10 +4929,22 @@ class CppScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
-        for line in grouped_gemm_allocate_lines:
-            if kernel.args.output_buffers[line.node.get_name()] != "REMOVED":
-                # only allocate the buffer when it's not removed in kernel args
-                V.graph.wrapper_code.writeline(line)
+
+        if _is_grouped_gemm(template_node):
+            # For Grouped GEMM, allocate buffers for each GEMM after the epilogue
+            # codegen to determine whether the GEMM output buffer has been removed.
+            assert (
+                len(template_node.outputs) == 1
+            ), "Grouped GEMM has 1 output template buffer"
+            for user in template_node.outputs[0].users:
+                assert isinstance(
+                    user.node, ExternKernelSchedulerNode
+                ), "Grouped GEMM should be with ExternKernelSchedulerNode"
+                assert isinstance(
+                    user.node.node, ir.MultiOutput
+                ), "Grouped GEMM has multi users with MultiOutput"
+                user.node.mark_run()
+
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
