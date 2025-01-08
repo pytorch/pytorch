@@ -86,61 +86,21 @@ _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
 }
 
 
-def _mark_rand_ops_as_side_effectful() -> Set[Callable]:
-    ops: Set[Callable] = set()
-    # don't dce aten rand ops
-    for opname in [
-        "bernoulli",
-        "bernoulli_",
-        "cauchy",
-        "cauchy_",
-        "exponential",
-        "exponential_",
-        "geometric",
-        "geometric_",
-        "log_normal",
-        "log_normal_",
-        "multinomial",
-        "normal",
-        "normal_",
-        "poisson",
-        "rand",
-        "rand_like",
-        "randint",
-        "randint_like",
-        "randn",
-        "randn_like",
-        "random",
-        "random_",
-        "randperm",
-        "uniform",
-        "uniform_",
-    ]:
-        op = getattr(_ops.aten, opname)
-        for overload in op.overloads():
-            ops.add(getattr(op, overload))
-    return ops
-
-
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
-_side_effectful_functions: Set[Callable] = (
-    {
-        torch._assert,
-        torch._assert_async,
-        _ops.aten._assert_async.msg,
-        _ops.aten._assert_scalar.default,
-        _ops.aten._assert_tensor_metadata.default,
-        _ops.aten.sym_constrain_range.default,
-        _ops.aten.sym_constrain_range_for_size.default,
-        _ops.profiler._record_function_enter,
-        _ops.profiler._record_function_enter_new,
-        _ops.profiler._record_function_exit,
-        _ops.inductor.accumulate_grad_.default,
-    }
-    | _side_effectful_need_to_be_preserved_pre_dispatch
-    | _mark_rand_ops_as_side_effectful()
-)
+_side_effectful_functions: Set[Callable] = {
+    torch._assert,
+    torch._assert_async,
+    _ops.aten._assert_async.msg,
+    _ops.aten._assert_scalar.default,
+    _ops.aten._assert_tensor_metadata.default,
+    _ops.aten.sym_constrain_range.default,
+    _ops.aten.sym_constrain_range_for_size.default,
+    _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_exit,
+    _ops.inductor.accumulate_grad_.default,
+} | _side_effectful_need_to_be_preserved_pre_dispatch
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
@@ -810,11 +770,18 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function based on schema.
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            if schema is not None and schema.is_mutable:
+                # impure since it mutates inputs
+                return True
+
+            tags: Optional[List[torch.Tag]] = getattr(self.target, "_tags", None)
+            if tags is not None and torch.Tag.nondeterministic_seeded in tags:
+                # impure since it mutates RNG state
+                return True
+
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
