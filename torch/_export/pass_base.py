@@ -18,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
-from torch.utils import _pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts, compute_unbacked_bindings
 
 

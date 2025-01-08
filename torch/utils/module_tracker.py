@@ -9,7 +9,7 @@ from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 
 if TYPE_CHECKING:

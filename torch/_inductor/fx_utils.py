@@ -7,6 +7,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils.pytree.python as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -14,9 +15,8 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     sym_eq,
 )
-from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 from .virtualized import V
 

@@ -6,12 +6,12 @@ from enum import Enum
 from typing import Dict, Set
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_map_only
+from torch.utils.pytree.python import tree_map_only
 
 
 __all__ = ["reinplace"]

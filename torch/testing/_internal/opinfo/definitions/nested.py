@@ -15,7 +15,7 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
     UnaryUfuncInfo,
 )
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils.pytree.python import tree_flatten, tree_map
 
 
 @dataclass

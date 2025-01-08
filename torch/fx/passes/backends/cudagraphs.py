@@ -2,11 +2,11 @@
 import operator
 
 import torch
+import torch.utils.pytree.python as pytree
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
-from torch.utils import _pytree as pytree
 
 
 class CudaGraphsSupport(OperatorSupport):

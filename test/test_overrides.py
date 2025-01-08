@@ -25,7 +25,7 @@ from torch.overrides import (
     BaseTorchFunctionMode
 )
 from torch.utils._mode_utils import all_same_mode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 Tensor = torch.Tensor
 
