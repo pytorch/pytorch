@@ -42,9 +42,10 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = (
-    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
-)
+#fx_graph_cache = (
+#    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+#)
+fx_graph_cache = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -53,9 +54,10 @@ fx_graph_cache = (
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # should we bundle triton caching into fx graph cache
-bundle_triton_into_fx_graph_cache: Optional[
-    bool
-] = bundle_triton_into_fx_graph_cache_default()
+#bundle_triton_into_fx_graph_cache: Optional[
+#    bool
+#] = bundle_triton_into_fx_graph_cache_default()
+bundle_triton_into_fx_graph_cache = False
 
 # Enable autotune local cache.
 #
