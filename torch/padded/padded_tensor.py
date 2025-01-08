@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
+from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 from utils import *
@@ -430,7 +432,10 @@ class IndexOp(RegularOp):
         for dim_idx, dim in enumerate(dims):
             if dim is None:
                 continue
-            elif type(dim) is torch.Tensor or type(dim) is PaddedTensor:
+            elif (
+                type(dim) in [torch.Tensor, FakeTensor, FunctionalTensor]
+                or type(dim) is PaddedTensor
+            ):
                 input_shape_mod[dim_idx] = dim.orig_shape[0]
             else:
                 raise NotImplementedError(f"Encountered unsupported type: {type(dim)}")
@@ -613,7 +618,11 @@ OP_DATABASE = OpDatabase()
 
 def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=None):
     def to_shape_str(arg):
-        if isinstance(arg, torch.Tensor):
+        if (
+            isinstance(arg, torch.Tensor)
+            or isinstance(arg, FakeTensor)
+            or isinstance(arg, FunctionalTensor)
+        ):
             return [i for i in arg.shape]
         else:
             return arg
@@ -636,7 +645,11 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
     def to_orig_shape_str(arg):
         if isinstance(arg, PaddedTensor):
             return [i for i in arg.orig_shape]
-        elif isinstance(arg, torch.Tensor):
+        elif (
+            isinstance(arg, torch.Tensor)
+            or isinstance(arg, FakeTensor)
+            or isinstance(arg, FunctionalTensor)
+        ):
             return "Tensor"
         else:
             return arg
@@ -806,7 +819,12 @@ class PaddedTensor(torch.Tensor):
         # Convert args and kwargs to padded tensors
         args_new = []
         for arg in args:
-            if type(arg) is torch.Tensor or type(arg) is torch.nn.Parameter:
+            if (
+                type(arg) is torch.Tensor
+                or type(arg) is torch.nn.Parameter
+                or type(arg) is FakeTensor
+                or type(arg) is FunctionalTensor
+            ):
                 args_new.append(PaddedTensor(arg, multipliers))
                 log(
                     "Encountered tensor with shape",
@@ -841,7 +859,9 @@ class PaddedTensor(torch.Tensor):
 
         out_flat_padded = []
         for idx, t in enumerate(out_flat):
-            if type(t) is torch.Tensor and idx < len(orig_shape):
+            if type(t) in [torch.Tensor, FakeTensor, FunctionalTensor] and idx < len(
+                orig_shape
+            ):
                 s = orig_shape[idx]
                 out_flat_padded.append(
                     PaddedTensor(t, multipliers, s, view_shape_stack)
