@@ -202,11 +202,11 @@ GENERATED_H_CUDA = [
 ]
 
 GENERATED_CPP_CUDA = [
-    "RegisterCUDA.cpp",
-    "RegisterNestedTensorCUDA.cpp",
-    "RegisterSparseCUDA.cpp",
-    "RegisterSparseCsrCUDA.cpp",
-    "RegisterQuantizedCUDA.cpp",
+    "RegisterCUDA_0.cpp",
+    "RegisterNestedTensorCUDA_0.cpp",
+    "RegisterSparseCUDA_0.cpp",
+    "RegisterSparseCsrCUDA_0.cpp",
+    "RegisterQuantizedCUDA_0.cpp",
 ]
 
 GENERATED_CPP = [

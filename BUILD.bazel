@@ -48,7 +48,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterFunctionalization_3.cpp",
     # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
     "aten/src/ATen/RegisterMkldnnCPU.cpp",
-    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
+    "aten/src/ATen/RegisterNestedTensorCPU_0.cpp",
     "aten/src/ATen/RegisterQuantizedCPU.cpp",
     "aten/src/ATen/RegisterSparseCPU.cpp",
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
@@ -100,11 +100,11 @@ generated_cpu_cpp = [
 generated_cuda_cpp = [
     "aten/src/ATen/CUDAFunctions.h",
     "aten/src/ATen/CUDAFunctions_inl.h",
-    "aten/src/ATen/RegisterCUDA.cpp",
-    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
-    "aten/src/ATen/RegisterQuantizedCUDA.cpp",
-    "aten/src/ATen/RegisterSparseCUDA.cpp",
-    "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
+    "aten/src/ATen/RegisterCUDA_0.cpp",
+    "aten/src/ATen/RegisterNestedTensorCUDA_0.cpp",
+    "aten/src/ATen/RegisterQuantizedCUDA_0.cpp",
+    "aten/src/ATen/RegisterSparseCUDA_0.cpp",
+    "aten/src/ATen/RegisterSparseCsrCUDA_0.cpp",
 ]
 
 generate_aten(
