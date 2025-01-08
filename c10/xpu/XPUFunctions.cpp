@@ -35,6 +35,7 @@ void identifyDeviceType(
   for (const auto i : c10::irange(device_list.size())) {
     const auto& device = device_list[i];
     if (device.is_gpu()) {
+      // Generally, iGPUs have a unified memory subsystem.
       if (device.get_info<sycl::info::device::host_unified_memory>()) {
         is_igpu[i] = true;
       } else {
