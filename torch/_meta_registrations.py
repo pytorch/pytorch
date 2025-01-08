@@ -5301,7 +5301,7 @@ def meta__scaled_dot_product_flash_attention(
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((2), dtype=torch.long, device="meta"),
         torch.empty((), dtype=torch.long, device="meta"),
         debug_mask,
     )
@@ -5644,7 +5644,7 @@ def meta__flash_attention_forward(
     return (
         attention,
         logsumexp,
-        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((2), dtype=torch.long, device="meta"),
         torch.empty((), dtype=torch.long, device="meta"),
         debug_mask,
     )
