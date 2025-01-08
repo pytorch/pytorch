@@ -1067,6 +1067,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+        replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
@@ -1080,7 +1081,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         base,
                         view_tensor,
                         view_tensor.requires_grad,
-                        replay_views=config.view_replay_for_aliased_outputs,
+                        replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner

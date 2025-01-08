@@ -314,28 +314,8 @@ def gen_alias_from_base(
     return aliased_out
 
 
-def has_same_metadata(t1, t2):
-    return (
-        definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(t1.layout == t2.layout)
-        and (
-            is_sparse_any(t1)
-            or (
-                definitely_true(sym_eq(t1.stride(), t2.stride()))
-                and definitely_true(t1.storage_offset() == t2.storage_offset())
-            )
-        )
-        and t1.is_conj() == t2.is_conj()
-        and t1.is_neg() == t2.is_neg()
-    )
-
-
 @dataclass(frozen=True)
 class MetadataKey:
-    """
-    This should be equal whenever has_same_metadata would return True
-    """
-
     size: Tuple[SymIntEqByExpr, ...]
     layout: torch.layout
     is_sparse: bool
@@ -359,44 +339,26 @@ class MetadataKey:
         )
 
 
-# Recursively compare the equality of 2 different objects, assuming that in
-# the outer call, both `lhs` and `rhs` will be ViewMeta instances.
-def _view_meta_equals(lhs: object, rhs: object) -> bool:
-    # Both `lhs` and `rhs` should be of the same type.
-    if type(lhs) != type(rhs):
-        return False
-
-    # If they are ViewMeta derived objects, compare their innards by
-    # calling `as_tuple`.
-    ViewMeta = _functionalization.ViewMeta
-    if isinstance(lhs, ViewMeta) and isinstance(rhs, ViewMeta):
-        return _view_meta_equals(lhs.as_tuple(), rhs.as_tuple())  # type: ignore[attr-defined]
-
-    # If they are ListLike objects, compare each of their elements.
-    ListLike = (list, tuple)
-    if isinstance(lhs, ListLike) and isinstance(rhs, ListLike):
-        return all(_view_meta_equals(l, r) for l, r in zip(lhs, rhs))
-
-    # If they are Tensor objects, compare each of their elements, and
-    # retrieve the result as a boolean.
-    if isinstance(lhs, Tensor) and isinstance(rhs, Tensor):
-        return bool(lhs.eq(rhs).all().item())
-
-    # Finally, check whether they are any of the allowed literals.
-    AllowedLiteral = (str, int, float, bool)
-    if isinstance(lhs, AllowedLiteral) and isinstance(rhs, AllowedLiteral):
-        return lhs == rhs
-
-    # Otherwise, raise an error.
-    # This is so we don't get False results unexpectedly.
-    raise ValueError(f"_view_meta_equals: unsupported type: {type(lhs)}")
-
-
 # ViewMeta sequence wrapper for equality comparisons.
+#
+# Even though we can compare each ViewMeta instance, we compare the resulting
+# tensor metadata, instead. That's because the creation of synthetic bases + the
+# re-generation of input views might end-up creating a different sequence of
+# ViewMeta that is semantically equivalent. i.e. gets to a tensor with the same
+# metadata.
+#
+# Therefore, we store what the end result should look like as serializable
+# metadata.
 class ViewMetaSequence:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.sequence = _functionalization.get_view_meta_sequence(tensor)
+    def __init__(self, tensor: FunctionalTensor) -> None:
+        assert torch._is_functional_tensor(tensor.elem)
+        self.sequence = _functionalization.get_view_meta_sequence(tensor.elem)
+        self.metadata = MetadataKey.make(tensor)
+
+    def __str__(self) -> str:
+        suffix = len("_ViewMeta")
+        types = ", ".join(type(vm).__name__[:-suffix] for vm in self.sequence)
+        return f"ViewMetaSequence({types})"
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
@@ -409,16 +371,7 @@ class ViewMetaSequence:
         if not isinstance(other, ViewMetaSequence):
             return NotImplemented
 
-        # Compare the length of their inner sequence.
-        if len(self.sequence) != len(other.sequence):
-            return False
-
-        # Compare each of their ViewMeta instances.
-        for l, r in zip(self.sequence, other.sequence):
-            if not _view_meta_equals(l, r):
-                return False
-
-        return True
+        return self.metadata == other.metadata
 
 
 # new_arg and arg here are either:

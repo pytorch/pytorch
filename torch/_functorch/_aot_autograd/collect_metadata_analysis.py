@@ -636,7 +636,7 @@ from a multi-output view call"
                 and not input_info[base_idx].mutates_metadata
             ):
                 if isinstance(o, FunctionalTensor):
-                    view_meta_sequence = ViewMetaSequence(o.elem)
+                    view_meta_sequence = ViewMetaSequence(o)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
