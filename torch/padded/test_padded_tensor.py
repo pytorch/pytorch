@@ -56,7 +56,10 @@ class TestAttention(TestCase):
 
     def run_unpadded_padded(self, fn, inputs, inputs_p):
         # Run the function on unpadded and padded inputs
+        inputs = pytree.tree_map(lambda x: x.clone(), inputs)
         outputs = fn(*inputs)
+
+        inputs_p = pytree.tree_map(lambda x: x.clone(), inputs_p)
         outputs_p = fn(*inputs_p)
 
         # Check the outputs are equal
@@ -69,15 +72,18 @@ class TestAttention(TestCase):
         def median(x):
             return sorted(x)[len(x) // 2]
 
-        def bench(fn, inputs, n_iter=10):
+        def bench(fn, inputs, n_iter=1):
             times = []
             outputs = None
 
             for _ in range(n_iter):
+                inps = pytree.tree_map(lambda x: x.clone(), inputs)
+
                 start = time.time()
-                outputs = fn(*inputs)
+                outputs = fn(*inps)
                 times.append(time.time() - start)
 
+            outputs = pytree.tree_map(lambda x: x.clone(), outputs)
             return median(times), outputs
 
         # Benchmark eager
