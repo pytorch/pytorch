@@ -97,4 +97,4 @@ runs:
         # This is due to the device files (/dev/kfd & /dev/dri) being owned by video group on bare metal.
         # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
-        echo "GPU_FLAG=--device=/dev/mem:/dev/mem:rw --volume /dev/mem:/dev/mem:rw --device=/dev/kfd:/dev/kfd:rw --volume /dev/kfd:/dev/kfd:rw --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device /dev/dri --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
