@@ -16,7 +16,17 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Container, Dict, Hashable, List, Optional, Tuple, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Container,
+    Dict,
+    Hashable,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -250,14 +260,18 @@ class CachingAutotuner(KernelInterface):
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
-    def precompile(self, warm_cache_only=False):
+    def precompile(
+        self,
+        warm_cache_only=False,
+        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+    ):
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
             self._precompile_worker()
             self._make_launchers()
-            self._dynamic_scale_rblock()
+            self._dynamic_scale_rblock(reload_in_parent)
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -278,7 +292,9 @@ class CachingAutotuner(KernelInterface):
         self.compile_results = compile_results
         self.configs = None
 
-    def _dynamic_scale_rblock(self):
+    def _dynamic_scale_rblock(
+        self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
+    ):
         # TODO(jansel): we should find a way to move is (possible) extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg
         device_prop = self.device_props
@@ -369,6 +385,14 @@ class CachingAutotuner(KernelInterface):
                     triton_config,
                     new_config,
                 )
+                if self.fn.fn is None:
+                    """
+                    We are in the parent process, while this program was compiled in a worker
+                    and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+                    containing the real fn yet.
+                    """
+                    assert reload_in_parent
+                    self.fn = reload_in_parent().fn
                 self.compile_results.append(self._precompile_config(new_config))
 
             self._make_launchers()
@@ -397,9 +421,12 @@ class CachingAutotuner(KernelInterface):
         self.launchers = launchers
 
     def prepare_for_pickle(self):
-        """drop stuff from triton.JITFunction that does not pickle"""
+        """Drop stuff from triton.JITFunction that does not pickle.
+        This must be called after precompile so that these things are no longer needed.
+        """
         self.fn.fn = None
         self.fn.__globals__ = None
+        self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
 
@@ -959,8 +986,8 @@ class TritonCompileResult:
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": binary.__class__.launch_enter_hook,
+            "launch_exit_hook": binary.__class__.launch_exit_hook,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1011,7 +1038,7 @@ class TritonCompileResult:
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.launch_enter_hook:
+            if binary.__class__.launch_enter_hook:
                 launch_metadata = (
                     f"bin.launch_metadata(grid, stream, {', '.join(call_args)})"
                 )

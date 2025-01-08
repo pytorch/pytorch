@@ -26,7 +26,10 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import SubprocPool
-from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+from torch._inductor.runtime.compile_tasks import (
+    _set_triton_ptxas_path,
+    _worker_compile_triton,
+)
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -201,7 +204,7 @@ class AsyncCompile:
 
             def get_result() -> CachingAutotuner:
                 kernel = task.result()
-                kernel.precompile(warm_cache_only=False)
+                kernel.precompile(warm_cache_only=False, reload_in_parent=load_kernel)
                 return kernel
 
             return LambdaFuture(get_result, future=task)
@@ -212,8 +215,9 @@ class AsyncCompile:
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
-                kernel = _worker_compile_triton(load_kernel, {})
-                kernel.make_launchers()
+                _set_triton_ptxas_path()
+                kernel = load_kernel()
+                kernel.precompile(warm_cache_only=False)
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
