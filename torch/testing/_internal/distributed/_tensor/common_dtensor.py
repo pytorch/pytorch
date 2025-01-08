@@ -323,6 +323,10 @@ class DTensorTestBase(MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @property
+    def backend(self) -> str:
+        return PG_BACKEND
+
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
