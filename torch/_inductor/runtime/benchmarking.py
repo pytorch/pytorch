@@ -590,7 +590,5 @@ class LazyInductorBenchmarker(GroupedInductorBenchmarker):
 
 
 benchmarker = (
-    LazyInductorBenchmarker()
-    if use_experimental_benchmarker
-    else TritonBenchmarker()
+    LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
 )
