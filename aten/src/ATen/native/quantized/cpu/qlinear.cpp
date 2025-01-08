@@ -834,7 +834,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor y({dst_dims, is_input_qint8 ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
+  auto output_ideep_data_type = is_input_qint8 ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8;
+  auto ideep_lowp_kind = is_input_qint8 ? ideep::s8s8 : ideep::u8s8;
+  ideep::tensor y({dst_dims, output_ideep_data_type,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -857,8 +859,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
           params, x, w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
-          is_input_qint8 ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
-          is_input_qint8 ? ideep::s8s8 : ideep::u8s8);
+          output_ideep_data_type,
+          ideep_lowp_kind);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
@@ -869,8 +871,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
                                    dst_scales, src_zero_point, dst_zero_point,
                                    1.0f, 1.0f, op_attr,
-                                   is_input_qint8 ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
-                                   is_input_qint8 ? ideep::s8s8 : ideep::u8s8);
+                                   output_ideep_data_type,
+                                   ideep_lowp_kind);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
