@@ -217,7 +217,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch import (
+    TorchCtxManagerClassVariable,
+    TorchDispatchKeySetVariable,
+    TorchInGraphFunctionVariable,
+)
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
@@ -688,7 +692,7 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
             return FrozensetVariable(items, source=self.source)
-        elif isinstance(value, enum.Enum):
+        elif isinstance(value, (enum.Enum, torch.DispatchKey)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -2492,6 +2496,13 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
+    elif proxy.node.target in [
+        torch._C._dispatch_keys,
+        torch._C._dispatch_tls_local_include_set,
+        torch._C._dispatch_tls_local_exclude_set,
+    ]:
+        set_example_value(proxy.node, example_value)
+        return TorchDispatchKeySetVariable(example_value, **options)
     elif isinstance(example_value, int) and (
         proxy.node.target
         in [
@@ -2973,7 +2984,7 @@ class SourcelessBuilder:
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, enum.Enum):
+        elif isinstance(value, (enum.Enum, torch.DispatchKey)):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
@@ -3030,6 +3041,10 @@ class SourcelessBuilder:
         handlers[immutable_list] = handlers[list]
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
+
+        handlers[torch.DispatchKeySet] = lambda tx, value: TorchDispatchKeySetVariable(
+            value, mutation_type=ValueMutationNew()
+        )
 
         handlers[
             torch.distributions.constraints._Real
