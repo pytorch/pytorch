@@ -1025,64 +1025,66 @@ class GetAttrVariable(VariableTracker):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         # When Dynamo interprets `obj.__dict__`, it often represents the result
-        # as a `GetAttrVariable(obj_var, "__dict__")` rather than a
-        # `ConstDictVariable`. To support method calls on that dict object, we
-        # need to implement the following.
-        if self.name == "__dict__":
-            if (
-                name in ("__getitem__", "get")
-                and not kwargs
-                and args[0].is_python_constant()
-                and isinstance(
-                    self.obj,
-                    (
-                        variables.UserDefinedObjectVariable,
-                        variables.NNModuleVariable,
-                        variables.UserDefinedClassVariable,
-                    ),
-                )
-            ):
-                obj = self.obj
-                key = args[0].as_python_constant()
-                if obj.has_key_in_generic_dict(tx, key):
-                    # redirect to var_getattr on the original obj
-                    return obj.var_getattr(tx, key)
+        # as a `GetAttrVariable(obj_var, "__dict__")`.  To support method calls
+        # on cases where `obj.__dict__` returns a dict object or a dict view as
+        # `MappingProxyType`, we need the following logic.
+        if (
+            name in ("__getitem__", "get")
+            and self.name == "__dict__"
+            and not kwargs
+            and args[0].is_python_constant()
+            and isinstance(
+                self.obj,
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            if obj.has_key_in_generic_dict(tx, key):
+                # redirect to var_getattr on the original obj
+                return obj.var_getattr(tx, key)
 
-                # Return the default value for get
-                if name == "get":
-                    if len(args) == 2:
-                        return args[1]
-                    else:
-                        return variables.ConstantVariable(None)
-
-            elif (
-                name == "__contains__"
-                and len(args) == 1
-                and args[0].is_python_constant()
-                and not kwargs
-                and isinstance(
-                    self.obj,
-                    (
-                        variables.UserDefinedObjectVariable,
-                        variables.NNModuleVariable,
-                        variables.UserDefinedClassVariable,
-                    ),
-                )
-            ):
-                obj = self.obj
-                key = args[0].as_python_constant()
-                if obj.has_key_in_generic_dict(tx, key):
-                    return variables.ConstantVariable(True)
+            # Return the default value for get
+            if name == "get":
+                if len(args) == 2:
+                    return args[1]
                 else:
-                    return variables.ConstantVariable(False)
+                    return variables.ConstantVariable(None)
 
-            elif (
-                name in ("__setitem__")
-                and not kwargs
-                and isinstance(self.obj, variables.UserDefinedObjectVariable)
-            ):
-                # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+        elif (
+            name == "__contains__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+            and isinstance(
+                self.obj,
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            if obj.has_key_in_generic_dict(tx, key):
+                return variables.ConstantVariable(True)
+            else:
+                return variables.ConstantVariable(False)
+
+        elif (
+            name == "__setitem__"
+            and self.name == "__dict__"
+            and not kwargs
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+        ):
+            # Bypass any custom setattr as we are updating the `__dict__` itself
+            return self.obj.method_setattr_standard(tx, args[0], args[1])
 
         return super().call_method(tx, name, args, kwargs)
 
