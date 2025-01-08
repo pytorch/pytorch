@@ -295,8 +295,8 @@ class CachingAutotuner(KernelInterface):
     def _dynamic_scale_rblock(
         self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
     ):
-        # TODO(jansel): we should find a way to move is (possible) extra compile into the worker process
-        # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg
+        # TODO(jansel): we should find a way to move this extra compile into the worker process
+        # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
         if (
             self.inductor_meta.get("dynamic_scale_rblock", True)
