@@ -142,6 +142,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          has_dropout_randval,
                          drop_seed_offset};
 }
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x num_heads x head_size
            const at::Tensor &k,                      // batch_size x seqlen_k x num_heads_k x head_size
@@ -342,6 +343,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 #if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+#else
+        TORCH_CHECK(
+            false,
+            "CK Flash Attention is not compiled with the right GPU arch. "
+            "Either remove USE_CK_FLASH_ATTENTION or compile with the "
+            "GPU arch that CK attention supports."
+        )
 #endif
     }
     else {
