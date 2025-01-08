@@ -75,7 +75,7 @@ from .dependencies import (
 )
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, LazyBenchmark
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
     argsort,
@@ -4373,9 +4373,13 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
 
-    def benchmark(self, *args, out) -> float:  # type: ignore[no-untyped-def]
+    def benchmark(self, *args, out, lazy=False) -> Union[LazyBenchmark, float]:  # type: ignore[no-untyped-def]
         algo = self.to_callable()
-        return benchmarker.benchmark(algo, args, {"out": out})
+        if lazy:
+            timing = benchmarker.lazy_benchmark(algo, args, {"out": out})
+        else:
+            timing = benchmarker.benchmark(algo, args, {"out": out})
+        return timing
 
     def call_name(self) -> str:
         raise NotImplementedError
