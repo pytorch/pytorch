@@ -5619,11 +5619,17 @@ def meta__flash_attention_forward(
 
     # Cuda Path
     attention = torch.empty_like(query)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
+    if cum_seq_q is None:
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q),
+            dtype=torch.float,
+            device=query.device,
+        )
+    else:
+        total_q = query.size(0)
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
