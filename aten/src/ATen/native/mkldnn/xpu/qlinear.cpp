@@ -14,13 +14,13 @@ Tensor q_linear_pointwise(
     Tensor weight,
     Tensor weight_scales,
     Tensor weight_zero_points,
-    c10::optional<Tensor> bias,
+    std::optional<Tensor> bias,
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
-    c10::string_view post_op_name,
+    std::string_view post_op_name,
     torch::List<std::optional<at::Scalar>> post_op_args,
-    c10::string_view post_op_algorithm) {
+    std::string_view post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -71,9 +71,9 @@ Tensor q_linear_pointwise_tensor(
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
-    c10::string_view post_op_name,
+    std::string_view post_op_name,
     torch::List<std::optional<at::Scalar>> post_op_args,
-    c10::string_view post_op_algorithm) {
+    std::string_view post_op_algorithm) {
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -115,7 +115,7 @@ Tensor q_linear_pointwise_tensor(
 
 at::Tensor q_linear_prepack_onednn(
     at::Tensor weight,
-    c10::optional<torch::List<int64_t>> input_shape) {
+    std::optional<torch::List<int64_t>> input_shape) {
   at::Tensor weight_transposed = weight.transpose(0, 1);
   return weight_transposed;
 }
