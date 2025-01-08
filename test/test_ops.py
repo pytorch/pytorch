@@ -14,7 +14,7 @@ from importlib import import_module
 
 import torch
 import torch._prims as prims
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -73,7 +73,7 @@ from torch.testing._internal.common_utils import (
     unMarkDynamoStrictTest,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 assert torch.get_default_dtype() == torch.float32
