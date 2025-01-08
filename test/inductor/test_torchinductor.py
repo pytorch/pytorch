@@ -12201,10 +12201,10 @@ class CommonTemplate:
             inputs = torch.randn((1,) * (dim + 2))
             model = Model(dim)
 
-            with self.assertRaisesRegex(ValueError, "Output size is too small"):
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = model(inputs)
 
-            with self.assertRaisesRegex(ValueError, "Output size is too small"):
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
 
