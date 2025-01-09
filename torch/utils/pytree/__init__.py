@@ -28,16 +28,19 @@ from typing_extensions import ParamSpec as _ParamSpec, Self as _Self
 
 import torch.utils._pytree as python
 from torch._utils import classproperty as _classproperty
+from torch.utils._pytree import (  # these type aliases are identical in both implementations
+    FlattenFunc as FlattenFunc,
+    FlattenWithKeysFunc as FlattenWithKeysFunc,
+    FromDumpableContextFunc as FromDumpableContextFunc,
+    ToDumpableContextFunc as ToDumpableContextFunc,
+    UnflattenFunc as UnflattenFunc,
+)
 
 
 if _TYPE_CHECKING:
     from types import ModuleType
 
     from torch.utils._cxx_pytree import (  # noqa: TC004
-        FlattenFunc as FlattenFunc,
-        FlattenWithKeysFunc as FlattenWithKeysFunc,
-        FromDumpableContextFn as FromDumpableContextFunc,
-        ToDumpableContextFn as ToDumpableContextFunc,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
         tree_any as tree_any,
@@ -52,7 +55,6 @@ if _TYPE_CHECKING:
         tree_structure as tree_structure,
         tree_unflatten as tree_unflatten,
         treespec_pprint as treespec_pprint,
-        UnflattenFunc as UnflattenFunc,
     )
 
 
@@ -72,28 +74,12 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "treespec_pprint",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "FlattenWithKeysFunc",
+    "ToDumpableContextFunc",
+    "FromDumpableContextFunc",
 ]
-
-
-if _TYPE_CHECKING:
-    # To annotate a module using `torch.utils.pytree`, users can use:
-    #
-    # ```python
-    # from typing import TYPE_CHECKING
-    #
-    # if TYPE_CHECKING:
-    #     from torch.utils.pytree import FlattenFunc, ...
-    #
-    # ...
-    # ```
-
-    __all__ += [
-        "FlattenFunc",
-        "UnflattenFunc",
-        "FlattenWithKeysFunc",
-        "ToDumpableContextFunc",
-        "FromDumpableContextFunc",
-    ]
 
 
 PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
