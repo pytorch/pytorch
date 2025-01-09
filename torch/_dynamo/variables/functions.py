@@ -427,28 +427,6 @@ class GeneratorObjectVariable(VariableTracker):
                 break
         return result
 
-    def _setup_exception(self, tx, exc):
-        tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
-        try:
-            tracer._raise_exception_variable(None)
-        except ObservedException as e:
-            # if no handler is available (i.e. user code doesn't catch it), the
-            # exception is raised again.
-            tracer.exception_handler(e)
-
-    def _is_inside_try_finally(self, tracer):
-        exn_tab_entry = tracer.current_instruction.exn_tab_entry
-        return (sys.version_info >= (3, 11) and exn_tab_entry) or (
-            sys.version_info < (3, 11) and tracer.block_stack
-        )
-
-    def _is_generator_new(self):
-        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
-
-    def _is_generator_exhausted(self):
-        return getattr(self.inline_tracer, "generator_exhausted", False)
-
     def call_method(
         self,
         tx: "InstructionTranslator",
