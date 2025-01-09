@@ -142,6 +142,8 @@ class DeviceProperties(typing.NamedTuple):
         except AttributeError:
             if device_type == "xpu":
                 multi_processor_count = props.gpu_subslice_count
+            elif device_type == "mps":
+                multi_processor_count = 10
             else:
                 raise
         return cls(
