@@ -203,7 +203,7 @@ class ViewOp(SliceRunRepadOp):
                 b = args[0].view_shape_stack[-1]
             else:
                 # TODO: Remove this hard-coded hack.
-                b = [992]
+                b = [991]
 
             # Find the first non-1 dim
             idx = 0

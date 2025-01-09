@@ -292,14 +292,14 @@ class TestAttention(TestCase):
         return inputs_p
 
     def test_attention_all(self):
-        inputs = self.create_inputs(15, 992)
+        inputs = self.create_inputs(15, 991)
         inputs_p = self.pad_inputs(inputs, 16)
 
         self.run_unpadded_padded(self.f_attention, inputs, inputs_p)
 
     def test_attention_bench(self):
         with torch.no_grad():
-            inputs = self.create_inputs(15, 992)
+            inputs = self.create_inputs(15, 991)
             inputs_p = self.pad_inputs(inputs, 16)
 
             self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)
