@@ -255,7 +255,9 @@ class Benchmarker:
         return self.lazy_benchmark_gpu(_callable, **kwargs)
 
     @time_and_count
-    def lazy_benchmark_cpu(self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any) -> LazyBenchmark:
+    def lazy_benchmark_cpu(
+        self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any
+    ) -> LazyBenchmark:
         # we need to execute `_callable` once before creating the lazy
         # benchmark, since we want any exceptions that `_callable` might
         # throw to be thrown when this function is called, not when the
@@ -264,7 +266,9 @@ class Benchmarker:
         return LazyBenchmark(lambda: self.benchmark_cpu(_callable, *args, **kwargs))
 
     @time_and_count
-    def lazy_benchmark_gpu(self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any) -> LazyBenchmark:
+    def lazy_benchmark_gpu(
+        self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any
+    ) -> LazyBenchmark:
         # we need to execute `_callable` once before creating the lazy
         # benchmark, since we want any exceptions that `_callable` might
         # throw to be thrown when this function is called, not when the
