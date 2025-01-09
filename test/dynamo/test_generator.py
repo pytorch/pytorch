@@ -11,6 +11,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    xfailIfLessPy312,
 )
 
 
@@ -601,7 +602,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(i, 3)
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
-    @unittest.expectedFailure
+    @xfailIfLessPy312
     def test_cleanup_throw(self):
         def nested_generator():
             try:
