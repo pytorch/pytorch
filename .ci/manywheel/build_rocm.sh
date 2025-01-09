@@ -186,15 +186,6 @@ do
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
 
-# FIXME: Temporary until https://github.com/pytorch/pytorch/pull/137443 lands
-# Install AOTriton
-if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
-    cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
-    bash ${PYTORCH_ROOT}/.ci/docker/common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
-    export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
-    ROCM_SO_FILES+=("libaotriton_v2.so")
-fi
-
 # rocBLAS library files
 ROCBLAS_LIB_SRC=$ROCM_HOME/lib/rocblas/library
 ROCBLAS_LIB_DST=lib/rocblas/library
@@ -265,20 +256,6 @@ RCCL_SHARE_DST=share/rccl/msccl-algorithms
 RCCL_SHARE_FILES=($(ls $RCCL_SHARE_SRC))
 DEPS_AUX_SRCLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_SRC/})
 DEPS_AUX_DSTLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_DST/})
-
-# PyTorch 2.6+ (AOTriton 0.8b+)
-# AKS = "AOTriton Kernel Storage", a file format to store GPU kernels compactly
-if (( $(echo "${PYTORCH_VERSION} 2.6" | awk '{print ($1 >= $2)}') )); then
-    LIBAOTRITON_DIR=$(find "$ROCM_HOME/lib/" -name "libaotriton_v2.so" -printf '%h\n')
-    if [[ -z ${LIBAOTRITON_DIR} ]]; then
-        LIBAOTRITON_DIR=$(find "$ROCM_HOME/" -name "libaotriton_v2.so" -printf '%h\n')
-    fi
-    AKS_FILES=($(find "${LIBAOTRITON_DIR}/aotriton.images" -type f -name '*.aks?' -printf '%P\n'))
-    AKS_SRC="${LIBAOTRITON_DIR}/aotriton.images"
-    AKS_DST="lib/aotriton.images"
-    DEPS_AUX_SRCLIST+=(${AKS_FILES[@]/#/${AKS_SRC}/})
-    DEPS_AUX_DSTLIST+=(${AKS_FILES[@]/#/${AKS_DST}/})
-fi
 
 echo "PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
 

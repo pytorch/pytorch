@@ -94,9 +94,9 @@ class Dirichlet(ExponentialFamily):
     def mode(self) -> Tensor:
         concentrationm1 = (self.concentration - 1).clamp(min=0.0)
         mode = concentrationm1 / concentrationm1.sum(-1, True)
-        mask = (self.concentration < 1).all(axis=-1)
+        mask = (self.concentration < 1).all(dim=-1)
         mode[mask] = torch.nn.functional.one_hot(
-            mode[mask].argmax(axis=-1), concentrationm1.shape[-1]
+            mode[mask].argmax(dim=-1), concentrationm1.shape[-1]
         ).to(mode)
         return mode
 
