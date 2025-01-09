@@ -8,8 +8,19 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/cat.h>
+#endif
+
+#if AT_KLEIDIAI_ENABLED()
+#include <ATen/native/kleidiai/kai_kernels.h>
+#include <cpuinfo.h>
+#endif
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -762,10 +773,457 @@ void int4pack_mm_kernel(
   }
 }
 
+#if AT_KLEIDIAI_ENABLED()
+bool can_use_kleidiai(
+    const at::Tensor& scales_zeros,
+    const int64_t K,
+    const int64_t block_size) {
+  bool ret = false;
+  if (cpuinfo_has_arm_neon_dot()) {
+    // The Groupwise kernel requires BFloat16 Scales and Channelwise kernel
+    // requires Float32 Scales. If not provided, we will use fallback
+    // implementation.
+    if ((block_size == K && scales_zeros.dtype() == at::kFloat) ||
+        ((block_size < K && !(block_size % 32) && !(K % block_size)) &&
+         scales_zeros.dtype() == at::kBFloat16)) {
+      ret = true;
+    }
+  }
+  return ret;
+}
+#endif
+
+/**
+ * The Int4 quantized weights must be represented as a uint8 tensor
+ * For matrix multiplication with a weight shape of (N x K)
+ * the shape of the 4-bit quantized weights is [N, K/groupsize, groupsize/2].
+ *
+ * For KleidiAI weight packing, the scales, biases, and Int4 quantized
+ * weights are packed into a single `packed_weights` structure, optimized for
+ * Arm instructions.
+ *
+ * In the fallback reference kernel, no special packing is required for
+ * Int4 quantized weights.
+ *
+ * The Groupwise kernel requires BFloat16 Scales and Channelwise kernel requires
+ * Float32 Scales. If not provided, we will use fallback implementation.
+ */
+void dyn_quant_pack_4bit_weight_kernel(
+    Tensor& packed_weights,
+    const Tensor& weights,
+    const Tensor& scales_zeros,
+    const std::optional<Tensor>& bias,
+    const int64_t N,
+    const int64_t K,
+    const int64_t block_size) {
+#if AT_KLEIDIAI_ENABLED()
+  if (can_use_kleidiai(scales_zeros, K, block_size)) {
+    const int64_t weight_packed_size =
+        kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
+    packed_weights.resize_({weight_packed_size});
+    kleidiai::kai_pack_int4_rhs(
+        packed_weights, weights, scales_zeros, bias, N, K, block_size);
+  } else
+#endif
+  {
+    TORCH_CHECK(
+        bias.has_value() == 0,
+        __func__,
+        " : Bias is unsupported in reference implementation");
+    packed_weights = packed_weights.to(kFloat);
+    auto weight_reshaped = weights.view({-1}).to(kFloat);
+    auto scales_zeros_reshaped = scales_zeros.view({-1}).to(kFloat);
+    auto res = at::cat({weight_reshaped, scales_zeros_reshaped}, 0);
+    packed_weights.resize_(res.sizes()).copy_(res);
+  }
+}
+
+static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
+    size_t m,
+    size_t n,
+    size_t k,
+    const float* lhs_f32,
+    const uint8_t* rhs_qs4cx,
+    const float* rhs_scales_f32,
+    float* dst_f32,
+    float scalar_min,
+    float scalar_max) {
+  const size_t input_size_8bit = m * (k + sizeof(int32_t) + sizeof(float));
+
+  auto lhs_qa8dx_buffer = std::make_unique<uint8_t[]>(input_size_8bit);
+  uint8_t* lhs_qa8dx = lhs_qa8dx_buffer.get();
+
+  // Lambda for quantizing the fp32 input to 8 bit symmetric and pack it in
+  // required format for matmul
+  auto input_quant_pack_8bit_channelwise =
+      [&](size_t m, size_t k, const float* lhs_f32, int8_t* lhs_qa8dx) {
+        const size_t dst_stride =
+            (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
+
+        const size_t lhs_qa8dx_stride = k;
+
+        for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+          const float* src_ptr = lhs_f32 + m_idx * lhs_qa8dx_stride;
+
+          float max0 = -FLT_MAX;
+          float min0 = FLT_MAX;
+
+          // Find min/max for each channel
+          for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+            const float src0_0 = src_ptr[k_idx];
+
+            max0 = (std::max)(src0_0, max0);
+            min0 = (std::min)(src0_0, min0);
+          }
+
+          // Maximum/minimum int8 values
+          const float qmin = (float)INT8_MIN;
+          const float qmax = (float)INT8_MAX;
+
+          const float rmin0 = (std::min)(0.0f, min0);
+          const float rmax0 = (std::max)(0.0f, max0);
+
+          const float scale0 =
+              rmin0 == rmax0 ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
+
+          // Reciprocal to quantize
+          const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
+
+          const float descaled_min0 = rmin0 * scale0;
+          const float descaled_max0 = rmax0 * scale0;
+
+          const float zero_point_from_min_error0 = qmin + descaled_min0;
+          const float zero_point_from_max_error0 = qmax + descaled_max0;
+
+          float zero_point0 =
+              zero_point_from_min_error0 + zero_point_from_max_error0 > 0
+              ? qmin - descaled_min0
+              : qmax - descaled_max0;
+
+          zero_point0 = (std::max)(zero_point0, qmin);
+          zero_point0 = (std::min)(zero_point0, qmax);
+
+          // Round to nearest integer
+          const int32_t nudged_zero_point0 = lrintf(zero_point0);
+
+          int8_t* dst_ptr = (int8_t*)lhs_qa8dx + m_idx * dst_stride;
+
+          // LHS offset at the beginning of the row
+          *((float*)(dst_ptr)) = recip_scale0;
+          dst_ptr += sizeof(float);
+          *((int32_t*)(dst_ptr)) = -nudged_zero_point0;
+          dst_ptr += sizeof(int32_t);
+
+          // Quantize the channels
+          for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+            const float src0_0 = src_ptr[k_idx];
+
+            // Scale the values
+            int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
+
+            v0_s32 = v0_s32 + nudged_zero_point0;
+            v0_s32 = (std::max)(v0_s32, static_cast<int32_t>(INT8_MIN));
+            v0_s32 = (std::min)(v0_s32, static_cast<int32_t>(INT8_MAX));
+            dst_ptr[0] = (int8_t)v0_s32;
+            dst_ptr += sizeof(int8_t);
+          }
+        }
+      };
+
+  // Dynamically Quantize the float32 input to 8 bit assymetric
+  input_quant_pack_8bit_channelwise(m, k, lhs_f32, (int8_t*)lhs_qa8dx);
+
+  const size_t lhs_stride =
+      k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
+
+  const size_t rhs_qs4cx_stride = ((((k + 2 - 1) / 2) * 2) / 2);
+
+  for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+    const int8_t* lhs_ptr_start = (int8_t*)lhs_qa8dx + m_idx * lhs_stride;
+
+    for (size_t n_idx = 0; n_idx < n; ++n_idx) {
+      // Main f32 accumulator
+      int32_t iacc = 0;
+
+      const int8_t* lhs_ptr = lhs_ptr_start;
+      const uint8_t* rhs_ptr = rhs_qs4cx + n_idx * rhs_qs4cx_stride;
+
+      // Get the LHS quantization parameters stored at the
+      // beginning of each row
+      const float lhs_scale = *(const float*)lhs_ptr;
+      lhs_ptr += sizeof(float);
+
+      const int32_t lhs_offset = *(const int32_t*)lhs_ptr;
+      lhs_ptr += sizeof(int32_t);
+
+      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+        // Get the LHS values
+        const int32_t lhs_v0 = (int32_t)lhs_ptr[0];
+
+        // Get the RHS values
+        const uint8_t rhs_byte = rhs_ptr[0];
+
+        // Unpack the RHS values
+        int32_t rhs_v0 = 0;
+        if ((k_idx % 2) == 0) {
+          rhs_v0 = (((int32_t)(rhs_byte & 0x0F)) - 8);
+        } else {
+          rhs_v0 = (((int32_t)(rhs_byte >> 4)) - 8);
+        }
+
+        iacc += lhs_v0 * rhs_v0;
+        iacc += lhs_offset * rhs_v0;
+
+        lhs_ptr += 1;
+
+        // Increment only when k_idx is not a multiple of 2
+        rhs_ptr += k_idx % 2;
+      }
+
+      // Get the RHS scale
+      const float rhs_scale = rhs_scales_f32[n_idx];
+
+      float main_acc = iacc * rhs_scale;
+
+      main_acc = main_acc * lhs_scale;
+
+      // Clamp (min-max) operation
+      main_acc = (std::max)(main_acc, scalar_min);
+      main_acc = (std::min)(main_acc, scalar_max);
+
+      dst_f32[0] = main_acc;
+      dst_f32 += 1;
+    }
+  }
+};
+
+static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
+    size_t m,
+    size_t n,
+    size_t k,
+    size_t bl,
+    const float* lhs_f32,
+    const uint8_t* rhs_qs4c32,
+    const float* rhs_scales_fp32,
+    float* dst_f32,
+    float scalar_min,
+    float scalar_max) {
+  // Lambda for LHS quantization
+  auto lhs_quant_pack = [&](size_t m,
+                            size_t k,
+                            const float* lhs_f32,
+                            int8_t* lhs_qa8dx) {
+    const size_t dst_stride =
+        (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
+
+    for (size_t row_idx = 0; row_idx < m; ++row_idx) {
+      const float* src_ptr = lhs_f32 + row_idx * k;
+
+      float max0 = -FLT_MAX;
+      float min0 = FLT_MAX;
+
+      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+        const float src0_0 = src_ptr[k_idx];
+        max0 = (std::max)(src0_0, max0);
+        min0 = (std::min)(src0_0, min0);
+      }
+
+      const float qmin = (float)INT8_MIN;
+      const float qmax = (float)INT8_MAX;
+
+      const float rmin0 = (std::min)(0.0f, min0);
+      const float rmax0 = (std::max)(0.0f, max0);
+      const float scale0 =
+          (rmin0 == rmax0) ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
+      const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
+
+      const float descaled_min0 = rmin0 * scale0;
+      const float descaled_max0 = rmax0 * scale0;
+
+      float zero_point0 = (qmin + descaled_min0 + qmax + descaled_max0 > 0)
+          ? qmin - descaled_min0
+          : qmax - descaled_max0;
+
+      zero_point0 = (std::max)(zero_point0, qmin);
+      zero_point0 = (std::min)(zero_point0, qmax);
+      const int32_t nudged_zero_point0 = lrintf(zero_point0);
+
+      int8_t* dst_ptr = (int8_t*)lhs_qa8dx + row_idx * dst_stride;
+
+      *((float*)(dst_ptr)) = recip_scale0;
+      dst_ptr += sizeof(float);
+      *((int32_t*)(dst_ptr)) = -nudged_zero_point0;
+      dst_ptr += sizeof(int32_t);
+
+      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+        const float src0_0 = src_ptr[k_idx];
+        int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
+        v0_s32 = (std::max)(
+            (std::min)(
+                v0_s32 + nudged_zero_point0, static_cast<int32_t>(INT8_MAX)),
+            static_cast<int32_t>(INT8_MIN));
+        dst_ptr[0] = (int8_t)v0_s32;
+        dst_ptr += sizeof(int8_t);
+      }
+    }
+  };
+
+  auto lhs_qa8dx_buffer = std::make_unique<int8_t[]>(
+      m * (k + sizeof(float) + sizeof(int32_t))); // Allocate for LHS
+  int8_t* lhs_qa8dx = lhs_qa8dx_buffer.get();
+  // Quantize and pack LHS
+  lhs_quant_pack(m, k, lhs_f32, lhs_qa8dx);
+
+  const size_t num_blocks_row = (((k + bl - 1) / bl) * bl) / bl;
+  const size_t lhs_stride = k + sizeof(float) + sizeof(int32_t);
+  const size_t rhs_stride = (((k + 2 - 1) / 2) * 2) / 2;
+
+  for (size_t row_idx = 0; row_idx < m; ++row_idx) {
+    const int8_t* lhs_ptr_start = lhs_qa8dx + row_idx * lhs_stride;
+
+    for (size_t col_idx = 0; col_idx < n; ++col_idx) {
+      float main_acc = 0.0f;
+      const int8_t* lhs_ptr = lhs_ptr_start;
+      const uint8_t* rhs_ptr = rhs_qs4c32 + col_idx * rhs_stride;
+
+      const float lhs_scale = *(const float*)lhs_ptr;
+      lhs_ptr += sizeof(float);
+      const int32_t lhs_offset = *(const int32_t*)lhs_ptr;
+      lhs_ptr += sizeof(int32_t);
+
+      for (size_t block_idx = 0; block_idx < num_blocks_row; ++block_idx) {
+        const float rhs_scale =
+            rhs_scales_fp32[block_idx + col_idx * num_blocks_row];
+        int32_t iacc = 0;
+
+        for (size_t i = 0; i < bl; ++i) {
+          const size_t k_idx = block_idx * bl + i;
+          if (k_idx >= k) {
+            break;
+          }
+
+          const int32_t lhs_v0 = (int32_t)lhs_ptr[0];
+          const uint8_t rhs_byte = rhs_ptr[0];
+          int32_t rhs_v0 = (k_idx % 2 == 0) ? (((int32_t)(rhs_byte & 0x0F)) - 8)
+                                            : (((int32_t)(rhs_byte >> 4)) - 8);
+
+          iacc += lhs_v0 * rhs_v0;
+          iacc += lhs_offset * rhs_v0;
+
+          lhs_ptr += 1;
+          rhs_ptr += (k_idx % 2);
+        }
+
+        main_acc += iacc * rhs_scale;
+      }
+
+      main_acc = main_acc * lhs_scale;
+      main_acc = (std::max)(main_acc, scalar_min);
+      main_acc = (std::min)(main_acc, scalar_max);
+
+      dst_f32[0] = main_acc;
+      dst_f32 += 1;
+    }
+  }
+}
+
+/**
+ * Dynamic Input Quant 4 bit weights matmul execution flow
+              (INT4 Weights + FP scales + FP32 Bias)
+  FP32 Input              Packed Buffer
+       |                       |
+    Quantize                Cast
+   to INT8                 to INT8
+       |                       |
+       v                       v
+ INT8 Input              INT8 Weights
+          \               /
+            \            /
+             \         /
+           INT8 Matrix Multiplication
+                   |
+                   v
+ FP32 Dequantized and Accumulate in FP32
+                   |
+                   v
+             FP32 Final Output
+
+ * The Groupwise kernel requires BFloat16 Scales and Channelwise kernel requires
+ * Float32 Scales. If not provided, we will use fallback implementation.
+ */
+void dyn_quant_matmul_4bit_kernel(
+    const Tensor& output,
+    const Tensor& inp,
+    const Tensor& packed_weights,
+    const int64_t M,
+    const int64_t N,
+    const int64_t K,
+    const int64_t block_size) {
+#if AT_KLEIDIAI_ENABLED()
+  const int64_t weight_packed_size =
+      kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
+  if (weight_packed_size == packed_weights.numel()) {
+    // KleidiAI interface intenally handles the Channelwise and groupwise
+    // distinction
+    kleidiai::kai_quant_pack_lhs_int4_mm(
+        output, inp, packed_weights, M, N, K, block_size);
+  } else
+#endif
+  {
+    float* lhs_f32 = reinterpret_cast<float*>(inp.data_ptr());
+    const auto weights_size = N * K / 2;
+    // The weights needs to be in uint8_t data type after quantization
+    auto extracted_weights =
+        (packed_weights.narrow(0, 0, weights_size)).to(kByte);
+    auto float32_scales =
+        (packed_weights.narrow(
+             0, weights_size, packed_weights.size(0) - weights_size))
+            .to(kFloat);
+    uint8_t* rhs_4bit =
+        reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
+    float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
+    float* dst_f32 = reinterpret_cast<float*>(output.data_ptr());
+    if (block_size == K) {
+      ref_dyn_quant_matmul_4bit_channelwise_kernel(
+          M,
+          N,
+          K,
+          lhs_f32,
+          rhs_4bit,
+          rhs_scales_f32,
+          dst_f32,
+          -FLT_MAX,
+          FLT_MAX);
+    } else if (!(block_size % 32) && !(K % block_size)) {
+      ref_dyn_quant_matmul_4bit_groupwise_kernel(
+          M,
+          N,
+          K,
+          block_size,
+          lhs_f32,
+          rhs_4bit,
+          rhs_scales_f32,
+          dst_f32,
+          -FLT_MAX,
+          FLT_MAX);
+    } else {
+      TORCH_CHECK(
+          block_size == K || (!(block_size % 32) && !(K % block_size)),
+          __func__,
+          ": Group size should be multiple 32 or in_features [",
+          K,
+          "]. Provided ",
+          block_size);
+    }
+  }
+}
+
 } // anonymous namespace
 
 ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel)
 ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel)
+REGISTER_DISPATCH(dyn_quant_pack_4bit_weight_stub, &dyn_quant_pack_4bit_weight_kernel)
+REGISTER_DISPATCH(dyn_quant_matmul_4bit_stub, &dyn_quant_matmul_4bit_kernel)
 
 } // at::native
 C10_DIAGNOSTIC_POP()
