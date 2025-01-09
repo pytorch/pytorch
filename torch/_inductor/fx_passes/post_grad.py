@@ -5,7 +5,8 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -54,6 +55,9 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -213,7 +217,9 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+def register_lowering_pattern(
+    pattern, extra_check=_return_true, pass_number=1
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
     """
@@ -1035,7 +1041,7 @@ def register_partial_reduction_pattern():
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 
-            def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def replacement(inp: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 partial = partial_red.target(inp, reduced_dims, keepdim)
                 complete = full_red.target(partial)
                 return (partial, complete)
