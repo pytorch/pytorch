@@ -274,6 +274,32 @@ class TestLazyGraphModule(TestCase):
         )
         assert hasattr(got_lazy_inner_forward, "__self__")
 
+    def test_get_spec_attribute(self):
+        """
+        _in_spec and _out_spec should be populated.
+        """
+        from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+        from torch.utils import _pytree as pytree
+
+        def f(x):
+            return x * 2
+
+        _, spec = pytree.tree_flatten(torch.randn(1))
+        gm = torch.fx.symbolic_trace(f)
+        lazy_gm = torch.fx._lazy_graph_module._LazyGraphModule.from_graphmodule(gm)
+
+        lazy_gm.graph._codegen = _PyTreeCodeGen(
+            _PyTreeInfo(
+                ["x"],
+                spec,
+                spec,
+            )
+        )
+        out_spec = lazy_gm._out_spec
+        in_spec = lazy_gm._in_spec
+        self.assertEqual(out_spec, spec)
+        self.assertEqual(in_spec, spec)
+
 
 if __name__ == "__main__":
     run_tests()
