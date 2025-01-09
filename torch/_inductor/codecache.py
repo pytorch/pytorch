@@ -96,6 +96,7 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
@@ -375,7 +376,7 @@ def code_hash(code: Union[str, bytes], extra: str = "") -> str:
 
 def get_path(
     basename: str, extension: str, specified_dir: str = ""
-) -> Tuple[str, str, str]:
+) -> tuple[str, str, str]:
     if specified_dir:
         if os.path.isabs(specified_dir):
             subdir = specified_dir
@@ -403,7 +404,7 @@ def write(
     extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     # use striped content to compute hash so we don't end up with different
     # hashes just because the content begins/ends with different number of
     # spaces.
@@ -527,7 +528,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_fake_tensor(
         self, t: Tensor
-    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+    ) -> tuple[Callable[[T], T], tuple[TensorMetadata]]:
         """
         Custom reducer to pickle FakeTensors.
         """
@@ -537,7 +538,7 @@ class FxGraphCachePickler(pickle.Pickler):
     def _reduce_tensor(
         self,
         t: Tensor,
-    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -570,7 +571,7 @@ class FxGraphCachePickler(pickle.Pickler):
         # Otherwise, we just include the metadata.
         return (_ident, (metadata,))
 
-    def _reduce_symint(self, s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
+    def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
         Custom reducer to pickle SymInts.
         """
@@ -588,7 +589,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_graph_module(
         self, gm: torch.fx.GraphModule
-    ) -> Tuple[Any, Tuple[Dict[str, Any], str]]:
+    ) -> tuple[Any, tuple[Dict[str, Any], str]]:
         """
         Custom reducer for graph module to handle irrelevant data for user
         defined triton kernels
@@ -860,7 +861,7 @@ def compiled_fx_graph_hash(
     example_inputs: Sequence[InputType],
     fx_kwargs: _CompileFxKwargs,
     inputs_to_check: Sequence[int],
-) -> Tuple[str, List[str]]:
+) -> tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -980,7 +981,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         constants: CompiledFxGraphConstants,
-    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+    ) -> tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -991,14 +992,17 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
+        def iterate_over_candidates() -> (
+            Generator[Tuple[CompiledFxGraph, bytes], None, None]
+        ):
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
                         try:
                             with open(os.path.join(subdir, path), "rb") as f:
-                                yield pickle.load(f)
+                                content = f.read()
+                                yield pickle.loads(content), content
                         except Exception:
                             log.warning(
                                 "fx graph cache unable to load compiled graph",
@@ -1012,7 +1016,7 @@ class FxGraphCache:
                         data = cache_data["data"]
                         assert isinstance(data, (str, bytes))
                         content = base64.b64decode(data)
-                        yield pickle.loads(content)
+                        yield pickle.loads(content), content
                 except Exception:
                     log.warning(
                         "fx graph cache unable to load compiled graph", exc_info=True
@@ -1021,9 +1025,10 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        pickled_content = None
         cache_info: Dict[str, Any] = dict()
 
-        for candidate in iterate_over_candidates():
+        for candidate, pickled_content in iterate_over_candidates():
             if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -1049,6 +1054,11 @@ class FxGraphCache:
 
         if graph is None:
             return None, cache_info
+
+        if pickled_content is not None:
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.INDUCTOR, key, pickled_content
+            )
 
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
@@ -1099,6 +1109,18 @@ class FxGraphCache:
         return graph, cache_info
 
     @staticmethod
+    def _write_to_local_cache(key: str, content: bytes) -> None:
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+
+        # Use a hash of the serialized CompiledFxGraph to get a unique file
+        # name. The specific name doesn't matter since a lookup involves
+        # iterating over all entries in the parent subdir.
+        path = os.path.join(subdir, sha256_hash(content))
+        write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
     def _save_graph(
         key: str,
         compiled_graph: OutputCode,
@@ -1140,16 +1162,11 @@ class FxGraphCache:
             return
 
         try:
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.INDUCTOR, key, content
+            )
             if local:
-                subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                if not os.path.exists(subdir):
-                    os.makedirs(subdir, exist_ok=True)
-
-                # Use a hash of the serialized CompiledFxGraph to get a unique file
-                # name. The specific name doesn't matter since a lookup involves
-                # iterating over all entries in the parent subdir.
-                path = os.path.join(subdir, sha256_hash(content))
-                write_atomic(path, content, make_dirs=True)
+                FxGraphCache._write_to_local_cache(key, content)
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
@@ -1222,7 +1239,7 @@ class FxGraphCache:
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
-    ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
+    ) -> tuple[Optional[tuple[str, List[str]]], Dict[str, Any]]:
         """
         Checks that the inductor input is cacheable, then computes
         and returns the cache key for the input.
@@ -1274,7 +1291,7 @@ class FxGraphCache:
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+    ) -> tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
@@ -1347,7 +1364,7 @@ def run_command_and_check(cmd_: str) -> None:
 
 
 @functools.lru_cache(None)
-def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
+def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
     if path.endswith(".so"):
         return os.path.split(path)
@@ -2720,10 +2737,10 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
+    linemaps: Dict[str, List[tuple[Any, ...]]] = {}
 
     @classmethod
-    def write(cls, source_code: str, extra: str = "") -> Tuple[str, str]:
+    def write(cls, source_code: str, extra: str = "") -> tuple[str, str]:
         return write(source_code, "py", extra=extra)
 
     @classmethod
@@ -2731,7 +2748,7 @@ class PyCodeCache:
         cls,
         source_code: str,
         extra: str = "",
-        linemap: Optional[List[Tuple[int, str]]] = None,
+        linemap: Optional[List[tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
     ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
@@ -2742,7 +2759,7 @@ class PyCodeCache:
         cls,
         key: str,
         path: str,
-        linemap: Optional[List[Tuple[int, str]]] = None,
+        linemap: Optional[List[tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
     ) -> ModuleType:
         if linemap is None:
@@ -3043,7 +3060,7 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
-    def write(cls, source_code: str, dst_file_ext: str) -> Tuple[str, str]:
+    def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
         Returns the hash key of source code, and the path to the file.
@@ -3060,7 +3077,7 @@ class CUDACodeCache:
     @classmethod
     def compile(
         cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
@@ -3099,7 +3116,7 @@ class CUDACodeCache:
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
-    def load(cls, source_code: str, dst_file_ext: str) -> Tuple[DLLWrapper, str, str]:
+    def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
         """
         Compiles source code and loads the generated .so file.
         Returns a tuple of DLLWrapper, hash_key, source_code_path
@@ -3129,7 +3146,7 @@ class ROCmCodeCache:
     _logged_compiler_version = False
 
     @classmethod
-    def write(cls, source_code: str, dst_file_ext: str) -> Tuple[str, str]:
+    def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
         Returns the hash key of source code, and the path to the file.
@@ -3146,7 +3163,7 @@ class ROCmCodeCache:
     @classmethod
     def compile(
         cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         """
         Compiles source_code into a file with dst_file_ext extension,
         using the compile command specific for the ROCm platform.
@@ -3194,7 +3211,7 @@ class ROCmCodeCache:
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
-    def load(cls, source_code: str, dst_file_ext: str) -> Tuple[DLLWrapper, str, str]:
+    def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
         """
         Compiles source code and loads the generated .so file.
         Returns a tuple of DLLWrapper, hash_key, source_code_path
