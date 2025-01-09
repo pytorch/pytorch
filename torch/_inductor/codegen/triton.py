@@ -4163,7 +4163,9 @@ class TritonScheduling(SIMDScheduling):
                 kernel_callable = lambda: call(  # noqa: E731
                     wrapped_jit_function.clone_args(*args)[0]
                 )
-                clone_callable = lambda: wrapped_jit_function.clone_args(*args)[  # noqa: E731
+                clone_callable = lambda: wrapped_jit_function.clone_args(  # noqa: E731
+                    *args
+                )[
                     0
                 ]
                 # benchmarking both the kernel and the clone overhead together improves accuracy

@@ -92,13 +92,6 @@ RUN apt-get update -y && \
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 
-# Install AOTriton
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
-
 FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
 # Install patchelf
