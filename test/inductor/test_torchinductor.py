@@ -8653,6 +8653,26 @@ class CommonTemplate:
         self.assertGreater(c0.max(), 2**40)
         self.assertLess(c0.max(), 2**50)
 
+    def test_randint_distribution(self):
+        @torch.compile(fullgraph=True)
+        def fn(n_argsmax, size):
+            return torch.randint(n_max, (size,), device=self.device)
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+
+        size = 1_000_000
+        n_max = int(0.75 * 2**32)
+        n_bins = 8
+
+        res = fn(n_max, size)
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
+
     @config.patch(fallback_random=True)
     def test_like_rands(self):
         def fn(x):
@@ -12176,6 +12196,31 @@ class CommonTemplate:
 
         self.assertEqual(res1, ref1)
         self.assertEqual(res2, ref2)
+
+    def test_conv_shape_check(self):
+        # https://github.com/pytorch/pytorch/issues/144013
+        class Model(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                conv_t_cls = eval(f"torch.nn.ConvTranspose{dim}d")
+                self.conv_t = conv_t_cls(
+                    1, 1, kernel_size=(2,) * dim, padding=(1,) * dim
+                )
+
+            def forward(self, x):
+                x = self.conv_t(x)
+                x = torch.sigmoid(x)  # tigger condition
+                return x
+
+        for dim in (1, 2, 3):
+            inputs = torch.randn((1,) * (dim + 2))
+            model = Model(dim)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = model(inputs)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = torch.compile(model)(inputs)
 
 
 @dataclasses.dataclass
