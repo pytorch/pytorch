@@ -4,6 +4,7 @@ import functools
 import itertools
 import operator
 import time
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -480,10 +481,16 @@ class AutogradCompilerInstance:
                 and len(ca.all_input_nodes) == len(aot.all_input_nodes)
             )
 
+        # number of times we saw this AOT backward graph, used to dedup reused graphs
+        aot_id_counter: Dict[int, int] = defaultdict(int)
         for nodecall_index, info in self.aot_graph_infos.items():
             ca_node_start_idx = info["ca_node_start_idx"]
             aot_id = info["aot_id"]
+            aot_id_postfix = ""
             aot_graph = info["aot_gm"].graph
+            if aot_id_counter[aot_id]:
+                aot_id_postfix = f"_{aot_id_counter[aot_id]}"
+            aot_id_counter[aot_id] += 1
 
             # 1. Find the first op from user code in the AOT graph
             aot_it = iter(aot_graph.nodes)
@@ -520,9 +527,11 @@ class AutogradCompilerInstance:
                         # So any deviation is an error
                         raise StopIteration
 
-                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    ca_node.name = f"aot{aot_id}{aot_id_postfix}_{aot_node.name}"
                     for i, inp in enumerate(aot_node.all_input_nodes):
-                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+                        ca_node.all_input_nodes[
+                            i
+                        ].name = f"aot{aot_id}{aot_id_postfix}_{inp.name}"
 
                     aot_node = next(aot_it)
                     ca_node = next(ca_it)

@@ -273,7 +273,7 @@ class ComputeCodegenUnboxedKernels:
             exception_boundary_begin = indent + "try {"
             exception_boundary_end = f"""{indent}}} catch (const std::exception& ex) {{
 {indent}  ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
-{indent}  context.fail(torch::executor::Error::error);
+{indent}  context.fail(torch::executor::Error::Internal);
 {indent}}}"""
         newline = "\n    "
         return "\n".join(

@@ -639,7 +639,7 @@ Kernel(
         *stack[0] = EValue(result_);
         } catch (const std::exception& ex) {
           ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
-          context.fail(torch::executor::Error::error);
+          context.fail(torch::executor::Error::Internal);
         }
     }
 ),
