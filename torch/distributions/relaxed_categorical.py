@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -63,18 +62,18 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def param_shape(self) -> torch.Size:
+    def param_shape(self):
         return self._categorical.param_shape
 
     @property
-    def logits(self) -> Tensor:
+    def logits(self):
         return self._categorical.logits
 
     @property
-    def probs(self) -> Tensor:
+    def probs(self):
         return self._categorical.probs
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
             torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
@@ -131,13 +130,13 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self) -> Tensor:
+    def temperature(self):
         return self.base_dist.temperature
 
     @property
-    def logits(self) -> Tensor:
+    def logits(self):
         return self.base_dist.logits
 
     @property
-    def probs(self) -> Tensor:
+    def probs(self):
         return self.base_dist.probs

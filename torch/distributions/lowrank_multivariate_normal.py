@@ -2,7 +2,6 @@
 import math
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
@@ -144,21 +143,21 @@ class LowRankMultivariateNormal(Distribution):
         return new
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.loc
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self.loc
 
     @lazy_property
-    def variance(self) -> Tensor:  # type: ignore[override]
+    def variance(self):
         return (
             self._unbroadcasted_cov_factor.pow(2).sum(-1) + self._unbroadcasted_cov_diag
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
-    def scale_tril(self) -> Tensor:
+    def scale_tril(self):
         # The following identity is used to increase the numerically computation stability
         # for Cholesky decomposition (see http://www.gaussianprocess.org/gpml/, Section 3.4.3):
         #     W @ W.T + D = D1/2 @ (I + D-1/2 @ W @ W.T @ D-1/2) @ D1/2
@@ -175,7 +174,7 @@ class LowRankMultivariateNormal(Distribution):
         )
 
     @lazy_property
-    def covariance_matrix(self) -> Tensor:
+    def covariance_matrix(self):
         covariance_matrix = torch.matmul(
             self._unbroadcasted_cov_factor, self._unbroadcasted_cov_factor.mT
         ) + torch.diag_embed(self._unbroadcasted_cov_diag)
@@ -184,7 +183,7 @@ class LowRankMultivariateNormal(Distribution):
         )
 
     @lazy_property
-    def precision_matrix(self) -> Tensor:
+    def precision_matrix(self):
         # We use "Woodbury matrix identity" to take advantage of low rank form::
         #     inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D)
         # where :math:`C` is the capacitance matrix.
@@ -200,7 +199,7 @@ class LowRankMultivariateNormal(Distribution):
             self._batch_shape + self._event_shape + self._event_shape
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         W_shape = shape[:-1] + self.cov_factor.shape[-1:]
         eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)

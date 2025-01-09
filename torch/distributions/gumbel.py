@@ -3,7 +3,6 @@ import math
 from numbers import Number
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
@@ -65,19 +64,19 @@ class Gumbel(TransformedDistribution):
         return (y - y.exp()) - self.scale.log()
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.loc + self.scale * euler_constant
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self.loc
 
     @property
-    def stddev(self) -> Tensor:
+    def stddev(self):
         return (math.pi / math.sqrt(6)) * self.scale
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return self.stddev.pow(2)
 
     def entropy(self):

@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
+from typing import Any, Dict, Optional
 from typing_extensions import deprecated
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
 from torch.types import _size
@@ -114,7 +113,7 @@ class Distribution:
         return self._event_shape
 
     @property
-    def arg_constraints(self) -> dict[str, constraints.Constraint]:
+    def arg_constraints(self) -> Dict[str, constraints.Constraint]:
         """
         Returns a dictionary from argument names to
         :class:`~torch.distributions.constraints.Constraint` objects that
@@ -124,7 +123,7 @@ class Distribution:
         raise NotImplementedError
 
     @property
-    def support(self) -> Optional[constraints.Constraint]:
+    def support(self) -> Optional[Any]:
         """
         Returns a :class:`~torch.distributions.constraints.Constraint` object
         representing this distribution's support.
@@ -132,34 +131,34 @@ class Distribution:
         raise NotImplementedError
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self) -> torch.Tensor:
         """
         Returns the mean of the distribution.
         """
         raise NotImplementedError
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self) -> torch.Tensor:
         """
         Returns the mode of the distribution.
         """
         raise NotImplementedError(f"{self.__class__} does not implement mode")
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self) -> torch.Tensor:
         """
         Returns the variance of the distribution.
         """
         raise NotImplementedError
 
     @property
-    def stddev(self) -> Tensor:
+    def stddev(self) -> torch.Tensor:
         """
         Returns the standard deviation of the distribution.
         """
         return self.variance.sqrt()
 
-    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def sample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
@@ -167,7 +166,7 @@ class Distribution:
         with torch.no_grad():
             return self.rsample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
@@ -179,14 +178,14 @@ class Distribution:
         "`sample_n(n)` will be deprecated. Use `sample((n,))` instead.",
         category=FutureWarning,
     )
-    def sample_n(self, n: int) -> Tensor:
+    def sample_n(self, n: int) -> torch.Tensor:
         """
         Generates n samples or n batches of samples if the distribution
         parameters are batched.
         """
         return self.sample(torch.Size((n,)))
 
-    def log_prob(self, value: Tensor) -> Tensor:
+    def log_prob(self, value: torch.Tensor) -> torch.Tensor:
         """
         Returns the log of the probability density/mass function evaluated at
         `value`.
@@ -196,7 +195,7 @@ class Distribution:
         """
         raise NotImplementedError
 
-    def cdf(self, value: Tensor) -> Tensor:
+    def cdf(self, value: torch.Tensor) -> torch.Tensor:
         """
         Returns the cumulative density/mass function evaluated at
         `value`.
@@ -206,7 +205,7 @@ class Distribution:
         """
         raise NotImplementedError
 
-    def icdf(self, value: Tensor) -> Tensor:
+    def icdf(self, value: torch.Tensor) -> torch.Tensor:
         """
         Returns the inverse cumulative density/mass function evaluated at
         `value`.
@@ -216,7 +215,7 @@ class Distribution:
         """
         raise NotImplementedError
 
-    def enumerate_support(self, expand: bool = True) -> Tensor:
+    def enumerate_support(self, expand: bool = True) -> torch.Tensor:
         """
         Returns tensor containing all values supported by a discrete
         distribution. The result will enumerate over dimension 0, so the shape
@@ -240,7 +239,7 @@ class Distribution:
         """
         raise NotImplementedError
 
-    def entropy(self) -> Tensor:
+    def entropy(self) -> torch.Tensor:
         """
         Returns entropy of distribution, batched over batch_shape.
 
@@ -249,7 +248,7 @@ class Distribution:
         """
         raise NotImplementedError
 
-    def perplexity(self) -> Tensor:
+    def perplexity(self) -> torch.Tensor:
         """
         Returns perplexity of distribution, batched over batch_shape.
 
@@ -272,7 +271,7 @@ class Distribution:
             sample_shape = torch.Size(sample_shape)
         return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
-    def _validate_sample(self, value: Tensor) -> None:
+    def _validate_sample(self, value: torch.Tensor) -> None:
         """
         Argument validation for distribution methods such as `log_prob`,
         `cdf` and `icdf`. The rightmost dimensions of a value to be

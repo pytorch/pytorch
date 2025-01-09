@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import nan, Tensor
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
@@ -94,19 +94,19 @@ class Categorical(Distribution):
         return constraints.integer_interval(0, self._num_events - 1)
 
     @lazy_property
-    def logits(self) -> Tensor:
+    def logits(self):
         return probs_to_logits(self.probs)
 
     @lazy_property
-    def probs(self) -> Tensor:
+    def probs(self):
         return logits_to_probs(self.logits)
 
     @property
-    def param_shape(self) -> torch.Size:
+    def param_shape(self):
         return self._param.size()
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return torch.full(
             self._extended_shape(),
             nan,
@@ -115,11 +115,11 @@ class Categorical(Distribution):
         )
 
     @property
-    def mode(self) -> Tensor:
-        return self.probs.argmax(dim=-1)
+    def mode(self):
+        return self.probs.argmax(axis=-1)
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return torch.full(
             self._extended_shape(),
             nan,

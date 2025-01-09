@@ -40,7 +40,9 @@ class TestOpRecorder(common_utils.TestCase):
         input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
         input_y.dtype = ir.DataType.FLOAT
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             cast = self.opset.CastLike(input_y, input_x)
             _ = self.opset.Add(input_x, cast)
 
@@ -54,7 +56,9 @@ class TestOpRecorder(common_utils.TestCase):
         input_y = _tensors.SymbolicTensor(opset=self.opset, name="input_y")
         input_y.dtype = ir.DataType.INT64
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             cast = self.opset.CastLike(input_y, input_x)
             _ = self.opset.Add(input_x, cast)
 
@@ -68,7 +72,9 @@ class TestOpRecorder(common_utils.TestCase):
         )
         new_shape = [3, 2, 4]
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             _ = self.opset.Reshape(input_x, new_shape)
 
         self.assertEqual(len(tracer.nodes), 2)
@@ -89,7 +95,9 @@ class TestOpRecorder(common_utils.TestCase):
             opset=self.opset, name="input_z", shape=ir.Shape([1, 3])
         )
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             _ = self.opset.SequenceAt([input_x, input_y, input_z], 1)
 
         self.assertEqual(len(tracer.nodes), 3)
@@ -106,63 +114,33 @@ class TestOpRecorder(common_utils.TestCase):
             opset=self.opset, name="input_z", shape=ir.Shape([1, 3])
         )
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             _ = self.opset.Max(input_x, input_y, 0, input_z)
 
         self.assertEqual(len(tracer.nodes), 2)
         self.assertEqual(tracer.nodes[0].op_type, "Constant")
 
-    def test_process_python_sequence_creates_extra_concat(self):
-        # Elements in the list must be 0D tensors
+    def test_process_python_sequence_with_an_extra_concat(self):
         input_x = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_x", shape=ir.Shape([])
+            opset=self.opset, name="input_x", shape=ir.Shape([2, 3])
         )
         input_y = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_y", shape=ir.Shape([])
+            opset=self.opset, name="input_y", shape=ir.Shape([2, 3])
         )
         input_z = _tensors.SymbolicTensor(
             opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
         )
 
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
+        with onnxscript.evaluator.default_as(
+            tracer := self.recorder,
+        ):
             _ = self.opset.Add([input_x, input_y], input_z)
 
-        self.assertEqual(len(tracer.nodes), 6)
-        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
-        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
-
-    def test_process_python_sequence_mix_symbolic_constant_creates_extra_concat(self):
-        # Elements in the list must be 0D tensors
-        input_x = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_x", shape=ir.Shape([])
-        )
-        input_z = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
-        )
-
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
-            _ = self.opset.Add([input_x, 42], input_z)
-
-        self.assertEqual(len(tracer.nodes), 5)
-        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
-        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
-
-    def test_process_python_sequence_mix_constant_symbolic_creates_extra_concat(self):
-        # Elements in the list must be 0D tensors
-        input_x = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_x", shape=ir.Shape([])
-        )
-        input_z = _tensors.SymbolicTensor(
-            opset=self.opset, name="input_z", shape=ir.Shape([4, 3])
-        )
-
-        with onnxscript.evaluator.default_as(tracer := self.recorder):
-            # Constant first
-            _ = self.opset.Add([42, input_x], input_z)
-
-        self.assertEqual(len(tracer.nodes), 5)
-        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
-        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
+        self.assertEqual(len(tracer.nodes), 2)
+        self.assertEqual(tracer.nodes[0].op_type, "Concat")
+        self.assertEqual(tracer.nodes[0].attributes["axis"].value, 0)
 
 
 if __name__ == "__main__":

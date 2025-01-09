@@ -4,7 +4,7 @@ import math
 import numbers
 import operator
 import weakref
-from typing import Optional
+from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -94,7 +94,7 @@ class Transform:
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
-        self._inv: Optional[weakref.ReferenceType[Transform]] = None
+        self._inv = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -109,13 +109,13 @@ class Transform:
         return state
 
     @property
-    def event_dim(self) -> int:
+    def event_dim(self):
         if self.domain.event_dim == self.codomain.event_dim:
             return self.domain.event_dim
         raise ValueError("Please use either .domain.event_dim or .codomain.event_dim")
 
     @property
-    def inv(self) -> "Transform":
+    def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
         This should satisfy ``t.inv.inv is t``.
@@ -129,7 +129,7 @@ class Transform:
         return inv
 
     @property
-    def sign(self) -> int:
+    def sign(self):
         """
         Returns the sign of the determinant of the Jacobian, if applicable.
         In general this only makes sense for bijective transforms.
@@ -220,7 +220,7 @@ class _InverseTransform(Transform):
 
     def __init__(self, transform: Transform):
         super().__init__(cache_size=transform._cache_size)
-        self._inv: Transform = transform  # type: ignore[assignment]
+        self._inv: Transform = transform
 
     @constraints.dependent_property(is_discrete=False)
     def domain(self):
@@ -233,17 +233,17 @@ class _InverseTransform(Transform):
         return self._inv.domain
 
     @property
-    def bijective(self) -> bool:  # type: ignore[override]
+    def bijective(self):
         assert self._inv is not None
         return self._inv.bijective
 
     @property
-    def sign(self) -> int:
+    def sign(self):
         assert self._inv is not None
         return self._inv.sign
 
     @property
-    def inv(self) -> Transform:
+    def inv(self):
         return self._inv
 
     def with_cache(self, cache_size=1):
@@ -285,7 +285,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: list[Transform], cache_size=0):
+    def __init__(self, parts: List[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
@@ -327,18 +327,18 @@ class ComposeTransform(Transform):
         return codomain
 
     @lazy_property
-    def bijective(self) -> bool:  # type: ignore[override]
+    def bijective(self):
         return all(p.bijective for p in self.parts)
 
     @lazy_property
-    def sign(self) -> int:  # type: ignore[override]
+    def sign(self):
         sign = 1
         for p in self.parts:
             sign = sign * p.sign
         return sign
 
     @property
-    def inv(self) -> Transform:
+    def inv(self):
         inv = None
         if self._inv is not None:
             inv = self._inv()
@@ -438,11 +438,11 @@ class IndependentTransform(Transform):
         )
 
     @property
-    def bijective(self) -> bool:  # type: ignore[override]
+    def bijective(self):
         return self.base_transform.bijective
 
     @property
-    def sign(self) -> int:  # type: ignore[override]
+    def sign(self):
         return self.base_transform.sign
 
     def _call(self, x):
@@ -577,7 +577,7 @@ class PowerTransform(Transform):
         return PowerTransform(self.exponent, cache_size=cache_size)
 
     @lazy_property
-    def sign(self) -> int:  # type: ignore[override]
+    def sign(self):
         return self.exponent.sign()
 
     def __eq__(self, other):
@@ -726,7 +726,7 @@ class AffineTransform(Transform):
         self._event_dim = event_dim
 
     @property
-    def event_dim(self) -> int:
+    def event_dim(self):
         return self._event_dim
 
     @constraints.dependent_property(is_discrete=False)
@@ -773,7 +773,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> int:
+    def sign(self):
         if isinstance(self.scale, numbers.Real):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -1038,7 +1038,7 @@ class CatTransform(Transform):
        y = t(x)
     """
 
-    transforms: list[Transform]
+    transforms: List[Transform]
 
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1053,11 +1053,11 @@ class CatTransform(Transform):
         self.dim = dim
 
     @lazy_property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self):
         return max(t.event_dim for t in self.transforms)
 
     @lazy_property
-    def length(self) -> int:
+    def length(self):
         return sum(self.lengths)
 
     def with_cache(self, cache_size=1):
@@ -1113,7 +1113,7 @@ class CatTransform(Transform):
             return sum(logdetjacs)
 
     @property
-    def bijective(self) -> bool:  # type: ignore[override]
+    def bijective(self):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
@@ -1142,7 +1142,7 @@ class StackTransform(Transform):
        y = t(x)
     """
 
-    transforms: list[Transform]
+    transforms: List[Transform]
 
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1189,7 +1189,7 @@ class StackTransform(Transform):
         return torch.stack(logdetjacs, dim=self.dim)
 
     @property
-    def bijective(self) -> bool:  # type: ignore[override]
+    def bijective(self):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
@@ -1229,7 +1229,7 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self) -> constraints.Constraint:  # type: ignore[override]
+    def domain(self):
         return self.distribution.support
 
     def _call(self, x):

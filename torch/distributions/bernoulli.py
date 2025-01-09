@@ -2,7 +2,7 @@
 from numbers import Number
 
 import torch
-from torch import nan, Tensor
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -76,29 +76,29 @@ class Bernoulli(ExponentialFamily):
         return self._param.new(*args, **kwargs)
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.probs
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         mode = (self.probs >= 0.5).to(self.probs)
         mode[self.probs == 0.5] = nan
         return mode
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self) -> Tensor:
+    def logits(self):
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self) -> Tensor:
+    def probs(self):
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self) -> torch.Size:
+    def param_shape(self):
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
@@ -125,7 +125,7 @@ class Bernoulli(ExponentialFamily):
         return values
 
     @property
-    def _natural_params(self) -> tuple[Tensor]:
+    def _natural_params(self):
         return (torch.logit(self.probs),)
 
     def _log_normalizer(self, x):

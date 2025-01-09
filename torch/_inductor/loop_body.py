@@ -6,7 +6,17 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
 import sympy
 
@@ -490,11 +500,11 @@ class LoopBodyBlock:
             def bucketize(
                 self,
                 values: T,
-                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: T,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
+                sorter: Optional[Tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[T] = None,
             ) -> T:
                 """
@@ -552,7 +562,7 @@ class LoopBodyBlock:
             def scan(
                 dtype_proxy,
                 combine_fn: Callable[
-                    [tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]
+                    [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
                 ],
                 value_proxy,
             ):

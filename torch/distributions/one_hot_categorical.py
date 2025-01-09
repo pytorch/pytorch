@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -63,33 +62,33 @@ class OneHotCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def _param(self) -> Tensor:
+    def _param(self):
         return self._categorical._param
 
     @property
-    def probs(self) -> Tensor:
+    def probs(self):
         return self._categorical.probs
 
     @property
-    def logits(self) -> Tensor:
+    def logits(self):
         return self._categorical.logits
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self._categorical.probs
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         probs = self._categorical.probs
-        mode = probs.argmax(dim=-1)
+        mode = probs.argmax(axis=-1)
         return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return self._categorical.probs * (1 - self._categorical.probs)
 
     @property
-    def param_shape(self) -> torch.Size:
+    def param_shape(self):
         return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):
@@ -127,7 +126,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     """
     has_rsample = True
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         samples = self.sample(sample_shape)
         probs = self._categorical.probs  # cached via @lazy_property
         return samples + (probs - probs.detach())

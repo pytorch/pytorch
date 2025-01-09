@@ -24,6 +24,7 @@ from typing import (
     Optional,
     overload,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -955,8 +956,8 @@ def get_reduction_combine_fn(
     elif reduction_type in ("argmax", "argmin"):
 
         def argmax_combine_fn(
-            a: tuple[object, object], b: tuple[object, object]
-        ) -> tuple[OpsValue, OpsValue]:
+            a: Tuple[object, object], b: Tuple[object, object]
+        ) -> Tuple[OpsValue, OpsValue]:
             a_value, a_index = a
             b_value, b_index = b
 
@@ -988,9 +989,9 @@ def get_reduction_combine_fn(
     elif reduction_type == "welford_combine":
 
         def welford_combine_fn(
-            a: tuple[OpsValue, OpsValue, OpsValue],
-            b: tuple[OpsValue, OpsValue, OpsValue],
-        ) -> tuple[OpsValue, OpsValue, OpsValue]:
+            a: Tuple[OpsValue, OpsValue, OpsValue],
+            b: Tuple[OpsValue, OpsValue, OpsValue],
+        ) -> Tuple[OpsValue, OpsValue, OpsValue]:
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
@@ -1103,7 +1104,7 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
-    ) -> tuple[ReductionHint, _IntLike]:
+    ) -> Tuple[ReductionHint, _IntLike]:
         def _is_static(x: object) -> bool:
             return isinstance(x, (int, Integer))
 
@@ -1189,7 +1190,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
         )
 
-        def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
+        def get_read_indices(r: Reduction) -> Tuple[Sequence[Expr], bool]:
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -1288,7 +1289,7 @@ class Reduction(Loops):
 
             def value_fn(
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
-            ) -> tuple[OpsValue, OpsValue]:
+            ) -> Tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
@@ -1730,7 +1731,7 @@ class WelfordReduction(Reduction):
 
             def loader(
                 idx: Sequence[Expr], reduction_idx: Sequence[Expr]
-            ) -> tuple[OpsValue, ...]:
+            ) -> Tuple[OpsValue, ...]:
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
@@ -1985,13 +1986,13 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Integer]
     size: List[Integer]
-    combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]]
+    combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]]
     reindex: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Sequence[_IntLike]]
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
-    dtypes: tuple[torch.dtype, ...]
-    inner_fns: tuple[Callable[..., Any], ...]
+    dtypes: Tuple[torch.dtype, ...]
+    inner_fns: Tuple[Callable[..., Any], ...]
 
     # HACK we mimick reduction
 
@@ -2053,11 +2054,11 @@ class Scan(Loops):
     def create(  # type: ignore[override]
         cls,
         device: torch.device,
-        dtypes: tuple[torch.dtype, ...],
-        inner_fns: tuple[Callable[[Sequence[Expr]], Any], ...],
+        dtypes: Tuple[torch.dtype, ...],
+        inner_fns: Tuple[Callable[[Sequence[Expr]], Any], ...],
         size: List[Integer],
         axis: int,
-        combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
+        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         *,
         # Whether we have the option to fallback to aten
@@ -2154,9 +2155,9 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Integer],
         scan_ranges: List[Integer],
-        combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
+        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         scan_numel: Expr,
-    ) -> tuple[ReductionHint, _IntLike]:
+    ) -> Tuple[ReductionHint, _IntLike]:
         # TODO: custom splitting heuristic for scan
         def wrapper_fn(idx: Sequence[Expr], reduction_idx: Sequence[Expr]) -> OpsValue:
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
@@ -2188,8 +2189,8 @@ class Sort(Loops):
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
-    dtypes: tuple[torch.dtype, ...]
-    inner_fns: tuple[Callable[..., Any], ...]
+    dtypes: Tuple[torch.dtype, ...]
+    inner_fns: Tuple[Callable[..., Any], ...]
 
     stable: bool
     descending: bool
@@ -2250,8 +2251,8 @@ class Sort(Loops):
     def create(  # type: ignore[override]
         cls,
         device: torch.device,
-        dtypes: tuple[torch.dtype, ...],
-        inner_fns: tuple[Callable[[List[Expr]], Any], ...],
+        dtypes: Tuple[torch.dtype, ...],
+        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
         size: List[Integer],
         axis: int,
         stable: bool,
@@ -2353,7 +2354,7 @@ def as_storage_and_layout(
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
     exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
-) -> tuple[StorageBox, Layout]:
+) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2676,7 +2677,7 @@ class SqueezeView(BaseView):
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: List[sympy.Expr]) -> tuple[sympy.Expr, ...]:
+        def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
@@ -4027,10 +4028,10 @@ class ComputedBuffer(OperationBuffer):
     @cache_on_self
     def get_default_sizes_body(
         self,
-    ) -> tuple[
-        tuple[List[sympy.Expr], List[sympy.Expr]],
+    ) -> Tuple[
+        Tuple[List[sympy.Expr], List[sympy.Expr]],
         LoopBody,
-        tuple[List[sympy.Expr], List[sympy.Expr]],
+        Tuple[List[sympy.Expr], List[sympy.Expr]],
     ]:
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
@@ -4059,9 +4060,9 @@ class ComputedBuffer(OperationBuffer):
 
     def simplify_and_reorder(
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
-    ) -> tuple[tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
+    ) -> Tuple[Tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
         """
         This is a main place where we do loop transformations in a
         backend-agnostic way.
@@ -4282,7 +4283,7 @@ class TemplateBuffer(OperationBuffer):
 
     def simplify_and_reorder(  # type: ignore[no-untyped-def]
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         return (
@@ -4468,7 +4469,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
-    def get_min_choice(self) -> tuple[ChoiceCaller, float]:
+    def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
         min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
         return (min_choice, self.choice_timings[min_choice])
 
@@ -4739,7 +4740,7 @@ class ConcatKernel(NopKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
-    constant_args: tuple[Any, ...] = ()
+    constant_args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
     python_kernel_name: Optional[str] = None
@@ -4905,7 +4906,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def process_kernel(  # type: ignore[no-untyped-def]
         cls, kernel, *args, **kwargs
-    ) -> tuple[
+    ) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -6074,7 +6075,7 @@ class ScatterFallback(ExternKernel):
     ) -> None:
         self.src_is_tensor = isinstance(src, TensorBox)
 
-        constant_args: tuple[Any, ...]
+        constant_args: Tuple[Any, ...]
         if self.src_is_tensor:
             tensors = [self.realize_input(t) for t in [x, index, src]]
             constant_args = (dim,)
@@ -6822,7 +6823,7 @@ class MultiOutput(ExternKernel):
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
 
-    def __init__(self, layout: OutputSpec, input, indices: List[tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, layout: OutputSpec, input, indices: List[Tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)

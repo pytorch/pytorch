@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
+from typing import Dict
 
 import torch
-from torch import Tensor
 from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
 
@@ -51,15 +51,12 @@ class MixtureSameFamily(Distribution):
         component_distribution: `torch.distributions.Distribution`-like
             instance. Right-most batch dimension indexes component.
     """
-    arg_constraints: dict[str, constraints.Constraint] = {}
+    arg_constraints: Dict[str, constraints.Constraint] = {}
     has_rsample = False
 
     def __init__(
-        self,
-        mixture_distribution: Categorical,
-        component_distribution: Distribution,
-        validate_args=None,
-    ) -> None:
+        self, mixture_distribution, component_distribution, validate_args=None
+    ):
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
 
@@ -127,22 +124,22 @@ class MixtureSameFamily(Distribution):
         return self._component_distribution.support
 
     @property
-    def mixture_distribution(self) -> Categorical:
+    def mixture_distribution(self):
         return self._mixture_distribution
 
     @property
-    def component_distribution(self) -> Distribution:
+    def component_distribution(self):
         return self._component_distribution
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         probs = self._pad_mixture_dimensions(self.mixture_distribution.probs)
         return torch.sum(
             probs * self.component_distribution.mean, dim=-1 - self._event_ndims
         )  # [B, E]
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         # Law of total variance: Var(Y) = E[Var(Y|X)] + Var(E[Y|X])
         probs = self._pad_mixture_dimensions(self.mixture_distribution.probs)
         mean_cond_var = torch.sum(

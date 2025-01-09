@@ -2,7 +2,6 @@
 from numbers import Number
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -79,18 +78,18 @@ class LogitRelaxedBernoulli(Distribution):
         return self._param.new(*args, **kwargs)
 
     @lazy_property
-    def logits(self) -> Tensor:
+    def logits(self):
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self) -> Tensor:
+    def probs(self):
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self) -> torch.Size:
+    def param_shape(self):
         return self._param.size()
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(
@@ -141,13 +140,13 @@ class RelaxedBernoulli(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self) -> Tensor:
+    def temperature(self):
         return self.base_dist.temperature
 
     @property
-    def logits(self) -> Tensor:
+    def logits(self):
         return self.base_dist.logits
 
     @property
-    def probs(self) -> Tensor:
+    def probs(self):
         return self.base_dist.probs

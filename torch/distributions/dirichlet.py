@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
@@ -72,7 +71,7 @@ class Dirichlet(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = ()) -> Tensor:
+    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
         return _Dirichlet.apply(concentration)
@@ -87,11 +86,11 @@ class Dirichlet(ExponentialFamily):
         )
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.concentration / self.concentration.sum(-1, True)
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         concentrationm1 = (self.concentration - 1).clamp(min=0.0)
         mode = concentrationm1 / concentrationm1.sum(-1, True)
         mask = (self.concentration < 1).all(axis=-1)
@@ -101,7 +100,7 @@ class Dirichlet(ExponentialFamily):
         return mode
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         con0 = self.concentration.sum(-1, True)
         return (
             self.concentration
@@ -120,7 +119,7 @@ class Dirichlet(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self) -> tuple[Tensor]:
+    def _natural_params(self):
         return (self.concentration,)
 
     def _log_normalizer(self, x):
