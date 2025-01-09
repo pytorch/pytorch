@@ -64,8 +64,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Set,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -82,8 +80,10 @@ from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -192,7 +192,7 @@ class Match:
 
     def extend(self, other: Match) -> None:
         if self.kwargs:
-            for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
+            for key in OrderedSet(self.kwargs.keys()) & OrderedSet(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
                     raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
@@ -376,7 +376,7 @@ class PatternExpr(ABC):
         return self.__class__.__name__ + "()"
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
@@ -467,7 +467,7 @@ class _TargetExpr(PatternExpr):
     """
 
     fns: List[FnsType]
-    fns_set: Set[FnsType]
+    fns_set: OrderedSet[FnsType]
 
     def __init__(
         self, fns: Union[FnsType, Sequence[FnsType]], users: Union[Multiple, int] = 1
@@ -479,7 +479,7 @@ class _TargetExpr(PatternExpr):
                 fns.extend(getattr(fn, overload) for overload in fn.overloads())
 
         self.fns = fns
-        self.fns_set = set(fns)
+        self.fns_set = OrderedSet(fns)
         self.users = users
 
     @property
@@ -514,7 +514,7 @@ class _TargetExpr(PatternExpr):
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         raise NotImplementedError
 
@@ -542,7 +542,7 @@ class _TargetExpr(PatternExpr):
         )
 
 
-_SimpleSpec = Tuple[Any, ...]
+_SimpleSpec = tuple[Any, ...]
 
 
 class _TargetArgsExpr(_TargetExpr):
@@ -572,7 +572,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def simple_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         values = (*args, *kwargs.values())
         spec = (len(args), *kwargs.keys())
         return values, spec
@@ -580,7 +580,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
 
         def convert_type(x: Any) -> Any:
@@ -679,7 +679,7 @@ class _TargetArgsExpr(_TargetExpr):
         return m
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         """
         This is used when we are matching a pattern with multiple outputs.
@@ -865,7 +865,7 @@ class MultiOutputPattern(PatternExpr):
     ) -> MatchResult:
         prior = dict(ctx.pattern_to_node)
         m: MatchResult = FailedMatch("no anchor found")
-        for node in pattern.find_anchor_nodes(ctx, set()):
+        for node in pattern.find_anchor_nodes(ctx, OrderedSet()):
             m = ctx.match(pattern, node)
             if is_match(m):
                 return m
@@ -913,7 +913,7 @@ class RepeatedExpr(PatternExpr):
             self.inner_pattern,
         )
         # Check all anchor nodes match the pattern
-        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, set()):
+        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, OrderedSet()):
             anchor_m = MatchContext([self], graph=node.graph).match(
                 self.inner_pattern, anchor_node
             )
@@ -985,7 +985,7 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+    def __getitem__(self, k: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         ...
 
 
@@ -1096,10 +1096,10 @@ class ReplacementPatternEntry(PatternEntry):
             node: torch.fx.Node,
             tag_name: str,
             tag_value: str,
-            input_stops: Set[torch.fx.Node],
+            input_stops: OrderedSet[torch.fx.Node],
         ) -> None:
             queue = [node]
-            visited = set()
+            visited = OrderedSet[torch.fx.Node]()
 
             while queue:
                 arg = queue.pop()
@@ -1151,7 +1151,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # incorrectly tag some nodes as recomputables.
                     for tag_name in ["recompute", "ac_graph_id"]:
                         if tag_name in old.meta:
-                            percolate_tags(new, tag_name, old.meta[tag_name], set(args))
+                            percolate_tags(
+                                new, tag_name, old.meta[tag_name], OrderedSet(args)
+                            )
 
                     old.replace_all_uses_with(new)
                     graph.erase_node(old)
@@ -1223,6 +1225,48 @@ def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
     )
 
 
+def check_and_add_duplicate_pattern(
+    pattern: PatternExpr,
+    graph: Optional[torch.fx.Graph],
+    seen_patterns: Dict[str, List[Optional[str]]],
+    skip_duplicates: bool = False,
+) -> bool:
+    """
+    Check if a pattern is a duplicate. Because we ignore certain types in searching, but not
+    in matching, use the graph to distinguish equivalent search patterns.
+
+    Returns True if a duplicate is found and `skip_duplicates=True` is passed in. Errors if
+    `skip_duplicates` is False and a duplicate is found.
+    """
+
+    pattern_repr = PatternPrettyPrinter.run(pattern)
+    equiv_pattern_reprs = seen_patterns.get(pattern_repr)
+    if not equiv_pattern_reprs:
+        seen_patterns[pattern_repr].append(str(graph) if graph else None)
+        return False
+
+    if graph is None:
+        if skip_duplicates:
+            return True
+        torch._check(
+            False,
+            lambda: f"Duplicate pattern: {pattern_repr} with no graph",
+        )
+
+    new_graph_str = str(graph)
+    for graph_str in equiv_pattern_reprs:
+        if not new_graph_str == graph_str:
+            continue
+        if skip_duplicates:
+            return True
+        torch._check(
+            False,
+            lambda: f"Duplicate pattern: {pattern_repr} with duplicated match graph {graph_str} ",
+        )
+    equiv_pattern_reprs.append(new_graph_str)
+    return False
+
+
 def register_replacement(
     search_fn: SearchFn,
     replace_fn: ReplaceFn,
@@ -1233,6 +1277,7 @@ def register_replacement(
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: Union[PatternExpr, None] = None,
+    skip_duplicates: bool = False,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1382,7 +1427,7 @@ def register_replacement(
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
         if search_fn_pattern is None:
-            pattern = gen_pattern(
+            pattern, gm = gen_pattern_and_search_gm(
                 search_fn,
                 example_inputs,
                 trace_fn,
@@ -1391,10 +1436,20 @@ def register_replacement(
             )
         else:
             pattern = search_fn_pattern
+            gm = None
 
-        pattern_repr = PatternPrettyPrinter.run(pattern)
-        assert pattern_repr not in _seen_patterns
-        _seen_patterns.add(pattern_repr)
+        for pattern_matcher_pass in (
+            pass_dicts if isinstance(pass_dicts, Sequence) else [pass_dicts]
+        ):
+            if isinstance(pattern_matcher_pass, PatternMatcherPass):
+                if check_and_add_duplicate_pattern(
+                    pattern,
+                    gm.graph if gm else None,
+                    pattern_matcher_pass.seen_patterns,
+                    skip_duplicates=skip_duplicates,
+                ):
+                    return False
+
         pattern = ReplacementPatternEntry(
             pattern=pattern,
             extra_check=check_fn,
@@ -1404,13 +1459,13 @@ def register_replacement(
         return pattern.pattern
 
 
-_serialized_patterns: Set[str] = set()
+_serialized_patterns = OrderedSet[str]()
 
 
 def _serialize_pattern(
     unique_name: str,
     search_fn: SearchFn,
-    example_inputs: Iterable[Any],
+    example_inputs: Sequence[Any],
     trace_fn: TraceFn,
     scalar_workaround: Union[Dict[str, Union[float, int]], None],
 ) -> PatternExpr:
@@ -1486,7 +1541,7 @@ SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patt
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
 _known_precompiled_patterns: List[
-    Tuple[
+    tuple[
         Any,
         Iterable[Any],
         Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
@@ -1535,8 +1590,6 @@ def gen_register_replacement(
             # Since this is just an optimization we can clear it out.
             arg.constant = None
 
-    if PatternPrettyPrinter.run(pat) in _seen_patterns and skip_duplicates:
-        return
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
@@ -1550,17 +1603,18 @@ def gen_register_replacement(
         scalar_workaround,
         exclusive_arg_names,
         search_fn_pattern=pat,
+        skip_duplicates=skip_duplicates,
     )
 
 
 @functorch_config.patch(functionalize_rng_ops=False)
-def gen_pattern(
+def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
-) -> PatternExpr:
+) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     if scalar_workaround is None:
@@ -1576,13 +1630,28 @@ def gen_pattern(
             input_idx += 1
 
     search_gm = trace_fn(search_fn, flat_inputs)
-    return fx_to_pattern(
+    return (
+        fx_to_pattern(
+            search_gm,
+            ignore_types=(int, float, list, torch.device, torch.dtype),
+            argnames=argnames,
+            scalar_workaround=scalar_workaround,
+            exclusive_arg_names=exclusive_arg_names,
+        ),
         search_gm,
-        ignore_types=(int, float, list, torch.device, torch.dtype),
-        argnames=argnames,
-        scalar_workaround=scalar_workaround,
-        exclusive_arg_names=exclusive_arg_names,
     )
+
+
+def gen_pattern(
+    search_fn: SearchFn,
+    example_inputs: Sequence[Any],
+    trace_fn: TraceFn,
+    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    exclusive_arg_names: Sequence[str] = (),
+) -> PatternExpr:
+    return gen_pattern_and_search_gm(
+        search_fn, example_inputs, trace_fn, scalar_workaround, exclusive_arg_names
+    )[0]
 
 
 def register_lowering_pattern(
@@ -1709,11 +1778,17 @@ class PatternMatcherPass:
     ) -> None:
         super().__init__()
         self.patterns: DefaultDict[
-            Tuple[str, torch.fx.node.Target], List[PatternEntry]
+            tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
 
-    def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+        # For a particular generated pattern repr, store all of the str representations
+        # of the graph used to generate them. Because we ignore certain patterns
+        # in searching, but not in matching, use the graph to distinguish if two equivalent
+        # searches are actually different.
+        self.seen_patterns: Dict[str, List[Optional[str]]] = defaultdict(list)
+
+    def __getitem__(self, item: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
@@ -1765,7 +1840,7 @@ class PatternMatcherPass:
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                        and len(OrderedSet(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
@@ -1913,7 +1988,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
     def record_joint_graph(
         joint_graph: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
-    ) -> Tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         nonlocal gm
         assert not gm
         gm = clone_graph(joint_graph)
@@ -1967,7 +2042,7 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
 
     # - Nodes in `ready` have been processed and are already in the correct
     #   order.
-    ready = set()
+    ready = OrderedSet[torch.fx.Node]()
 
     # - `waiting` is a mapping from a dependency to nodes which depend on that
     #   dependency.
@@ -2037,7 +2112,8 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return CopyGraph(input_graph).transform()
 
 
-_seen_patterns: Set[str] = set()
+# TODO: remove in follow up diff, used internally
+_seen_patterns = OrderedSet[str]()
 
 
 def get_arg_value(
@@ -2064,5 +2140,5 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
      as a function.
     """
     if node.op == "call_module":
-        return getattr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
+        return _get_attr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
     return node.target

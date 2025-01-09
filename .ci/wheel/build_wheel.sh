@@ -173,8 +173,10 @@ conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_p
 source activate "$tmp_env_name"
 
 pip install -q "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests
-retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -yq  llvm-openmp=14.0.6 cmake ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
 retry pip install -qr "${pytorch_rootdir}/requirements.txt" || true
+# TODO : Remove me later (but in the interim, use Anaconda cmake, to find Anaconda installed OpenMP)
+retry pip uninstall -y cmake
+retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -yq  llvm-openmp=14.0.6 cmake ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv and pkg-config to find libuv.
 export USE_DISTRIBUTED=1
@@ -224,26 +226,6 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
-
-    ##########################
-    # now test the binary, unless it's cross compiled arm64
-    if [[ -z "$CROSS_COMPILE_ARM64" ]]; then
-        pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-        pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-
-        # Create new "clean" conda environment for testing
-        conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "test_conda_env" python="$desired_python"
-        conda activate test_conda_env
-
-        pip install "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new" -v
-
-        echo "$(date) :: Running tests"
-        # TODO: Add real tests, as run_test.sh from builder is a glorified no-op
-        # pushd "$pytorch_rootdir"
-        # "${SOURCE_DIR}/../run_tests.sh" 'wheel' "$desired_python" 'cpu'
-        # popd
-        echo "$(date) :: Finished tests"
-    fi
 else
     pushd "$pytorch_rootdir"
 
