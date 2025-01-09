@@ -568,10 +568,10 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
 
         # benchmark `_callable`
         interleaved_event_pairs = self.get_interleaved_event_pairs(
-            len(callables), benchmark_iters
+            len(callables_to_benchmark), benchmark_iters
         )
         for event_pairs in interleaved_event_pairs:
-            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+            for _callable, (start_event, end_event) in zip(callables_to_benchmark, event_pairs):
                 buffer.zero_()
                 start_event.record()
                 _callable()
