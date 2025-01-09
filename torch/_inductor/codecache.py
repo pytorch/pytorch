@@ -50,7 +50,6 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.version
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -694,6 +693,8 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/implementation.cpp",
+                    "codegen/cpp_prefix.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1437,8 +1438,7 @@ class AotCodeCompiler:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        vec_isa_cmd_line = vec_isa_cmd_gen.get_command_line()
-        cpp_command = repr(vec_isa_cmd_line)
+        cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
         # Meta internal AOTInductor CPU
         fbcode_aot_cpu_re = (
@@ -1653,28 +1653,14 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            # precompile the AOT header for this device
-            header_file = _get_cpp_wrapper_header(device_type, aot_mode=graph.aot_mode)
-            compile_command = {
-                "vec_isa": picked_vec_isa,
-                "device_type": device_type,
-                "aot_mode": graph.aot_mode,
-                "use_absolute_path": use_absolute_path,
-                "use_mmap_weights": use_mmap_weights,
-            }
             object_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
                 compile_only=True,
-                **compile_command,  # type: ignore[arg-type]
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
             )
-            object_build_options.set_precompiled_header(
-                _precompile_header(
-                    header_file,
-                    vec_isa_cmd_line,
-                    object_build_options.get_compiler(),
-                    compile_command,
-                )
-            )
-
             object_builder = CppBuilder(
                 name=str(cpp_path_operator.stem),
                 sources=cpp_path,
@@ -1825,6 +1811,37 @@ class AotCodeCompiler:
         return output_so
 
 
+# Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
+# Why? importing from cpp.py invokes codecache.pick_vec_isa(), which takes out a lock.
+# Cycle goes:
+# - CppCodeCache.load()
+# - pick_vec_isa()
+# - valid_vec_isa_list()
+# - VecISA.__bool__() <-- takes out a lock
+# - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@clear_on_fresh_inductor_cache
+@functools.lru_cache
+def cpp_prefix_path() -> str:
+    path = Path(__file__).parent / "codegen/cpp_prefix.h"
+    with path.open() as f:
+        content = f.read()
+        _, filename = write(
+            content,
+            "h",
+        )
+    return normalize_path_separator(filename)
+
+
+def cpp_prefix() -> str:
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
+
+
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
 def compile_file(
@@ -1843,6 +1860,9 @@ def _compile_file(
     ]
     try:
         if config.is_fbcode():
+            # Need to copy our header into the same folder as the sourcecode.
+            header_path = cpp_prefix_path()
+            header_name = os.path.basename(header_path)
             output_name = os.path.basename(output_path)
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
@@ -1850,6 +1870,7 @@ def _compile_file(
             torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
+                shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                 shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
@@ -1928,60 +1949,6 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
-# Precompiled headers are persistent past program runtime, but associated with one
-# specific compiler version and set of flags.  We explicitly use default_cache_dir here
-# because these headers need to be global, rather than ignored by fresh_inductor_cache.
-_HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
-_COMPILED_HEADERS: OrderedSet[str] = OrderedSet()
-
-
-def _precompile_header(
-    header: str, hashable_cmd_line: str, compiler: str, compile_command: dict[str, Any]
-) -> str:
-    compiler_version = get_compiler_version_info(compiler)
-    header_hash, header_full_path = write(
-        content=f"#include <{header}>\n",
-        extension="h",
-        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__}",
-        specified_dir=_HEADER_DIR,
-    )
-
-    if header_hash not in _COMPILED_HEADERS:
-        header_build_option = CppTorchDeviceOptions(
-            precompiling=True,
-            **compile_command,
-        )
-        cpp_builder = CppBuilder(
-            name=header_full_path,
-            sources=header_full_path,
-            BuildOption=header_build_option,
-        )
-        # _worker_compile_cpp will automatically ignore any compilation whose result
-        # already exists, so this is safe to do anytime the hash is not in
-        # _COMPILED_HEADERS.
-        _worker_compile_cpp(
-            os.path.join(get_lock_dir(), f"{header_hash}.lock"),
-            cpp_builder,
-            header_full_path,
-            cpp_builder.get_target_file_path(),
-        )
-        _COMPILED_HEADERS.add(header_hash)
-
-    return header_full_path
-
-
-def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
-    """Given a device type (and optionally whether we're in AOT Inductor mode), returns
-    the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
-    is_array_ref = config.aot_inductor.allow_stack_allocation
-    return (
-        "torch/csrc/inductor/"
-        f"{'cpp_wrapper_array_ref' if is_array_ref else 'cpp_wrapper'}/"
-        f"{'aoti_' if aot_mode else ''}{base_device}.h"
-    )
-
-
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
@@ -2016,13 +1983,6 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        """
-        Given a device type, returns the path to a CPP header file to be precompiled.
-        """
-        return None
-
-    @classmethod
     def load_async(
         cls,
         source_code: str,
@@ -2039,8 +1999,9 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        cpp_build_option = CppTorchDeviceOptions(**compile_command)
-        command_gen = CppBuilder(name="o", sources="i", BuildOption=cpp_build_option)
+        command_gen = CppBuilder(
+            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
+        )
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
         # So we need get a command_line which contains isa related parameter as a part of hash key.
@@ -2062,17 +2023,7 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if header_file := cls._get_uncompiled_header(device_type):
-                cpp_build_option.set_precompiled_header(
-                    _precompile_header(
-                        header_file,
-                        vec_isa_cmd,
-                        cpp_build_option.get_compiler(),
-                        compile_command,
-                    )
-                )
-
+            cpp_build_option = CppTorchDeviceOptions(**compile_command)
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2262,12 +2213,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return module
 
     @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        if device.startswith("cpu"):
-            return "torch/csrc/inductor/cpp_prefix.h"
-        return None
-
-    @classmethod
     def load_pybinding_async(
         cls,
         argtypes: List[str],
@@ -2389,10 +2334,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
-
-    @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        return _get_cpp_wrapper_header(device)
 
 
 @clear_on_fresh_inductor_cache
@@ -2745,11 +2686,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         assert os.path.exists(sofile)
         cls._standalone_runtime_path = sofile
         return sofile
-
-    @classmethod
-    def _get_uncompiled_header(cls, device: str) -> str | None:
-        """Header precompiling is currently disabled for halide."""
-        return None
 
 
 def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
