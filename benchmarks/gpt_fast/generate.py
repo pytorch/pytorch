@@ -2,9 +2,10 @@ import dataclasses
 import itertools
 import platform
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 import torchao
+from common import Experiment, register_experiment
 from mixtral_moe_model import ConditionalFeedForward, Transformer as MixtralMoE
 from mixtral_moe_quantize import (
     ConditionalFeedForwardInt8,
@@ -88,7 +89,7 @@ def prefill(
 
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
     logits = model(x, input_pos)
@@ -295,9 +296,8 @@ def run_experiment(
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
+@register_experiment(name="llama2_7b_bf16")
 def run_llama2_7b_bf16(device: str = "cuda"):
-    from benchmark import Experiment
-
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -345,9 +345,8 @@ def run_llama2_7b_bf16(device: str = "cuda"):
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
+@register_experiment(name="llama2_7b_int8")
 def run_llama2_7b_int8(device: str = "cuda"):
-    from benchmark import Experiment
-
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -395,9 +394,8 @@ def run_llama2_7b_int8(device: str = "cuda"):
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
+@register_experiment(name="mixtral_8x7b_int8")
 def run_mixtral_8x7b_int8(device: str = "cuda"):
-    from benchmark import Experiment
-
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
     model = GPTModelConfig(
         "Mixtral-8x7B-v0.1",
@@ -447,8 +445,6 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_llama2_7b_autoquant(device: str = "cuda"):
-    from benchmark import Experiment
-
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -497,8 +493,6 @@ def run_llama2_7b_autoquant(device: str = "cuda"):
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_mixtral_8x7b_autoquant(device: str = "cuda"):
-    from benchmark import Experiment
-
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
     model = GPTModelConfig(
         "Mixtral-8x7B-v0.1",
@@ -548,8 +542,6 @@ def run_mixtral_8x7b_autoquant(device: str = "cuda"):
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_llama2_7b_autoquant_v2(device: str = "cuda"):
-    from benchmark import Experiment
-
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -599,8 +591,6 @@ def run_llama2_7b_autoquant_v2(device: str = "cuda"):
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_mixtral_8x7b_autoquant_v2(device: str = "cuda"):
-    from benchmark import Experiment
-
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
     model = GPTModelConfig(
         "Mixtral-8x7B-v0.1",
