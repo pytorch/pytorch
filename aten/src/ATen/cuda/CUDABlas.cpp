@@ -1277,7 +1277,7 @@ void gemm_and_bias(
     }
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
-#ifdef USE_ROCM
+#ifndef USE_ROCM
     if (at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       scaleType = CUDA_R_16F;
