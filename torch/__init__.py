@@ -1641,6 +1641,23 @@ def _check_is_size(i, message=None):
     _advise_is_size(i)
 
 
+def _check_is_bounded(x, upper_bound, message=None):
+    """Checks that a given integer is a valid size (i.e., is non-negative).
+    You should use this over _check(i >= 0) because we can use the semantic
+    information (that i is a size) to make some further inferences in case
+    i is an unbacked SymInt.
+
+    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
+    to infer the size from context, or if you should wrap-around or truncate).
+    Only use this if the only valid value is an honest to goodness size.
+    """
+    # This is responsible for the expect_true
+    _check(x <= upper_bound, message)
+    from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
+
+    _advise_is_bounded(x, upper_bound)
+
+
 def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.

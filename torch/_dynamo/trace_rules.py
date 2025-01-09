@@ -2237,6 +2237,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._assert",
         "torch._check_index",
         "torch._check_is_size",
+        "torch._check_is_bounded",
         "torch._check_not_implemented",
         "torch._check_tensor_all_with",
         "torch._check_tensor_all",
