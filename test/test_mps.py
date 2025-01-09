@@ -90,7 +90,6 @@ def mps_ops_grad_modifier(ops):
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
-        'linalg.cholesky': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
