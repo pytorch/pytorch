@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import contextlib
 import functools
 import inspect
 import itertools
@@ -70,6 +71,14 @@ def update_global(x):
     _variable += 1
     # Check that updated global variable value is picked up
     return x * _variable
+
+
+@contextlib.contextmanager
+def update_global_ctx(x):
+    try:
+        yield update_global(x)
+    finally:
+        pass
 
 
 def func_with_default(a, b, some_default_arg=True):
@@ -2633,6 +2642,28 @@ class GraphModule(torch.nn.Module):
         d.update({"c": 3})
         opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
         self.assertEqual(opt_fn(x, d.keys()), fn(x, d.keys()))
+
+    def test_dict_key_set3(self):
+        a = {
+            "domains": {
+                "d1": {"attr": 1},
+                "d2": {"attr": 2},
+            }
+        }
+        b = a["domains"].keys()
+
+        def fn(x, a, b):
+            for e in b:
+                x += a["domains"][e]["attr"]
+            return x
+
+        x = torch.ones(2, 3)
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
+        a["domains"].update({"d3": {"attr": 3}})
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
 
     def test_pow_int(self):
         def fn(a, b):

@@ -72,8 +72,11 @@ from torch.testing._internal.common_utils import (
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.custom_tensor import (
+    ConstantExtraMetadataTensor,
+    CustomTensorPlainOut,
+)
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -84,12 +87,6 @@ from torch.utils._pytree import (
     treespec_loads,
 )
 
-
-if HAS_GPU:
-    import triton
-    import triton.language as tl
-
-    from torch._library import capture_triton
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
@@ -640,137 +637,6 @@ graph():
         self.assertEqual(gm(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
-
-    @requires_gpu
-    def test_export_custom_triton_kernel(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.library.triton_op("mylib::add", mutates_args=())
-        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-            return output
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return custom_add(x, y)
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-        )
-        max_len = 128
-        dynamic_shapes = {
-            "x": {0: Dim("dim0_x", max=max_len)},
-            "y": {0: Dim("dim0_y", max=max_len)},
-        }
-        m = M()
-        ep = export(m, args, dynamic_shapes=dynamic_shapes)
-
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-        ep_decomposed = ep.run_decompositions()
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep_decomposed.graph_module.code
-        )
-        exp_out = m(*args)
-        self.assertEqual(exp_out, ep.module()(*args))
-
-    @requires_gpu
-    def test_export_custom_triton_kernel_mutable(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.library.triton_op("mylib::add", mutates_args={"output"})
-        def custom_add_out(
-            x: torch.Tensor, y: torch.Tensor, output: torch.Tensor
-        ) -> torch.Tensor:
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-            return output.clone()
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, out):
-                return custom_add_out(x, y, out)
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-            torch.zeros(3, device=GPU_TYPE),
-        )
-        custom_add_out(*args)
-        max_len = 128
-        dynamic_shapes = {
-            "x": {0: Dim("dim0_x", max=max_len)},
-            "y": {0: Dim("dim0_y", max=max_len)},
-            "out": {0: Dim("dim0_z", max=max_len)},
-        }
-
-        m = M()
-        ep = export(m, args, dynamic_shapes=dynamic_shapes)
-
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-        ep_decomposed = ep.run_decompositions()
-        FileCheck().check_count(
-            "torch.ops.higher_order.auto_functionalized", 1, exactly=True
-        ).run(ep_decomposed.graph_module.code)
-
-        x, y, out = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-            torch.zeros(3, device=GPU_TYPE),
-        )
-        exp_out = m(x, y, out)
-        out_copy = out.clone()
-        out_copy2 = out.clone()
-        out_copy3 = out.clone()
-        self.assertEqual(exp_out, ep.module()(x, y, out_copy))
-        # For non-functional graph module, out_copy is mutated
-        self.assertEqual(out, out_copy)
-        self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
-        # For non-functional graph module, out_copy is not mutated
-        self.assertEqual(out_copy2, out_copy3)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -1677,6 +1543,348 @@ def forward(self, x, y):
         with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    def test_subclasses_parameterization(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4))
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export_for_training(m, (ref_x,))
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_1,)""",
+        )
+
+        ep = export(m, (ref_x,)).run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
+    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original0), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original1), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_2,), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_3,)""",
+        )
+        res = ep.module()(ref_x)
+
+        self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    def test_subclasses_parameterization_nested(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(
+                        CustomTensorPlainOut(
+                            torch.Tensor([[0, 0], [0, 1]]),
+                            torch.Tensor([[0, 0], [1, 0]]),
+                        ),
+                        CustomTensorPlainOut(
+                            torch.Tensor([[1, 0], [0, 0]]),
+                            torch.Tensor([[0, 1], [0, 0]]),
+                        ),
+                    )
+                )
+
+            def forward(self, x):
+                a = (x + 2 * self.p1 + self.p2).sum().sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(2, 2)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=2] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_1,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sum_1,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_2), kwargs = {})
+    return (add_2,)""",
+        )
+
+        ep = export(m, (ref_x,))
+        ep = ep.run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
+    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %p_parametrizations_p2_original2 : [num_users=1] = placeholder[target=p_parametrizations_p2_original2]
+    %p_parametrizations_p2_original3 : [num_users=1] = placeholder[target=p_parametrizations_p2_original3]
+    %x : [num_users=2] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
+    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_4, %add_5), kwargs = {})
+    %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_6), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_7,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sum_1,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_2), kwargs = {})
+    return (add_8,)""",
+        )
+        res = ep.module()(ref_x)
+        self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = (2 * self.p1 + self.p2).sum()
+                return x + res.get_elem_a().b
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, b), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_38), kwargs = {})
+    return (add_1,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.constant_attribute
+                return x + res2.elem.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.constant_attribute
+                return x + res2.elem.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = 2 * self.p1 + self.p2
+                res2 = res + res.a.elem + res.b.constant_attribute
+                return x + res2.a.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=2] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%add, a), kwargs = {})
+    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, elem), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %getattr_38), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, 4), kwargs = {})
+    %getattr_45 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_2, a), kwargs = {})
+    %getattr_50 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_45, elem), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_50), kwargs = {})
+    return (add_3,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_complicated_metadata(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = x + 2 * self.p1 + self.p2
+                return res.elem.elem + self.p2.get_complicated_metadata().foo
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
+    %getattr_21 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_26 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_21, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_26, 4), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})
@@ -4027,6 +4235,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             epm = export(mod, inp).module()
             self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
 
+    def test_unflatten_isinstance(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                return self.n(x + 1, True) + self.n(x + 1, False)
+
+        x = torch.zeros(4)
+        types = {"n": N}
+        ep = export(
+            M(),
+            (x,),
+            preserve_module_call_signature=tuple(types.keys()),
+        )
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(x), x + 5))
+        for fqn, mod in ufm.named_modules(remove_duplicate=False):
+            if cls := types.get(fqn):
+                ty = f"{cls.__module__}.{cls.__qualname__}"
+                self.assertTrue(ty, mod.type_name())
+
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
         class M1(torch.nn.Module):
@@ -4869,6 +5107,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertGreater(len(ops), 0)
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_float_conversion_from_int(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),)).run_decompositions(
+            {}
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+        self.assertIn(torch.ops.aten._assert_tensor_metadata.default, ops)
+
+        self.assertEqual(ep.module()(torch.tensor(1, dtype=torch.int32)), 1)
+
+        # Raises error because the input dtype is not the same as the input
+        # tensor when exporting.
+        with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+            ep.module()(torch.tensor(1, dtype=torch.float32))
 
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
@@ -7698,14 +7959,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7763,14 +8021,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7827,14 +8082,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7910,15 +8162,12 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8036,17 +8285,14 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-                "n1.n2.n3.n4.n5",
-                "n1.n2.n3.n4.n5.n6",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8224,20 +8470,17 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-                "n1.n2.n3.n4.n5",
-                "n1.n2.n3.n4.n5.n6",
-                "n1.n2.n3.n4.n5.n6.n7",
-                "n1.n2.n3.n4.n5.n6.n7.n8",
-                "n1.n2.n3.n4.n5.n6.n7.n8.n9",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+            "n1.n2.n3.n4.n5.n6.n7",
+            "n1.n2.n3.n4.n5.n6.n7.n8",
+            "n1.n2.n3.n4.n5.n6.n7.n8.n9",
+        )
         ep = export(
             N0(),
             inp,
@@ -8283,13 +8526,10 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8330,13 +8570,10 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8427,6 +8664,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
             if not is_retracebility_test(self._testMethodName):
+                # swapping will not work with retrace
                 test(
                     export(Mod(), inp, preserve_module_call_signature=(path_n,)),
                     swap={path_n: N()},
@@ -8460,6 +8698,7 @@ graph():
         eager_result = m(*inp)
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             ep = export(M(), inp, preserve_module_call_signature=("n",))
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
@@ -8511,18 +8750,17 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
-        if not is_retracebility_test(self._testMethodName):
-            if is_training_ir_test(self._testMethodName):
-                test(
-                    torch.export.export_for_training(
-                        M(),
-                        inp,
-                        strict=not is_non_strict_test(self._testMethodName),
-                        preserve_module_call_signature=("n",),
-                    )
+        if is_training_ir_test(self._testMethodName):
+            test(
+                torch.export.export_for_training(
+                    M(),
+                    inp,
+                    strict=not is_non_strict_test(self._testMethodName),
+                    preserve_module_call_signature=("n",),
                 )
+            )
 
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+        test(export(M(), inp, preserve_module_call_signature=("n",)))
 
     def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
         class N(torch.nn.Module):
@@ -8566,6 +8804,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
                 swap={"n": N()},
@@ -8622,6 +8861,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
                 swap={"n": N()},
@@ -8766,15 +9006,13 @@ graph():
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
 
-            if not is_retracebility_test(self._testMethodName):
-                # preserving module call signatures
-                ep = export(m, inp, preserve_module_call_signature=("n", "p"))
-                exported_result = ep.module()(*inp)
-                self.assertTrue(torch.allclose(exported_result, eager_result))
+            ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+            exported_result = ep.module()(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
 
-                unflattened = torch.export.unflatten(ep)
-                unflattened_result = unflattened(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            unflattened = torch.export.unflatten(ep)
+            unflattened_result = unflattened(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
@@ -9536,6 +9774,47 @@ def forward(self, x):
     foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
     return (foo_functional,)""",
         )
+
+    def test_placeholder_naming_order(self):
+        # See https://github.com/pytorch/pytorch/issues/143732
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 16)
+                self.layer2 = torch.nn.Linear(3, 32)
+
+            def forward(self, x1, x2, flag=True):
+                x1o = self.layer1(x1)
+                x2o = self.layer2(x2)
+                return torch.cat([x1o, x2o], dim=1)
+
+        mod = Mod()
+        args = (torch.rand(1, 3),)
+        kwargs = {"flag": False, "x2": torch.rand(1, 3)}
+        ep = export(mod, args, kwargs)
+
+        # check that graph is behaviorally correct
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+
+        # check that graph input names are as expected
+        self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
+
+    def test_placeholder_naming_order_variadic(self):
+        class Mod(torch.nn.Module):
+            def forward(self, a, b, c, **kwargs):
+                return a - b + c * kwargs["d"]
+
+        mod = Mod()
+        args = (torch.randn(3),)
+        kwargs = {"c": torch.randn(3), "b": torch.randn(3), "d": torch.randn(3)}
+        ep = export(mod, args, kwargs)
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+        self.assertEqual(ep.graph_signature.user_inputs, ("a", "c", "b", "d"))
 
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs

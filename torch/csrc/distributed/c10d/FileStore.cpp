@@ -99,6 +99,7 @@ class Lock {
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
@@ -282,8 +283,7 @@ off_t refresh(
 } // namespace
 
 FileStore::FileStore(std::string path, int numWorkers)
-    : Store(),
-      path_(std::move(path)),
+    : path_(std::move(path)),
 
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
