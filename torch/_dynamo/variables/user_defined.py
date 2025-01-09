@@ -469,7 +469,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented("contextlib.contextmanager")
-                # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
+                # Replace UserFunctionVariable by FunctionDecoratedBycontextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
                 # supported in dynamo
@@ -774,11 +774,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if method is object.__ne__:
                     func_var = VariableTracker.build(tx, polyfills.object_ne)
                     return func_var.call_function(tx, [self, *args], kwargs)
-
-            if torch._dynamo.config.enable_yield_on_generator and isinstance(
-                self.value, types.GeneratorType
-            ):
-                unimplemented("Generator as graph argument is not supported")
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):

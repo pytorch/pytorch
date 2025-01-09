@@ -45,9 +45,8 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
-    GeneratorFunctionVariable,
-    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -3516,8 +3515,7 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            GeneratorFunctionVariable,
-            GeneratorObjectVariable,
+            FunctionDecoratedByContextlibContextManagerVariable,
         ),
     ):
         try:
@@ -3537,10 +3535,7 @@ def check_verbose(obj, is_inlined_call=False):
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: Set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    if issubclass(
-        rule,
-        (UserFunctionVariable, GeneratorFunctionVariable, PolyfilledFunctionVariable),
-    ):
+    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
