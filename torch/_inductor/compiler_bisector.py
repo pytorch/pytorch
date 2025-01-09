@@ -7,7 +7,7 @@ import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -233,7 +233,7 @@ class CompilerBisector:
     @classmethod
     def get_bisect_range(
         cls, backend_name: str, subsystem_name: str
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_bisect_range.txt"
         )

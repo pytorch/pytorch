@@ -335,11 +335,11 @@ class BasicEvaluation:
 
         output += "\n".join(
             [
-                f"""{'-'*80}
+                f"""{'-' * 80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-'*80}"""
+{'-' * 80}"""
                 for event in event_list
             ]
         )
