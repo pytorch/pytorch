@@ -27,7 +27,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, Self, TypeIs
+from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import optree
 from optree import (  # noqa: F401  # direct import for type annotations
@@ -36,7 +36,17 @@ from optree import (  # noqa: F401  # direct import for type annotations
 )
 
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import KeyEntry as KeyEntry
+from torch.utils._pytree import (
+    Context as Context,
+    DumpableContext as DumpableContext,
+    FlattenFunc as FlattenFunc,
+    FlattenWithKeysFunc as FlattenWithKeysFunc,
+    FromDumpableContextFunc as FromDumpableContextFunc,
+    KeyPath as KeyPath,
+    PyTree as PyTree,
+    ToDumpableContextFunc as ToDumpableContextFunc,
+    UnflattenFunc as UnflattenFunc,
+)
 
 
 __all__ = [
@@ -47,6 +57,8 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "ToDumpableContextFunc",
+    "FromDumpableContextFunc",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -83,17 +95,9 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
-
-Context = Any
-PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
-UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
-OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
-DumpableContext = Any  # Any json dumpable text
-ToDumpableContextFn = Callable[[Context], DumpableContext]
-FromDumpableContextFn = Callable[[DumpableContext], Context]
-KeyPath = Tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
+ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
+FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
+OpTreeUnflattenFunc: TypeAlias = Callable[[Context, Iterable[Any]], PyTree]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
@@ -110,8 +114,8 @@ def register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
@@ -178,8 +182,8 @@ def _register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node for the C++ pytree only.
 
@@ -229,8 +233,8 @@ def _private_register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
 ) -> None:
     """This is an internal function that is used to register a pytree node type
     for the C++ pytree only. End-users should use :func:`register_pytree_node`
