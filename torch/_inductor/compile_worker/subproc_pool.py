@@ -340,6 +340,9 @@ class SubprocMain:
         return pickler.dumps(result)
 
 
+AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
+
+
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
     # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
     # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
