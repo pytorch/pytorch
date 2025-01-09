@@ -1377,6 +1377,13 @@ def _use_template_for_cpu(layout: Layout) -> bool:
     return use_max_autotune() and layout.device.type == "cpu"
 
 
+def use_cpp_bmm_template(layout: Layout, mat1: IRNode, mat2: IRNode) -> bool:
+    return (
+        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
+        and mat1.layout.is_contiguous()  # type: ignore[attr-defined]
+    )
+
+
 def use_cpp_gemm_template(
     layout: Layout,
     mat1: IRNode,
