@@ -147,7 +147,17 @@ def run_gather_gemv(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, score_idxs, x)
 
-            us_per_iter = benchmarker.benchmark(compiled_fn, (W, score_idxs, x,)) * 1000
+            us_per_iter = (
+                benchmarker.benchmark(
+                    compiled_fn,
+                    (
+                        W,
+                        score_idxs,
+                        x,
+                    ),
+                )
+                * 1000
+            )
             memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -190,7 +200,16 @@ def run_gemv(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, x)
 
-            us_per_iter = benchmarker.benchmark(compiled_fn, (W, x,)) * 1000
+            us_per_iter = (
+                benchmarker.benchmark(
+                    compiled_fn,
+                    (
+                        W,
+                        x,
+                    ),
+                )
+                * 1000
+            )
             memory_bandwidth += (1e6 / us_per_iter) * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
