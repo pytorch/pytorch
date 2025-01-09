@@ -35,7 +35,7 @@ class TestAttention(TestCase):
         )
 
     def create_kv_cache(self):
-        max_batch_size = 16
+        max_batch_size = 15
         max_seq_length = 1024
         cache_shape = (
             max_batch_size,
@@ -266,7 +266,7 @@ class TestAttention(TestCase):
     def create_inputs(self, batchsize, seqlen):
         x = torch.ones(batchsize, seqlen, dtype=torch.int32).to(device="cuda")
         freqs_cis = torch.randn(seqlen, 64, 2).to(device="cuda", dtype=self.dtype)
-        mask = torch.ones([batchsize, 1, seqlen, 16], device="cuda")
+        mask = torch.ones([batchsize, 1, seqlen, 15], device="cuda")
         input_pos = torch.arange(0, seqlen, dtype=torch.int32, device="cuda")
 
         k_cache, v_cache = self.create_kv_cache()
@@ -292,14 +292,14 @@ class TestAttention(TestCase):
         return inputs_p
 
     def test_attention_all(self):
-        inputs = self.create_inputs(16, 992)
+        inputs = self.create_inputs(15, 992)
         inputs_p = self.pad_inputs(inputs, 16)
 
         self.run_unpadded_padded(self.f_attention, inputs, inputs_p)
 
     def test_attention_bench(self):
         with torch.no_grad():
-            inputs = self.create_inputs(16, 992)
+            inputs = self.create_inputs(15, 992)
             inputs_p = self.pad_inputs(inputs, 16)
 
             self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)

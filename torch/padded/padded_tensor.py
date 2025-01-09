@@ -41,8 +41,7 @@ def slice_nd(input, start_idxs, end_idxs):
 
                 input = torch.ops.aten.slice(input, dim_idx, start_idx, end_idx)
 
-    # return input
-    return input.clone()
+    return input
 
 
 def extract_tensors_from_padded(args, kwargs):
@@ -224,6 +223,10 @@ class ViewOp(SliceRunRepadOp):
 
         # if math.prod(inp.shape) != math.prod(shape):
         inp = slice_nd(inp, [0] * len(args[0].orig_shape), args[0].orig_shape)
+
+        # Ensure that the input tensor is contiguous
+        if not inp.is_contiguous():
+            inp = inp.contiguous()
 
         args = (args[0], shape)
 
