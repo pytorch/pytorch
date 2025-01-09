@@ -1211,7 +1211,7 @@ def _set_cublas_allow_bf16_reduced_precision_reduction(
     arg: _bool,
 ) -> None: ...  # THPModule_setAllowBF16ReductionCuBLAS
 def _get_cublas_allow_fp16_accumulation() -> _bool: ... # THPModule_allowFP16AccumulationCuBLAS
-def _set_cublas_allow_fp16_accumulation()
+def _set_cublas_allow_fp16_accumulation(
     arg: _bool,
 ) -> None: ... # THPModule_setAllowFP16AccumulationCuBLAS
 def _set_conj(x: Tensor, conj: _bool) -> None: ...
