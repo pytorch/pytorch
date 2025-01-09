@@ -2,7 +2,7 @@
 import itertools
 import logging
 import operator
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -33,14 +33,14 @@ from .group_batch_fusion import is_node_meta_valid, POST_GRAD_FUSIONS, PRE_GRAD_
 
 log = logging.getLogger(__name__)
 
-_Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
-_TransformParam: TypeAlias = Tuple[
+_Arguments: TypeAlias = tuple[torch.fx.node.Argument, ...]
+_TransformParam: TypeAlias = tuple[
     Optional[_Arguments],
     Optional[_Arguments],
     Optional[_Arguments],
     Optional[_Arguments],
 ]
-_Range: TypeAlias = Tuple[int, int]
+_Range: TypeAlias = tuple[int, int]
 
 
 PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
@@ -158,7 +158,7 @@ def _get_dim(node: Any):
 def normalize_split_base(
     match: Match,
     _get_split_args: Callable[
-        [torch.fx.Node], Tuple[Optional[torch.fx.Node], Optional[Any], Optional[int]]
+        [torch.fx.Node], tuple[Optional[torch.fx.Node], Optional[Any], Optional[int]]
     ],
 ):
     """
@@ -1939,7 +1939,7 @@ def construct_cat_args(
     split_or_unbind_node: torch.fx.Node,
     threshold_to_cat: int = 2,
     run_update_func: Callable = update_args_from_split_getitem,  # type: ignore[type-arg]
-) -> Tuple[List[torch.fx.Node], List[torch.Tensor]]:
+) -> tuple[List[torch.fx.Node], List[torch.Tensor]]:
     new_cat_args, parents_seen, getitem_indices, idx_to_getitems = [], [], [], {}  # type: ignore[var-annotated]
     new_cat_args_meta = []  # type: ignore[var-annotated]
     for input in inputs:
