@@ -848,8 +848,8 @@ class CppGemmTemplate(CppTemplate):
             # It shouldn't happen as viewing an mkldnn tensor, we can extend the
             # implementation if it does.
             assert not isinstance(new_inputs[1], ir.BaseView)
-        # Note that the layout of MKLDNN Tensor is with the wrong stride
-        view_size, view_stride, view_offset = cls.get_view_layout(new_inputs[1])
+        # Save the original weight node for getting unwrapping layout once we know if blocking is used
+        original_weight_node = new_inputs[1]
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
@@ -905,6 +905,17 @@ class CppGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
+
+        # Note that the layout of MKLDNN Tensor is with the wrong stride
+        if is_slice(original_weight_node) and not block_weights:
+            # If weight is a slice of a larger tensor, we need to use the layout of the whole tensor
+            # instead of just the slice because the GEMM template expects the whole tensor.
+            view_layout = original_weight_node.data.get_layout()
+        else:
+            view_layout = original_weight_node.layout
+        view_size = view_layout.size
+        view_stride = view_layout.stride
+        view_offset = view_layout.offset
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
@@ -1038,11 +1049,6 @@ class CppGemmTemplate(CppTemplate):
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
         return True
-
-    @staticmethod
-    def get_view_layout(node):
-        view_layout = node.layout
-        return view_layout.size, view_layout.stride, view_layout.offset
 
     @classmethod
     def block_weight(cls, W, new_size, padding):

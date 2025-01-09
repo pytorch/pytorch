@@ -131,27 +131,6 @@ class CppBmmTemplate(CppGemmTemplate):
             else not W.is_contiguous()
         )
 
-    @staticmethod
-    def get_view_layout(node):
-        def is_slice(node: ir.IRNode):
-            if isinstance(node, ir.ReinterpretView):
-                old_layout = node.data.get_layout()
-                new_layout = node.layout
-                return (
-                    isinstance(node.data, ir.StorageBox)
-                    and old_layout.size[-len(new_layout.size) :] == new_layout.size
-                    and len(old_layout.size) > len(new_layout.size)
-                    and new_layout.is_contiguous()
-                )
-            return False
-
-        if is_slice(node):
-            # If weight is a slice of a larger tensor, we need to use the layout of the whole tensor
-            view_layout = node.data.get_layout()
-        else:
-            view_layout = node.layout
-        return view_layout.size, view_layout.stride, view_layout.offset
-
     def get_gemm_function_call(
         self,
         kernel: CppTemplateKernel,
