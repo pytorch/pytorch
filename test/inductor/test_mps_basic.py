@@ -44,11 +44,15 @@ class MPSBasicTests(TestCase):
     test_cat_empty = CommonTemplate.test_cat_empty
     test_floordiv = CommonTemplate.test_floordiv
     test_inf = CommonTemplate.test_inf
+    test_isinf = CommonTemplate.test_isinf
+    test_isinf2 = CommonTemplate.test_isinf2
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
     test_remainder = CommonTemplate.test_remainder
+    test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
+    test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_views6 = CommonTemplate.test_views6
     test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
@@ -73,8 +77,11 @@ class MPSBasicTests(TestCase):
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
-    def floor(self):
+    def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
+
+    def test_sign(self):
+        self.common(lambda x: x.sign(), (torch.rand(1024),))
 
     def test_sliced_input(self):
         self.common(
