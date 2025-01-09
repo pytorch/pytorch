@@ -23,11 +23,6 @@
 
 namespace c10 {
 
-DispatchKey computeDispatchKey(
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device);
-
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
   return dtype.value_or(get_default_dtype_as_scalartype());
 }
