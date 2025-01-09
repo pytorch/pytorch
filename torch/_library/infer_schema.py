@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import typing
@@ -62,7 +61,7 @@ def infer_schema(
     def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type)
-        except Exception as e:
+        except Exception:
             error_fn(
                 f"Unsupported type annotation {annotation_type}. It is not a type."
             )

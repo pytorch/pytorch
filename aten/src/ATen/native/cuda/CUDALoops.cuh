@@ -28,11 +28,10 @@
 // See BinaryOpsKernel.cu for the complete implementation
 //
 
-#include <iostream>
+#include <array>
 #include <tuple>
 #include <type_traits>
 
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
