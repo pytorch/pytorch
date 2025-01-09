@@ -176,10 +176,11 @@ class MultivariateNormal(Distribution):
                 precision_matrix.shape[:-2], loc.shape[:-1]
             )
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
-        else:
+        else:  # Note: redundant check, only here to make linters happy
             raise ValueError(
                 "At least one of covariance_matrix, precision_matrix or scale_tril must be specified."
             )
+
         self.loc = loc.expand(batch_shape + (-1,))
 
         event_shape = self.loc.shape[-1:]
