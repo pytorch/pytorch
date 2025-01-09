@@ -315,7 +315,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_no_recursive_compile_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
@@ -351,7 +351,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             h(torch.randn(5), f(i))
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_run_mode_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
