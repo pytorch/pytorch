@@ -76,7 +76,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
         "Text table index is out of range")
     filename = *text_table_[fnameIndex];
 
-    std::vector<c10::string_view> pieces;
+    std::vector<std::string_view> pieces;
     std::vector<std::shared_ptr<std::string>> strs;
 
     for (int64_t i : textIndex) {

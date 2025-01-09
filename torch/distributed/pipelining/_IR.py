@@ -1143,6 +1143,13 @@ class Pipe(torch.nn.Module):
 
 
 class SplitPoint(Enum):
+    """
+    Enum representing the points at which a split can occur in the execution of a submodule.
+    Attributes:
+        BEGINNING: Represents adding a split point *before* the execution of a certain submodule in the `forward` function.
+        END: Represents adding a split point *after* the execution of a certain submodule in the `forward` function.
+    """
+
     BEGINNING = 1
     END = 2
 

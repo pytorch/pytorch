@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Sized, Tuple
@@ -64,6 +63,7 @@ register_op_strategy(
         aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
+        aten.view.dtype,
         aten.zero_.default,
     ]
 )(default_strategy)
@@ -593,7 +593,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             args_schema=(
                 schema_suggestion.args_schema[0],
                 dim,
-                schema_suggestion.args_schema[1][dim],
+                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
             ),
             kwargs_schema=op_schema.kwargs_schema,
         )
