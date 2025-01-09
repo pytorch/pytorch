@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
 import torch
 import torch.export._trace
@@ -72,7 +72,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+) -> tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -263,7 +263,7 @@ def construct_fqn(ir, ref_map, name_map):
 
 def get_block_to_lifted_attrs(
     graph: torch._C.Graph,
-) -> Tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
+) -> tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
     When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
@@ -1394,7 +1394,7 @@ class TS2EPConverter:
     def __init__(
         self,
         ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
-        sample_args: Tuple[Any, ...],
+        sample_args: tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
         self.ts_model = ts_model
