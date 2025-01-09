@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+# ruff: noqa: F841
 
 import contextlib
 import math
@@ -38,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
-    ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
+    ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
@@ -7138,6 +7139,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
+    @largeTensorTest("40GB", device="cuda")
+    def test_layer_norm_large_tensor(self):
+        # test for https://github.com/pytorch/pytorch/issues/136291
+        device = torch.device("cuda")
+        b, n, dp = 16, 3000, 16
+        pairwise_repr = torch.randn(b, n, n, dp)
+
+        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
+        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
+        # we want a smaller copy to compare the results
+        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
+        norm = attn_bias_norm(pairwise_repr)
+        norm_small = attn_bias_norm(pairwise_small)
+
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # Check output to make sure it is correct.
+        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
         x = torch.randn(4, 8, 32, 32)
@@ -7332,7 +7351,7 @@ def add_test(test, decorator=None):
         else:
             add(cuda_test_name, with_tf32_off)
 
-for test_params in module_tests + new_module_tests:
+for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
         name = test_params.pop('module_name')
@@ -8841,6 +8860,35 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    @onlyNativeDeviceTypes
+    def test_ReflectionPad_fails(self, device):
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad1d(2)
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            torch.ops.aten.reflection_pad1d(inp, (2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad2d(2)
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            torch.ops.aten.reflection_pad2d(inp, (2, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad3d(3)
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            torch.ops.aten.reflection_pad3d(inp, (2, 2, 2, 2, 2, 2))
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
         shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
@@ -9931,7 +9979,8 @@ class TestNNDeviceType(NNTestCase):
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
-    @dtypes(torch.half)
+    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
@@ -9939,6 +9988,10 @@ class TestNNDeviceType(NNTestCase):
         out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         del x
         self.assertTrue(torch.allclose(out, out_ref))
+
+        x = torch.ones((17, 256, 512, 512), dtype=dtype).cuda().to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10295,6 +10348,13 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.double)
+    def test_softmax_double(self, device, dtype):
+        logits = torch.randn(5, 513, dtype=dtype, device=device)
+        expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
+        self.assertEqual(expected_ones, torch.ones_like(expected_ones))
 
     @onlyCUDA
     @dtypes(torch.half)

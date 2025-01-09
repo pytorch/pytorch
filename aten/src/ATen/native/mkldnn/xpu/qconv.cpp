@@ -31,17 +31,17 @@ class QConvoneDNNXPU final {
       at::Tensor weight,
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
       double inv_output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       std::string_view attr,
-      torch::List<c10::optional<at::Scalar>> scalars,
-      c10::optional<std::string_view> algorithm) {
+      torch::List<std::optional<at::Scalar>> scalars,
+      std::optional<std::string_view> algorithm) {
     if (act.dim() == 3 || act.dim() == 5) {
       TORCH_CHECK(
           attr == "none",
@@ -94,12 +94,12 @@ class QConvoneDNNXPU final {
         output,
         inv_output_scale,
         output_zero_point,
-        /*accum*/ c10::nullopt,
+        /*accum*/ std::nullopt,
         /*accum_scale*/ 0.0,
         /*accum_zero_point*/ 0,
         /*output_dtype*/ output_dtype,
-        /*binary_attr*/ c10::nullopt,
-        /*binary_alpha*/ c10::nullopt,
+        /*binary_attr*/ std::nullopt,
+        /*binary_alpha*/ std::nullopt,
         /*unary_attr*/ attr,
         /*unary_scalars*/ scalars,
         /*unary_algorithm*/ algorithm);

@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
+import os
 import unittest
+from unittest.mock import patch
 
 import torch
 from functorch import make_fx
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser
+from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
 from torch._dynamo.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -45,7 +47,7 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
-        fp64_model, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
+        _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
         self.assertEqual(fp64_examples, (x.to(torch.float64),))
 
         self.assertExpectedInline(
@@ -79,7 +81,7 @@ def forward(self, x_1):
                 _tensor_constant0
             )
             _tensor_constant0 = None
-            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(  # noqa: F841
                 primals_48, [None, lift_fresh_copy]
             )
             lift_fresh_copy = None
@@ -171,6 +173,25 @@ def forward(self, x_1):
 
         self.assertEqual(list(kwargs["primals_4"].shape), [5])
         self.assertEqual(kwargs["primals_5"], 5)
+
+    @patch.dict(os.environ, {"TORCHINDUCTOR_MAX_AUTOTUNE": "1", "TEST_ENV": "1"})
+    def test_generate_env_vars_string(self):
+        env_strings = generate_env_vars_string()
+        self.assertIn(
+            """os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
+""",
+            env_strings,
+        )
+        self.assertIn(
+            """import os
+""",
+            env_strings,
+        )
+        self.assertNotIn(
+            """TEST_ENV
+""",
+            env_strings,
+        )
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
 TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x);
 
-Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
+Tensor moveBatchDimToFront(Tensor tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t numelWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 std::optional<int64_t> valIfNonempty(std::optional<int64_t> maybe_empty, int64_t new_val);
@@ -243,9 +243,8 @@ inline void boxed_existing_bdim_all_batch_rule(
   const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-  auto maybe_layer = maybeCurrentDynamicLayer();
+  const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "boxed_existing_bdim_all_batch_rule");
-  int64_t cur_level = maybe_layer->layerId();
 
   const auto arguments = torch::jit::last(stack, num_arguments);
   if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
@@ -257,6 +256,8 @@ inline void boxed_existing_bdim_all_batch_rule(
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
   int64_t batch_size = 0;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  int64_t cur_level = maybe_layer->layerId();
 
   find_and_unpack_tensors(
       stack, num_arguments, cur_level,
