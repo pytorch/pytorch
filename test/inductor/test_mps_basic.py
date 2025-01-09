@@ -43,6 +43,8 @@ class MPSBasicTests(TestCase):
     test_addmm = CommonTemplate.test_addmm
     test_cat_empty = CommonTemplate.test_cat_empty
     test_floordiv = CommonTemplate.test_floordiv
+    test_fmod = CommonTemplate.test_fmod
+    test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
     test_inf = CommonTemplate.test_inf
     test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
@@ -52,6 +54,7 @@ class MPSBasicTests(TestCase):
     test_remainder = CommonTemplate.test_remainder
     test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
+    test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_views6 = CommonTemplate.test_views6
     test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
