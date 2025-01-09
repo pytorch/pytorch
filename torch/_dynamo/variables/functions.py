@@ -439,12 +439,6 @@ class GeneratorObjectVariable(VariableTracker):
             # exception is raised again.
             tracer.exception_handler(e)
 
-    def _is_inside_try_finally(self, tracer):
-        exn_tab_entry = tracer.current_instruction.exn_tab_entry
-        return (sys.version_info >= (3, 11) and exn_tab_entry) or (
-            sys.version_info < (3, 11) and tracer.block_stack
-        )
-
     def _is_generator_new(self):
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
 
@@ -518,8 +512,7 @@ class GeneratorObjectVariable(VariableTracker):
                 self._setup_exception(
                     tx, variables.ExceptionVariable(GeneratorExit, ())
                 )
-                next_instruction = tracer.instructions[tracer.instruction_pointer]
-                if next_instruction.opname == "CALL_INTRINSIC_1":
+                if tracer.next_instruction().opname == "CALL_INTRINSIC_1":
                     return variables.ConstantVariable(None)
             else:
                 try:
