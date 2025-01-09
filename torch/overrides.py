@@ -907,7 +907,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
         torch.nn.functional.linear: lambda input, weight, bias=None: -1,
         torch.nn.functional.local_response_norm: lambda input, size, alpha=0.0001, beta=0.75, k=1.0: -1,
-        torch.nn.functional.log_softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
+        torch.nn.functional.log_softmax: lambda input, dim=None, dtype=None: -1,
         torch.nn.functional.logsigmoid: lambda input: -1,
         torch.nn.functional.lp_pool1d: lambda input, norm_type, kernel_size, stride=None, ceil_mode=False: -1,
         torch.nn.functional.lp_pool2d: lambda input, norm_type, kernel_size, stride=None, ceil_mode=False: -1,
@@ -971,8 +971,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", beta=1.0: -1,  # noqa: B950
         torch.nn.functional.huber_loss: lambda input, target, reduction="mean", delta=1.0, weight=None: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
-        torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
-        torch.nn.functional.softmin: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
+        torch.nn.functional.softmax: lambda input, dim=None, dtype=None: -1,
+        torch.nn.functional.softmin: lambda input, dim=None, dtype=None: -1,
         torch.nn.functional.softplus: lambda input, beta=1, threshold=20: -1,
         torch.nn.functional.softshrink: lambda input, lambd=0.5: -1,
         torch.nn.functional.softsign: lambda input: -1,

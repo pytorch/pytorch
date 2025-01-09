@@ -204,11 +204,10 @@ class Softmax(torch.nn.Softmax):
     def forward(self, input):
         dim = self.dim
         if dim is None:
-            stacklevel = 3
             # Note: adding the mypy ignore on _get_softmax_dim seems less bad
             # than making `_get_softmax_dim` an official API.
             dim = torch.nn.functional._get_softmax_dim(  # type: ignore[attr-defined]
-                "softmax", input.dim(), stacklevel
+                "softmax", input.dim()
             )
         return torch.ops.quantized.softmax(input, dim, self.scale, self.zero_point)
 
