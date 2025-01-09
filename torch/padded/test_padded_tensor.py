@@ -282,7 +282,7 @@ class TestAttention(TestCase):
 
         inputs_p = [
             PaddedTensor(x, {0: N, 1: N}, None),
-            PaddedTensor(freqs_cis, {0: N, 1: N, 2: 1}, None),
+            PaddedTensor(freqs_cis, {0: 1, 1: N, 2: 1}, None),
             mask,
             PaddedTensor(input_pos, {0: 1, 1: 1, 2: N}, None),
             PaddedTensor(k_cache, {0: 1, 1: 1, 2: N}, None),

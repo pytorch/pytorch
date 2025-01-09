@@ -306,7 +306,7 @@ class ElementwiseUnaryOp(RegularOp):
         return [input_shape]
 
 
-class ElementwiseBinaryOp(SliceRunRepadOp):
+class ElementwiseBinaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
