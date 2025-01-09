@@ -755,7 +755,8 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
 static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor& out) {
   using namespace mps;
 
-  TORCH_CHECK(!input.is_complex(), "linalg.cholesky: Complex dtype not supported on MPS yet!");
+  TORCH_CHECK(out.is_mps());
+  TORCH_CHECK(input.scalar_type() == at::ScalarType::Float, "linalg.cholesky: Input tensor must be float32");
   TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
   TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
 
@@ -776,9 +777,9 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock_" + mps::scalarToMetalTypeString(out));
-  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM_" + mps::scalarToMetalTypeString(out));
-  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK_" + mps::scalarToMetalTypeString(out));
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
+  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
+  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;

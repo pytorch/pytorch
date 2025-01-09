@@ -67,23 +67,9 @@ struct SYRKBatchedParams {
   uint nPairs; // total # of (j, h) pairs
 };
 
-template <typename T>
-inline T sqrt_cast(T x) {
-#if __METAL_VERSION__ >= 310
-  if (is_same_v<T, bfloat16>) {
-    return T(sqrt(float(x)));
-  }
-#endif
-  if (is_same_v<T, half>) {
-    return T(sqrt(float(x)));
-  }
-  return T(sqrt(x));
-}
-
-template <typename T>
-inline T blockReduceSum(
-    threadgroup T* sharedScratch,
-    T val,
+inline float blockReduceSum(
+    threadgroup float* sharedScratch,
+    float val,
     uint tid,
     uint tpg) {
   sharedScratch[tid] = val;
@@ -99,9 +85,8 @@ inline T blockReduceSum(
   return sharedScratch[0];
 }
 
-template <typename T>
 kernel void factorDiagonalBlock(
-    device T* A [[buffer(0)]],
+    device float* A [[buffer(0)]],
     constant BlockParams& sizes [[buffer(1)]],
     device int* success [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
@@ -119,8 +104,8 @@ kernel void factorDiagonalBlock(
   const uint row0 = k * NB;
   const uint col0 = k * NB;
 
-  threadgroup T tile[32][33];
-  threadgroup T reduceScratch[1024];
+  threadgroup float tile[32][33];
+  threadgroup float reduceScratch[1024];
   const uint tileSize = actSize * actSize;
 
   for (uint i = tid; i < tileSize; i += tpg) {
@@ -131,36 +116,36 @@ kernel void factorDiagonalBlock(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   for (uint kk = 0; kk < actSize; kk++) {
-    T diagElt = T(0);
+    float diagElt = 0.0f;
     if (kk > 0) {
-      T partialSum = T(0);
+      float partialSum = 0.0f;
       for (uint i = tid; i < kk; i += tpg) {
-        T val = tile[kk][i];
-        partialSum += val * val;
+        float val = tile[kk][i];
+        partialSum = fma(val, val, partialSum);
       }
       diagElt = blockReduceSum(reduceScratch, partialSum, tid, tpg);
     }
 
     if (tid == 0) {
-      T diagVal = tile[kk][kk] - diagElt;
+      float diagVal = tile[kk][kk] - diagElt;
       // Check for positive definiteness
-      if (diagVal <= T(0)) {
+      if (diagVal <= 0.0f) {
         success[bid] = 0; // matrix is not positive definite
         return;
       }
-      tile[kk][kk] = sqrt_cast(diagVal);
+      tile[kk][kk] = sqrt(diagVal);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    T pivot = tile[kk][kk];
+    float pivot = tile[kk][kk];
 
     for (uint j = kk + 1 + tid; j < actSize; j += tpg) {
-      T partialSum = T(0);
+      float partialSum = 0.0f;
       for (uint i = 0; i < kk; i++) {
-        partialSum += tile[j][i] * tile[kk][i];
+        partialSum = fma(tile[j][i], tile[kk][i], partialSum);
       }
 
-      T val = tile[j][kk];
+      float val = tile[j][kk];
       val -= partialSum;
       val /= pivot;
       tile[j][kk] = val;
@@ -173,15 +158,10 @@ kernel void factorDiagonalBlock(
     uint c = i % actSize;
     A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r][c];
   }
-
-  if (tid == 0) {
-    success[bid] &= 1; // Mark successful completion
-  }
 }
 
-template <typename T>
 kernel void applyTRSM(
-    device T* A [[buffer(0)]],
+    device float* A [[buffer(0)]],
     constant TRSMParams& sizes [[buffer(1)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
@@ -211,8 +191,8 @@ kernel void applyTRSM(
     return;
   }
 
-  threadgroup T diag[32 * 32];
-  threadgroup T target[32 * 32];
+  threadgroup float diag[32 * 32];
+  threadgroup float target[32 * 32];
 
   for (uint i = tid.x; i < actSize_k * actSize_k; i += tpg.x) {
     uint r = i / actSize_k;
@@ -227,13 +207,24 @@ kernel void applyTRSM(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   for (uint col = 0; col < actSize_k; col++) {
-    T diag_val = diag[col * actSize_k + col];
+    float diag_val = diag[col * actSize_k + col];
+    if (abs(diag_val) < 1e-6f) {
+      diag_val = (diag_val < 0.0f) ? -1e-6f : 1e-6f;
+    }
+
     for (uint row = tid.x; row < actSize_j; row += tpg.x) {
-      T sumVal = target[row * actSize_k + col];
+      float sum = target[row * actSize_k + col];
+
+      // kahan sum
+      float c = 0.0f;
       for (uint p = 0; p < col; p++) {
-        sumVal -= target[row * actSize_k + p] * diag[col * actSize_k + p];
+        float y = -target[row * actSize_k + p] * diag[col * actSize_k + p] - c;
+        float t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
       }
-      target[row * actSize_k + col] = sumVal / diag_val;
+
+      target[row * actSize_k + col] = sum / diag_val;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
@@ -245,9 +236,8 @@ kernel void applyTRSM(
   }
 }
 
-template <typename T>
 kernel void applySYRK(
-    device T* A [[buffer(0)]],
+    device float* A [[buffer(0)]],
     constant SYRKBatchedParams& sizes [[buffer(1)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
@@ -275,9 +265,9 @@ kernel void applySYRK(
   if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0)
     return;
 
-  threadgroup T left[32 * 32];
-  threadgroup T right_t[32 * 32];
-  threadgroup T tile[32 * 32];
+  threadgroup float left[32 * 32];
+  threadgroup float right_t[32 * 32];
+  threadgroup float tile[32 * 32];
 
   const uint threads = min(tpg.x, actSize_j * actSize_k);
 
@@ -311,36 +301,34 @@ kernel void applySYRK(
       continue;
 
     uint tile_idx = r * actSize_h + c;
-    T sum = tile[tile_idx];
+    float sum = tile[tile_idx];
 
     uint left_row = r * actSize_k;
     uint right_col = c;
 
     uint k = 0;
-    T sum4[4] = {T(0), T(0), T(0), T(0)};
+    float4 sum4 = {0.0f, 0.0f, 0.0f, 0.0f};
 
     for (; k + 4 <= actSize_k; k += 4) {
-      T left4[4] = {
+      float4 left4 = {
           left[left_row + k],
           left[left_row + k + 1],
           left[left_row + k + 2],
           left[left_row + k + 3]};
 
-      T right4[4] = {
+      float4 right4 = {
           right_t[(k + 0) * actSize_h + right_col],
           right_t[(k + 1) * actSize_h + right_col],
           right_t[(k + 2) * actSize_h + right_col],
           right_t[(k + 3) * actSize_h + right_col]};
 
-      for (uint i = 0; i < 4; ++i) {
-        sum4[i] += left4[i] * right4[i];
-      }
+      sum4 = fma(left4, right4, sum4);
     }
 
-    sum -= sum4[0] + sum4[1] + sum4[2] + sum4[3];
+    sum -= dot(sum4, 1.0);
 
     for (; k < actSize_k; k++) {
-      sum -= left[left_row + k] * right_t[k * actSize_h + right_col];
+      sum = fma(-left[left_row + k], right_t[k * actSize_h + right_col], sum);
     }
 
     tile[tile_idx] = sum;
@@ -354,45 +342,6 @@ kernel void applySYRK(
     A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r * actSize_h + c];
   }
 }
-
-#define INSTANTIATE_FACTOR_DIAGONAL(DTYPE)                          \
-  template [[host_name("factorDiagonalBlock_" #DTYPE)]] kernel void \
-  factorDiagonalBlock<DTYPE>(                                       \
-      device DTYPE * A [[buffer(0)]],                               \
-      constant BlockParams & sizes [[buffer(1)]],                   \
-      device int* success [[buffer(2)]],                            \
-      uint tid [[thread_position_in_threadgroup]],                  \
-      uint bid [[threadgroup_position_in_grid]],                    \
-      uint tpg [[threads_per_threadgroup]])
-
-#define INSTANTIATE_TRSM(DTYPE)                                             \
-  template [[host_name("applyTRSM_" #DTYPE)]] kernel void applyTRSM<DTYPE>( \
-      device DTYPE * A [[buffer(0)]],                                       \
-      constant TRSMParams & sizes [[buffer(1)]],                            \
-      uint3 tid [[thread_position_in_threadgroup]],                         \
-      uint3 tgid [[threadgroup_position_in_grid]],                          \
-      uint3 tpg [[threads_per_threadgroup]])
-
-#define INSTANTIATE_SYRK(DTYPE)                                             \
-  template [[host_name("applySYRK_" #DTYPE)]] kernel void applySYRK<DTYPE>( \
-      device DTYPE * A [[buffer(0)]],                                       \
-      constant SYRKBatchedParams & sizes [[buffer(1)]],                     \
-      uint3 tid [[thread_position_in_threadgroup]],                         \
-      uint3 tgid [[threadgroup_position_in_grid]],                          \
-      uint3 tpg [[threads_per_threadgroup]])
-
-INSTANTIATE_FACTOR_DIAGONAL(float);
-INSTANTIATE_FACTOR_DIAGONAL(half);
-INSTANTIATE_TRSM(float);
-INSTANTIATE_TRSM(half);
-INSTANTIATE_SYRK(float);
-INSTANTIATE_SYRK(half);
-
-#if __METAL_VERSION__ >= 310
-INSTANTIATE_FACTOR_DIAGONAL(bfloat);
-INSTANTIATE_TRSM(bfloat);
-INSTANTIATE_SYRK(bfloat);
-#endif
 
 #define INSTANTIATE_NAIVE_MM(DTYPE)                          \
   template [[host_name("naive_matmul_" #DTYPE)]] kernel void \

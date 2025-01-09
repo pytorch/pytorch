@@ -90,6 +90,7 @@ def mps_ops_grad_modifier(ops):
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
+        'linalg.cholesky': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -676,7 +677,6 @@ def mps_ops_modifier(ops):
         'angle': None,
         'cauchy_': None,
         'cauchy': None,
-        'cholesky': None,
         'cholesky_inverse': None,
         'cholesky_solve': None,
         'cummax': None,
@@ -696,7 +696,6 @@ def mps_ops_modifier(ops):
         'index_reduceamin': None,
         'kthvalue': None,
         'lcm': None,
-        'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.detsingular': None,
@@ -6332,6 +6331,27 @@ class TestMPS(TestCaseMPS):
                 torch.tensor((10, 20, 30, 40, 50), device=device),
                 atol=0, rtol=0
             )
+
+    def test_cholesky(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_cholesky_test(size, *batch_dims):
+            input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            input_mps = input_cpu.to('mps')
+            output_cpu = torch.linalg.cholesky(input_cpu)
+            output_mps = torch.linalg.cholesky(input_mps)
+            self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
+
+        matrix_sizes = [1, 2, 3, 4, 8, 17, 64, 128, 154]
+        batch_sizes = [1, 2, 4, 8, 16, 17]
+
+        for size in matrix_sizes:
+            for batch_size in batch_sizes:
+                run_cholesky_test(size, batch_size)
+
+        # test >3D matrices
+        run_cholesky_test(128, 10, 10)
+        run_cholesky_test(128, 2, 2, 2, 2, 10, 10)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
