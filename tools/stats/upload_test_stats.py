@@ -56,7 +56,9 @@ def parse_xml_report(
     return test_cases
 
 
-def process_xml_element(element: ET.Element) -> dict[str, Any]:
+def process_xml_element(
+    element: ET.Element, output_numbers: bool = True
+) -> dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
     ret: dict[str, Any] = {}
 
@@ -69,15 +71,15 @@ def process_xml_element(element: ET.Element) -> dict[str, Any]:
 
     # The XML format encodes all values as strings. Convert to ints/floats if
     # possible to make aggregation possible in SQL.
-    for k, v in ret.items():
-        try:
-            ret[k] = int(v)
-        except ValueError:
-            pass
-        try:
-            ret[k] = float(v)
-        except ValueError:
-            pass
+    if output_numbers:
+        for k, v in ret.items():
+            try:
+                ret[k] = int(v)
+            except ValueError:
+                try:
+                    ret[k] = float(v)
+                except ValueError:
+                    pass
 
     # Convert inner and outer text into special dict elements.
     # e.g.
