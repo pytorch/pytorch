@@ -1572,13 +1572,13 @@ TEST_WITH_SUBCLASSES: bool = TestEnvironment.def_flag(
 TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     "TEST_WITH_TORCHDYNAMO",
     env_var="PYTORCH_TEST_WITH_DYNAMO",
-    implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR
+    implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER or TEST_WITH_SUBCLASSES
 )
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 64
+    torch._dynamo.config.accumulated_recompile_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings
@@ -1595,11 +1595,17 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 
+
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
+def xfailIfPy312Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
 def xfailIfLinux(func):
@@ -1851,6 +1857,19 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return wrapper
     if func:
         return dec_fn(func)
+    return dec_fn
+
+def skipIfRocmArch(arch: Tuple[str, ...]):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                prop = torch.cuda.get_device_properties(0)
+                if prop.gcnArchName.split(":")[0] in arch:
+                    reason = f"skipIfRocm: test skipped on {arch}"
+                    raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
     return dec_fn
 
 def runOnRocm(fn):
@@ -3174,13 +3193,15 @@ class TestCase(expecttest.TestCase):
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            override_backend: Optional[str] = None
+            # override_backend: Optional[str] = None
             if TEST_WITH_TORCHINDUCTOR:
                 super_run = torch._dynamo.optimize("inductor")(super_run)
             elif TEST_WITH_AOT_EAGER:
-                override_backend = "aot_eager_decomp_partition"
+                # override_backend = "aot_eager_decomp_partition"
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_SUBCLASSES:
-                override_backend = "test_subclasses"
+                # override_backend = "test_subclasses"
+                super_run = torch._dynamo.optimize("test_subclasses")(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 # Assume eager-generated GraphModules will not error out.
@@ -3221,8 +3242,8 @@ class TestCase(expecttest.TestCase):
                     method = getattr(self, self._testMethodName)
                     setattr(self, self._testMethodName, ignore_failure(method, key))
 
-            with torch._dynamo.eval_frame.dynamo_override_backend(override_backend):
-                super_run(result=result)
+            # with torch._dynamo.eval_frame.dynamo_override_backend(override_backend):
+            super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
@@ -4476,7 +4497,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
                 try:
                     return f(*args, **kwargs)
                 except ExceptionToCheck as e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    msg = f"{e}, Retrying in {mdelay:d} seconds..."
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
@@ -5018,7 +5039,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parent.parent.parent
+    torch_root = Path(__file__).resolve().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):

@@ -12,8 +12,7 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
-import torchvision.transforms as transforms
-from torchvision import models
+from torchvision import models, transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 

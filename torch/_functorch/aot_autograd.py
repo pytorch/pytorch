@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    KeysView,
     List,
     NewType,
     Optional,
@@ -28,9 +29,10 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import (
+    CompileEventLogger,
     dynamo_timed,
-    get_chromium_event_logger,
     preserve_rng_state,
+    set_feature_use,
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.output_code import OutputCode
@@ -636,7 +638,7 @@ def _create_aot_dispatcher_function(
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
-    chromium_log = get_chromium_event_logger()
+
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -692,7 +694,7 @@ def _create_aot_dispatcher_function(
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
-                chromium_log.try_add_event_data(
+                CompileEventLogger.try_add_pt2_compile(
                     "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
                 )
 
@@ -812,17 +814,17 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             if aot_config.is_export:
                 # export uses just the "graph bits", whereas the other
                 # two dispatchers include some extra work around handling a runtime epilogue
-                chromium_log.try_add_event_data(
+                CompileEventLogger.try_add_pt2_compile(
                     "backend_compile", dispatch_mode="export"
                 )
                 return partial(aot_dispatch_export, needs_autograd=needs_autograd)
             elif needs_autograd and not aot_config.pre_dispatch:
-                chromium_log.try_add_event_data(
+                CompileEventLogger.try_add_pt2_compile(
                     "backend_compile", dispatch_mode="autograd"
                 )
                 return aot_dispatch_autograd
             else:
-                chromium_log.try_add_event_data(
+                CompileEventLogger.try_add_pt2_compile(
                     "backend_compile", dispatch_mode="inference"
                 )
                 return aot_dispatch_base
@@ -1006,6 +1008,68 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
+def _try_get_metadata_from_dynamo(
+    mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
+) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
+    """
+    Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
+    We first verify that `mod` does come from Dynamo, then we handle cases where
+    metadata might be missing.
+
+    Returns:
+        aot_autograd_arg_pos_to_source: used to dedup params and their guards
+        static_input_indices: used to identify static inputs for cudagraphs
+    """
+    if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
+        # graph was not captured by dynamo
+        return None, []
+
+    if not hasattr(mod, "_param_name_to_source"):
+        # is from export
+        return None, []
+
+    # We now know this came from dynamo, and (1) we care about guards,
+    # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
+    # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+    # Additionally, we mark static indices for cudagraphs.
+    param_name_to_source = mod._param_name_to_source
+    seen_sources = set()
+
+    aot_autograd_arg_pos_to_source = []
+    # Collect the new inputs lifted by aotdispatch
+    for name in param_keys:
+        assert name in param_name_to_source, f"{name} not found."
+        source = param_name_to_source[name]
+        assert source not in seen_sources, source
+        seen_sources.add(source)
+        aot_autograd_arg_pos_to_source.append(source)
+
+    # Collect the dynamo graph inputs
+    static_input_indices = []
+    for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
+        assert hasattr(node, "_dynamo_source")
+        source = node._dynamo_source
+        assert source not in seen_sources, source
+        seen_sources.add(source)
+        aot_autograd_arg_pos_to_source.append(source)
+        source_name = source.name() if source else str(source)
+
+        if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
+            "_dynamo_static_input_type", None
+        ):
+            static_inputs_log.debug(
+                "Adding static input pos %s for source %s", pos, source_name
+            )
+            static_input_indices.append(pos)
+        else:
+            static_inputs_log.debug(
+                "Non-static input pos %s for source %s", pos, source_name
+            )
+
+    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    return aot_autograd_arg_pos_to_source, static_input_indices
+
+
 def aot_module_simplified(
     mod: nn.Module,
     args,
@@ -1043,8 +1107,6 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
-    seen_sources = set()
-
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -1056,51 +1118,13 @@ def aot_module_simplified(
             tracing_context.params_unwrapped_to_flat_index,
         ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
 
-    aot_autograd_arg_pos_to_source = None
-    # Then, the params 1:1 mapped sources, if relevant.
-    if hasattr(mod, "_param_name_to_source"):
-        aot_autograd_arg_pos_to_source = []
-        # We now know this came from dynamo, and (1) we care about guards,
-        # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
-        # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params.keys():
-            assert name in mod._param_name_to_source, f"{name} not found."
-            source = mod._param_name_to_source[name]
-            assert source not in seen_sources, source
-            seen_sources.add(source)
-            aot_autograd_arg_pos_to_source.append(source)
-
     # Next, the input args
     full_args.extend(args)
 
-    static_input_indices = []
-    if hasattr(mod, "graph"):
-        # Non dynamo entrypoints can get to here...
-        for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-            if hasattr(node, "_dynamo_source"):
-                # ... but not here!
-                if aot_autograd_arg_pos_to_source is None:
-                    aot_autograd_arg_pos_to_source = []
-                source = node._dynamo_source
-                assert source not in seen_sources, source
-                seen_sources.add(source)
-                aot_autograd_arg_pos_to_source.append(source)
-                source_name = source.name() if source else str(source)
-
-                if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-                    "_dynamo_static_input_type", None
-                ):
-                    static_inputs_log.debug(
-                        "Adding static input pos %s for source %s", pos, source_name
-                    )
-                    static_input_indices.append(pos)
-                else:
-                    static_inputs_log.debug(
-                        "Non-static input pos %s for source %s", pos, source_name
-                    )
-
-    if aot_autograd_arg_pos_to_source is not None:
-        assert len(full_args) == len(aot_autograd_arg_pos_to_source)
+    (
+        aot_autograd_arg_pos_to_source,
+        static_input_indices,
+    ) = _try_get_metadata_from_dynamo(mod, params.keys(), len(full_args))
 
     dynamic_shapes = False
     for x in full_args:
@@ -1144,6 +1168,7 @@ def aot_module_simplified(
         local = should_use_local_autograd_cache()
         remote = should_use_remote_autograd_cache()
         if local or remote:
+            set_feature_use("aot_autograd_remote_cache", remote)
             compiled_fn = AOTAutogradCache.load(
                 dispatch_and_compile,
                 mod,
