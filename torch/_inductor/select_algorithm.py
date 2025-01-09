@@ -1993,15 +1993,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(
             choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
-        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], Union[LazyBenchmark, float]]:
             inputs = get_inputs(choices)
             timings = {}
-            has_lazy_benchmark = False
             for choice in choices:
                 try:
                     timing = benchmark_choice_in_current_process(choice, inputs)
-                    if not has_lazy_benchmark and isinstance(timing, LazyBenchmark):
-                        has_lazy_benchmark = True
                 except CUDACompileError as e:
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
@@ -2039,20 +2036,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     except ImportError:
                         raise e from None
 
-                timings[choice] = timing
-
-            if has_lazy_benchmark:
-                # if we lazily benchmarked any values, we need to finalize
-                # those results by triggering the benchmark. this can be
-                # done by converting the lazy benchmark to a float
-                # mypy gets confused about types (since it does not realize that
-                # all lazy benchmarks will get finalized), so let's give it a hint
-                timings: Dict[
-                    Union[ExternKernelCaller, TritonTemplateCaller], float
-                ] = {
-                    choice: float(timing)
-                    for choice, timing in timings.items()
-                }
+                timings[choice] = timing                
 
             return timings
 
@@ -2069,12 +2053,20 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = benchmark_in_current_process(extern)
             timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
-
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
-        )
+        
+        def benchmark() -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+            if config.autotune_in_subproc:
+                maybe_lazy_benchmarks = benchmark_in_sub_process()
+            else:
+                maybe_lazy_benchmarks = benchmark_in_current_process()
+            # if we lazily benchmarked any values, we need to finalize
+            # those results by triggering the benchmark. this can be
+            # done by converting the lazy benchmark to a float
+            # mypy gets confused about types (since it does not realize that
+            # all lazy benchmarks will get finalized), so let's give it a hint
+            timings: Dict[
+                Union[ExternKernelCaller, TritonTemplateCaller], float
+            ] = {choice: float(timing) for choice, timing in maybe_lazy_benchmarks.items()}
 
         return benchmark
 
