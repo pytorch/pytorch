@@ -184,6 +184,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::rsqrt({x})"
 
     @staticmethod
+    def tanh(x: CSEVariable) -> str:
+        return f"metal::tanh({x})"
+
+    @staticmethod
     def atanh(x: CSEVariable) -> str:
         return f"metal::atanh({x})"
 
