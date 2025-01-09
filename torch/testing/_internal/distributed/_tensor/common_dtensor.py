@@ -325,7 +325,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if TEST_CUDA else "gloo"
+        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
