@@ -1,12 +1,15 @@
+import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
-from statistics import median
-from typing import Any, Callable, Dict, List
+from random import randint
+from statistics import mean, median
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.config import use_experimental_benchmarker
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -18,66 +21,70 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def maybe_time(
+def time_and_count(
     fn: Callable[Concatenate[Any, P], T]
 ) -> Callable[Concatenate[Any, P], T]:
-    """Wrapper that logs the duration of `fn`, in milliseconds, along with a representation
-    of the function's args and kwargs, if logging is enabled. It is expected that `fn` is
-    a method of `Benchmarker` or one of its subclasses; typing limitations prevent us from
-    declaring this directly. If logging is disabled, this becomes a no-op.
-    """
-
-    # no-op if benchmarking-specific logging is disabled
-    if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
-        return fn
-
-    @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        start_t = time.perf_counter()
-        result = fn(*args, **kwargs)
-        logger.debug(
-            "Call `benchmarking.%s.%s(*args=%r, **kwargs=%r)` took %f milliseconds.",
-            self.__class__.__name__,
-            fn.__name__,
-            args,
-            kwargs,
-            (time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND,
-        )
-        return result
-
-    return wrapper
-
-
-def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
-    """Wrapper that increments relevant dynamo counters on `fn` call. It is expected that
-    `fn` is a method of `Benchmarker` or one of its subclass; typing limitations prevent
-    us from declaring this directly. The counter incrementation follows the formula,
-
-    `counters["inductor"]["benchmarking.Foo.bar] += 1`
-
-    where `Foo` is the class whose' instance called the function, and `bar` is the function name.
+    """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
+    counters. It is expected that `fn` is a method of `Benchmarker` or one of its
+    subclasses; typing limitations prevent us from declaring this directly.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        counters["inductor"][
-            "benchmarking." + self.__class__.__name__ + "." + fn.__name__
-        ] += 1
-        return fn(self, *args, **kwargs)
+        fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
+        counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
+        with dynamo_timed(fn_qual_name, log_pt2_compile_event=True):
+            return fn(self, *args, **kwargs)
 
     return wrapper
+
+
+class LazyBenchmark:
+    def __init__(self: Self, benchmark: Callable[[], float]) -> None:
+        self.benchmark = benchmark
+
+    @cached_property
+    @time_and_count
+    def timing(self: Self) -> float:
+        timing = self.benchmark()
+        # I don't think this helps with saving memory at all,
+        # but at least it gives good signal if we ever try
+        # to call self.benchmark again
+        del self.benchmark
+        return timing
+
+    def __float__(self: Self) -> float:
+        return float(self.timing)
 
 
 class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
-    @maybe_time
-    @count
+    def infer_device_type(
+        self: Self, fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]
+    ) -> Any:
+        inferred_device = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            if not isinstance(arg_or_kwarg, torch.Tensor):
+                continue
+            if inferred_device is None:
+                inferred_device = arg_or_kwarg.device
+            elif arg_or_kwarg.device != inferred_device:
+                raise ValueError(
+                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                )
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+            )
+        return inferred_device
+
+    @time_and_count
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: tuple[Any, ...],
+        fn_args: Tuple[Any, ...],
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
@@ -100,33 +107,22 @@ class Benchmarker:
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        with dynamo_timed("Benchmarker.benchmark", log_pt2_compile_event=True):
-            inferred_device = None
-            for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-                if not isinstance(arg_or_kwarg, torch.Tensor):
-                    continue
-                if inferred_device is None:
-                    inferred_device = arg_or_kwarg.device
-                elif arg_or_kwarg.device != inferred_device:
-                    raise ValueError(
-                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                    )
-            if inferred_device is None:
-                raise ValueError(
-                    "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
-                )
-            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
-            if inferred_device == torch.device("cpu"):
-                return self.benchmark_cpu(_callable, **kwargs)
-            # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
-            # implementation which was written specifically with CUDA devices in mind, we may want to
-            # explore alternate implementations for other device types.
-            return self.benchmark_gpu(_callable, **kwargs)
+        inferred_device = self.infer_device_type(fn_args, fn_kwargs)
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        if inferred_device == torch.device("cpu"):
+            return self.benchmark_cpu(_callable, **kwargs)
+        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+        # implementation which was written specifically with CUDA devices in mind, we may want to
+        # explore alternate implementations for other device types.
+        return self.benchmark_gpu(_callable, **kwargs)
 
-    @maybe_time
-    @count
+    @time_and_count
     def benchmark_cpu(
-        self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
+        self: Self,
+        _callable: Callable[[], Any],
+        warmup: int = 20,
+        rep: int = 100,
+        **kwargs: Any,
     ) -> float:
         """Benchmark the CPU callable, `_callable`, and return the median runtime,
         in milliseconds.
@@ -139,6 +135,8 @@ class Benchmarker:
         before benchmarking starts.
         - rep: Optionally, the duration, in milliseconds, to run `_callable`
         during benchmarking.
+        - kwargs: Any additional kwargs that may be passed, for example `ranking_key`
+        or `pruning_key` if the experimental benchmarker is disabled.
 
         Returns:
         - The median runtime of `_callable`, in milliseconds.
@@ -159,15 +157,130 @@ class Benchmarker:
         run_for(warmup)
         return median(run_for(rep))
 
-    @count
+    @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+
+    @time_and_count
+    def benchmark_many(
+        self: Self,
+        fns: List[Callable[..., Any]],
+        fns_args: List[Tuple[Any, ...]],
+        fns_kwargs: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> List[float]:
+        """Benchmark `fn(*fn_args, *fn_kwargs)` for `fn`, `fn_args`, and `fn_kwargs` in `fns`,
+        `fns_args`, and `fns_kwargs`, and return the runtimes, in milliseconds (the actual runtime
+        calculation is dictated by the benchmarking implementation, but may be one of [mean, median,
+        minimum, etc.]). Functions as a convenience wrapper around device-specific implementations,
+        like `benchmark_many_cpu` and `benchmark_many_gpu`. Raises `ValueError(...)` if we can't safely
+        infer the device type of any `fn` in `fns`, or if there is more than one device type in `fns`;
+        for example, if multiple device types are found in the `fn_args` and `fn_kwargs` of a given `fn`
+        from `fns`, or if no device types are found, or if some `fn1` and `fn2` from `fns` have different
+        inferred device types.
+
+        Arguments:
+        - fns: The list of functions to benchmark.
+        - fns_args: The list of functions' arguments.
+        - fns_kwargs: The list of functions' kwargs.
+
+        Keyword Arguments:
+        - **kwargs: The benchmarking implementation's kwargs.
+
+        Returns:
+        - The runtimes of `fn(*fn_args, **fn_kwargs)`, for `fn`, `fn_args`, and `fn_kwargs` in `fns`,
+        in milliseconds.
+        """
+        inferred_device = None
+        for fn_args, fn_kwargs in zip(fns_args, fns_kwargs):
+            this_inferred_device = self.infer_device_type(fn_args, fn_kwargs)
+            if inferred_device is None:
+                inferred_device = this_inferred_device
+            elif this_inferred_device != inferred_device:
+                raise ValueError("Multiple device types inferred from `fns`.")
+        callables = [
+            lambda: fn(*fn_args, **fn_kwargs)
+            for fn, fn_args, fn_kwargs in zip(fns, fns_args, fns_kwargs)
+        ]  # noqa: E731
+        if inferred_device == torch.device("cpu"):
+            return self.benchmark_many_cpu(callables, **kwargs)
+        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+        # implementation which was written specifically with CUDA devices in mind, we may want to
+        # explore alternate implementations for other device types.
+        return self.benchmark_many_gpu(callables, **kwargs)
+
+    @time_and_count
+    def benchmark_many_cpu(
+        self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
+    ) -> List[float]:
+        return [
+            self.benchmark_cpu(_callable, *args, **kwargs) for _callable in callables
+        ]
+
+    @time_and_count
+    def benchmark_many_gpu(
+        self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
+    ) -> List[float]:
+        return [
+            self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
+        ]
+
+    @time_and_count
+    def lazy_benchmark(
+        self: Self,
+        fn: Callable[..., Any],
+        fn_args: Tuple[Any],
+        fn_kwargs: Dict[str, Any],
+        **kwargs: Any,
+    ) -> Union[LazyBenchmark, float]:
+        """Lazily enque `fn(*fn_args, *fn_kwargs)` for benchmarking. Follows the same
+        principles as `Benchmarking.benchmark` except that the benchmarking is delayed,
+        in the form of returning a `LazyBenchmark` object, such that benchmarking does
+        not occur until the benchmarking results are required. This allows us to have
+        better benchmark grouping (i.e. we can utilize `GroupedInductorBenchmarker`)
+        without having to refactor user callsites.
+        Arguments:
+        - fn: The function to benchmark.
+        - fn_args: The function's arguments.
+        - fn_kwargs: The function's kwargs.
+        Keyword Arguments:
+        - **kwargs: The benchmarking implementation's kwargs.
+        Returns:
+        - A `LazyBenchmark`, `x`, that evaluates to the actual benchmark result
+        when `float(x)` or `x.timing` is executed.
+        """
+        inferred_device = self.infer_device_type(fn_args, fn_kwargs)
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        if inferred_device == torch.device("cpu"):
+            return self.lazy_benchmark_cpu(_callable, **kwargs)
+        return self.lazy_benchmark_gpu(_callable, **kwargs)
+
+    @time_and_count
+    def lazy_benchmark_cpu(
+        self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any
+    ) -> LazyBenchmark:
+        # we need to execute `_callable` once before creating the lazy
+        # benchmark, since we want any exceptions that `_callable` might
+        # throw to be thrown when this function is called, not when the
+        # lazy benchmark is finally evaluated
+        _callable()
+        return LazyBenchmark(lambda: self.benchmark_cpu(_callable, *args, **kwargs))
+
+    @time_and_count
+    def lazy_benchmark_gpu(
+        self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any
+    ) -> LazyBenchmark:
+        # we need to execute `_callable` once before creating the lazy
+        # benchmark, since we want any exceptions that `_callable` might
+        # throw to be thrown when this function is called, not when the
+        # lazy benchmark is finally evaluated
+        _callable()
+        torch.cuda.synchronize()
+        return LazyBenchmark(lambda: self.benchmark_gpu(_callable, *args, **kwargs))
 
 
 class TritonBenchmarker(Benchmarker):
     @cached_property
-    @maybe_time
-    @count
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's `do_bench`."""
         try:
@@ -176,8 +289,7 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
-    @maybe_time
-    @count
+    @time_and_count
     def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
@@ -195,6 +307,10 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        do_bench_params = inspect.signature(self.triton_do_bench).parameters
+        for kwarg in list(kwargs.keys()):
+            if kwarg not in do_bench_params:
+                del kwargs[kwarg]
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:
@@ -202,4 +318,387 @@ class TritonBenchmarker(Benchmarker):
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
-benchmarker = TritonBenchmarker()
+class InductorBenchmarker(TritonBenchmarker):
+    @cached_property
+    def L2_cache_size(self: Self) -> int:
+        """Get the L2 cache size, in bytes, of the current device."""
+        device = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device)
+        return props.L2_cache_size
+
+    def get_event_pairs(
+        self: Self, iters: int
+    ) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
+        """Get `iters` pairs of CUDA events."""
+        return [
+            (
+                torch.cuda.Event(enable_timing=True),
+                torch.cuda.Event(enable_timing=True),
+            )
+            for _ in range(iters)
+        ]
+
+    def get_event_pairs_min_timing(
+        self: Self, event_pairs: List[Tuple[torch.cuda.Event, torch.cuda.Event]]
+    ) -> float:
+        """Get the minimum timing, in milliseconds, for a group of CUDA event pairs."""
+        return min(
+            [
+                start_event.elapsed_time(end_event)
+                for start_event, end_event in event_pairs
+            ]
+        )
+    
+    @cached_property
+    def gpu_t_per_clock_cycle(self: Self) -> float:
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # I've found that 1000000 clock cycles is long enough to average out
+        # most of the uncertainty from the measurement, without being so long
+        # that we're leaving compile time on the table
+        num_clock_cycles = 1000000
+        torch.cuda._sleep(num_clock_cycles)
+        end_event.record()
+        torch.cuda.synchronize()
+        return start_event.elapsed_time(end_event) / num_clock_cycles
+
+    @time_and_count
+    def benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], Any],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration: int = 25,
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using a custom benchmarking implementation.
+
+        Arguments:
+        - _callable: The callable to benchmark.
+
+        Keyword Arguments:
+        - estimation_iters: Optionally, the number of iterations to run `_callable`
+        during runtime estimation.
+        - memory_warmup_iters: Optionally, the number of iterations to flush the L2
+        cache before starting benchmarking.
+        - benchmark_iters: Optionally, the number of iterations to run `_callable`
+        during the benchmarking.
+        - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
+        in milliseconds. An estimated duration is calculated based on the values
+        of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
+        runtime of `_callable` and various other factors, and we then shrink
+        `benchmark_iters` to fit in the alloted maximum duration.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The minimum runtime of `_callable`, in milliseconds.
+        """
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # warmup `_callable` (and catches any failures in the process)
+        _callable()
+        torch.cuda.synchronize()
+
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+
+        # estimate the runtime of `_callable`
+        event_pairs = self.get_event_pairs(estimation_iters)
+        queue_start_t = time.perf_counter()
+        for start_event, end_event in event_pairs:
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        queue_end_t = time.perf_counter()
+        # a measure of the CPU time it takes to send a single iteration of
+        # `_callable` to the GPU event queue, in milliseconds
+        queue_t_per_iter = (
+            (queue_end_t - queue_start_t) * MILLISECONDS_PER_SECOND
+        ) / estimation_iters
+        torch.cuda.synchronize()
+        estimated_timing = self.get_event_pairs_min_timing(event_pairs)
+
+        # adjust `benchmark_iters` to fit in the maximum benchmarking duration
+        benchmark_iters = max(
+            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
+        )
+
+        # put the GPU to sleep to start packing the event queue
+        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+
+        # do the memory warmup
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark `_callable`
+        event_pairs = self.get_event_pairs(benchmark_iters)
+        for start_event, end_event in event_pairs:
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        torch.cuda.synchronize()
+        benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # return the minimum of `estimated_timing` and `benchmarked_timing`,
+        # we just want the minimum timing overall so we might as well check both
+        return min(estimated_timing, benchmarked_timing)
+
+
+class GroupedInductorBenchmarker(InductorBenchmarker):
+    def get_interleaved_event_pairs(
+        self: Self, num_callables: int, iters: int
+    ) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
+        """Get `iters` interleaved `num_callables` pairs of CUDA events."""
+        return [self.get_event_pairs(num_callables) for _ in range(iters)]
+
+    def get_interleaved_event_pairs_min_timing(
+        self: Self,
+        interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
+    ) -> List[float]:
+        """Get the interleaved minimum timings, in milliseconds, for an interleaved
+        grouping of CUDA event pairs.
+        """
+        return [
+            self.get_event_pairs_min_timing(list(event_pairs))
+            for event_pairs in zip(*interleaved_event_pairs)
+        ]
+
+    @time_and_count
+    def benchmark_many_gpu(
+        self: Self,
+        callables: List[Callable[[], Any]],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration: int = 25,
+        ranking_key: Optional[str] = None,
+        pruning_key: Optional[str] = None,
+        pruning_factor: float = 1.1,
+        pruning_limit: int = 5,
+        **kwargs: Any,
+    ) -> List[float]:
+        """Benchmark many GPU callables using a custom benchmarking implementation.
+
+        Arguments:
+        - callables: The callables to benchmark.
+
+        Keyword Arguments:
+        - estimation_iters: The number of iterations to run `_callable` during
+        runtime estimation.
+        - memory_warmup_iters: The number of iterations to flush the L2 cache
+        before benchmarking.
+        - benchmark_iters: The number of iterations to run `_callable` during
+        benchmarking.
+        - max_benchmark_duration: The maximum duration of the benchmarking per
+        callable, in milliseconds. An estimated duration is calculated based on
+        the values of `memory_warmup_iters` and `benchmark_iters`, along with the
+        estimated runtime of `_callable` and various other factors, and we then
+        shrink `benchmark_iters` to fit in the alloted maximum duration.
+        - ranking_key: Optional string key that if set enables ranking. Ranking
+        is an early termination of the benchmarking process, returning results of
+        the estimation loop instead of processing a full benchmarking cycle. The
+        ranking key is set as a string, instead of a boolean, to ensure lazy benchmarks
+        are properly grouped if ranking is enabled.
+        - pruning_key: Similar to `ranking_key` an optional string key that enables
+        pruning. Pruning eliminates slow callables after the stimation loop, and only
+        a subset of the fastest callables are fully benchmarked.
+        - pruning_factor: Cutoff for pruning callables. The runtime of the fastest
+        callable is multiplied by `pruning_factor` and only callables faster than this
+        new target time are allowed to pass through to the full benchmarking cycle.
+        - pruning_limit: Maximum number of callables that will be fully benchmarked
+        when pruning is enabled. For example, if `pruning_limit` is 1 only the fastest
+        callable will be fully benchmarked.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The minimum runtime of each callable in `callables`, in milliseconds.
+        """
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # warmup each callable in `callables` (and catches any failures in the process)
+        for _callable in callables:
+            _callable()
+        torch.cuda.synchronize()
+
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+
+        # estimate the runtime of `_callable`
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
+        queue_start_t = time.perf_counter()
+        for event_pairs in interleaved_event_pairs:
+            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+        queue_end_t = time.perf_counter()
+        # a measure of the CPU time it takes to send a single set of iterations
+        # of `callables` to the GPU event queue, in milliseconds
+        queue_t_per_iter = (
+            (queue_end_t - queue_start_t) * MILLISECONDS_PER_SECOND
+        ) / estimation_iters
+        torch.cuda.synchronize()
+        estimated_timings = self.get_interleaved_event_pairs_min_timing(
+            interleaved_event_pairs
+        )
+
+        if ranking_key is not None:
+            del buffer
+            return estimated_timings
+
+        callable_to_timing = dict(zip(callables, estimated_timings))
+
+        if pruning_key is not None:
+            target_timing = min(estimated_timings) * pruning_factor
+            callables_to_benchmark = []
+            for _callable, timing_ms in sorted(
+                callable_to_timing.items(), key=lambda x: x[1]
+            ):
+                if timing_ms <= target_timing:
+                    callables_to_benchmark.append(_callable)
+                if len(callables_to_benchmark) == pruning_limit:
+                    break
+            # adjust the queue time calculation based on the number of callables we
+            # have pruned away; it is not guaranteed that all callables have an equivalent
+            # queue time, but we can assume this anyways since the value does not need to
+            # be exact and a close estimate is good enough for our use case
+            queue_t_per_iter = queue_t_per_iter * (len(callables_to_benchmark) / len(callables))
+            # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
+            # we're alloted `max_benchmark_duration` per-callable, and since we've
+            # pruned the callables we can assume the maximum duration of any callable
+            # is equivalent to `target_timing`
+            benchmark_iters = max(
+                min(benchmark_iters, int(max_benchmark_duration // target_timing)),
+                1,
+            )
+        else:
+            callables_to_benchmark = callables
+            # in the case that we haven't pruned the callables, we can take the average
+            # of the estimated timings to determine the appropriate number of iterations
+            benchmark_iters = max(
+                min(
+                    benchmark_iters,
+                    int(max_benchmark_duration // mean(estimated_timings))
+                ),
+                1,
+            )
+
+        # put the GPU to sleep to start packing the event queue
+        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+
+        # do the memory warmup
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark `_callable`
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), benchmark_iters
+        )
+        for event_pairs in interleaved_event_pairs:
+            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+        torch.cuda.synchronize()
+        benchmarked_timings = self.get_interleaved_event_pairs_min_timing(
+            interleaved_event_pairs
+        )
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # return the minimum of estimated_timing and benchmarked_timing, since
+        # we just want the minimum timing overall we might check both
+        return [
+            min(estimated_timing, benchmarked_timing)
+            for estimated_timing, benchmarked_timing in zip(
+                estimated_timings, benchmarked_timings
+            )
+        ]
+
+
+class LazyInductorBenchmarker(GroupedInductorBenchmarker):
+    def __init__(self: Self) -> None:
+        self.memory_cache: Dict[str, float] = {}
+        self.kwargs_hash_to_futures_gpu: Dict[
+            str, List[Tuple[Callable[[], Any], str]]
+        ] = {}
+
+    @time_and_count
+    def lazy_benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> LazyBenchmark:
+        # we should try the callable before queueing it for benchmarking, in
+        # case it throws an exception. we could catch and handle any exception
+        # later on, but some codepaths expect and handle certain exceptions
+        _callable()
+        torch.cuda.synchronize()
+
+        # we want to group benchmarks based on the kwargs hash, this handles
+        # grouping benchmarks by ranking keys and pruning keys, and also ensures
+        # that we only benchmark callables that should run under the same conditions
+        # with respect to warmup, benchmarking, etc.
+        kwargs_hash = str(hash(tuple(sorted(kwargs.items()))))
+        # we've seen that just hash(_callable) and the kwargs_hash are not enough to
+        # differentiate callables; if _callable is something like a lambda, which then
+        # goes out of scope and gets garbage collected, its memory address may be later
+        # reused for a different _callable. if this is the case, the latter _callable would
+        # incorrectly exist in the memory cache, which could lead to memory leaks if we
+        # have a lazy benchmark grouping of one, because we would never remove _callable
+        # from the lazy benchmark queue and as such any memory referenced by _callable
+        # would remain allocated
+        key = str(hash(_callable) + randint(-(2**100), 2**100)) + kwargs_hash
+        self.kwargs_hash_to_futures_gpu.setdefault(kwargs_hash, []).append(
+            (_callable, key)
+        )
+
+        def benchmark() -> float:
+            # all but the first benchmark in a grouping of lazy benchmarks
+            # should be cached in memory, so we should return that cached timing
+            if key in self.memory_cache:
+                return self.memory_cache[key]
+
+            futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
+            callables, keys = zip(*futures_gpu)
+            callables, keys = list(callables), list(keys)
+
+            try:
+                timings = self.benchmark_many_gpu(callables, **kwargs)
+            except Exception as e:  # noqa: TRY302
+                raise e
+            else:
+                self.memory_cache.update(zip(keys, timings))
+                return self.memory_cache[key]
+            finally:
+                # we have seen cases where not explicitly deleting the GPU futures
+                # can prevent the memory allocated for the callables from being
+                # properly and timely cleaned up, which can have fatal interactions
+                # in cudagraphs mode
+                del futures_gpu
+
+        return LazyBenchmark(benchmark)
+
+
+benchmarker = (
+    LazyInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+)
