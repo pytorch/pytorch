@@ -229,3 +229,19 @@ class EnumVariable(VariableTracker):
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__eq__":
+            assert len(args) == 1
+            if not isinstance(args[0], EnumVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+
+            return ConstantVariable.create(self.value == args[0].value)
+
+        unimplemented(f"const method call {typestr(self.value)}.{name}")
