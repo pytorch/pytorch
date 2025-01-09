@@ -573,6 +573,7 @@ Vectorized<c10::Half> inline fmadd(
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 #else
   return a * b + c;
+#endif
 }
 
 template <>
