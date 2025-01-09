@@ -336,8 +336,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
-  Py_DECREF(self->context);
-  self->context = nullptr;
+  Py_CLEAR(self->context);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
