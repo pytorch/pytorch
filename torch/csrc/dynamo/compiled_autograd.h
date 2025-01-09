@@ -1033,20 +1033,7 @@ struct IValuePacker<VariableInfo> {
     const auto& tuple_elements = tuple->elements();
     const auto elements = tuple_elements.asArrayRef();
     TORCH_INTERNAL_ASSERT(elements.size() == 6);
-    // auto tuple = t.to<std::tuple<
-    //     at::Layout,
-    //     at::Device,
-    //     at::ScalarType,
-    //     std::vector<at::SymInt>,
-    //     bool,
-    //     bool>>();
     VariableInfo v;
-    // v.layout = std::get<0>(tuple);
-    // v.device = std::get<1>(tuple);
-    // v.scalar_type = std::get<2>(tuple);
-    // v.size = std::get<3>(tuple);
-    // v.requires_grad = std::get<4>(tuple);
-    // v.is_empty = std::get<5>(tuple);
     v.layout = elements[0].toLayout();
     v.device = elements[1].toDevice();
     v.scalar_type = elements[2].toScalarType();
