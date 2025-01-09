@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import itertools
+import sys
 import unittest
 from collections import OrderedDict
 
@@ -601,6 +602,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(i, 3)
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
+    @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
     @unittest.expectedFailure
     def test_cleanup_throw(self):
         def nested_generator():
