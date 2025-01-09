@@ -394,7 +394,6 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
@@ -409,6 +408,14 @@ bool Context::allowBF16ReductionCuBLAS() const {
 
 void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
+}
+
+bool Context::useFP16AccumulationCuBLAS() const {
+  return use_fp16_accumulation_cublas;
+}
+
+void Context::setUseFP16AccumulationCuBLAS(bool b) {
+  use_fp16_accumulation_cublas = b;
 }
 
 
