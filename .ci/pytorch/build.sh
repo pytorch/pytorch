@@ -100,7 +100,13 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
-  source /opt/riscv-cross-env/bin/activate
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
 
   export CMAKE_CROSSCOMPILING=TRUE
   export CMAKE_SYSTEM_NAME=Linux
@@ -119,7 +125,7 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   git remote add upstream https://github.com/shibatch/sleef || true
   git fetch upstream
   git checkout master
-  git pull upstream $(git rev-parse --abbrev-ref HEAD)
+  git pull upstream "$(git rev-parse --abbrev-ref HEAD)"
   cd ../..
 fi
 
