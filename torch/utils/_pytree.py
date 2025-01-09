@@ -50,7 +50,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, Self
+from typing_extensions import deprecated, Self, TypeAlias
 
 
 __all__ = [
@@ -61,6 +61,8 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "ToDumpableContextFunc",
+    "FromDumpableContextFunc",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -115,17 +117,21 @@ class EnumEncoder(json.JSONEncoder):
         return super().default(obj)  # type: ignore[no-any-return]
 
 
-Context = Any
-PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
-UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
-DumpableContext = Any  # Any json dumpable text
-ToDumpableContextFn = Callable[[Context], DumpableContext]
-FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", List[str]], str]
-MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
-KeyPath = Tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Context]]
+Context: TypeAlias = Any
+PyTree: TypeAlias = Any
+FlattenFunc: TypeAlias = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc: TypeAlias = Callable[[Iterable[Any], Context], PyTree]
+DumpableContext: TypeAlias = Any  # Any json dumpable text
+ToDumpableContextFunc: TypeAlias = Callable[[Context], DumpableContext]
+FromDumpableContextFunc: TypeAlias = Callable[[DumpableContext], Context]
+ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
+FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
+ToStrFunc: TypeAlias = Callable[["TreeSpec", List[str]], str]
+MaybeFromStrFunc: TypeAlias = Callable[[str], Optional[Tuple[Any, Context, str]]]
+KeyPath: TypeAlias = Tuple[KeyEntry, ...]
+FlattenWithKeysFunc: TypeAlias = Callable[
+    [PyTree], Tuple[List[Tuple[KeyEntry, Any]], Context]
+]
 
 
 # A NodeDef holds two callables:
@@ -158,8 +164,8 @@ SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 class _SerializeNodeDef(NamedTuple):
     typ: Type[Any]
     serialized_type_name: str
-    to_dumpable_context: Optional[ToDumpableContextFn]
-    from_dumpable_context: Optional[FromDumpableContextFn]
+    to_dumpable_context: Optional[ToDumpableContextFunc]
+    from_dumpable_context: Optional[FromDumpableContextFunc]
 
 
 SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
@@ -197,8 +203,8 @@ def register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
@@ -306,8 +312,8 @@ def _register_pytree_node(
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node for the Python pytree only.
@@ -359,8 +365,8 @@ def _private_register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """This is an internal function that is used to register a pytree node type
