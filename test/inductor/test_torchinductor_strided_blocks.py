@@ -15,6 +15,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -168,13 +169,18 @@ class CommonTemplate:
                 False,
             ),  # Non-power-of-2 inner dims: non-block ptr
             ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar: non-block ptr
-            (
-                (2, 4 * max_block),
-                (2, 3 * max_block),
-                None,
-                None,
-                True,
-            ),  # Inner dim multiple of max_block
+            subtest(
+                arg_values=(
+                    (2, 4 * max_block),
+                    (2, 3 * max_block),
+                    None,
+                    None,
+                    True,
+                ),  # Inner dim multiple of max_block
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
         ],
     )
     def test_pointwise(
@@ -371,7 +377,13 @@ class CommonTemplate:
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
             ((15, 15), None, 1),  # Non-power of 2
-            ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
+            # Multiple of max block. Uses loops.
+            subtest(
+                arg_values=((3 * max_block, 2), 3, 2),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
             (
                 (2, 3 * max_block),
                 2,
@@ -531,18 +543,24 @@ class CommonTemplate:
             ),  # Contiguous 2D tensor. Does not require tiling.
             ((5, 9), (3, 7), 3, 2),  # 2D tensor with 1 discontiguous dim.
             ((11, 13, 7), (9, 13, 5), 3, 2),  # 3D tensor with 1 discontiguous dim (2).
-            (
-                (3, 11, 13, 7),
-                (2, 9, 13, 7),
-                3,
-                2,
+            subtest(
+                arg_values=(
+                    (3, 11, 13, 7),
+                    (2, 9, 13, 7),
+                    3,
+                    2,
+                ),
+                decorators=test_torchinductor.skip_if_triton_cpu(
+                    "Triton CPU: slow test"
+                ),
             ),  # 4D tensor with 1 discontiguous dim (1).
             (
                 (3, 11, 13, 7),
                 (2, 11, 9, 7),
                 3,
                 2,
-            ),  # 4D tensor with 1 discontiguous dim (2).
+            ),
+            # 4D tensor with 1 discontiguous dim (2).
             (
                 (5, 5, 5, 5, 5),
                 (3, 3, 5, 3, 5),
@@ -694,6 +712,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
     def test_welford_non_block_pointer(
         self,
     ):
@@ -741,6 +760,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
         Test a 2D reduction in multi kernel mode.
