@@ -534,7 +534,13 @@ def _root_pre_forward(
         if handle:
             should_cast_buffers_to_full_prec = handle._force_full_precision
         else:
-            should_cast_buffers_to_full_prec = True
+            # If the root has no handle (no managed parameters), then we fall
+            # back to checking if any child wants to force full precision as a
+            # workaround
+            handles = traversal_utils._get_fsdp_handles(module)
+            should_cast_buffers_to_full_prec = any(
+                handle._force_full_precision for handle in handles
+            )
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(

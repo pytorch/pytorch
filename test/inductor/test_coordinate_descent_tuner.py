@@ -109,8 +109,8 @@ class TestCoordinateDescentTuner(TestCase):
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("RBLOCK", max_block["R"]))
-        self.assertTrue(tuner.value_too_large("RBLOCK", max_block["R"] * 2))
+        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
+        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
 
 if __name__ == "__main__":

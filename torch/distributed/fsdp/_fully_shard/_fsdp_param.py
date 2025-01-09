@@ -71,6 +71,7 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
 @torch.library.impl(lib, "copy_", "Meta")
 @torch.library.impl(lib, "copy_", "CUDA")
+@torch.library.impl(lib, "copy_", "XPU")
 @torch.library.impl(lib, "copy_", "CPU")
 def copy_(tensor, data):
     tensor.copy_(data)
@@ -415,6 +416,11 @@ class FSDPParam:
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
+        # Clamp `reduce_dtype` to `None` if no casting is required: since
+        # gradients are computed in `param_dtype`, if `reduce_dtype` matches,
+        # then we do not need extra casting
+        if reduce_dtype == param_dtype:
+            reduce_dtype = None
         # Clamp `param_dtype` to `None` if no casting is required
         if param_dtype == self.orig_dtype:
             param_dtype = None
@@ -702,13 +708,15 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh)
+                    ) = sharded_local_tensor.fsdp_pre_all_gather(
+                        self.shard_mesh_from_root
+                    )
                 else:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
-                        self.shard_mesh,
+                        self.shard_mesh_from_root,
                         self._orig_size,
                         self._contiguous_orig_stride,
                         self._module_info.module,
@@ -795,6 +803,19 @@ class FSDPParam:
             assert mesh.mesh_dim_names is not None
             return mesh[mesh.mesh_dim_names[-1]]
         raise ValueError(f"Invalid mesh: {mesh}")
+
+    @property
+    def shard_mesh_from_root(self):
+        mesh = self.mesh_info.mesh
+
+        if mesh.ndim == 1:
+            return mesh
+        else:
+            assert mesh.mesh_dim_names is not None
+            shard_dim_name = mesh.mesh_dim_names[-1]
+
+            root_mesh = _mesh_resources.get_root_mesh(mesh)
+            return root_mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:

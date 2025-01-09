@@ -1,6 +1,6 @@
 boto3==1.35.42
 hypothesis==6.56.4
-expecttest==0.2.1
+expecttest==0.3.0
 fbscribelogger==0.1.7
 librosa>=0.6.2
 mpmath==1.3.0

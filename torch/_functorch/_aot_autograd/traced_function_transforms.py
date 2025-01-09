@@ -38,9 +38,6 @@ from torch.nn.utils import stateless
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .functional_utils import (
-    _check_if_mutation_can_be_in_graph,
-    are_all_mutations_hidden_from_autograd,
-    are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -482,30 +479,9 @@ def create_functionalized_fn(
                 ):
                     assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ), "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
-                    if has_data_mutation(f_inpt):
-                        can_be_in_graph = _check_if_mutation_can_be_in_graph(
-                            keep_input_mutations=True,
-                            mutates_data=True,
-                            mutates_metadata=False,
-                            mutations_hidden_from_autograd=are_all_mutations_hidden_from_autograd(
-                                f_inpt
-                            ),
-                            mutations_under_no_grad_or_inference_mode=are_all_mutations_under_no_grad_or_inference_mode(
-                                f_inpt
-                            ),
-                            mutates_storage_metadata=False,
-                            mutation_inductor_storage_resize=was_inductor_storage_resized(
-                                f_inpt
-                            ),
-                            requires_grad=f_inpt.requires_grad,
-                        )
-                        assert (
-                            can_be_in_graph
-                        ), "a backward input that had data mutated in an autograd-aware way. This is not supported"
-                        # Perform the input mutation
-                        with torch.fx.traceback.preserve_node_meta():
-                            before.copy_(after)
+                    ) and not has_data_mutation(
+                        f_inpt
+                    ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
             if aot_config.keep_inference_input_mutations:
                 # Note: This is a bit annoying. There's a layering issue here, where:
@@ -645,7 +621,7 @@ def create_functionalized_fn(
                 flat_outs = [from_fun(o) for o in flat_outs]
                 num_outs = len(meta.output_info)
 
-                for i, outp in enumerate(flat_outs[:num_outs]):
+                for i in range(num_outs):
                     info = meta.output_info[i]
                     if info.output_type != OutputType.is_input:
                         continue
