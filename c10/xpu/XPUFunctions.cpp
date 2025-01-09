@@ -28,51 +28,60 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-void identifyDeviceType(
-    std::vector<sycl::device>& device_list,
-    std::vector<bool>& is_igpu,
-    std::vector<bool>& is_dgpu) {
-  for (const auto i : c10::irange(device_list.size())) {
-    const auto& device = device_list[i];
-    if (device.is_gpu()) {
-      // Generally, iGPUs and the host share a unified memory subsystem.
-      if (device.get_info<sycl::info::device::host_unified_memory>()) {
-        is_igpu[i] = true;
-      } else {
-        is_dgpu[i] = true;
-      }
-    }
-  }
-}
-
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   auto platform_list = sycl::platform::get_platforms();
-  // Enumerated GPU devices from the specific platform.
-  for (const auto& platform : platform_list) {
-    if (platform.get_backend() != sycl::backend::ext_oneapi_level_zero) {
-      continue;
-    }
-    auto device_list = platform.get_devices();
-    auto is_igpu = std::vector<bool>(device_list.size(), false);
-    auto is_dgpu = std::vector<bool>(device_list.size(), false);
-    identifyDeviceType(device_list, is_igpu, is_dgpu);
-    // First, enumerate dGPU devices.
-    for (const auto i : c10::irange(device_list.size())) {
-      if (is_dgpu[i]) {
-        devices.push_back(std::make_unique<sycl::device>(device_list[i]));
+  auto is_igpu = [](const sycl::device& device) {
+    // Generally, iGPUs share a unified memory subsystem with the host.
+    return device.get_info<sycl::info::device::host_unified_memory>();
+  };
+  // Check if a platform contains at least one GPU (either iGPU or dGPU).
+  auto has_gpu = [&is_igpu](sycl::platform& platform, bool check_igpu) {
+    // Only consider platforms using the Level Zero backend.
+    return platform.get_backend() == sycl::backend::ext_oneapi_level_zero &&
+        std::any_of(
+               platform.get_devices().begin(),
+               platform.get_devices().end(),
+               [&is_igpu, check_igpu](const sycl::device& device) {
+                 return device.is_gpu() &&
+                     (check_igpu ? is_igpu(device) : !is_igpu(device));
+               });
+  };
+
+  // Case 1: Platform with dGPU found. Most platforms with dGPU only have dGPU
+  // or a combination of dGPU and iGPU.
+  auto has_dgpu = [&has_gpu](sycl::platform& platform) {
+    return has_gpu(platform, /*check_igpu=*/false);
+  };
+  // Find the first platform that contains at least one dGPU.
+  auto platform_with_dgpu =
+      std::find_if(platform_list.begin(), platform_list.end(), has_dgpu);
+  // Only add all dGPUs to the device lists.
+  if C10_LIKELY (platform_with_dgpu != platform_list.end()) {
+    for (const auto& device : platform_with_dgpu->get_devices()) {
+      if (device.is_gpu() && !is_igpu(device)) {
+        devices.push_back(std::make_unique<sycl::device>(device));
       }
     }
-    // Second, enumerate iGPU devices if no dGPU is found.
-    if (devices.empty()) {
-      for (const auto i : c10::irange(device_list.size())) {
-        if (is_igpu[i]) {
-          devices.push_back(std::make_unique<sycl::device>(device_list[i]));
-        }
-      }
-    }
-    // Only one ext_oneapi_level_zero platform is supported for now.
-    break;
+    return; // Exit early since we found a platform with dGPU.
   }
+
+  // Case 2: No dGPU found, but a platform with iGPU is available.
+  auto has_igpu = [&has_gpu](sycl::platform& platform) {
+    return has_gpu(platform, /*check_igpu=*/true);
+  };
+  // Find the first platform that contains at least one iGPU.
+  auto platform_with_igpu =
+      std::find_if(platform_list.begin(), platform_list.end(), has_igpu);
+  // Add all iGPUs to the device lists.
+  if C10_LIKELY (platform_with_igpu != platform_list.end()) {
+    for (const auto& device : platform_with_igpu->get_devices()) {
+      if (device.is_gpu()) { // If the device is a GPU, it must be a iGPU.
+        devices.push_back(std::make_unique<sycl::device>(device));
+      }
+    }
+  }
+
+  // Case 3: No GPUs found (neither dGPU nor iGPU).
 }
 
 inline void initGlobalDevicePoolState() {
