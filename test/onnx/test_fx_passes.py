@@ -133,12 +133,12 @@ class TestModularizePass(common_utils.TestCase):
 
             def forward(self, x, y):
                 result = self.used_gelu(x + y)
-                unused_relu_result = self.unused_relu(x)
+                unused_relu_result = self.unused_relu(x)  # noqa: F841
                 return result
 
         if is_exported_program:
             model = torch.export.export(
-                TestModule(), args=(torch.randn(3), torch.randn(3))
+                TestModule(), args=(torch.randn(3), torch.randn(3)), strict=True
             )
         else:
             model = TestModule()
@@ -185,7 +185,7 @@ class TestModularizePass(common_utils.TestCase):
 
         if is_exported_program:
             model = torch.export.export(
-                TestModule(), args=(torch.randn(3), torch.randn(3))
+                TestModule(), args=(torch.randn(3), torch.randn(3)), strict=True
             )
         else:
             model = TestModule()
@@ -239,7 +239,7 @@ class TestModularizePass(common_utils.TestCase):
 
         if is_exported_program:
             model = torch.export.export(
-                TestModule(), args=(torch.randn(3), torch.randn(3))
+                TestModule(), args=(torch.randn(3), torch.randn(3)), strict=True
             )
         else:
             model = TestModule()

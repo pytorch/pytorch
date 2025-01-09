@@ -586,7 +586,7 @@ def linear_backward_default(func, *args, **kwargs):
         dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
         # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
-        db = grad_output._values
+        db = grad_output._values.detach()
     return (ds, dw, db)
 
 
@@ -917,8 +917,6 @@ def chunk_default(func, *args, **kwargs):
 
     if operating_on_batch:
         chunks = new_kwargs["chunks"]
-        dim0_size = inp._size[0]
-        chunk_size = math.ceil(dim0_size / chunks)
 
         # get _offsets of the chunks
         lengths = inp._offsets.diff()
