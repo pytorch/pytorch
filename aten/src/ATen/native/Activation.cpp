@@ -573,7 +573,7 @@ Tensor math_mish_backward(
 }
 
 template <typename scalar_t>
-static void _rrelu_with_noise_train(
+inline void _rrelu_with_noise_train(
     Tensor& output,
     const Tensor& input,
     Tensor& noise,

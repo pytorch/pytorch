@@ -121,12 +121,6 @@ class DeviceInterface:
     def is_bf16_supported(including_emulation: bool = False):
         raise NotImplementedError
 
-    @classmethod
-    def is_dtype_supported(
-        cls, dtype: torch.dtype, including_emulation: bool = False
-    ) -> bool:
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
-
     @staticmethod
     def memory_allocated(device: _device_t = None) -> int:
         raise NotImplementedError
@@ -346,16 +340,8 @@ class CpuInterface(DeviceInterface):
 
 class MpsInterface(DeviceInterface):
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False) -> bool:
+    def is_bf16_supported(including_emulation: bool = False):
         return torch.backends.mps.is_macos_or_newer(14, 0)
-
-    @classmethod
-    def is_dtype_supported(
-        cls, dtype: torch.dtype, including_emulation: bool = False
-    ) -> bool:
-        if dtype == torch.float64:
-            return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
     def is_available() -> bool:
