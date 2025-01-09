@@ -28,6 +28,7 @@ from torch._export.utils import (
     get_param,
     is_buffer,
     is_param,
+    register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
@@ -4920,7 +4921,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             z: int = None
 
         # Override the registration with keep none fields
-        torch.export.register_dataclass(
+        register_dataclass_as_pytree_node(
             MyOtherDataClass,
             return_none_fields=True,
             serialized_type_name="test_pytree_regster_data_class.MyOtherDataClass",
@@ -6194,9 +6195,7 @@ def forward(self, b_a_buffer, x):
 
         dim0_x_f, dim0_x_p = torch.export.dims("dim0_x_f", "dim0_x_p")
         dynamic_shapes = {"x": [{0: dim0_x_f}, {0: dim0_x_p}]}
-        ep_dynamic = export(
-            mod, example_inputs, dynamic_shapes=dynamic_shapes
-        )
+        ep_dynamic = export(mod, example_inputs, dynamic_shapes=dynamic_shapes)
         for node in ep_dynamic.graph.nodes:
             if node.op == "placeholder":
                 for i, s in enumerate(node.meta["val"].shape):
