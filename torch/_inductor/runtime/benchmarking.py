@@ -255,7 +255,7 @@ class Benchmarker:
         # throw to be thrown when this function is called, not when the
         # lazy benchmark is finally evaluated
         _callable()
-        return LazyBenchmark(lambda: self.benchmark_cpu(*args, **kwargs))
+        return LazyBenchmark(lambda: self.benchmark_cpu(_callable, *args, **kwargs))
 
     @time_and_count
     def lazy_benchmark_gpu(self: Self, _callable: Callable[[], Any], *args: Any, **kwargs: Any) -> LazyBenchmark:
@@ -265,7 +265,7 @@ class Benchmarker:
         # lazy benchmark is finally evaluated
         _callable()
         torch.cuda.synchronize()
-        return LazyBenchmark(lambda: self.benchmark_gpu(*args, **kwargs))
+        return LazyBenchmark(lambda: self.benchmark_gpu(_callable, *args, **kwargs))
 
 
 class TritonBenchmarker(Benchmarker):
