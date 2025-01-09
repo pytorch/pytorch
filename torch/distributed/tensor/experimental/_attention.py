@@ -319,7 +319,6 @@ class _AllGatherRotater(_RingRotater):
             )
 
     def next_buffer(self) -> torch.Tensor:
-        size = dist.get_world_size(self._pg)
         rank = dist.get_rank(self._pg)
         idx = rank - self._idx
 

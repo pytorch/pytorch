@@ -3076,7 +3076,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3415,7 +3415,6 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3688,7 +3687,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
     enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
-    permute_order, sorted_stride = zip(*enumerated_stride)
+    permute_order, _sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
     repeat_xtensor = a.expand(urtensor_shape)
@@ -3799,7 +3798,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -6543,7 +6542,11 @@ def _recursive_build(
 
     # seq can be a list of tensors
     seq = obj
-    return torch.stack([_recursive_build(scalarType, item) for item in seq])
+    return (
+        torch.empty(0)
+        if not seq
+        else torch.stack([_recursive_build(scalarType, item) for item in seq])
+    )
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6608,8 +6611,10 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
     # TODO (or not): support names kwarg
     if isinstance(data, torch.Tensor):
         warnings.warn(
-            "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-            "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor)"
+            "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
+            "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor)",
+            UserWarning,
+            stacklevel=2,
         )
     type_inference = dtype is None
     new_tensor = _internal_new_from_data(
