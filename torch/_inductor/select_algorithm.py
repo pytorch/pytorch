@@ -2045,13 +2045,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 # if we lazily benchmarked any values, we need to finalize
                 # those results by triggering the benchmark. this can be
                 # done by converting the lazy benchmark to a float
-                timings.update(
-                    {choice: float(timing) for choice, timing in timings.items()}
-                )
-
-            # mypy gets confused about types (since it does not realize that
-            # all lazy benchmarks will get finalized), so let's give it a hint
-            timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = timings
+                # mypy gets confused about types (since it does not realize that
+                # all lazy benchmarks will get finalized), so let's give it a hint
+                timings: Dict[
+                    Union[ExternKernelCaller, TritonTemplateCaller], float
+                ] = {
+                    choice: float(timing)
+                    for choice, timing in timings.items()
+                }
 
             return timings
 
