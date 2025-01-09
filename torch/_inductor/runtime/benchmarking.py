@@ -1,3 +1,4 @@
+import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
@@ -306,6 +307,10 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        do_bench_params = inspect.signature(self.triton_do_bench).parameters
+        for kwarg in list(kwargs.keys()):
+            if kwarg not in do_bench_params:
+                del kwargs[kwarg]
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:
