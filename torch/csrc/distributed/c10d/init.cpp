@@ -3027,6 +3027,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -3197,6 +3201,12 @@ Example::
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
+  py::enum_<::c10d::ErrorType>(module, "ErrorType")
+      .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
+      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
+      .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
+      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")

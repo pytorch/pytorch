@@ -126,7 +126,9 @@ static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* EXCEPTION_DUMP = "exception_dump";
+constexpr const char* kStoreDumpKey = "exception_dump";
+
+constexpr const char* kStoreErrorSignalKey = "remote_error";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -758,6 +760,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
+  ErrorType getError() override;
+
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
   void registerMemPool(c10::cuda::MemPool* pool);
@@ -969,6 +973,19 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Broadcast flight-recorder dump signal
   void broadcastDumpSignal();
 
+  // A helper function to broadcast a signal (key) from a src rank to all other
+  // ranks using the specified store.
+  void broadcastSignal(
+      c10::intrusive_ptr<Store>& store,
+      const std::string& signal,
+      int srcRank);
+
+  // A helper function to get the src rank of a signal from the Store. This is
+  // nonblocking function returning -1 if the signal is not available yet.
+  int getSignalSrcRank(
+      c10::intrusive_ptr<Store>& store,
+      const std::string& signal);
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -992,6 +1009,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
+
+  void checkAndSetRemoteError();
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -1181,6 +1200,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
+
+  ErrorType error_ = ErrorType::SUCCESS;
+
+  std::mutex errorMutex_;
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
