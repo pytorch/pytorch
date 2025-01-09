@@ -26,6 +26,7 @@
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
+#include <aotriton/config.h>
 #include <aotriton/flash.h>
 #define USE_AOTRITON 1
 #endif
@@ -108,8 +109,15 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
-  // All head_dim sizes must be equal and less than 256
+#if USE_AOTRITON && AOTRITON_VERSION_MAJOR == 0 && AOTRITON_VERSION_MINOR == 8 && AOTRITON_VERSION_PATCH >= 1
+  // Head dim 512 is only support in AOTriton >= 0.8.1 and < 0.9
+  // AOTriton 0.9 will support > 256 head dim with another set of kernels,
+  // exposed as efficient attention.
+  const auto max_size = c10::SymInt(512);
+#else
+  // Otherwise, all head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
@@ -136,7 +144,11 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 // See check_head_dim_size_flash above for the purpose of caller_is_meff
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
+#if USE_AOTRITON && AOTRITON_VERSION_MAJOR == 0 && AOTRITON_VERSION_MINOR == 8 && AOTRITON_VERSION_PATCH >= 1
+  const auto max_size = c10::SymInt(512);
+#else
   const auto max_size = c10::SymInt(256);
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);

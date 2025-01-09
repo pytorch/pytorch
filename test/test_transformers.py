@@ -1667,7 +1667,7 @@ class TestSDPAFailureModes(NNTestCase):
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else SdpaShape(2, 2, 3, 257)
             if TEST_WITH_ROCM:  # On ROCM, FA and EA share the backend GPU kernels
-                size = SdpaShape(2, 2, 3, 257)
+                size = SdpaShape(2, 2, 3, 513)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -3082,7 +3082,10 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize(
         "head_dim",
-        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64],
+        [8, 16, 96, 128, 512] if TEST_WITH_ROCM else (
+            [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80
+            else [8, 16, 32, 64]
+        ),
     )
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
@@ -3192,7 +3195,10 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize(
         "head_dim",
-        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64],
+        [8, 16, 96, 128, 512] if TEST_WITH_ROCM else (
+            [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80
+            else [8, 16, 32, 64]
+        ),
     )
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.0, 0.22])
