@@ -55,7 +55,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // Find the first platform that contains at least one dGPU.
   auto platform_with_dgpu =
       std::find_if(platform_list.begin(), platform_list.end(), has_dgpu);
-  // Only add all dGPUs to the device lists.
+  // Only add all dGPUs to the device list.
   if (C10_LIKELY(platform_with_dgpu != platform_list.end())) {
     for (const auto& device : platform_with_dgpu->get_devices()) {
       if (device.is_gpu() && !is_igpu(device)) {
@@ -72,7 +72,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // Find the first platform that contains at least one iGPU.
   auto platform_with_igpu =
       std::find_if(platform_list.begin(), platform_list.end(), has_igpu);
-  // Add all iGPUs to the device lists.
+  // Add all iGPUs to the device list.
   if (C10_LIKELY(platform_with_igpu != platform_list.end())) {
     for (const auto& device : platform_with_igpu->get_devices()) {
       if (device.is_gpu()) { // If the device is a GPU, it must be a iGPU.
