@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -118,6 +119,7 @@ class TORCH_API Context {
 
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -238,6 +240,9 @@ class TORCH_API Context {
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
+  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  void setROCmFAPreferredBackend(at::ROCmFABackend);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Operations in PyTorch that normally act nondeterministically, but have an
@@ -347,6 +352,7 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
@@ -426,6 +432,10 @@ class TORCH_API Context {
 #endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
+  at::ROCmFABackend rocm_fa_preferred_backend =
+      c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
+      ? at::ROCmFABackend::Ck
+      : at::ROCmFABackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -536,6 +546,10 @@ inline bool hasOpenMP() {
 
 inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
 }
 
 inline bool hasLAPACK() {

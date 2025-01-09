@@ -26,6 +26,10 @@ class TestRun:
         str
     ]  # If non-empy, only these tests should be run in this test run
 
+    # NB: Also the class is called TestRun, it's not a test class, so having this field set
+    # will allow pytest to ignore this accordingly
+    __test__ = False
+
     def __init__(
         self,
         name: str,
