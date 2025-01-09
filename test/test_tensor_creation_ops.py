@@ -26,9 +26,6 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     set_default_tensor_type,
     TEST_SCIPY,
-    IS_MACOS,
-    IS_PPC,
-    IS_JETSON,
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -1049,50 +1046,52 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
-        see https://github.com/pytorch/pytorch/issues/38752")
-    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.uint64,
+        torch.int64,
+    )
     def test_float_to_int_conversion_finite(self, device, dtype):
-        min = torch.finfo(torch.float).min
-        max = torch.finfo(torch.float).max
-
         # Note: CUDA max float -> integer conversion is divergent on some dtypes
-        vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
+        vals = (-2, -1.5, -0.5, 0, 0.5, 1.5, 2)
         refs = None
-        if self.device_type == 'cuda':
-            if torch.version.hip:
-                # HIP min float -> int64 conversion is divergent
-                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
-            else:
-                vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
-        elif dtype == torch.uint8:
-            # Note: CPU max float -> uint8 conversion is divergent
-            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
-            # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
-            #       see https://github.com/pytorch/pytorch/issues/97794
-            refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
-            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+        if dtype == torch.uint8:
+            refs = (0, 0, 0, 0, 0, 1, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
+        max = torch.finfo(torch.float).max
+        min = torch.finfo(torch.float).min
+        if dtype != torch.bool:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        self._float_to_int_conversion_helper((min, max), device, dtype, refs)
 
-    # Note: CUDA will fail this test on most dtypes, often dramatically.
-    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
-    # nondeterministically fails, warning "invalid value encountered in cast"
-    @onlyCPU
-    @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.uint64,
+        torch.int64,
+    )
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
-        vals = (float('-inf'), float('inf'), float('nan'))
-        refs = 0
+        vals = (float("-inf"), float("inf"), float("nan"))
         if dtype == torch.bool:
-            refs = True
-        elif dtype in (torch.int32, torch.int64):
-            refs = torch.iinfo(dtype).min
+            refs = (True, True, True)
+        elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
+        else:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
 
-        self._float_to_int_conversion_helper(vals, device, dtype, (refs, ) * 3)
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
