@@ -19,6 +19,15 @@ def slice_nd(input, start_idxs, end_idxs):
     # This is a generalization of torch.slice, which only supports slicing along one dimension
     assert len(start_idxs) == len(end_idxs)
 
+    # Check if input.shape and end_idx are identical. Skip slicing if so.
+    if all(
+        input.shape[dim_idx] == end_idx
+        for dim_idx, end_idx in enumerate(end_idxs)
+        if end_idx is not None
+    ):
+        return input
+
+    # Slice the tensor
     for dim_idx, (start_idx, end_idx) in enumerate(zip(start_idxs, end_idxs)):
         if start_idx is not None and end_idx is not None:
             if end_idx != input.shape[dim_idx]:
@@ -601,6 +610,7 @@ class OpDatabase:
             "slice": NoOp(),
             "unbind": NoOp(),
             "_to_copy": NoOp(),
+            "copy_": NoOp(),
         }
 
     def get_op(self, opname):

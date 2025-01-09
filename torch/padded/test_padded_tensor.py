@@ -72,7 +72,7 @@ class TestAttention(TestCase):
         def median(x):
             return sorted(x)[len(x) // 2]
 
-        def bench(fn, inputs, n_iter=1):
+        def bench(fn, inputs, n_iter=10):
             times = []
             outputs = None
 
@@ -86,13 +86,13 @@ class TestAttention(TestCase):
             outputs = pytree.tree_map(lambda x: x.clone(), outputs)
             return median(times), outputs
 
-        # Benchmark eager
+        # Run eager
         time_eager, outputs_eager = bench(fn, inputs)
         time_eager_padded, outputs_eager_padded = bench(fn, inputs_p)
 
         self.are_equal(outputs_eager, outputs_eager_padded)
 
-        # Benchmark compiled
+        # Run compiled
         fn_compiled = torch.compile(fn, mode="reduce-overhead")
 
         time_compiled, outputs_compiled = bench(fn_compiled, inputs)
@@ -267,7 +267,7 @@ class TestAttention(TestCase):
         x = torch.ones(batchsize, seqlen, dtype=torch.int32).to(device="cuda")
         freqs_cis = torch.randn(seqlen, 64, 2).to(device="cuda", dtype=self.dtype)
         mask = torch.ones([batchsize, 1, seqlen, 16], device="cuda")
-        input_pos = torch.ones([seqlen], dtype=torch.int32, device="cuda")
+        input_pos = torch.arange(0, seqlen, dtype=torch.int32, device="cuda")
 
         k_cache, v_cache = self.create_kv_cache()
         k_cache = k_cache.to(device="cuda", dtype=self.dtype)
