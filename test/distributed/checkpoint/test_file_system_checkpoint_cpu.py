@@ -15,13 +15,12 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.checkpoint import (
-    DefaultSavePlanner,
     FileSystemReader,
     FileSystemWriter,
     load_state_dict,
     save_state_dict,
 )
-from torch.distributed.checkpoint._extension import Rot13
+from torch.distributed.checkpoint._extension import Rot13Example
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -140,13 +139,12 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
             fs_writer = FileSystemWriter(
                 path=path,
                 thread_count=thread_count,
+                _extensions=[Rot13Example()],
             )
-            save_planner = DefaultSavePlanner(extensions=[Rot13()])
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
                 no_dist=True,
-                planner=save_planner,
             )
 
             state_dict_to_load_to = MyTestModule().state_dict()

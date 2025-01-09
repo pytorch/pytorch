@@ -213,7 +213,7 @@ struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
       T... extra_args) {
     auto tensor_ = check_and_reshape_input(tensor, batch_dim);
     auto res = Func(std::move(tensor_), std::forward<T>(extra_args)...);
-    return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
+    return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0, std::get<3>(res), 0);
   }
 };
 
@@ -279,8 +279,8 @@ threeOutputs linalg_lu_unpack_batch_rule(
     LU_bdim = 0;
   }
 
-  const auto res = at::lu_unpack(LU_, pivots_, unpack_data, unpack_pivots);
-  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+  auto res = at::lu_unpack(LU_, pivots_, unpack_data, unpack_pivots);
+  return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0);
 }
 
 oneOutput linalg_lu_solve_batch_rule(

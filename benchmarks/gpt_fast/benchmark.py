@@ -4,12 +4,8 @@ import dataclasses
 import json
 import os
 
-from generate import (
-    get_arch_name,
-    run_llama2_7b_bf16,
-    run_llama2_7b_int8,
-    run_mixtral_8x7b_int8,
-)
+from common import all_experiments, Experiment, register_experiment
+from generate import get_arch_name
 
 import torch
 import torch.nn as nn
@@ -20,18 +16,6 @@ from torch.utils.flop_counter import FlopCounterMode
 WARMUP_ITER = 5
 
 A100_40G_BF16_TFLOPS = 312
-
-
-@dataclasses.dataclass
-class Experiment:
-    name: str
-    metric: str
-    target: float
-    actual: float
-    dtype: str
-    device: str
-    arch: str  # GPU name for CUDA or CPU arch for CPU
-    is_model: bool = False
 
 
 class SimpleMLP(nn.Module):
@@ -52,6 +36,7 @@ class SimpleMLP(nn.Module):
         return x
 
 
+@register_experiment(name="mlp_layer_norm_gelu")
 def run_mlp_layer_norm_gelu(device: str = "cuda"):
     dtype_flops_utilization_map = {
         torch.bfloat16: "0.8",
@@ -102,6 +87,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
     return results
 
 
+@register_experiment(name="layer_norm")
 def run_layer_norm(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
         torch.bfloat16: "950",
@@ -145,6 +131,7 @@ def run_layer_norm(device: str = "cuda"):
     return results
 
 
+@register_experiment(name="gather_gemv")
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gather_gemv(device: str = "cuda"):
     E = 8
@@ -194,6 +181,7 @@ def run_gather_gemv(device: str = "cuda"):
     return results
 
 
+@register_experiment(name="gemv")
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gemv(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
@@ -297,30 +285,20 @@ def output_json(output_file, headers, row):
 
 DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
-all_experiments = {
-    # A list of GPT models: LlaMa, Mixtral, etc.
-    # waiting for A100-80G machine to be available in CI
-    # https://github.com/pytorch/pytorch/actions/runs/12018005803/job/33503683582?pr=140627
-    # before we can turn on autoquant
-    # or alterantively, we can save the model after autoquant and just load here to track
-    # the performance
-    # run_llama2_7b_autoquant,
-    run_llama2_7b_bf16,
-    run_llama2_7b_int8,
-    run_mixtral_8x7b_int8,
-    # run_mixtral_8x7b_autoquant,
-    # A list of micro-benchmarks.
-    run_mlp_layer_norm_gelu,
-    run_layer_norm,
-    run_gather_gemv,
-    run_gemv,
-}
 
-
-def main(output_file=DEFAULT_OUTPUT_FILE):
+def main(output_file=DEFAULT_OUTPUT_FILE, only_model=None):
     results = []
 
-    for func in all_experiments:
+    if not only_model:
+        experiments = all_experiments.values()
+    else:
+        if only_model not in all_experiments:
+            print(
+                f"Unknown model: {only_model}, all available models: {all_experiments.keys()}"
+            )
+        # only run the specified model
+        experiments = [all_experiments[only_model]]
+    for func in experiments:
         try:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         except AssertionError:
@@ -347,6 +325,10 @@ if __name__ == "__main__":
         default=DEFAULT_OUTPUT_FILE,
         help="Set the output CSV file to save the benchmark results",
     )
+    parser.add_argument(
+        "--only",
+        help="Specify a model or micro-benchmark name to run exclusively",
+    )
     args = parser.parse_args()
 
-    main(output_file=args.output)
+    main(output_file=args.output, only_model=args.only)
