@@ -488,8 +488,6 @@ class ReshapeTransform(Transform):
     Arguments:
         in_shape (torch.Size): The input event shape.
         out_shape (torch.Size): The output event shape.
-        cache_size (int): Size of cache. If zero, no caching is done. If one,
-            the latest single value is cached. Only 0 and 1 are supported.
     """
 
     bijective = True
@@ -794,10 +792,10 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> int:
+    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
         if isinstance(self.scale, numbers.Real):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
-        return int(self.scale.sign().prod().item())  # type: ignore[union-attr]
+        return self.scale.sign()  # type: ignore[union-attr]
 
     def _call(self, x):
         return self.loc + self.scale * x
