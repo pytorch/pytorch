@@ -10,19 +10,8 @@ import logging
 import os
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import onnxruntime
@@ -45,8 +34,7 @@ _InputArgsType = Optional[
 _OutputsType = Sequence[_NumericType]
 
 onnx_model_dir = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)),
-    os.pardir,
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
     "repos",
     "onnx",
     "onnx",
@@ -54,11 +42,7 @@ onnx_model_dir = os.path.join(
     "test",
     "data",
 )
-
-
 pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
-
-
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
 
