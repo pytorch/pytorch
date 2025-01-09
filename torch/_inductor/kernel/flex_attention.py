@@ -943,7 +943,7 @@ def lower_cpu(
     ]
 
     # The original mask_graph works on a scalar and only includes
-    # the logic of calculating the mask value。
+    # the logic of calculating the mask value.
     # We need to add the logic of applying the mark to the qk_data tensor
     # into the graph for the later codegen of this part.
     # Example:
