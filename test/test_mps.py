@@ -6335,23 +6335,26 @@ class TestMPS(TestCaseMPS):
     def test_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_cholesky_test(size, *batch_dims):
+        def run_cholesky_test(size, *batch_dims, upper):
             input_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
             input_mps = input_cpu.to('mps')
-            output_cpu = torch.linalg.cholesky(input_cpu)
-            output_mps = torch.linalg.cholesky(input_mps)
+            output_cpu = torch.linalg.cholesky(input_cpu, upper=upper)
+            output_mps = torch.linalg.cholesky(input_mps, upper=upper)
             self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
 
+        # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4, 8, 17, 64, 128, 154]
+        # even/odd batch sizes
         batch_sizes = [1, 2, 4, 8, 16, 17]
 
-        for size in matrix_sizes:
-            for batch_size in batch_sizes:
-                run_cholesky_test(size, batch_size)
+        for upper in [True, False]:
+            for size in matrix_sizes:
+                for batch_size in batch_sizes:
+                    run_cholesky_test(size, batch_size, upper=upper)
 
         # test >3D matrices
-        run_cholesky_test(128, 10, 10)
-        run_cholesky_test(128, 2, 2, 2, 2, 10, 10)
+        run_cholesky_test(128, 10, 10, upper=False)
+        run_cholesky_test(128, 2, 2, 2, 2, 10, 10, upper=True)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
