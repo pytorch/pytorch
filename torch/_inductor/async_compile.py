@@ -158,6 +158,9 @@ class AsyncCompile:
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(get_compile_threads())
         else:
+            if config.worker_start_method == "spawn":
+                # Avoid creating pools in the spawned subprocs themselves:
+                os.environ["TORCH_WARM_POOL"] = "0"
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = ProcessPoolExecutor(
