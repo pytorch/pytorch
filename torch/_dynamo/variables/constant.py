@@ -187,6 +187,12 @@ its type to `common_constant_types`.
             search = args[0].as_python_constant()
             result = search in self.value
             return ConstantVariable.create(result)
+        elif name == "__eq__":
+            assert len(args) == 1
+            if not isinstance(args[0], ConstantVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+
+            return ConstantVariable.create(self.value == args[0].value)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 

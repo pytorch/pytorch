@@ -659,6 +659,13 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
+        elif name == "__eq__":
+            assert len(args) == 1
+            if not isinstance(args[0], SetVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+
+            return ConstantVariable.create(args[0].set_items == self.set_items)
+
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
@@ -832,6 +839,12 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        elif name == "__eq__":
+            assert len(args) == 1
+            if not isinstance(args[0], DictKeysVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+
+            return ConstantVariable.create(args[0].set_items == self.set_items)
         return super().call_method(tx, name, args, kwargs)
 
 

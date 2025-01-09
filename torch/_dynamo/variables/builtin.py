@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, variables
+from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -462,6 +462,16 @@ class BuiltinVariable(VariableTracker):
         has_set_items = (SetVariable, DictKeysVariable)
 
         def create_cmp_op_handlers(op):
+            if op is operator.eq:
+
+                def handler(tx, a, b):
+                    return tx.inline_user_function_return(
+                        VariableTracker.build(tx, polyfills.cmp_eq), [a, b], {}
+                    )
+
+                result = [((VariableTracker, VariableTracker), handler)]
+                return result
+
             def compare_by_value(tx: "InstructionTranslator", a, b):
                 return ConstantVariable(op(a.value, b.value))
 

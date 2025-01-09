@@ -13,6 +13,8 @@ from typing import Any, Callable, List, Sequence, TYPE_CHECKING
 
 import torch
 
+from ..utils import dict_keys
+
 
 if TYPE_CHECKING:
     # Load by torch._dynamo.polyfills.loader
@@ -203,3 +205,18 @@ def object_ne(self, other):
     # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
     # Using `==` is important because `self` might have a user-defined `__eq__`.
     return not (self == other)
+
+
+def cmp_eq(a, b):
+    if isinstance(a, (list, tuple)):
+        if type(a) is not type(b):
+            return NotImplemented
+        if len(a) != len(b):
+            return False
+        return all(cmp_eq(x, y) for x, y in zip(a, b))
+    if a is b:
+        return True
+    result = a.__eq__(b)
+    if result is NotImplemented:
+        result = b.__eq__(a)
+    return result is not NotImplemented and result
