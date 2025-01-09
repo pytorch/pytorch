@@ -1133,9 +1133,12 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
-    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
-      static bool bit8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
-      return bit8_support;
+    } else if (dtype == ScalarType::Byte) {
+      static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return u8_support;
+    } else if (dtype == ScalarType::Char) {
+      static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
+      return s8_support;
     }
     return false;
   }
