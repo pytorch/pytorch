@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Tuple
+from typing import cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -125,7 +125,7 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
         )
 
 
-_bufs_to_skip_wait = OrderedSet[Tuple[int, str]]()
+_bufs_to_skip_wait = OrderedSet[tuple[int, str]]()
 
 
 def mark_as_skip_wait(x: ir.IRNode) -> None:
