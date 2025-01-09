@@ -722,10 +722,11 @@ class Module:
         """
         Set the submodule given by ``target`` if it exists, otherwise throw an error.
 
-        NOTE: If ``strict`` is set to ``False`` (default), the method will replace an existing submodule
-        or create a new submodule if the parent module exists. If ``strict`` is set to ``True``,
-        the method will only attempt to replace an existing submodule and throw an error if
-        the submodule does not exist.
+        .. note::
+            If ``strict`` is set to ``False`` (default), the method will replace an existing submodule
+            or create a new submodule if the parent module exists. If ``strict`` is set to ``True``,
+            the method will only attempt to replace an existing submodule and throw an error if
+            the submodule does not exist.
 
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
@@ -746,10 +747,8 @@ class Module:
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
         To override the ``Conv2d`` with a new submodule ``Linear``, you
-        would call
-        ``set_submodule("net_b.net_c.conv", nn.Linear(1, 1))`` or
-        ``set_submodule("net_b.net_c.conv", nn.Linear(1, 1), strict=False)`` or
-        ``set_submodule("net_b.net_c.conv", nn.Linear(1, 1), strict=True)``.
+        could call ``set_submodule("net_b.net_c.conv", nn.Linear(1, 1))``
+        where ``strict`` could be ``True`` or ``False``
 
         To add a new submodule ``Conv2d`` to the existing ``net_b`` module,
         you would call ``set_submodule("net_b.conv", nn.Conv2d(1, 1, 1))``.
