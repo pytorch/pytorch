@@ -512,7 +512,7 @@ class GeneratorObjectVariable(VariableTracker):
                 self._setup_exception(
                     tx, variables.ExceptionVariable(GeneratorExit, ())
                 )
-                if tracer.next_instruction().opname == "CALL_INTRINSIC_1":
+                if tracer.next_instruction.opname == "CALL_INTRINSIC_1":
                     return variables.ConstantVariable(None)
             else:
                 try:
