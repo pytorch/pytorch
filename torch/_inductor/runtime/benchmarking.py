@@ -363,6 +363,47 @@ class InductorBenchmarker(TritonBenchmarker):
         end_event.record()
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / num_clock_cycles
+    
+    @cached_property
+    def queue_t_and_gpu_t_per_cache_clear(
+        self: Self,
+    ) -> Tuple[float, float]:
+        """Experimentally calculate the CPU queue overhead, in milliseconds,
+        and the GPU time, in milliseconds, of an L2 cache clear.
+        """
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+        # synchronize after zeroing the buffer to reduce uncertainty
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        queue_start_t = time.perf_counter()
+        # 100 buffer zeroes is long enough to reduce uncertainty
+        num_iters = 100
+        for _ in range(num_iters):
+            buffer.zero_()
+        queue_end_t = time.perf_counter()
+        queue_t_per_iter = (
+            (queue_end_t() - queue_start_t) * MILLISECONDS_PER_SECOND
+        ) / num_iters
+        end_event.record()
+        torch.cuda.synchronize()
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor benchmarks
+        del buffer
+        return (
+            queue_t_per_iter,
+            start_event.elapsed_time(end_event) / num_iters,
+        )
+    
+    @cached_property
+    def queue_t_per_cache_flush(self: Self) -> float:
+        return self.queue_t_and_gpu_t_per_cache_clear[0]
+    
+    @cached_property
+    def gpu_t_per_cache_flush(self: Self) -> float:
+        return self.queue_t_and_gpu_t_per_cache_clear[1]
 
     @time_and_count
     def benchmark_gpu(
@@ -399,6 +440,9 @@ class InductorBenchmarker(TritonBenchmarker):
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
+        # initialize here, avoids double buffer allocation
+        self.queue_t_and_gpu_t_per_cache_clear
+
         # warmup `_callable` (and catches any failures in the process)
         _callable()
         torch.cuda.synchronize()
@@ -429,8 +473,16 @@ class InductorBenchmarker(TritonBenchmarker):
             min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
         )
 
+        # calculate the number of clock cycles to put the GPU to sleep so that we can
+        # efficiently overlap with the memory warmup stage such that the last memory warmup
+        # finishes executing on the GPU just as the last benchmarking event is queued on the CPU
+        queue_t_all_cache_flushes = memory_warmup_iters * self.queue_t_per_cache_flush
+        queue_t_all_benchmark_iters = benchmark_iters * queue_t_per_iter
+        sleep_t = (queue_t_all_cache_flushes + queue_t_all_benchmark_iters) - (
+            memory_warmup_iters * self.gpu_t_per_cache_flush 
+        )
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle)), 0)
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -527,6 +579,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
+        # initialize here, avoids double buffer allocation
+        self.queue_t_and_gpu_t_per_cache_clear
+
         # warmup each callable in `callables` (and catches any failures in the process)
         for _callable in callables:
             _callable()
@@ -599,8 +654,16 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
                 1,
             )
 
+        # calculate the number of clock cycles to put the GPU to sleep so that we can
+        # efficiently overlap with the memory warmup stage such that the last memory warmup
+        # finishes executing on the GPU just as the last benchmarking event is queued on the CPU
+        queue_t_all_cache_flushes = memory_warmup_iters * self.queue_t_per_cache_flush
+        queue_t_all_benchmark_iters = benchmark_iters * queue_t_per_iter
+        sleep_t = (queue_t_all_cache_flushes + queue_t_all_benchmark_iters) - (
+            memory_warmup_iters * self.gpu_t_per_cache_flush 
+        )
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle)), 0)
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
