@@ -1,4 +1,5 @@
 # Owner(s): ["module: cuda"]
+# ruff: noqa: F841
 
 import contextlib
 import ctypes
@@ -59,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    MI300_ARCH,
     NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
@@ -67,6 +69,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -483,7 +486,33 @@ class TestCuda(TestCase):
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @contextlib.contextmanager
+    def _hip_allow_tf32(self):
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+
+        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+        try:
+            yield
+        finally:
+            if hip_allow_tf32 is not None:
+                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+            else:
+                del os.environ["HIPBLASLT_ALLOW_TF32"]
+
     def test_cublas_allow_tf32_get_set(self):
+        """
+        We only turn on TF32 for MI300 with a special env var. This is because TF32
+        is only available in MI300+ and is in experimental mode (hipblaslt support
+        is current WIP)
+        """
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_cublas_allow_tf32_get_set_inner()
+
+    def _test_cublas_allow_tf32_get_set_inner(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
@@ -498,6 +527,12 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_float32_matmul_precision_get_set_inner()
+
+    def _test_float32_matmul_precision_get_set_inner(self):
         orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
@@ -509,6 +544,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.get_float32_matmul_precision(), "highest")
         else:
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+
         for p in ("medium", "high"):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
@@ -663,7 +699,6 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
         tensor1 = torch.ByteTensor(5).pin_memory()
-        tensor2 = tensor1.cuda(non_blocking=True) + 1
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
@@ -733,6 +768,10 @@ class TestCuda(TestCase):
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        with self.assertRaisesRegex(
+            RuntimeError, "device_index >= 0 && device_index < num_gpus"
+        ):
+            torch.accelerator.current_stream(torch.accelerator.device_count())
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
@@ -987,7 +1026,7 @@ except RuntimeError as e:
             )
             out, err = p.communicate(timeout=10)
             p.wait(timeout=10)
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             p.kill()
             out, err = p.communicate()
         expected_messages = [
@@ -1175,7 +1214,7 @@ except RuntimeError as e:
             with self.assertLeaksNoCudaTensors():
                 x = torch.randn(3, 1, device="cuda")
                 y = torch.randn(2, 1, device="cuda")
-                z = x + y
+                x + y
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     @serialTest()
@@ -1303,7 +1342,7 @@ except RuntimeError as e:
                     )
                     for p in model.parameters():
                         self.assertTrue(p.grad is None)
-                    for i in range(iters):
+                    for _ in range(iters):
                         loss = model(x, x_first_use_on_ambient).sum()
                         if out_of_place:
                             x_grad = torch.autograd.grad((loss,), (x,))[0]
@@ -1477,7 +1516,7 @@ torch.cuda.synchronize()
             # Line up threads to increase likelihood of race conditions.
             barrier.wait()
             with torch.cuda.stream(my_stream):
-                for i in range(test_iters):
+                for _ in range(test_iters):
                     # If all threads are sharing the same cublas handle,
                     # the following sequence may occur:
                     # thread 0 calls cublasSetStream()
@@ -1594,7 +1633,7 @@ torch.cuda.synchronize()
             # Line up threads to increase likelihood of race conditions.
             barrier.wait()
             with torch.cuda.stream(my_stream):
-                for i in range(test_iters):
+                for _ in range(test_iters):
                     # If all threads are sharing the same cublas handle,
                     # the following sequence may occur:
                     # thread 0 calls cublasSetStream()
@@ -1689,7 +1728,7 @@ torch.cuda.synchronize()
             return generator, old_state, new_state
 
         def register_states_to_graph(generator_state, graph):
-            generator, old_state, new_state = generator_state
+            _, old_state, new_state = generator_state
             graph.register_generator_state(old_state)
             graph.register_generator_state(new_state)
 
@@ -1712,7 +1751,7 @@ torch.cuda.synchronize()
 
         # Define a function to retrieve the final offsets of the original and new generator states
         def get_final_offsets_of_states(generator_state):
-            generator, old_state, new_state = generator_state
+            _, old_state, new_state = generator_state
             old_state_offset = old_state.get_offset()
             new_state_offset = new_state.get_offset()
             return old_state_offset, new_state_offset
@@ -1883,7 +1922,7 @@ torch.cuda.synchronize()
             z = x + y
             with torch.cuda.stream(s1):
                 s1.wait_stream(s0)
-                w = z + y
+                z + y
             s0.wait_stream(s1)
             g.capture_end()
         s0.synchronize()
@@ -1911,7 +1950,7 @@ except RuntimeError as e:
 exit(2)
 """
         try:
-            a = subprocess.check_output(
+            subprocess.check_output(
                 [sys.executable, "-c", script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
@@ -1976,7 +2015,7 @@ exit(2)
         free_bytes_before, total_bytes = torch.cuda.mem_get_info()
         used_gb_before = (total_bytes - free_bytes_before) / 1e9
 
-        for i in range(100):
+        for _ in range(100):
             torch_graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(torch_graph):
                 torch.mm(a, b)
@@ -2648,7 +2687,7 @@ exit(2)
         torch.cuda.synchronize()
 
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
-        c = torch.zeros((3,), device="cuda")
+        torch.zeros((3,), device="cuda")
 
     @skipIfRocm
     @unittest.skipIf(
@@ -2668,20 +2707,20 @@ exit(2)
         model = torch.nn.LSTM(512, 512, 2, dropout=0.5).cuda()
         x = torch.ones(100, 192, 512, device="cuda")
 
-        y = model(x)
+        model(x)
 
         g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             g.capture_begin()
-            y = model(x)
+            model(x)
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
         g.replay()
 
-        y = model(x)
+        model(x)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -2858,7 +2897,7 @@ exit(2)
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
 
-        N, D_in, H, D_out = 640, 4096, 2048, 1024
+        N, D_in, H, _ = 640, 4096, 2048, 1024
 
         class ParameterlessModule(torch.nn.Module):
             def forward(self, input_dict: dict):
@@ -2882,7 +2921,6 @@ exit(2)
 
         x = torch.randn(N, D_in, device="cuda", requires_grad=False)
         unused_input = torch.randn(N, H, device="cuda", requires_grad=False)
-        y_pred = torch.randn(N, D_in, device="cuda", requires_grad=False)
         y = torch.randn(N, D_in, device="cuda")
 
         # This is a good stress test. It graphs four callables: two Modules and two python functions.
@@ -2907,7 +2945,7 @@ exit(2)
                 with torch.amp.autocast(
                     device_type="cuda", enabled=with_amp, cache_enabled=cache_enabled
                 ):
-                    out = m({"x": data, "unused_input": unused_input})["output"]
+                    m({"x": data, "unused_input": unused_input})["output"]
 
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
@@ -3160,7 +3198,7 @@ exit(2)
             z = x + y
         with torch.cuda.stream(s1):
             s1.wait_stream(s0)
-            w = z + y
+            z + y
         s0.wait_stream(s1)
         with torch.cuda.stream(s0):
             g.capture_end()
@@ -3314,6 +3352,8 @@ print(f"{torch.cuda.device_count()}")
             {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
             {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+            {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+            {"ROCR_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
         ]
 
         for env_config in custom_envs:
@@ -3362,7 +3402,7 @@ print(f"{{r1}}, {{r2}}")
             error_msg = "cuFileHandleRegister failed"
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
-                file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+                torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -3438,7 +3478,7 @@ class TestCudaMallocAsync(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="all")
-            x = torch.rand(311, 411, device="cuda")
+            x = torch.rand(311, 411, device="cuda")  # noqa: F841
 
             ss = torch.cuda.memory._snapshot()["segments"]
             found_it = False
@@ -3532,8 +3572,8 @@ class TestCudaMallocAsync(TestCase):
                 record_context = context is not None
                 ss = torch.cuda.memory._snapshot()
 
-                tplot = trace_plot(ss)
-                splot = segment_plot(ss)
+                trace_plot(ss)
+                segment_plot(ss)
                 text = json.dumps(ss)
 
                 self.assertTrue(record_context == ("test_memory_plots" in text))
@@ -3638,7 +3678,7 @@ class TestCudaMallocAsync(TestCase):
             def foo():
                 return torch.rand(311, 411, device="cuda")
 
-            x = foo()
+            x = foo()  # noqa: F841
 
             ss = torch.cuda.memory._snapshot()["segments"]
             found_it = False
@@ -4017,10 +4057,12 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -4049,11 +4091,7 @@ class TestCudaMallocAsync(TestCase):
         that the pytorch call is returning a correct list of UUIDs.
         """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
-        uuids = (
-            subprocess.check_output(cmd, shell=True, universal_newlines=True)
-            .strip()
-            .split("\n")
-        )
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
         for uuid in uuids:
@@ -4077,11 +4115,7 @@ import os
 print(f"{torch.cuda.device_count()}")
         """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
-        uuids = (
-            subprocess.check_output(cmd, shell=True, universal_newlines=True)
-            .strip()
-            .split("\n")
-        )
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
 
         custom_envs = []

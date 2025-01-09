@@ -19,6 +19,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
@@ -158,7 +159,7 @@ class ImplDetailTest(TestCase):
 
         def _create_computed_buffer():
             def inner_fn(index):
-                i0, i1, i2, i3 = index
+                i0, _, i2, i3 = index
                 return ops.load(
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
@@ -398,6 +399,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
@@ -420,6 +422,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_pattern_2(self):
         """
@@ -435,7 +438,6 @@ class LoopOrderingTest(TestCase):
         scale = torch.Tensor([10.0]).to("cuda")
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-        E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
         def test_pattern2(tensor_x_inp, scale_x):
             tensor_x = tensor_x_inp * scale_x

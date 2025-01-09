@@ -13,7 +13,6 @@ runs:
         container_name=$(docker run \
           ${GPU_FLAG:-} \
           -e BINARY_ENV_FILE \
-          -e BUILDER_ROOT \
           -e BUILD_ENVIRONMENT \
           -e DESIRED_CUDA \
           -e DESIRED_DEVTOOLSET \
