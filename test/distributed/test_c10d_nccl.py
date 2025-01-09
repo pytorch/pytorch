@@ -456,6 +456,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         t = torch.rand(10, 10, device=device)
         # First allreduce to initialize state.
+        dist.all_reduce(t)
+        dist.all_reduce(t)
+        dist.all_reduce(t)
         side_thread = threading.Thread(target=init_collective_task, args=(t,))
         side_thread.start()
         side_thread.join()

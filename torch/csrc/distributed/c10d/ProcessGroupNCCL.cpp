@@ -807,12 +807,12 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   // register the deleter as a callback when the WorkNCCL object is destroyed.
   auto deleter = [lockPtr = this->cacheMutexPtr_,
-                  eventPtr = this->eventsArrayPtr_,
+                  eventsArrayPtr = this->eventsArrayPtr_,
                   timing](at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(*lockPtr);
     // We put the event back to the cache deque once the WorkNCCL object is
     // destroyed.
-    (*eventPtr)[timing ? 1 : 0].push_back(event);
+    (*eventsArrayPtr)[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {

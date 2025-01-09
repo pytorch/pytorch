@@ -462,12 +462,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     static CUDAEventCache& get(at::DeviceIndex device);
 
    private:
-    std::shared_ptr<std::mutex> cacheMutexPtr_;
+    std::shared_ptr<std::mutex> cacheMutexPtr_ = std::make_shared<std::mutex>();
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
     std::shared_ptr<std::array<std::deque<at::cuda::CUDAEvent*>, 2>>
-        eventsArrayPtr_; // 0 for timing=false, 1 for timing=true
+        eventsArrayPtr_ = std::make_shared<std::array<
+            std::deque<at::cuda::CUDAEvent*>,
+            2>>(); // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
