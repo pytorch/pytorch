@@ -4376,12 +4376,10 @@ class ChoiceCaller:
     def benchmark(self, *args, out, lazy=False) -> Union[LazyBenchmark, float]:  # type: ignore[no-untyped-def]
         algo = self.to_callable()
         if lazy:
-            timing = benchmarker.lazy_benchmark(
+            return benchmarker.lazy_benchmark(
                 algo, args, {"out": out}, pruning_key="max-autotune-gemm"
             )
-        else:
-            timing = benchmarker.benchmark(algo, args, {"out": out})
-        return timing
+        return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
