@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 
@@ -32,5 +31,5 @@ class Chi2(Gamma):
         return super().expand(batch_shape, new)
 
     @property
-    def df(self) -> Tensor:
+    def df(self):
         return self.concentration * 2

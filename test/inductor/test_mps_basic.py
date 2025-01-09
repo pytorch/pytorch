@@ -74,11 +74,8 @@ class MPSBasicTests(TestCase):
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
-    def test_floor(self):
+    def floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
-
-    def test_sign(self):
-        self.common(lambda x: x.sign(), (torch.rand(1024),))
 
     def test_sliced_input(self):
         self.common(

@@ -2,7 +2,6 @@
 from numbers import Number
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -34,15 +33,15 @@ class Poisson(ExponentialFamily):
     support = constraints.nonnegative_integer
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.rate
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self.rate.floor()
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return self.rate
 
     def __init__(self, rate, validate_args=None):
@@ -73,7 +72,7 @@ class Poisson(ExponentialFamily):
         return value.xlogy(rate) - rate - (value + 1).lgamma()
 
     @property
-    def _natural_params(self) -> tuple[Tensor]:
+    def _natural_params(self):
         return (torch.log(self.rate),)
 
     def _log_normalizer(self, x):

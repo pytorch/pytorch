@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 from torch.distributions.distribution import Distribution
 
 
@@ -29,7 +28,7 @@ class ExponentialFamily(Distribution):
     """
 
     @property
-    def _natural_params(self) -> tuple[Tensor, ...]:
+    def _natural_params(self):
         """
         Abstract method for natural parameters. Returns a tuple of Tensors based
         on the distribution
@@ -44,7 +43,7 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     @property
-    def _mean_carrier_measure(self) -> float:
+    def _mean_carrier_measure(self):
         """
         Abstract method for expected carrier measure, which is required for computing
         entropy.

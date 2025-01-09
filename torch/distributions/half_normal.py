@@ -2,7 +2,7 @@
 import math
 
 import torch
-from torch import inf, Tensor
+from torch import inf
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -42,19 +42,19 @@ class HalfNormal(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def scale(self) -> Tensor:
+    def scale(self):
         return self.base_dist.scale
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.scale * math.sqrt(2 / math.pi)
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return torch.zeros_like(self.scale)
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return self.scale.pow(2) * (1 - 2 / math.pi)
 
     def log_prob(self, value):

@@ -174,14 +174,12 @@ static void _mkldnn_convolution_out (
     IntArrayRef padding,
     int64_t groups,
     bool is_channels_last,
-    const ideep::attr_t& op_attr,
-    const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
+    const ideep::attr_t& op_attr) {
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  auto algo = ideep::algorithm::convolution_direct;
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
@@ -196,9 +194,7 @@ static void _mkldnn_convolution_out (
         {padding.begin(), padding.end()},
         groups,
         is_channels_last,
-        op_attr,
-        algo,
-        aprop_kind);
+        op_attr);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
@@ -211,9 +207,7 @@ static void _mkldnn_convolution_out (
         {padding.begin(), padding.end()},
         groups,
         is_channels_last,
-        op_attr,
-        algo,
-        aprop_kind);
+        op_attr);
   }
 }
 
@@ -229,8 +223,7 @@ static Tensor _mkldnn_convolution(
     std::string_view attr = "none",
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
-    std::optional<std::string_view> algorithm = std::nullopt,
-    const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
+    std::optional<std::string_view> algorithm = std::nullopt) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
@@ -272,8 +265,7 @@ static Tensor _mkldnn_convolution(
       padding_expanded,
       groups,
       use_channels_last,
-      op_attr,
-      aprop_kind);
+      op_attr);
 
   if (input_t.is_mkldnn()) {
     return MKLDNNTensor(y, input_t.options());
@@ -318,14 +310,6 @@ Tensor mkldnn_convolution_pointwise(
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
-  auto aprop_kind = ideep::prop_kind::forward;
-  bool maybe_backward = GradMode::is_enabled() &&
-      (input_t.requires_grad() || weight_t.requires_grad() ||
-       (bias_opt.has_value() && bias_opt->defined() &&
-        bias_opt->requires_grad()));
-  if (!maybe_backward) {
-    aprop_kind = ideep::prop_kind::forward_inference;
-  }
   return _mkldnn_convolution(
       input_t,
       weight_t,
@@ -337,8 +321,7 @@ Tensor mkldnn_convolution_pointwise(
       use_channels_last,
       attr,
       scalars,
-      algorithm,
-      aprop_kind);
+      algorithm);
 }
 
 

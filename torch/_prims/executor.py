@@ -1,22 +1,17 @@
-from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import ParamSpec, TypeVarTuple, Unpack
+# mypy: allow-untyped-defs
+from typing import Callable, Optional
 
 from torch._prims.context import TorchRefsMode
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
 
 
-T = TypeVar("T")
-P = ParamSpec("P")
-Ts = TypeVarTuple("Ts")
-
-
 def execute(
     gm: GraphModule,
-    *args: Unpack[Ts],
+    *args,
     executor: str = "aten",
     executor_parameters: Optional[dict] = None,
-) -> Any:
+):
     """
     Prototype ATen executor.
 
@@ -30,7 +25,7 @@ def execute(
     raise ValueError(msg)
 
 
-def make_traced(fn: Callable[P, T]) -> Callable[P, T]:
+def make_traced(fn: Callable):
     """
     Returns a function that, when called, will
     trace its torch operations to prims and then
@@ -54,9 +49,7 @@ def make_traced(fn: Callable[P, T]) -> Callable[P, T]:
     result = traced_foo(a, b, executor='aten')
     """
 
-    def _traced(*args: P.args, **kwargs: P.kwargs) -> T:
-        executor = str(kwargs.pop("executor", "aten"))
-
+    def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
         wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
 
@@ -64,4 +57,4 @@ def make_traced(fn: Callable[P, T]) -> Callable[P, T]:
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
-    return _traced  # type: ignore[return-value]
+    return _traced

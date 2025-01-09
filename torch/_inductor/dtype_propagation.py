@@ -1,6 +1,15 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Callable, Optional, Protocol, Sequence, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Callable,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import sympy
 
@@ -37,7 +46,7 @@ DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 
 @functools.lru_cache(None)
 def get_promoted_dtype(
-    *args: Sequence[tuple[torch.dtype, bool]],
+    *args: Sequence[Tuple[torch.dtype, bool]],
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     def construct_input(inp):
@@ -284,10 +293,10 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def scan(
-        dtypes: tuple[torch.dtype, ...],
-        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
-        values: tuple[T, ...],
-    ) -> tuple[torch.dtype, ...]:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
+        values: Tuple[T, ...],
+    ) -> Tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -303,17 +312,17 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def frexp(x: DTypeArg) -> tuple[torch.dtype, torch.dtype]:
+    def frexp(x: DTypeArg) -> Tuple[torch.dtype, torch.dtype]:
         # TODO - need to handle multiple outputs
         return (promote_types([x]), torch.int32)
 
     @staticmethod
     def sort(
-        dtypes: tuple[torch.dtype, ...],
-        values: tuple[T, ...],
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
         stable: bool,
         descending: bool,
-    ) -> tuple[torch.dtype, ...]:
+    ) -> Tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -323,7 +332,7 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def bucketize(
         values: DTypeArg,
-        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -50,24 +49,24 @@ class InverseGamma(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def concentration(self) -> Tensor:
+    def concentration(self):
         return self.base_dist.concentration
 
     @property
-    def rate(self) -> Tensor:
+    def rate(self):
         return self.base_dist.rate
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         result = self.rate / (self.concentration - 1)
         return torch.where(self.concentration > 1, result, torch.inf)
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self.rate / (self.concentration + 1)
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         result = self.rate.square() / (
             (self.concentration - 1).square() * (self.concentration - 2)
         )

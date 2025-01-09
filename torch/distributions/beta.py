@@ -2,7 +2,6 @@
 from numbers import Number, Real
 
 import torch
-from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
@@ -63,19 +62,19 @@ class Beta(ExponentialFamily):
         return new
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return self.concentration1 / (self.concentration1 + self.concentration0)
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self._dirichlet.mode[..., 0]
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         total = self.concentration1 + self.concentration0
         return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
-    def rsample(self, sample_shape: _size = ()) -> Tensor:
+    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):
@@ -88,7 +87,7 @@ class Beta(ExponentialFamily):
         return self._dirichlet.entropy()
 
     @property
-    def concentration1(self) -> Tensor:
+    def concentration1(self):
         result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
             return torch.tensor([result])
@@ -96,7 +95,7 @@ class Beta(ExponentialFamily):
             return result
 
     @property
-    def concentration0(self) -> Tensor:
+    def concentration0(self):
         result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
             return torch.tensor([result])
@@ -104,7 +103,7 @@ class Beta(ExponentialFamily):
             return result
 
     @property
-    def _natural_params(self) -> tuple[Tensor, Tensor]:
+    def _natural_params(self):
         return (self.concentration1, self.concentration0)
 
     def _log_normalizer(self, x, y):

@@ -226,7 +226,7 @@ def _raggedness_matches(nt1, nt2):
 # as this causes autograd problems.
 def _clone(t):
     requires_grad = t.requires_grad
-    return t.detach().clone().requires_grad_(requires_grad)
+    return t.clone().detach().requires_grad_(requires_grad)
 
 
 # Helper function to update a sample with new kwargs / name
@@ -1316,10 +1316,10 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
         # non-contiguous transposed
         yield njt.transpose(1, 3)
         # non-contiguous with holes
-        values = njt.values().detach().clone()
-        offsets = njt.offsets().detach().clone()
+        values = njt.values().clone().detach()
+        offsets = njt.offsets().clone().detach()
         # subtract 1 to cause holes
-        lengths = (offsets.diff() - 1).detach().clone()
+        lengths = (offsets.diff() - 1).clone().detach()
         yield torch.nested.nested_tensor_from_jagged(
             values=values,
             offsets=offsets,

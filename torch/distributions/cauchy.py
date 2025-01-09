@@ -3,7 +3,7 @@ import math
 from numbers import Number
 
 import torch
-from torch import inf, nan, Tensor
+from torch import inf, nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -52,22 +52,22 @@ class Cauchy(Distribution):
         return new
 
     @property
-    def mean(self) -> Tensor:
+    def mean(self):
         return torch.full(
             self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device
         )
 
     @property
-    def mode(self) -> Tensor:
+    def mode(self):
         return self.loc
 
     @property
-    def variance(self) -> Tensor:
+    def variance(self):
         return torch.full(
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()
         return self.loc + eps * self.scale
