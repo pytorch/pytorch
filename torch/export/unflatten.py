@@ -120,7 +120,14 @@ def _assign_attr(
             setattr(to_module, field, from_obj)
 
 
-class InterpreterModule(torch.nn.Module):
+class _SubmoduleBase:
+    _ty: Optional[str]
+
+    def type_name(self) -> Optional[str]:
+        return self._ty
+
+
+class InterpreterModule(_SubmoduleBase, torch.nn.Module):
     """A module that uses torch.fx.Interpreter to execute instead of the usual
     codegen that GraphModule uses. This provides better stack trace information
     and makes it easier to debug execution.
@@ -131,9 +138,11 @@ class InterpreterModule(torch.nn.Module):
     def __init__(
         self,
         graph: torch.fx.Graph,
+        ty: Optional[str] = None,
     ):
         super().__init__()
         self.graph = graph
+        self._ty = ty
         self.graph.owning_module = self
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
@@ -206,7 +215,7 @@ class InterpreterModule(torch.nn.Module):
         )
 
 
-class InterpreterModuleDispatcher(torch.nn.Module):
+class InterpreterModuleDispatcher(_SubmoduleBase, torch.nn.Module):
     """
     A module that carries a sequence of InterpreterModules corresponding to
     a sequence of calls of that module. Each call to the module dispatches
@@ -219,6 +228,7 @@ class InterpreterModuleDispatcher(torch.nn.Module):
         self._modules = call_modules[0]._modules
         for accessor in attrs:
             setattr(self, accessor, getattr(call_modules[0], accessor))
+        self._ty = call_modules[0]._ty
         self._call_modules = call_modules
         self._num_calls = 0
 
@@ -898,7 +908,7 @@ class _ModuleFrame:
         seen_attrs,
         created_modules,
         parent,
-        module_stack: List[Tuple[str, int]],
+        module_stack: List[Tuple[str, Optional[str], int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,
@@ -916,7 +926,7 @@ class _ModuleFrame:
         self.module_call_graph = module_call_graph
         self.verbose = False
 
-        self.fqn, num_calls = self.module_stack[-1]
+        self.fqn, ty, num_calls = self.module_stack[-1]
         # generate call name for self.fqn
         self.child_fqn = _call_name(self.fqn, num_calls + 1)
 
@@ -927,7 +937,7 @@ class _ModuleFrame:
         else:
             self.module = self.created_modules.get(
                 self.fqn,
-                InterpreterModule(torch.fx.Graph()),
+                InterpreterModule(torch.fx.Graph(), ty=ty),
             )
             self.ivals = parent.ivals
 
@@ -945,7 +955,7 @@ class _ModuleFrame:
                 path = f"{parent.fqn}.{fqn}" if parent.fqn else fqn
                 if path in self.created_modules:
                     return self.created_modules[path]
-                submod = InterpreterModule(torch.fx.Graph())
+                submod = InterpreterModule(torch.fx.Graph(), ty=ty)
                 self.created_modules[path] = submod
                 return submod
 
@@ -1274,7 +1284,11 @@ class _ModuleFrame:
                 node_module_stack = self.module_stack
             else:
                 node_module_stack = [
-                    (path, int(k.split("@")[-1]) if "@" in k else 0)
+                    (
+                        path,
+                        ty if path else None,
+                        int(k.split("@")[-1]) if "@" in k else 0,
+                    )
                     for k, (path, ty) in node.meta["nn_module_stack"].items()
                 ]
 
@@ -1349,7 +1363,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         seen_attrs,
         created_modules,
         None,
-        [("", 0)],
+        [("", None, 0)],
         "",
         {
             entry.fqn: entry.signature

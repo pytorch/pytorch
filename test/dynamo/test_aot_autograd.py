@@ -1543,7 +1543,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_input = input.clone().detach()
 
         out = f(*argsfn(input))
-        opt_out = torch._dynamo.optimize(compiler, dynamic=True)(f)(*argsfn(opt_input))
+        opt_out = torch.compile(f, backend=compiler, dynamic=True)(*argsfn(opt_input))
         self.assertEqual(out, opt_out)
 
         self.assertEqual(compiler.counter.frame_count, 1)
@@ -1601,7 +1601,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return self.counter(*args, **kwargs)
 
         compiler = Compiler()
-        opt_f = torch._dynamo.optimize(compiler, dynamic=True)(f)
+        opt_f = torch.compile(f, backend=compiler, dynamic=True)
 
         input = torch.arange(1_000)
         opt_input = input.clone().detach()
