@@ -348,6 +348,21 @@ class InductorBenchmarker(TritonBenchmarker):
                 for start_event, end_event in event_pairs
             ]
         )
+    
+    @cached_property
+    def gpu_t_per_clock_cycle(self: Self) -> float:
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # I've found that 1000000 clock cycles is long enough to average out
+        # most of the uncertainty from the measurement, without being so long
+        # that we're leaving compile time on the table
+        num_clock_cycles = 1000000
+        torch.cuda._sleep(num_clock_cycles)
+        end_event.record()
+        torch.cuda.synchronize()
+        return start_event.elapsed_time(end_event) / num_clock_cycles
 
     @time_and_count
     def benchmark_gpu(
@@ -394,11 +409,18 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters)
+        queue_start_t = time.perf_counter()
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
             _callable()
             end_event.record()
+        queue_end_t = time.perf_counter()
+        # a measure of the CPU time it takes to send a single iteration of
+        # `_callable` to the GPU event queue, in milliseconds
+        queue_t_per_iter = (
+            (queue_end_t - queue_start_t) * MILLISECONDS_PER_SECOND
+        ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
@@ -406,6 +428,9 @@ class InductorBenchmarker(TritonBenchmarker):
         benchmark_iters = max(
             min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
         )
+
+        # put the GPU to sleep to start packing the event queue
+        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -515,12 +540,19 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         interleaved_event_pairs = self.get_interleaved_event_pairs(
             len(callables), estimation_iters
         )
+        queue_start_t = time.perf_counter()
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
                 start_event.record()
                 _callable()
                 end_event.record()
+        queue_end_t = time.perf_counter()
+        # a measure of the CPU time it takes to send a single set of iterations
+        # of `callables` to the GPU event queue, in milliseconds
+        queue_t_per_iter = (
+            (queue_end_t - queue_start_t) * MILLISECONDS_PER_SECOND
+        ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
@@ -542,6 +574,11 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
                     callables_to_benchmark.append(_callable)
                 if len(callables_to_benchmark) == pruning_limit:
                     break
+            # adjust the queue time calculation based on the number of callables we
+            # have pruned away; it is not guaranteed that all callables have an equivalent
+            # queue time, but we can assume this anyways since the value does not need to
+            # be exact and a close estimate is good enough for our use case
+            queue_t_per_iter = queue_t_per_iter * (len(callables_to_benchmark) / len(callables))
             # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
             # we're alloted `max_benchmark_duration` per-callable, and since we've
             # pruned the callables we can assume the maximum duration of any callable
@@ -561,6 +598,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
                 ),
                 1,
             )
+
+        # put the GPU to sleep to start packing the event queue
+        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
