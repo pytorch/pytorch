@@ -1,6 +1,6 @@
 import importlib
 import warnings
-from typing import Any, Callable, List
+from typing import Callable, List
 
 
 _MESSAGE_TEMPLATE = (
@@ -41,7 +41,7 @@ def lazy_deprecated_import(
         old_location=old_module, new_location=new_module
     )
 
-    def getattr_dunder(name: str) -> Any:
+    def getattr_dunder(name: str) -> None:
         if name in all:
             # We are using the "RuntimeWarning" to make sure it is not
             # ignored by default.
