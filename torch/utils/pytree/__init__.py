@@ -77,12 +77,17 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "treespec_pprint",
-    "FlattenFunc",
-    "UnflattenFunc",
-    "FlattenWithKeysFunc",
-    "ToDumpableContextFunc",
-    "FromDumpableContextFunc",
 ]
+
+
+if _TYPE_CHECKING:
+    __all__ += [
+        "FlattenFunc",
+        "UnflattenFunc",
+        "FlattenWithKeysFunc",
+        "ToDumpableContextFunc",
+        "FromDumpableContextFunc",
+    ]
 
 
 PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
