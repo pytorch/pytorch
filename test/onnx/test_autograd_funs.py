@@ -4,9 +4,7 @@ import pytorch_test_common
 from onnx_test_common import run_model_test
 
 import torch
-from torch.onnx import OperatorExportTypes
 from torch.onnx._globals import GLOBALS
-from torch.onnx.utils import _model_to_graph
 from torch.testing._internal import common_utils
 
 
@@ -110,45 +108,6 @@ class TestAutogradFuns(pytorch_test_common.ExportTestCase):
         model = Caller()
         input = torch.ones(1, 5)
         run_model_test(self, model, input_args=(input,))
-
-    # Run export in ONNX_FALLTHROUGH mode as torch.erf() is not supported
-    def test_aten_unsupported(self):
-        class Erf(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                erf_out = torch.special.erf(x)
-                ctx.save_for_backward(erf_out)
-                return erf_out
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                result = ctx.saved_tensors
-                return torch.special.erfinv(result), None
-
-        class Caller(torch.nn.Module):
-            def forward(self, input):
-                return Erf.apply(input)
-
-        model = Caller()
-        input = torch.ones(1, 5)
-
-        # Test ONNX_FALLTHROUGH_MODE
-        graph, _, _ = _model_to_graph(
-            model,
-            (input,),
-            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-        )
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "prim::PythonOp")
-
-        # Test ATEN_FALLBACK_MODE
-        graph, _, _ = _model_to_graph(
-            model,
-            (input,),
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        )
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "aten::ATen")
 
     def test_inline_and_symbolic(self):
         class Exp(torch.autograd.Function):

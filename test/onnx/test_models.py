@@ -27,7 +27,6 @@ from verify import verify
 import torch
 from torch.ao import quantization
 from torch.autograd import Variable
-from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -56,7 +55,7 @@ class TestModels(pytorch_test_common.ExportTestCase):
         with torch.onnx.select_model_mode_for_export(
             model, torch.onnx.TrainingMode.EVAL
         ):
-            graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
+            graph = torch.onnx.utils._trace(model, inputs)
             torch._C._jit_pass_lint(graph)
             verify(
                 model,
