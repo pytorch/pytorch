@@ -6181,7 +6181,7 @@ def forward(self, b_a_buffer, x):
         )
 
         class Module(torch.nn.Module):
-            def forward(self, x: Input):
+            def forward(self, x: Inp3):
                 return x.f + 1
 
         mod = Module()
