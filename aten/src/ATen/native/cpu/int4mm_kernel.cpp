@@ -995,7 +995,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
       dst_f32 += 1;
     }
   }
-};
+}
 
 static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     size_t m,
@@ -1066,7 +1066,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
         dst_ptr += sizeof(int8_t);
       }
     }
-  };
+  }
 
   auto lhs_qa8dx_buffer = std::make_unique<int8_t[]>(
       m * (k + sizeof(float) + sizeof(int32_t))); // Allocate for LHS
