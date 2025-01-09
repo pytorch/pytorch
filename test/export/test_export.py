@@ -5108,6 +5108,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
+    def test_float_conversion_from_int(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),)).run_decompositions(
+            {}
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+        self.assertIn(torch.ops.aten._assert_tensor_metadata.default, ops)
+
+        self.assertEqual(ep.module()(torch.tensor(1, dtype=torch.int32)), 1)
+
+        # Raises error because the input dtype is not the same as the input
+        # tensor when exporting.
+        with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+            ep.module()(torch.tensor(1, dtype=torch.float32))
+
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -9751,6 +9774,47 @@ def forward(self, x):
     foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
     return (foo_functional,)""",
         )
+
+    def test_placeholder_naming_order(self):
+        # See https://github.com/pytorch/pytorch/issues/143732
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 16)
+                self.layer2 = torch.nn.Linear(3, 32)
+
+            def forward(self, x1, x2, flag=True):
+                x1o = self.layer1(x1)
+                x2o = self.layer2(x2)
+                return torch.cat([x1o, x2o], dim=1)
+
+        mod = Mod()
+        args = (torch.rand(1, 3),)
+        kwargs = {"flag": False, "x2": torch.rand(1, 3)}
+        ep = export(mod, args, kwargs)
+
+        # check that graph is behaviorally correct
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+
+        # check that graph input names are as expected
+        self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
+
+    def test_placeholder_naming_order_variadic(self):
+        class Mod(torch.nn.Module):
+            def forward(self, a, b, c, **kwargs):
+                return a - b + c * kwargs["d"]
+
+        mod = Mod()
+        args = (torch.randn(3),)
+        kwargs = {"c": torch.randn(3), "b": torch.randn(3), "d": torch.randn(3)}
+        ep = export(mod, args, kwargs)
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+        self.assertEqual(ep.graph_signature.user_inputs, ("a", "c", "b", "d"))
 
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
