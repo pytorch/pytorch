@@ -226,12 +226,12 @@ TORCH_META_FUNC(softshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-TORCH_META_FUNC(gelu) (const Tensor & self, c10::string_view approximate) {
+TORCH_META_FUNC(gelu) (const Tensor & self, std::string_view approximate) {
   build_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(gelu_backward) (
-  const Tensor& grad, const Tensor& self, c10::string_view approximate
+  const Tensor& grad, const Tensor& self, std::string_view approximate
 ) {
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
@@ -387,7 +387,7 @@ static bool use_mkldnn(const Tensor& input) {
 #endif
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
-  const Tensor& self, c10::string_view approximate, const Tensor& result
+  const Tensor& self, std::string_view approximate, const Tensor& result
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
@@ -398,7 +398,7 @@ auto approximate_type = get_gelutype_enum(approximate);
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
@@ -412,7 +412,7 @@ auto approximate_type = get_gelutype_enum(approximate);
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
-  const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input
+  const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()

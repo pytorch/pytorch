@@ -264,7 +264,7 @@ class TestSchedulePlan(TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
+                _formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
 
@@ -305,10 +305,7 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
-                    schedule.pipeline_order
-                )
-                # print(formatted_pipeline_order)
+                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -866,14 +863,21 @@ class TestScheduleLowering(TestCase):
 
 class TestValidateSchedule(TestCase):
     def test_valid_schedule(self):
-        actions = {
-            0: [_Action(0, F, 0), _Action(0, B, 0)],
-            1: [_Action(1, F, 0), _Action(1, B, 0)],
-        }
+        schedule_actions = [
+            {
+                0: [_Action(0, F, 0), _Action(0, B, 0)],
+                1: [_Action(1, F, 0), _Action(1, B, 0)],
+            },
+            {
+                0: [_Action(0, F, 0), _Action(0, I, 0), _Action(0, W, 0)],
+                1: [_Action(1, F, 0), _Action(1, I, 0), _Action(1, W, 0)],
+            },
+        ]
         pp_group_size = 2
         num_stages = 2
         num_microbatches = 1
-        _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+        for actions in schedule_actions:
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
     def test_invalid_schedule_missing_rank(self):
         actions = {

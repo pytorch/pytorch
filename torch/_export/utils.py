@@ -16,7 +16,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
     Union,
@@ -289,8 +288,14 @@ def _check_input_constraints_for_graph(
                 )
 
             for j, (arg_dim, node_dim) in enumerate(zip(arg.shape, node_val.shape)):
-                # TODO(avik): Assert the following property in the IR verifier:
-                # node_dim is either an int or a SymInt containing an int or a unary sympy.Expr
+                if (
+                    isinstance(arg_dim, torch.SymInt)
+                    and not arg_dim.node.expr.is_number
+                ):
+                    # This can happen when, say, arg is a fake tensor.
+                    # We do not run checks on symbolic shapes of fake inputs as
+                    # such checks can affect the shape env.
+                    continue
                 if (
                     isinstance(node_dim, torch.SymInt)
                     and len(node_dim.node.expr.free_symbols) == 1
@@ -304,32 +309,23 @@ def _check_input_constraints_for_graph(
                                 f"{existing_dim}, but got {arg_dim}",
                             )
                     else:
-                        if (
-                            isinstance(arg_dim, torch.SymInt)
-                            and not arg_dim.node.expr.is_number
-                        ):
-                            # This can happen when, say, arg is a fake tensor.
-                            # We do not run checks on symbolic shapes of fake inputs as
-                            # such checks can affect the shape env.
-                            pass
+                        if isinstance(node_dim.node.expr, sympy.Symbol):
+                            # Short cut for try_solve below. Also useful in cases where
+                            # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
+                            # purely because symbol is constrained to be size-like,
+                            # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
+                            unification_map[symbol] = int(arg_dim)
                         else:
-                            if isinstance(node_dim.node.expr, sympy.Symbol):
-                                # Short cut for try_solve below. Also useful in cases where
-                                # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
-                                # purely because symbol is constrained to be size-like,
-                                # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
-                                unification_map[symbol] = int(arg_dim)
-                            else:
-                                solution = try_solve(
-                                    sympy.Eq(node_dim.node.expr, arg_dim), symbol
+                            solution = try_solve(
+                                sympy.Eq(node_dim.node.expr, arg_dim), symbol
+                            )
+                            if solution is None:
+                                raise RuntimeError(  # noqa: B904
+                                    f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
+                                    f"of the form {node_dim.node.expr}, where {symbol} is an integer"
                                 )
-                                if solution is None:
-                                    raise RuntimeError(  # noqa: B904
-                                        f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
-                                        f"of the form {node_dim.node.expr}, where {symbol} is an integer"
-                                    )
-                                else:
-                                    unification_map[symbol] = int(solution[1])
+                            else:
+                                unification_map[symbol] = int(solution[1])
 
                     if node_dim.node.expr in range_constraints:
                         min_val, max_val = _convert_range_to_int(
@@ -348,19 +344,18 @@ def _check_input_constraints_for_graph(
                                     f"Expected input at {get_keystr(key_path)}.shape[{j}] to be <= "
                                     f"{max_val}, but got {arg_dim}",
                                 )
-                else:
-                    if arg_dim != node_dim:
-                        if (
-                            isinstance(node_dim, torch.SymInt)
-                            and not node_dim.node.expr.is_number
-                        ):
-                            # this means we deferred a guard from export analysis to runtime, let this pass
-                            # we'll add a runtime assert checking equality to this replacement expression
-                            continue
-                        raise RuntimeError(
-                            f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
-                            f"{node_dim}, but got {arg_dim}",
-                        )
+                elif (
+                    isinstance(node_dim, torch.SymInt)
+                    and not node_dim.node.expr.is_number
+                ):
+                    # this means we deferred a guard from export analysis to runtime, let this pass
+                    # we'll add a runtime assert checking equality to this replacement expression
+                    continue
+                elif arg_dim != node_dim:
+                    raise RuntimeError(
+                        f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
+                        f"{node_dim}, but got {arg_dim}",
+                    )
         elif isinstance(node_val, (int, float, str)):
             if type(arg) != type(node_val) or arg != node_val:
                 raise RuntimeError(
@@ -382,7 +377,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn(obj: Any) -> tuple[List[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -399,8 +394,8 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
-    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
-        flattened, (flat_names, none_names) = flatten_fn(obj)  # type: ignore[misc]
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[List[Any], Context]:
+        flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
@@ -701,7 +696,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Sign
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
     ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
-    ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
+    ast_func_def: ast.FunctionDef = ast_mod.body[0]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
     arg_type_map = {"args": Parameter.POSITIONAL_OR_KEYWORD}
@@ -730,7 +725,11 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     else:
         sig = inspect.signature(mod.forward)
 
-    return sig.bind(*fake_args, **fake_kwargs).arguments
+    # Rather than binding both fake_args and fake_kwargs to sig names, we
+    # (partially) bind only fake_args, while reusing fake_kwarg names. This
+    # ensures that fake_kwargs do not get reordered, which is important to
+    # match flattened user inputs.
+    return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
@@ -741,7 +740,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     and gather the top-level named placeholder nodes.
     """
     # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    subgraph_ph_tuples: List[tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.HigherOrderOperator
@@ -834,7 +833,7 @@ def placeholder_naming_pass(
     ]
 
     # use pytree path to name nested user inputs
-    for (arg_path, arg), user_input_name in zip(flat_args_with_path, user_input_names):
+    for (arg_path, _arg), user_input_name in zip(flat_args_with_path, user_input_names):
         if user_input_name:
             _rename_without_collisions(
                 name_map,
@@ -1141,3 +1140,16 @@ def _get_decomp_for_cia(op: "OperatorBase"):
             )
 
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
+
+
+@contextmanager
+def _compiling_state_context():
+    old_compiling_flag = torch.compiler._is_compiling_flag
+    old_exporting_flag = torch.compiler._is_exporting_flag
+    try:
+        torch.compiler._is_compiling_flag = True
+        torch.compiler._is_exporting_flag = True
+        yield
+    finally:
+        torch.compiler._is_compiling_flag = old_compiling_flag
+        torch.compiler._is_exporting_flag = old_exporting_flag

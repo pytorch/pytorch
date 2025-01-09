@@ -17,6 +17,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     minifier_dir,
@@ -193,6 +194,7 @@ def generate_compiler_repro_exported_program(
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 import torch._inductor.inductor_prims
 
@@ -262,12 +264,12 @@ def repro_get_args(options, exported_program, config_patches):
 def repro_run(options, exported_program, config_patches):
     from torch._inductor import _aoti_compile_and_package_inner, aoti_load_package
 
-    mod, args, kwargs = repro_common(options, exported_program)
+    gm, args, kwargs = repro_common(options, exported_program)
 
     from torch.cuda import synchronize
 
     package_path = _aoti_compile_and_package_inner(
-        mod,
+        gm,
         args,
         kwargs,
         load_and_run=False,
@@ -283,7 +285,7 @@ def repro_run(options, exported_program, config_patches):
             need_sync = True
             break
 
-    compiled(*args)
+    compiled(*args, **kwargs)
 
     if need_sync:
         synchronize()  # ensure segfaults are surfaced
@@ -328,8 +330,14 @@ def export_for_aoti_minifier(
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
+    from torch._inductor.compile_fx import _aoti_flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
+
+    # update serialized_in_spec and serialized_out_spec
+    flat_example_inputs, inductor_configs = _aoti_flatten_inputs(
+        mod, args, kwargs, options=config_patches
+    )
     compiler_name = "aot_inductor"
     assert options.minifier_export_mode in ["dynamo", "python"]
     strict = options.minifier_export_mode == "dynamo"
@@ -345,7 +353,7 @@ def repro_minify(options, exported_program, config_patches):
             break
 
     def module_fails(gm, flat_example_inputs, check_str=None):
-        # we have to export first so the in_spec and out_spec are populated
+        # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
         gm = export_for_aoti_minifier(
             gm, tuple_inputs, strict=strict, skip_export_error=skip_export_error
@@ -356,13 +364,14 @@ def repro_minify(options, exported_program, config_patches):
         if gm is None:
             return False
 
+        assert isinstance(gm, torch.fx.GraphModule)
+
         try:
             _aoti_compile_and_package_inner(
                 gm,
                 tuple_inputs,
-                kwargs,
                 load_and_run=True,
-                inductor_configs=config_patches,
+                inductor_configs=inductor_configs,
             )
             if need_sync:
                 synchronize()  # ensure segfaults are surfaced
@@ -374,7 +383,7 @@ def repro_minify(options, exported_program, config_patches):
 
     minifier(
         mod,
-        args,
+        flat_example_inputs,
         module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state,
@@ -448,7 +457,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify,analyze}", required=True
+        dest="command", metavar="{run,minify}", required=True
     )
 
     parser_run = subparsers.add_parser(

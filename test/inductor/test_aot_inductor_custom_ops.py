@@ -50,7 +50,7 @@ try:
             copy_tests,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -195,6 +195,21 @@ class AOTInductorTestsTemplate:
         args = (
             torch.randn(4, 4, device=self.device),
             torch.randn(4, 4, device=self.device),
+        )
+        m(*args)
+
+        self.check_model(m, args)
+
+    def test_custom_op_out_variant_without_return(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                torch.ops.aoti_custom_ops.fn_out_variant_without_return(x, y)
+                return y
+
+        m = Model().to(device=self.device)
+        args = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
         m(*args)
 

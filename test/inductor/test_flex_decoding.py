@@ -22,7 +22,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils._triton import has_triton
 
 
@@ -281,7 +281,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Optional[Callable] = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -348,7 +348,7 @@ class TestFlexDecoding(InductorTestCase):
         if not golden_call:
             golden_call = sdpa_call
         q = torch.randn(
-            (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
+            (Q_B, KV_H, Q_S, Q_D),
             dtype=dtype,
             device="cuda",
             requires_grad=False,
@@ -492,9 +492,6 @@ class TestFlexDecoding(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
-
         assert Q_H % KV_H == 0
 
         q = torch.randn(
@@ -852,6 +849,61 @@ class TestFlexDecoding(InductorTestCase):
 
         self.run_test(seq_mask_mod, dtype)
         self.run_test_with_paged_attention(seq_mask_mod, dtype)
+
+    @supported_platform
+    def test_non_divisible_offset_mask(self):
+        KV_S = S - 3
+        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+
+        def mask_mod(b, h, q, kv):
+            return kv >= q + offset_tensor
+
+        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S)
+        self.run_test(KV_S=KV_S, block_mask=block_mask)
+
+    @supported_platform
+    def test_non_divisible_offset_mask_with_captured_buffer(self):
+        KV_S = S - 3
+        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+
+        def score_mod(score, b, h, q, kv):
+            return score + offset_kv[kv]
+
+        def mask_mod(b, h, q, kv):
+            return kv >= q + offset_tensor
+
+        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S)
+        self.run_test(KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
+
+    @supported_platform
+    def test_non_divisible_multi_token_offset_mask(self):
+        KV_S = S - 3
+        Q_S = 3
+        offset_tensor = torch.tensor(S // 2 - 1, device="cuda", dtype=torch.int32)
+
+        def mask_mod(b, h, q, kv):
+            return kv >= q + offset_tensor
+
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask)
+
+    @supported_platform
+    def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self):
+        KV_S = S - 3
+        Q_S = 3
+        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+
+        def score_mod(score, b, h, q, kv):
+            return score + offset_kv[kv] + offset_q[q]
+
+        def mask_mod(b, h, q, kv):
+            return kv >= q + offset_tensor
+
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1298,7 +1350,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
         self.run_test_with_paged_attention(bias_mod)
 
-    @skipIfRocm
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
         # Ensure fully masked out rows won't cause NaNs.
@@ -1502,7 +1553,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return causal_offset_mask
 
-        def noop(score, b, h, q_idx, kv_idx):
+        def noop(score, b, h, q_idx, kv_idx):  # noqa: F841
             return score
 
         mod = generate_causal_offset(
