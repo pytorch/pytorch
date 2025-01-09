@@ -21,7 +21,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -199,8 +198,8 @@ def getattr_recursive(
     return attr_itr
 
 
-def get_user_visible_output_strides(g: Graph) -> Dict[Node, Tuple[int, ...]]:
-    ret: Dict[Node, Tuple[int, ...]] = {}
+def get_user_visible_output_strides(g: Graph) -> Dict[Node, tuple[int, ...]]:
+    ret: Dict[Node, tuple[int, ...]] = {}
     output_node = g.find_nodes(op="output")[0]
 
     if "user_visible_output_idxs" not in output_node.meta:
@@ -213,7 +212,7 @@ def get_user_visible_output_strides(g: Graph) -> Dict[Node, Tuple[int, ...]]:
 
 
 def mark_nodes_dislike_padding(
-    g: Graph, user_visible_output_strides: Dict[Node, Tuple[int, ...]]
+    g: Graph, user_visible_output_strides: Dict[Node, tuple[int, ...]]
 ) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -287,7 +286,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
-    ) -> Tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
+    ) -> tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
@@ -324,7 +323,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def static_sizes_strides(
         self, ex: torch.Tensor
-    ) -> Tuple[List[sympy.Expr], List[sympy.Expr]]:
+    ) -> tuple[List[sympy.Expr], List[sympy.Expr]]:
         """
         Primarily used to weights
         """
@@ -466,7 +465,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
-            Tuple[int, str]
+            tuple[int, str]
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
@@ -996,7 +995,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
     def placeholder(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
@@ -1156,7 +1155,7 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: Tuple[()], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[()], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1204,7 +1203,7 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError
 
     def output(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
@@ -1306,9 +1305,9 @@ class GraphLowering(torch.fx.Interpreter):
     def propagate_mutation(
         self,
         fx_node: torch.fx.Node,
-        old_args: Tuple[Any],
+        old_args: tuple[Any],
         old_kwargs: Dict[str, Any],
-        new_args: Tuple[Any],
+        new_args: tuple[Any],
         new_kwargs: Dict[str, Any],
     ) -> None:
         """Propagate mutations on new_args/new_kwargs back to old_args/old_kwargs.
@@ -1804,7 +1803,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.const_module.wrapper_code.src_to_kernel
             )
 
-    def codegen_with_cpp_wrapper(self) -> Tuple[str, List[Tuple[int, Node]]]:
+    def codegen_with_cpp_wrapper(self) -> tuple[str, List[tuple[int, Node]]]:
         """
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
@@ -1903,7 +1902,7 @@ class GraphLowering(torch.fx.Interpreter):
             # cpu
             return self.codegen()
 
-    def codegen(self) -> Tuple[str, List[Tuple[int, Node]]]:
+    def codegen(self) -> tuple[str, List[tuple[int, Node]]]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             from .scheduler import Scheduler
 
@@ -1949,8 +1948,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def count_bytes(
         self,
-    ) -> Tuple[
-        int, List[Tuple[BaseSchedulerNode, int]], List[Tuple[BaseSchedulerNode, float]]
+    ) -> tuple[
+        int, List[tuple[BaseSchedulerNode, int]], List[tuple[BaseSchedulerNode, float]]
     ]:
         total_bytes = 0
         node_counts = []
