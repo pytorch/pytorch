@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
 from functools import wraps
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -39,13 +39,16 @@ from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.utils import _pytree as pytree
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 
-def register_meta(op):
+def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def wrapper(fn):
         fn = _convert_out_params(fn)
 
@@ -2249,6 +2252,12 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    torch._check(
+        any(x > 0 for x in ret_shape[2:]),
+        lambda: f"Given input size per channel: {list(dims)}. "
+        f"Calculated output size per channel: {ret_shape[2:]}. "
+        f"Output size is too small",
+    )
 
     return ret_shape
 
@@ -2444,7 +2453,38 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        out = x.new_empty(output_shape, dtype=output_dtype)
+        return out
+
+    @register_meta(torch.ops.onednn.qlinear_pointwise.binary)
+    @register_meta(torch.ops.onednn.qlinear_pointwise.binary_tensor)
+    def meta_qlinear_pointwise_binary(
+        x,
+        x_scale,
+        x_zp,
+        w,
+        w_scale,
+        w_zp,
+        x_2,
+        bias,
+        output_scale,
+        output_zero_point,
+        output_dtype,
+        x2_scale,
+        x2_zp,
+        binary_op_name,
+        alpha,
+        unary_op_name,
+        unary_op_args,
+        unary_op_algorithm,
+    ):
+        if binary_op_name == "sum":
+            return x_2
+        output_shape = list(x.shape)
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 

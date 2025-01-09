@@ -130,7 +130,7 @@ def aoti_compile_and_package(
 def _aoti_compile_and_package_inner(
     gm: torch.nn.Module,
     # flat_example_inputs: List[Any],
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
@@ -198,7 +198,7 @@ def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     options: Optional[Dict[str, Any]] = None,
