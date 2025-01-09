@@ -90,6 +90,9 @@
     ignore = dirty
     path = third_party/tensorpipe
     url = https://github.com/pytorch/tensorpipe.git
+[submodule "third_party/cudnn_frontend"]
+	path = third_party/cudnn_frontend
+	url = https://github.com/NVIDIA/cudnn-frontend.git
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
@@ -108,6 +111,9 @@
 [submodule "third_party/VulkanMemoryAllocator"]
 	path = third_party/VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "third_party/cutlass"]
+	path = third_party/cutlass
+	url = https://github.com/NVIDIA/cutlass.git
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
