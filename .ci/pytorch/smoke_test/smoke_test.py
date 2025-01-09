@@ -109,8 +109,10 @@ def check_version(package: str) -> None:
                             {release_matrix[module['name']]} for channel {channel}. But its {module_version}"
                     )
                 else:
-                    print(f"{module['name']} version actual: {module_version} expected: \
-                        {release_matrix[module['name']]} for channel {channel}.")
+                    print(
+                        f"{module['name']} version actual: {module_version} expected: \
+                        {release_matrix[module['name']]} for channel {channel}."
+                    )
 
     else:
         print(f"Skip version check for channel {channel} as stable version is None")
@@ -180,7 +182,7 @@ def smoke_test_cuda(
     # torch.compile is available on macos-arm64 and Linux for python 3.8-3.13
     if (
         torch_compile_check == "enabled"
-        and sys.version_info < (3, 13, 0)
+        and sys.version_info < (3, 14, 0)
         and target_os in ["linux", "linux-aarch64", "macos-arm64", "darwin"]
     ):
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
@@ -339,7 +341,7 @@ def smoke_test_modules():
                 print(f"Output: \n{output}\n")
 
 
-def main() -> None:
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--package",
@@ -362,9 +364,16 @@ def main() -> None:
         choices=["enabled", "disabled"],
         default="enabled",
     )
-    options = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> None:
+    options = parse_args()
     print(f"torch: {torch.__version__}")
     print(torch.__config__.parallel_info())
+    # All PyTorch binary builds should be built with OpenMP
+    if not torch.backends.openmp.is_available():
+        raise RuntimeError("PyTorch must be built with OpenMP support")
 
     check_version(options.package)
     smoke_test_conv2d()
