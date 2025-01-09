@@ -4165,9 +4165,7 @@ class TritonScheduling(SIMDScheduling):
                 )
                 clone_callable = lambda: wrapped_jit_function.clone_args(  # noqa: E731
                     *args
-                )[
-                    0
-                ]
+                )[0]
                 # benchmarking both the kernel and the clone overhead together improves accuracy
                 # and decreases overhead of benchmarking (since GPU warmups are now shared)
                 ms, ms_clone = benchmarker.benchmark_many_gpu(
