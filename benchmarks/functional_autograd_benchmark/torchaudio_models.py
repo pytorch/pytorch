@@ -3,7 +3,7 @@
 
 import math
 from collections import OrderedDict
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -512,7 +512,7 @@ class MultiheadAttentionContainer(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
             query, key, value (Tensor): map a query and a set of key-value pairs to an output.
@@ -589,7 +589,7 @@ class ScaledDotProduct(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Uses a scaled dot product with the projected key-value pair to update
         the projected query.
         Args:
@@ -686,7 +686,7 @@ class InProjContainer(torch.nn.Module):
 
     def forward(
         self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""Projects the input sequences using in-proj layers.
         Args:
             query, key, value (Tensors): sequence to be projected

@@ -1831,7 +1831,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.reshape(shape).contiguous().clone()
+    return a.reshape(shape).clone(memory_format=torch.contiguous_format)
 
 
 _reshape_doc = """
