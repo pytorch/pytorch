@@ -106,31 +106,9 @@ class MkldnnModule(PropModule):
     )
 
 
-class MatMulModule:
-    def __getattr__(self, name):
-        if name == "allow_tf32":
-            return torch.get_float32_matmul_precision() != "highest"
-        # TODO: support allow_fp16_reduced_precision_reduction and allow_bf16_reduced_precision_reduction
-        else:
-            raise AttributeError("Unknown attribute " + name)
-
-    def __setattr__(self, name, value):
-        if name == "allow_tf32":
-            assert isinstance(
-                value, bool
-            ), f"set torch.backends.mkldnn.matmul.allow_tf32 expect a bool, but got {type(value).__name__}"
-            if value:
-                torch.set_float32_matmul_precision("high")
-            else:
-                torch.set_float32_matmul_precision("highest")
-        else:
-            raise AttributeError("Unknown attribute " + name)
-
-
 if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
     allow_tf32: ContextProp
 
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
-matmul = MatMulModule()
