@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -76,30 +77,43 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
-    if (!constant_folded_) {
+    if (!constant_folded_.load(std::memory_order_acquire)) {
       // At this point, constant is not ready yet. We need to call constant
       // folding before we execute the model. We obtain a unique lock at this
       // point to make sure constant is ready for all.
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
-      if (!constant_folded_) {
-        auto folded_const_map = model->run_const_fold(
-            stream, proxy_executor, /* initialization = */ true);
-        update_constant_buffer(
-            folded_const_map,
-            /* use_inactive = */ false,
-            /* validate_full_update = */ false);
-        constant_folded_ = true;
+      model_access_count_.fetch_add(1, std::memory_order_release);
+      {
+        std::unique_lock constants_folding_lk(model_exec_mutex_);
+        // Double locking to make sure constant folding is only ran once.
+        if (!constant_folded_.load(std::memory_order_acquire)) {
+          auto folded_const_map = model->run_const_fold(
+              stream, proxy_executor, /* initialization = */ true);
+          update_constant_buffer(
+              folded_const_map,
+              /* use_inactive = */ false,
+              /* validate_full_update = */ false);
+          constant_folded_.store(true, std::memory_order_release);
+        }
       }
-      constants_folding_lk.unlock();
-      model_lk.lock();
+      model_access_count_.fetch_sub(1, std::memory_order_release);
+      {
+        std::unique_lock model_access_lk(model_access_mutex_);
+        if (model_access_count_.load(std::memory_order_acquire) == 0) {
+          model_exec_available_.notify_all();
+        }
+      }
     }
 
     try {
+      if (model_access_count_.load(std::memory_order_acquire) != 0) {
+        std::unique_lock model_access_lk(model_access_mutex_);
+        model_exec_available_.wait(model_access_lk, [this]() {
+          return model_access_count_.load(std::memory_order_acquire) == 0;
+        });
+      }
+      std::shared_lock model_lk(model_exec_mutex_);
       model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
@@ -165,28 +179,48 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
     if (!inactive_buffer) {
-      // We would need to acquire a unique lock if we want to run constant
-      // folding on the active buffer.
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      model_access_count_.fetch_add(1, std::memory_order_release);
       try {
+        // We would need to acquire a unique lock if we want to run constant
+        // folding on the active buffer.
+        std::unique_lock constants_folding_lk(model_exec_mutex_);
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
             folded_const_map,
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
       } catch (...) {
-        std::lock_guard lk(models_mutex_);
-        available_models_.push_back(model);
-        throw;
+        model_access_count_.fetch_sub(1, std::memory_order_release);
+        {
+          std::unique_lock model_access_lk(model_access_mutex_);
+          if (model_access_count_.load(std::memory_order_acquire) == 0) {
+            model_exec_available_.notify_all();
+          }
+        }
+        {
+          std::lock_guard lk(models_mutex_);
+          available_models_.push_back(model);
+          throw;
+        }
       }
-      constants_folding_lk.unlock();
-      model_lk.lock();
+      model_access_count_.fetch_sub(1, std::memory_order_release);
+      {
+        std::unique_lock model_access_lk(model_access_mutex_);
+        if (model_access_count_.load(std::memory_order_acquire) == 0) {
+          model_exec_available_.notify_all();
+        }
+      }
     } else {
+      if (model_access_count_.load(std::memory_order_acquire) != 0) {
+        std::unique_lock model_access_lk(model_access_mutex_);
+        model_exec_available_.wait(model_access_lk, [this]() {
+          return model_access_count_.load(std::memory_order_acquire) == 0;
+        });
+      }
+      std::shared_lock model_lk(model_exec_mutex_);
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto constants_map = get_constants_map(/* get_inactive= */ true);
@@ -359,18 +393,28 @@ class AOTInductorModelContainer {
   }
 
   void swap_constant_buffer() {
-    std::lock_guard unique_lk(model_exec_mutex_);
+    model_access_count_.fetch_add(1, std::memory_order_release);
+    {
+      std::lock_guard unique_lk(model_exec_mutex_);
 
-    auto constants_map = get_constants_map(/* get_inactive= */ true);
-    auto constants_array = get_constants_array(/* get_inactive= */ true);
+      auto constants_map = get_constants_map(/* get_inactive= */ true);
+      auto constants_array = get_constants_array(/* get_inactive= */ true);
 
-    for (auto& model : models_) {
-      model->update_constants_map(
-          constants_map, /* remap_constants_array = */ false);
-      model->update_constants_array(constants_array);
+      for (auto& model : models_) {
+        model->update_constants_map(
+            constants_map, /* remap_constants_array = */ false);
+        model->update_constants_array(constants_array);
+      }
+
+      use_secondary_ = !use_secondary_;
     }
-
-    use_secondary_ = !use_secondary_;
+    model_access_count_.fetch_sub(1, std::memory_order_release);
+    {
+      std::unique_lock model_access_lk(model_access_mutex_);
+      if (model_access_count_.load(std::memory_order_acquire) == 0) {
+        model_exec_available_.notify_all();
+      }
+    }
   }
 
   size_t num_inputs() const {
@@ -425,7 +469,7 @@ class AOTInductorModelContainer {
   bool use_secondary_{false};
 
   // Determine whether we have ran constant folding
-  bool constant_folded_{false};
+  std::atomic<bool> constant_folded_{false};
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
@@ -470,6 +514,9 @@ class AOTInductorModelContainer {
   // model. One such case is when we want to do a weight swapping. We want to
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
+  std::mutex model_access_mutex_;
+  std::atomic<int> model_access_count_{0};
+  std::condition_variable model_exec_available_;
 
 #if defined(USE_CUDA) || defined(USE_XPU)
   void* get_constant_blob_ptr(bool get_inactive) {
