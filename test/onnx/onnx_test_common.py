@@ -10,19 +10,8 @@ import logging
 import os
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import onnxruntime
