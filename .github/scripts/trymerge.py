@@ -1596,7 +1596,7 @@ def save_merge_record(
             "_id": f"{project}-{pr_num}-{comment_id}-{os.environ.get('GITHUB_RUN_ID')}",
         }
     ]
-    repo_root = Path(__file__).absolute().parents[2]
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
     with open(repo_root / "merge_record.json", "w") as f:
         json.dump(data, f)

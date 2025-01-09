@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from io import IOBase
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -13,7 +13,7 @@ __all__ = [
 
 
 @functional_datapipe("open_files")
-class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
     r"""
     Given pathnames, opens files and yield pathname and file stream in a tuple (functional name: ``open_files``).
 

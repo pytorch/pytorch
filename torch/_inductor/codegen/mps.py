@@ -9,8 +9,8 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
-from ..utils import get_kernel_metadata
-from ..virtualized import V
+from ..utils import get_bounds_index_expr, get_kernel_metadata
+from ..virtualized import ops, V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
@@ -62,24 +62,66 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
-        if val == torch.inf:
-            return "HUGE_VALF"
-        elif val == -torch.inf:
-            return "-HUGE_VALF"
+        if isinstance(val, float):
+            if val == torch.inf:
+                return "HUGE_VALF"
+            elif val == -torch.inf:
+                return "-HUGE_VALF"
+            elif val != val:  # Only float that not equal to self is nan
+                return "NAN"
+            return str(val)
+        elif isinstance(val, bool):
+            return "true" if val else "false"
         return str(val)
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        idx_str = V.kernel.index_to_str(V.kernel.prepare_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
+
+    @staticmethod
+    def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        with V.kernel.mask_loads(mask, other) as new_mask:
+            result = body()
+
+        if result.bounds.is_bool:
+            other = bool(other)  # type: ignore[assignment]
+
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
 
     @staticmethod
+    def remainder(a: CSEVariable, b: CSEVariable) -> str:
+        if b.dtype is not None and not b.dtype.is_floating_point:
+            return f"{a} % {b}"
+        # Upcast to float otherwise results of remainder op are wrong for half
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
+
+    @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
-        # TODO: Fix nan propagation, see https://github.com/pytorch/pytorch/issues/143976
-        return f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
+        max_res = f"metal::max({typecast_a}, {typecast_b})"
+        return f"{nan_check} ? {nan_value} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
-        return f"metal::min(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
+        min_res = f"metal::min({typecast_a}, {typecast_b})"
+        return f"{nan_check} ? {nan_value} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -96,6 +138,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def isinf(x: CSEVariable) -> str:
         return f"metal::isinf({x})"
+
+    @staticmethod
+    def log(x: CSEVariable) -> str:
+        return f"metal::log({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -134,8 +180,27 @@ class MetalOverrides(OpOverrides):
         return f"metal::sqrt({x})"
 
     @staticmethod
+    def rsqrt(x: CSEVariable) -> str:
+        return f"metal::rsqrt({x})"
+
+    @staticmethod
     def atanh(x: CSEVariable) -> str:
         return f"metal::atanh({x})"
+
+    @staticmethod
+    def floordiv(a: CSEVariable, b: CSEVariable) -> str:
+        # a and b are integer type
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+
+    @staticmethod
+    def floor(x: CSEVariable) -> str:
+        return f"metal::floor({x})"
+
+    @staticmethod
+    def sign(x: CSEVariable) -> str:
+        return f"metal::sign({x})"
 
 
 class MetalKernel(SIMDKernel):
@@ -143,6 +208,7 @@ class MetalKernel(SIMDKernel):
     suffix = ";"
     newvar_prefix = "auto "
     sexpr = MetalExprPrinter().doprint
+    kexpr = sexpr
 
     def __init__(
         self,
@@ -210,7 +276,7 @@ class MetalKernel(SIMDKernel):
             with code.indent():
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
-                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
+                        code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
