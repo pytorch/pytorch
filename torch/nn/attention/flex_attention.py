@@ -758,7 +758,9 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm = _dense_to_ordered(full_blocks)
+        full_bm: Tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+            full_blocks
+        )
     else:
         full_bm = (None, None)
 
