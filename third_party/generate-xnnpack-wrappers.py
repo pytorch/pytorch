@@ -100,7 +100,7 @@ IGNORED_SOURCES = set((
 def handle_singleline_parse(line):
     start_index = line.find("(")
     end_index = line.find(")")
-    line = line[start_index+1:end_index]
+    line = line[start_index + 1:end_index]
     key_val = line.split(" ")
     return key_val[0], [x[4:] for x in key_val[1:]]
 
