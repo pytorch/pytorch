@@ -11,7 +11,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    xfailIfLessPy312,
+    xfailIfLessPy312
 )
 
 
