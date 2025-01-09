@@ -1265,8 +1265,10 @@ void gemm_and_bias(
   cudaDataType_t scaleType = CUDA_R_32F;
   void * alpha_ptr = &alpha_val;
   void * beta_ptr = &beta_val;
+#ifndef USE_ROCM
   at::Half halpha_val;
   at::Half hbeta_val;
+#endif
   if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
