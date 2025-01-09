@@ -4882,6 +4882,7 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_bool_reduction_vec(self):
         for op in (
+            torch.masked.mean,
             torch.any,
             torch.min,
             torch.max,

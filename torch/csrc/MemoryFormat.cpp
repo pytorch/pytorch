@@ -24,11 +24,11 @@ PyObject* THPMemoryFormat_New(
   return self.release();
 }
 
-static PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
+PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
   return THPUtils_packString(self->name);
 }
 
-static PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
+PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
   auto* self = (THPMemoryFormat*)_self;
   return THPUtils_packString(self->name);
 }
