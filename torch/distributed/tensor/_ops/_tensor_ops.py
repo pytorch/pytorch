@@ -63,6 +63,7 @@ register_op_strategy(
         aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
+        aten.view.dtype,
         aten.zero_.default,
     ]
 )(default_strategy)
