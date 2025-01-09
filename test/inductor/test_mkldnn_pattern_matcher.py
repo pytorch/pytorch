@@ -2167,6 +2167,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. QLinear Unary fusion in post-grad fusion pass
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
+                    2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_unary_lower_count"],
                     0 if TEST_ACL else 2,
                 )
 
@@ -2330,7 +2334,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. Qlinear Binary Unary fusion in post-grad fusion pass * 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_count"],
-                    0 if TEST_ACL else 2,
+                    2,
                 )
                 # Two linear-binary patterns are matched
                 # matched patter1 = [qlinear, add, (convert dtype), (relu), quantize_per_tensor]
@@ -2342,7 +2346,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
-                    0 if TEST_ACL else expected_matcher_nodes,
+                    expected_matcher_nodes,
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_binary_lower_count"],
+                    0 if TEST_ACL else 2,
                 )
 
             self._test_common(
@@ -2443,7 +2451,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 3. QLinear Unary fusion in post-grad fusion pass * 1
             self.assertEqual(
                 counters["inductor"]["qlinear_unary_matcher_count"],
-                0 if TEST_ACL else 1,
+                1,
             )
 
         self._test_common(
@@ -3706,7 +3714,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
-                    3 if annotate_matmul and not TEST_ACL else 0,
+                    3 if annotate_matmul else 0,
                 )
 
             quantizer = X86InductorQuantizer()
