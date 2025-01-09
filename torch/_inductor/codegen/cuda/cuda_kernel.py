@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr
 
@@ -123,7 +113,7 @@ class CUDAKernel(Kernel):
             self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
         self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
