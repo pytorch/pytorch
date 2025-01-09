@@ -47,6 +47,7 @@ from torch._inductor.aoti_eager import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
+from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -6229,6 +6230,7 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6277,6 +6279,7 @@ class CommonTemplate:
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
 
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
@@ -6297,6 +6300,7 @@ class CommonTemplate:
         _, (code0, code1) = run_and_get_kernels(b, x)
         self.assertEqual(code0, code1)
 
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_with_suffix(self):
