@@ -15,10 +15,9 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Tuple
+from typing import Any, Container, Dict, Hashable, List, Optional
 
 import torch
-from torch._guards import CompileId
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -89,7 +88,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
+    xyz_options: tuple[tuple[int, Optional[int], Optional[int]], ...]
     configs: List[Config] = []
     warp_size = device_props.warp_size
     # CPU target has no concept of "warp"
@@ -731,7 +730,7 @@ class CachingAutotuner(KernelInterface):
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[List[Any], Dict[str, Any]]:
         """
         Prepare new args and kwargs by cloning any in-place buffers
         (that are not in the provided exclusion list), to avoid autotune
@@ -754,7 +753,7 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args, **kwargs) -> tuple[List[Any], Dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
@@ -763,8 +762,6 @@ class CachingAutotuner(KernelInterface):
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-            compile_id=CompileId.from_string(self.inductor_meta.get("compile_id")),
-            is_forward=self.inductor_meta.get("is_forward"),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1217,7 +1214,7 @@ def cached_autotune(
 
 def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
-    seen = OrderedSet[str]()
+    seen: OrderedSet[Hashable] = OrderedSet()
     pruned_configs = []
 
     for cfg in configs:
