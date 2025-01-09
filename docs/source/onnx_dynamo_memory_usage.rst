@@ -4,9 +4,9 @@ The previous TorchScript-based ONNX exporter would execute the model once to tra
 memory on your GPU if the model's memory requirements exceeded the available GPU memory. This issue has been addressed with the new
 TorchDynamo-based ONNX exporter.
 
-The TorchDynamo-based ONNX exporter leverages `FakeTensorMode <https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html>`_ to
-avoid performing actual tensor computations during the export process. This approach results in significantly lower memory usage
-compared to the TorchScript-based ONNX exporter.
+The TorchDynamo-based ONNX exporter utilizes torch.export.export() function to leverage
+`FakeTensorMode <https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html>`_ to avoid performing actual tensor computations
+during the export process. This approach results in significantly lower memory usage compared to the TorchScript-based ONNX exporter.
 
 Below is an example demonstrating the memory usage difference between TorchScript-based and TorchDynamo-based ONNX exporters.
 In this example, we use the HighResNet model from MONAI. Before proceeding, please install it from PyPI:
@@ -29,7 +29,6 @@ The code below could be run to generate a snapshot file which records the state 
 
     import torch
 
-    from torch.onnx.utils import export
     from monai.networks.nets import (
         HighResNet,
     )
@@ -44,17 +43,19 @@ The code below could be run to generate a snapshot file which records the state 
     data = torch.randn(30, 1, 48, 48, 48, dtype=torch.float32).to("cuda")
 
     with torch.no_grad():
-        export(
+        onnx_program = torch.onnx.export(
             model,
             data,
             "torchscript_exporter_highresnet.onnx",
+            dynamo=False,
         )
 
-    snapshot_name = f"torchscript_exporter_example.pickle"
+    snapshot_name = "torchscript_exporter_example.pickle"
     print(f"generate {snapshot_name}")
 
     torch.cuda.memory._dump_snapshot(snapshot_name)
-    print(f"Export is done.")
+    print("Export is done.")
+
 
 Open `pytorch.org/memory_viz <https://pytorch.org/memory_viz>`_ and drag/drop the generated pickled snapshot file into the visualizer.
 The memory usage is described as below:
