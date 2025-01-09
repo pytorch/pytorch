@@ -2492,7 +2492,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning("Similarity score=%s", score.cpu().detach().item())
+                log.warning("Similarity score=%s", score.detach().cpu().item())
             return score >= 0.99
         else:
             if not exact_dtype:
