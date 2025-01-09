@@ -36,7 +36,6 @@ def generate_faked_module():
     return _OpenRegMod()
 
 
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -289,6 +288,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         sys.version_info >= (3, 13),
         "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
     )
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
@@ -493,6 +493,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
     )
+    @unittest.skipIf(IS_ARM64, "Does not work on arm")
     def test_open_device_numpy_serialization(self):
         """
         This tests the legacy _rebuild_device_tensor_from_numpy serialization path
