@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 from torch import Tensor
@@ -99,17 +99,24 @@ class ErrorOptimizerInput:
         self.error_regex = error_regex
 
 
+# Typing for every optim_inputs_func
+class OptimInputsFunc:
+    def __call__(
+        self, device: str, dtype: Optional[torch.dtype] = None
+    ) -> List[OptimizerInput]: ...
+
+
 class OptimizerInfo:
     """Optimizer information to be used in testing."""
 
     def __init__(
         self,
-        optim_cls: Optimizer,  # Class object for the Optimizer under test
+        optim_cls: Type[Optimizer],  # Class object for the Optimizer under test
         *,
         # Function to generate optimizer inputs EXCLUDING params. We delegate params responsibility
         # to the test using the OptimizerInfo. OptimizerInput.params is likely None.
         # Can optionally take in device to filter out certain unsupported configs
-        optim_inputs_func,
+        optim_inputs_func: OptimInputsFunc,
         # Tuple of lambdas to generate LRScheduler instances to run with the optimizer for the
         # LRScheduler tests like test_forloop_goes_right_direction with_lrsched.
         # We DO NOT expect to thoroughly test LRSchedulers through the optimizers, so not every
