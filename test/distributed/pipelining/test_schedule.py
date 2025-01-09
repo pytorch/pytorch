@@ -58,6 +58,7 @@ torch.manual_seed(0)
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
+        self.submod = None
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
@@ -197,6 +198,28 @@ class ScheduleTest(TestCase):
 
         torch.distributed.destroy_process_group()
 
+    def test_zero_bubble_schedule_errors_with_compile(self):
+        """
+        Test that zero bubble schedules raise an error when used with torch.compile.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        n_stages = 1
+        device = torch.device("cpu")
+        model = MultiMLP(8, n_layers=n_stages)
+        # full_mod
+        compiled_model = torch.compile(model)
+        stage = PipelineStage(
+            compiled_model,
+            0,
+            n_stages,
+            device,
+        )
+        with self.assertRaises(RuntimeError):
+            ScheduleInterleavedZeroBubble([stage], 2)
+
 
 instantiate_parametrized_tests(ScheduleTest)
 
@@ -264,7 +287,7 @@ class TestSchedulePlan(TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
+                _formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
 
@@ -305,10 +328,7 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
-                    schedule.pipeline_order
-                )
-                # print(formatted_pipeline_order)
+                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size

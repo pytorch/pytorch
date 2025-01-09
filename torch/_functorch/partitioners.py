@@ -28,11 +28,13 @@ from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config
+from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
     greedy_knapsack,
     ilp_knapsack,
 )
+from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
@@ -122,7 +124,6 @@ def must_recompute(node: fx.Node) -> bool:
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
-    found = False
     for node in fx_g.graph.nodes:
         if must_recompute(node):
             return True
@@ -500,7 +501,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr":
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -1404,6 +1405,28 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dynamic_memory_budget_dp":
+        log.warning(
+            "dynamic_memory_budget_dp is an experimental solver. "
+            "It does not guarantee performance improvements. "
+            "Additionally, it is not guaranteed to be stable."
+        )
+        graph_info_provider = GraphInfoProvider.inialize_from_graph(
+            joint_graph=joint_graph,
+            all_recomputable_banned_nodes=all_recomputable_banned_nodes,
+            recorded_knapsack_input_memories=memory,
+            recorded_knapsack_input_runtimes=runtimes,
+        )
+        return dp_knapsack(
+            memory,
+            runtimes,
+            KnapsackEvaluator(
+                graph_info_provider=graph_info_provider,
+            ).get_knee_point_memory_budget(
+                knapsack_algo=dp_knapsack,
+                max_mem_budget=max_memory,
+            ),
+        )
     elif callable(SOLVER):
         saved_node_idx, recomp_node_idx = SOLVER(
             memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
@@ -1424,23 +1447,14 @@ def estimate_runtime(node):
             shape = list(x.meta["val"].shape)
 
             def realize_symbol(d):
-                if isinstance(d, torch.SymInt) and d.node.hint is None:
-                    return d.node.expr.xreplace(
-                        dict.fromkeys(d.node.expr.free_symbols, 4096)
-                    )
-                return hint_int(d)
+                return hint_int(d, fallback=4096)
 
             shape = [realize_symbol(s) for s in shape]
             return x.meta["val"].new_empty_strided(
                 shape, stride=x.meta["tensor_meta"].stride
             )
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            d = x.meta["val"]
-            if d.node.hint is None:
-                return d.node.expr.xreplace(
-                    dict.fromkeys(d.node.expr.free_symbols, 4096)
-                )
-            return hint_int(d)
+            return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
