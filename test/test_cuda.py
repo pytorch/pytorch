@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    MI300_ARCH,
     NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
@@ -68,6 +69,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -4055,10 +4057,12 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
