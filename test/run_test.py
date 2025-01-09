@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
 
 
 # using tools/ to optimize test run.
-REPO_ROOT = Path(__file__).absolute().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -182,7 +182,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/_tensor/test_attention",
+    "distributed/tensor/test_attention",
 ]
 
 # whitelist of tests for s390x
