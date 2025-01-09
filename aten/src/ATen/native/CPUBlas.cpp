@@ -1879,9 +1879,10 @@ void brgemm(
     const bool add_C,
     const at::BFloat16* A,
     const at::BFloat16* B,
-    at::BFloat16* C) {
+    at::BFloat16* C,
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  if (Brgemm::device_check(ScalarType::BFloat16)) {
+  if (is_vnni && Brgemm::device_check(ScalarType::BFloat16)) {
     Brgemm::call<at::BFloat16, at::BFloat16, BFloat16>(
         M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
