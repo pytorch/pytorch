@@ -1,5 +1,5 @@
 import copy
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, List
 
 import torch
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, PassResult, Argument
@@ -59,7 +59,7 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
     def call_operator(
         self,
         op: OpOverload,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
