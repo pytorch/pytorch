@@ -23,6 +23,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    OutputSharding,
     PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
@@ -46,11 +47,15 @@ _P = ParamSpec("_P")
 def register_prop_rule(
     op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+) -> Callable[
+    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
+]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
+    def wrapper(
+        impl: Callable[[OpSchema], OutputSharding]
+    ) -> Callable[[OpSchema], OutputSharding]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(

@@ -1591,11 +1591,17 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 
+
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
+def xfailIfPy312Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
 def xfailIfLinux(func):
@@ -1847,6 +1853,19 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return wrapper
     if func:
         return dec_fn(func)
+    return dec_fn
+
+def skipIfRocmArch(arch: Tuple[str, ...]):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                prop = torch.cuda.get_device_properties(0)
+                if prop.gcnArchName.split(":")[0] in arch:
+                    reason = f"skipIfRocm: test skipped on {arch}"
+                    raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
     return dec_fn
 
 def runOnRocm(fn):
