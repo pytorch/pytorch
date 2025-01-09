@@ -1604,6 +1604,10 @@ def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
+def xfailIfLessPy312(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 12) else func
+
+
 def xfailIfLinux(func):
     return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM and not IS_FBCODE else func
 
