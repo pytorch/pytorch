@@ -1,7 +1,6 @@
 import abc
 import io
 import operator
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
@@ -268,32 +267,6 @@ class SavePlanner(abc.ABC):
         It's the storage layer responsibility to figure out how to save them.
         """
 
-    def transform_save_stream(
-        self, write_item: WriteItem, raw_stream: io.IOBase
-    ) -> Tuple[
-        io.IOBase,
-        Sequence[str],
-    ]:
-        """Provide a hook for stream-based transformation of saved checkpoints.
-
-        ``write_item is an item to be written.  The first value of the
-        return tuple will be a a new stream to which the StorageWriter
-        should write the serialized item, then call close() on the
-        returned stream.  This stream will transform (compress,
-        encrypt, etc) the serialized item data, and write the
-        transformed result to ``raw_stream``.  ``raw_stream`` will
-        remain open for additional writing.
-
-        The second value of the return tuple will be a list of
-        descriptor strings.  This should be stored alongside the
-        stream data so it can be passed to transform_load_stream.
-
-        A default implementation is provided which simply returns the
-        input raw_stream.
-
-        """
-        return (raw_stream, [])
-
 
 class LoadPlanner:
     """
@@ -401,29 +374,6 @@ class LoadPlanner:
     @abc.abstractmethod
     def finish_plan(self, central_plan: LoadPlan) -> LoadPlan:
         """Accept the plan from coordinator and return final LoadPlan."""
-
-    def transform_load_stream(
-        self,
-        read_item: ReadItem,
-        transform_descriptors: Sequence[str],
-        raw_stream: io.IOBase,
-    ) -> io.IOBase:
-        """Provide a hook for stream-based transformation of loaded checkpoints.
-
-        ``read_item is an item to be read.  The return value will be a
-        a new stream which will read the data from raw_stream and
-        transform (decompress, unencrypt, etc) it back into the
-        serialized item data (that is, what was written to the stream
-        returned from transform_save_stream).
-
-        ``transform_descriptors`` should be the same value returned from
-        transform_save_stream, and identifies the transformations to take
-        place.
-
-        A default implementation is provided which simply returns the
-        input raw_stream.
-        """
-        return raw_stream
 
     @abc.abstractmethod
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:

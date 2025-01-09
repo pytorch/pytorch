@@ -3,15 +3,22 @@
 import abc
 import io
 import os
-import zstandard
-from collections.abc import MutableMapping, Sequence
-from typing import Optional, Type
+from collections.abc import Sequence
+from typing import cast, IO, Optional, Type
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
 
+import zstandard
 
-__all__ = ["Extension", "StreamTransformExtension", "Rot13", "ZStandard", "ExtensionRegistry"]
+
+__all__ = [
+    "Extension",
+    "StreamTransformExtension",
+    "Rot13Example",
+    "ZStandard",
+    "ExtensionRegistry",
+]
 
 
 class Extension(abc.ABC):
@@ -58,7 +65,7 @@ class StreamTransformExtension(Extension):
     """
 
     @abc.abstractmethod
-    def transform_to(self, output: io.IOBase) -> io.RawIOBase:
+    def transform_to(self, output: IO[bytes]) -> IO[bytes]:
         """
         Takes a writeable output stream, and generates a new stream which implements the
         output transform.  Input data written to the returned stream will be transformed
@@ -66,7 +73,7 @@ class StreamTransformExtension(Extension):
         """
 
     @abc.abstractmethod
-    def transform_from(self, input: io.IOBase) -> io.RawIOBase:
+    def transform_from(self, input: IO[bytes]) -> IO[bytes]:
         """
         Takes a readable input stream, and generates a new stream which implements the
         input transform.  When the returned stream is read, data will be read from the
@@ -74,16 +81,22 @@ class StreamTransformExtension(Extension):
         """
 
 
-class Rot13(StreamTransformExtension):
+class Rot13Example(StreamTransformExtension):
+    """
+    This is an example stream transform extension which just does rot13 on each
+    alphanumeric character of the stream.  It is mainly intended as a demonstration
+    and for testing; there isn't a production use case for this.
+    """
+
     def __init__(self, chunk_size: int = io.DEFAULT_BUFFER_SIZE) -> None:
         super().__init__()
         self._chunk_size = chunk_size
 
     @staticmethod
-    def from_descriptor(version: str) -> "Rot13":
+    def from_descriptor(version: str) -> "Rot13Example":
         if version.partition(".")[0] != "1":
             raise ValueError(f"Unknown extension {version=}")
-        return Rot13()
+        return Rot13Example()
 
     @staticmethod
     def registry_name() -> str:
@@ -103,9 +116,9 @@ class Rot13(StreamTransformExtension):
                 ch += ord("A") - ord("a")
             b[i] = ch
 
-    def transform_to(self, output: io.IOBase) -> io.RawIOBase:
+    def transform_to(self, output: IO[bytes]) -> IO[bytes]:
         class Writer(io.RawIOBase):
-            def __init__(self, output: io.IOBase) -> None:
+            def __init__(self, output: IO[bytes]) -> None:
                 self.output = output
 
             def writeable(self) -> bool:
@@ -114,28 +127,42 @@ class Rot13(StreamTransformExtension):
             def write(self, b: Buffer) -> Optional[int]:
                 # Don't mutate the input
                 chunk = bytearray(b)
-                Rot13._rot13bytes(chunk, len(chunk))
+                Rot13Example._rot13bytes(chunk, len(chunk))
                 return self.output.write(chunk)
 
             def flush(self) -> None:
                 self.output.flush()
 
-        return Writer(output)
+        return cast(IO[bytes], Writer(output))
 
-    def transform_from(self, input: io.IOBase) -> io.RawIOBase:
+    def transform_from(self, input: IO[bytes]) -> IO[bytes]:
         class Reader(io.RawIOBase):
-            def __init__(self, input: io.IOBase) -> None:
+            def __init__(self, input: IO[bytes]) -> None:
                 self.input = input
 
             def readable(self) -> bool:
                 return True
 
             def readinto(self, b: Buffer) -> Optional[int]:
-                count = self.input.readinto(b)  # type: ignore[attr-defined]
+                if hasattr(self.input, "readinto"):
+                    count = self.input.readinto(b)
+                else:
+                    # It's possible self.input is an IO[bytes] with no readinto method.
+                    # In that case, we emulate with a read and copy.  In practice,
+                    # all of the current concrete extensions have readinto.
+                    # 0 as a flags value is janky, but the flag values aren't available
+                    # in python until 3.12.
+                    view = b.__buffer__(0)
+                    r = self.input.read(len(view))
+                    if r is None:
+                        count = None
+                    else:
+                        count = len(r)
+                        view[:count] = r
                 if count == 0 or count is None:
                     return count
 
-                Rot13._rot13bytes(b, count)
+                Rot13Example._rot13bytes(b, count)
                 return count
 
             def seekable(self) -> bool:
@@ -147,11 +174,11 @@ class Rot13(StreamTransformExtension):
             def tell(self) -> int:
                 return self.input.tell()
 
-        return Reader(input)
+        return cast(IO[bytes], Reader(input))
 
 
 class ZStandard(StreamTransformExtension):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     @staticmethod
@@ -164,22 +191,23 @@ class ZStandard(StreamTransformExtension):
     def registry_name() -> str:
         return "stream.zstd"
 
-    def get_descriptor(self):
+    def get_descriptor(self) -> str:
         return f"{self.registry_name()}/1"
 
-    def transform_to(self, output: io.IOBase) -> io.RawIOBase:
+    def transform_to(self, output: IO[bytes]) -> IO[bytes]:
         compressor = zstandard.ZstdCompressor()
         return compressor.stream_writer(output)
 
-    def transform_from(self, input: io.IOBase) -> io.RawIOBase:
+    def transform_from(self, input: IO[bytes]) -> IO[bytes]:
         decompressor = zstandard.ZstdDecompressor()
         return decompressor.stream_reader(input)
+
 
 class ExtensionRegistry:
     def __init__(self) -> None:
         # Populate default registry contents
-        self.extensions: MutableMapping[str, Type[Extension]] = {
-            cls.registry_name(): cls for cls in [Rot13, ZStandard]
+        self.extensions: dict[str, Type[Extension]] = {
+            cls.registry_name(): cls for cls in (Rot13Example, ZStandard)
         }
 
     def register(self, cls: Type[Extension]) -> None:
@@ -199,7 +227,6 @@ class ExtensionRegistry:
         """
 
         def from_descriptor(desc: str) -> Extension:
-
             name, _, version = desc.partition("/")
             if version is None:
                 version = 0

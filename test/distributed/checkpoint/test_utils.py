@@ -14,7 +14,7 @@ from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.c10d_logger import _c10d_logger
 from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
-from torch.distributed.checkpoint.utils import find_state_dict_object, _create_file_view
+from torch.distributed.checkpoint.utils import _create_file_view, find_state_dict_object
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -131,13 +131,13 @@ class TestMedatadaIndex(TestCase):
 
 class TestReaderView(TestCase):
     def setUp(self):
-        buffer = io.BytesIO(bytearray(range(ord('A'), ord('Z') + 1)))
+        buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
         self.front_view = _create_file_view(buffer, 0, 5)
 
-        buffer = io.BytesIO(bytearray(range(ord('A'), ord('Z') + 1)))
+        buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
         self.middle_view = _create_file_view(buffer, 10, 5)
 
-        buffer = io.BytesIO(bytearray(range(ord('A'), ord('Z') + 1)))
+        buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
         self.back_view = _create_file_view(buffer, len(buffer.getbuffer()) - 5, 5)
 
     def testShortRead(self):
