@@ -2939,16 +2939,14 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ] = prev_nccl_async_error_handling
-    
+
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
         # avoid FR dumping logic during restart
-        prev_nccl_dump_handling = os.environ.get(
-            "TORCH_NCCL_DUMP_ON_TIMEOUT", None
-        )
+        prev_nccl_dump_handling = os.environ.get("TORCH_NCCL_DUMP_ON_TIMEOUT", None)
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         # test the barrier behavior in the non blocking wait setting
         prev_nccl_async_error_handling = os.environ.get(
@@ -3021,11 +3019,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             ] = prev_nccl_async_error_handling
 
         if prev_nccl_dump_handling is not None:
-            os.environ[
-                "TORCH_NCCL_DUMP_ON_TIMEOUT"
-            ] = prev_nccl_dump_handling
-
-
+            os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = prev_nccl_dump_handling
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val

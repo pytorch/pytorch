@@ -975,9 +975,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix()
-            << "ProcessGroupNCCL initialization options: " << "size: " << size
-            << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
+            << "size: " << size << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -2118,7 +2117,8 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   } else if (status == std::future_status::ready) {
     auto end = std::chrono::steady_clock::now();
     LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms" << " giving time for flight recorder dumps to finish.";
+              << "ms"
+              << " giving time for flight recorder dumps to finish.";
   }
 }
 
