@@ -549,12 +549,12 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
+        # For cpu/xpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in ["cpu", "xpu"]
                 for n in conv_nodes
                 for idx in [0, 1]
             )
