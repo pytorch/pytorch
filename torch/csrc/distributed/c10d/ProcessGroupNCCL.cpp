@@ -806,11 +806,13 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   // register the deleter as a callback when the WorkNCCL object is destroyed.
-  auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
-    std::lock_guard<std::mutex> lock(this->cacheMutex_);
+  auto deleter = [cache =
+                      std::shared_ptr<ProcessGroupNCCL::CUDAEventCache>(this),
+                  timing](at::cuda::CUDAEvent* event) {
+    std::lock_guard<std::mutex> lock(cache->cacheMutex_);
     // We put the event back to the cache deque once the WorkNCCL object is
     // destroyed.
-    this->eventsArray_[timing ? 1 : 0].push_back(event);
+    cache->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
@@ -836,7 +838,7 @@ ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
   // Per-thread ownership is needed to support multi-threaded case (instead of
   // multi-process case).
   static thread_local std::
-      map<at::DeviceIndex, ProcessGroupNCCL::CUDAEventCache>
+      map<at::DeviceIndex, std::shared_ptr<ProcessGroupNCCL::CUDAEventCache>>
           cacheDeviceMap;
   // Check if device has already been in the map, if not, add a new entry
   auto it = cacheDeviceMap.find(device);
@@ -847,9 +849,10 @@ ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
         it,
         std::piecewise_construct,
         std::forward_as_tuple(device),
-        std::forward_as_tuple());
+        std::forward_as_tuple(
+            std::make_shared<ProcessGroupNCCL::CUDAEventCache>()));
   }
-  return it->second;
+  return *(it->second);
 }
 
 static std::atomic<size_t> process_group_id = 0;
