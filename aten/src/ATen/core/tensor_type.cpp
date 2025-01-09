@@ -292,10 +292,11 @@ TensorTypePtr TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
   } else {
     // strides are all null, but still have number of strides equal to number of ranks
-    TORCH_INTERNAL_ASSERT(sizes.sizes().has_value() && sizes.size());
-    auto symbol_sizes = SymbolicShape(*sizes.sizes());
+    auto const& sizes_opt = sizes.sizes();
+    TORCH_INTERNAL_ASSERT(sizes_opt.has_value() && sizes.size());
+    auto symbol_sizes = SymbolicShape(sizes_opt.value());
     return TensorType::create(
-      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(sizes_opt->size()), requires_grad, undefined);
   }
 }
 

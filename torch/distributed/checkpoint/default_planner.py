@@ -6,20 +6,12 @@ import io
 import logging
 import operator
 from collections import ChainMap
-from collections.abc import Sequence
 from functools import reduce
 from typing import Any, cast, Dict, List, Optional, Tuple, Union
-
-# introduced as collections.abc.Buffer in Python 3.12
-from typing_extensions import Buffer
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
-from torch.distributed.checkpoint._extension import (
-    ExtensionRegistry,
-    StreamTransformExtension,
-)
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
@@ -80,13 +72,11 @@ class DefaultSavePlanner(SavePlanner):
         flatten_sharded_tensors: bool = True,
         dedup_replicated_tensors: Optional[bool] = None,
         dedup_save_to_lowest_rank: bool = False,
-        extensions: Optional[Sequence[StreamTransformExtension]] = None,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.mappings = {}
         self.dedup_save_to_lowest_rank = dedup_save_to_lowest_rank
-        self.extensions = () if extensions is None else extensions
         if dedup_replicated_tensors is not None:
             logger.warning(
                 "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
@@ -151,48 +141,13 @@ class DefaultSavePlanner(SavePlanner):
         """Extension from the planner interface to make it easy to extend the default planner."""
         return find_state_dict_object(self.state_dict, index)
 
-    def transform_object(self, write_item: WriteItem, object: Any) -> Any:
+    def transform_object(self, write_item: WriteItem, object: Any):
         """Extension from the planner interface to make it easy to extend the default planner."""
         if write_item.type == WriteItemType.BYTE_IO:
             bytes = io.BytesIO()
             torch.save(object, bytes)
             object = bytes
         return object
-
-    def transform_save_stream(
-        self, write_item: WriteItem, raw_stream: io.IOBase
-    ) -> Tuple[
-        io.IOBase,
-        List[str],
-    ]:
-        # In order to avoid leaking fds, transformers' close must
-        # cascade to wrapped streams, but since this function can
-        # append to the raw stream, we can't close the actual stream.
-        # So, we use this to put a wrapper around the raw stream's
-        # close() to make it a noop, and it gets closed once all files
-        # are appended.
-
-        class NoCloseWriter(io.IOBase):
-            def __init__(self, raw: io.IOBase):
-                self.raw = raw
-
-            def writeable(self) -> bool:
-                return True
-
-            def write(self, b: Buffer) -> Optional[int]:
-                return self.raw.write(b)
-
-            def close(self):
-                self.flush()
-                self.raw.flush()
-                # but not close.
-
-        transform_to: io.IOBase = NoCloseWriter(raw_stream)
-
-        for ex in self.extensions:
-            transform_to = ex.transform_to(transform_to)
-
-        return (transform_to, [ex.get_descriptor() for ex in reversed(self.extensions)])
 
 
 class DefaultLoadPlanner(LoadPlanner):
@@ -214,16 +169,12 @@ class DefaultLoadPlanner(LoadPlanner):
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
         allow_partial_load: bool = False,
-        extension_registry: Optional[ExtensionRegistry] = None,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
         self.allow_partial_load = allow_partial_load
-        self.extension_registry = (
-            ExtensionRegistry() if extension_registry is None else extension_registry
-        )
 
     def set_up_planner(
         self,
@@ -315,19 +266,6 @@ class DefaultLoadPlanner(LoadPlanner):
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """Extension from the planner interface to make it easy to extend the default planner."""
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
-
-    def transform_load_stream(
-        self,
-        read_item: ReadItem,
-        transform_descriptors: Sequence[str],
-        raw_stream: io.IOBase,
-    ) -> io.IOBase:
-        extensions = self.extension_registry.from_descriptor_list(transform_descriptors)
-        transform_from = raw_stream
-        for ex in extensions:
-            if isinstance(ex, StreamTransformExtension):
-                transform_from = ex.transform_from(transform_from)
-        return transform_from
 
 
 class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):

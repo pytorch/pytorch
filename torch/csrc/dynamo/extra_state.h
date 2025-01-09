@@ -2,6 +2,8 @@
 
 #include <Python.h>
 
+#include <torch/csrc/dynamo/framelocals_mapping.h>
+
 #ifdef __cplusplus
 
 #include <torch/csrc/dynamo/utils.h>
@@ -145,13 +147,12 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 // Ownership contract
 // args
 //  - extra_state: Borrowed
-//  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
 //   - Py_None or PyObject: Trace id of the compiled code.
 void lookup(
     ExtraState* extra_state,
-    PyObject* f_locals,
+    FrameLocalsMapping* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
     const char** trace_annotation,

@@ -4,18 +4,7 @@ import dataclasses
 import enum
 import itertools as it
 import logging
-from typing import (
-    Any,
-    cast,
-    DefaultDict,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, cast, DefaultDict, Dict, Iterator, List, Optional, Set, Union
 from typing_extensions import Literal
 
 import torch
@@ -33,8 +22,8 @@ from torch._utils import _element_size
 from torch.profiler import _utils
 
 
-KeyAndID = Tuple["Key", int]
-TensorAndID = Tuple["TensorKey", int]
+KeyAndID = tuple["Key", int]
+TensorAndID = tuple["TensorKey", int]
 
 log = logging.getLogger(__name__)
 
@@ -145,13 +134,13 @@ class TensorKey(Key):
         return None
 
     @property
-    def _as_sortable(self) -> Tuple[int, int, str, int]:
+    def _as_sortable(self) -> tuple[int, int, str, int]:
         return self.id, self.storage.allocation_id, self.device.type, self.device.index
 
 
 def _extract_parameters_and_gradients(
     node: _ProfilerEvent,
-) -> Iterator[Tuple[Optional[TensorKey], Optional[TensorKey]]]:
+) -> Iterator[tuple[Optional[TensorKey], Optional[TensorKey]]]:
     children = node.children
 
     # AccumulateGrad is used in the Autograd engine to handle gradient updates.
@@ -199,13 +188,13 @@ def extract_parameters(node: _ProfilerEvent) -> Iterator[TensorKey]:
 
 def extract_gradients(
     node: _ProfilerEvent,
-) -> Iterator[Tuple[Optional[TensorKey], TensorKey]]:
+) -> Iterator[tuple[Optional[TensorKey], TensorKey]]:
     for p, p_grad in _extract_parameters_and_gradients(node):
         if p_grad is not None:
             yield p, p_grad
 
 
-def get_scopes(event: Optional[_ProfilerEvent]) -> Tuple[RecordScope, ...]:
+def get_scopes(event: Optional[_ProfilerEvent]) -> tuple[RecordScope, ...]:
     scopes = []
     while event:
         if event.typed[0] == _EventType.TorchOp:
@@ -228,7 +217,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[Optional[bool], ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> tuple[Optional[bool], ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -246,7 +235,7 @@ class SchemaMatcher:
         return tuple(mutable or (None for _ in t.inputs))
 
     @classmethod
-    def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
+    def match_schemas(cls, t: _ExtraFields_TorchOp) -> tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
             TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
@@ -281,7 +270,7 @@ class SchemaMatcher:
                 isinstance(i, TensorKey) for i in observed
             )
 
-        type_map: Tuple[Tuple[Any, Union[type, Tuple[type, ...]]], ...] = (
+        type_map: tuple[tuple[Any, Union[type, tuple[type, ...]]], ...] = (
             (torch._C.TensorType, TensorKey),
             (torch._C.NoneType, type(None)),
             (torch._C.BoolType, bool),
@@ -302,7 +291,7 @@ class SchemaMatcher:
         return observed is None
 
     @staticmethod
-    def lookup_schemas(name: str) -> Optional[Tuple[FunctionSchema, ...]]:
+    def lookup_schemas(name: str) -> Optional[tuple[FunctionSchema, ...]]:
         # TODO(robieta):
         #   _jit_get_schemas_for_operator is quite expensive. (~100us / call)
         #   Consider adding `functools.lru_cache` if that becomes an issue.
@@ -332,7 +321,7 @@ class OpTree:
         yield from _utils.traverse_dfs(self._root_nodes, *args, **kwargs)
 
     @property
-    def sorted_nodes(self) -> Tuple[_ProfilerEvent, ...]:
+    def sorted_nodes(self) -> tuple[_ProfilerEvent, ...]:
         return self._sorted_nodes
 
 
@@ -483,7 +472,7 @@ class DataFlowNode:
         return dict(sorted((k, v) for k, v in edges.items() if k is not None))
 
     @property
-    def inputs(self) -> Dict[TensorKey, Tuple[bool, int]]:
+    def inputs(self) -> Dict[TensorKey, tuple[bool, int]]:
         return {
             # MyPy can't see through `is_allocation` to know that
             # `v.input_version` is not None.
@@ -501,7 +490,7 @@ class DataFlowNode:
         }
 
     @property
-    def intermediates(self) -> Tuple[TensorKey, ...]:
+    def intermediates(self) -> tuple[TensorKey, ...]:
         return tuple(
             k for k, v in self._edges.items() if v.is_allocation and v.is_deletion
         )
@@ -521,12 +510,12 @@ class DataFlowGraph:
         self.validate()
 
     @property
-    def flow_nodes(self) -> Tuple[DataFlowNode, ...]:
+    def flow_nodes(self) -> tuple[DataFlowNode, ...]:
         return tuple(self._flow_nodes)
 
     def validate(self):
         # Check that each (Tensor, version) pair has a unique creation node
-        outputs: Set[Tuple[TensorKey, int]] = set()
+        outputs: Set[tuple[TensorKey, int]] = set()
         for node in self.flow_nodes:
             node_outputs = set(node.outputs.items())
             duplicates = outputs & node_outputs
@@ -546,11 +535,11 @@ class DataFlowGraph:
                 tensor_versions[key] = version
 
     @property
-    def leaf_events(self) -> Tuple[_ProfilerEvent, ...]:
+    def leaf_events(self) -> tuple[_ProfilerEvent, ...]:
         return self._leaf_events
 
     @staticmethod
-    def _extract_leaf_events(op_tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
+    def _extract_leaf_events(op_tree: OpTree) -> tuple[_ProfilerEvent, ...]:
         """Partially traverse the op tree and extract top level ops.
 
         Consider the following code:
@@ -676,10 +665,10 @@ class MemoryProfile:
         self._set_autograd_detail()
 
     @property
-    def timeline(self) -> Tuple[Tuple[int, Action, KeyAndID, int], ...]:
-        output: List[Tuple[int, Action, KeyAndID, int]] = []
-        allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
-        live_unknown: Dict[Tuple[int, torch.device], Literal[True]] = {}
+    def timeline(self) -> tuple[tuple[int, Action, KeyAndID, int], ...]:
+        output: List[tuple[int, Action, KeyAndID, int]] = []
+        allocation_times: Dict[tuple[TensorKey, bool], int] = {}
+        live_unknown: Dict[tuple[int, torch.device], Literal[True]] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -712,7 +701,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
         last_version = dict(sorted(snapshot.keys()))
 
-        events: List[Tuple[int, Action, TensorAndID]] = [
+        events: List[tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
             for key, version in snapshot.keys()
             if (key, True) not in allocation_times and version == 0
@@ -1072,7 +1061,7 @@ class MemoryProfileTimeline:
         as a JSON formatted file to the given path for the given
         device."""
         device = torch.device(device_str)
-        raw_events: List[Tuple[int, int, int, int]] = []
+        raw_events: List[tuple[int, int, int, int]] = []
 
         def get_category_index(key, version):
             category = (
