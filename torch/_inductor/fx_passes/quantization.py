@@ -5,7 +5,7 @@ import functools
 import itertools
 import math
 import operator
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -401,7 +401,6 @@ def _register_quantized_linear_lowering(
     pattern,
     pass_number,
     computation_op,
-    unary_attr,
 ):
     @register_lowering_pattern(
         pattern,
@@ -427,11 +426,13 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
-        assert (
-            kwargs["postop_name"] == "none"
-        )  # Expected no post op fused in weight prepack phase
+        o_inv_scale = kwargs["output_scale"]
+        o_zero_point = kwargs["output_zero_point"]
+
+        # post op
+        postop_name = kwargs["postop_name"]
+        postop_args = kwargs["postop_args"]
+        postop_algorithm = kwargs["postop_algorithm"]
 
         computation_args = (
             x,
@@ -444,12 +445,12 @@ def _register_quantized_linear_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
-            unary_attr.op_name,
-            unary_attr.scalars_attr,
-            unary_attr.algorithm_attr,
+            postop_name,
+            postop_args,
+            postop_algorithm,
         )
-        counters["inductor"]["qlinear_unary_matcher_count"] += 1
-        counters["inductor"]["qlinear_unary_matcher_nodes"] += len(match.nodes)
+        counters["inductor"]["qlinear_unary_lower_count"] += 1
+        counters["inductor"]["qlinear_unary_lower_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qlinear
@@ -704,13 +705,7 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
-    from .mkldnn_fusion import (
-        _gelu_fusion_1 as _gelu_fusion_erf,
-        _gelu_fusion_2 as _gelu_fusion_tanh,
-        _hardswish_fusion,
-        _hardtanh_fusion,
-        _silu_fusion,
-    )
+    from .mkldnn_fusion import _hardswish_fusion, _hardtanh_fusion, _silu_fusion
 
     class UnaryAttr:
         def __init__(
@@ -720,8 +715,8 @@ def _register_quantization_unary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
+    # QConv2d
     for original_pattern_output_dtype in [torch.float32, torch.bfloat16]:
-        # QConv2d
         # Priority 1 to match: QConv2d Unary pattern with int8 output
         # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly.
         # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
@@ -819,87 +814,19 @@ def _register_quantization_unary_fusion():
                 unary_attr,  # unary_attr
             )
 
-        # QLinear
-        for x_scale_zp_are_tensors in (False, True):
-            qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
-            # Priority 1 to match: QLinear Unary pattern with int8 output
-            linear_unary_replace_patterns = {
-                UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                    qlinear_pattern,
-                ),
-                UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                    generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
-                ),
-                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                    _unary_fusion_pattern(
-                        _gelu_fusion_erf,
-                        get_qlinear_pt2e_pattern(
-                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
-                        ),
-                        2,
-                        is_bf16,
-                    ),
-                    with_dtype_convert=is_bf16,
-                ),
-                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                    _unary_fusion_pattern(
-                        _gelu_fusion_tanh,
-                        get_qlinear_pt2e_pattern(
-                            x_scale_zp_are_tensors, 1 if is_bf16 else 4
-                        ),
-                        4,
-                        is_bf16,
-                    ),
-                    with_dtype_convert=is_bf16,
-                ),
-            }
-
-            for unary_attr, patterns in linear_unary_replace_patterns.items():
-                _register_quantized_linear_lowering(
-                    patterns,
-                    1,  # pass_number
-                    torch.ops.onednn.qlinear_pointwise,  # computation_op
-                    unary_attr,  # unary_attr
-                )
-
-            # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
-            linear_unary_replace_float_out_patterns = {
-                UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                    qlinear_pattern, aten.relu.default
-                ),
-                UnaryAttr("gelu", [], "none"): _may_generate_pattern_with_dtype_convert(
-                    _unary_fusion_pattern(
-                        _gelu_fusion_erf,
-                        get_qlinear_pt2e_pattern(
-                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
-                        ),
-                        2,
-                        is_bf16,
-                    ),
-                    Arg(),
-                    is_bf16,
-                ),
-                UnaryAttr("gelu", [], "tanh"): _may_generate_pattern_with_dtype_convert(
-                    _unary_fusion_pattern(
-                        _gelu_fusion_tanh,
-                        get_qlinear_pt2e_pattern(
-                            x_scale_zp_are_tensors, 1 if is_bf16 else 4
-                        ),
-                        4,
-                        is_bf16,
-                    ),
-                    Arg(),
-                    is_bf16,
-                ),
-            }
-
-            for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
-                _register_quantized_linear_lowering(
-                    patterns,
-                    2,  # pass_number
-                    torch.ops.onednn.qlinear_pointwise,  # computation_op
-                    unary_attr,  # unary_attr
-                )
+    # QLinear
+    for x_scale_zp_are_tensors in (False, True):
+        qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
+        computation_op = (
+            torch.ops.onednn.qlinear_pointwise.tensor
+            if x_scale_zp_are_tensors
+            else torch.ops.onednn.qlinear_pointwise.default
+        )
+        _register_quantized_linear_lowering(
+            qlinear_pattern,
+            2,  # pass_number
+            computation_op,
+        )
 
 
 def _register_quantization_binary_fusion():
@@ -1911,7 +1838,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -2225,7 +2152,7 @@ def _register_qlinear_weight_prepack_pass(
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -2727,7 +2654,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
             )
 
             # create new linear node and insert on graph
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 x,
                 prepack_weight_node,
                 bias,
@@ -2802,6 +2729,434 @@ def _register_linear_dynamic_fp16_weight_prepack():
             )
 
 
+def _register_smooth_quant_int_mm_pattern():
+    """
+    The pattern is:
+      (no bias) reshape -> _int_mm -> convert_element_type -> (expand ->) mul -> mul -> reshape
+    or
+      (with bias) pattern_no_bias -> add (-> reshape -> reshape)
+    """
+
+    # When torch.compile'ing with dynamic=True, the expand node and the two tailing reshape nodes exist
+    # When torch.compile'ing with dynamic=False, they don't exist
+    def get_pattern_no_bias(expand_a_scale: bool, reshape_a: bool = True):
+        return CallFunction(
+            aten.mul.Tensor,
+            CallFunction(
+                aten.mul.Tensor,
+                CallFunction(
+                    prims.convert_element_type.default,
+                    CallFunction(
+                        aten._int_mm.default,
+                        CallFunction(
+                            aten.reshape.default,
+                            KeywordArg("a"),
+                            KeywordArg("in_shape"),
+                        )
+                        if reshape_a
+                        else KeywordArg("a"),
+                        KeywordArg("b"),
+                    ),
+                    KeywordArg("dtype"),
+                ),
+                (
+                    CallFunction(
+                        aten.expand.default,
+                        KeywordArg("x_scale"),
+                        Arg(),
+                    )
+                    if expand_a_scale
+                    else KeywordArg("x_scale")
+                ),
+            ),
+            KeywordArg("w_scale"),
+        )
+
+    def _with_outer_reshape(pattern):
+        return CallFunction(
+            aten.reshape.default, pattern, KeywordArg("out_shape_no_bias")
+        )
+
+    # for torch.compile(dynamic=False)
+    pattern_no_bias_1 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=False))
+    pattern_with_bias_1 = CallFunction(
+        aten.add.Tensor,
+        pattern_no_bias_1,
+        KeywordArg("bias"),
+    )
+    # for torch.compile(dynamic=True)
+    pattern_no_bias_2 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=True))
+    pattern_with_bias_2 = CallFunction(
+        aten.reshape.default,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.add.Tensor,
+                pattern_no_bias_2,
+                KeywordArg("bias"),
+            ),
+            Arg(),
+        ),
+        KeywordArg("out_shape_with_bias"),
+    )
+
+    # The following patterns are for torchao int8_dynamic_activation_int8_weight linear,
+    # when both activation and weights are symmetrically quantized.
+    # In practice, though, they may also match smooth-quant pattern when a 2D input shape would be used.
+    # Since add is not currently being used as a oneDNN post-op, but is unfused, we don't need these patterns with bias.
+    # Ideally, we should add mul + add post-op support in ATen int8 oneDNN linear op.
+    pattern1_with_no_outer_or_act_reshape = get_pattern_no_bias(
+        expand_a_scale=False, reshape_a=False
+    )
+    pattern2_with_no_outer_or_act_reshape = get_pattern_no_bias(
+        expand_a_scale=True, reshape_a=False
+    )
+
+    def _validate_pattern(match: Match):
+        if len(match.nodes) not in [4, 5, 6, 7, 10]:
+            return False
+        # Make sure weight is a constant
+        aten_int_mm_node = filter_nodes(match.nodes, aten._int_mm.default)[0]
+        if not isinstance(aten_int_mm_node.args[1], torch.fx.node.Node):
+            return False
+        if aten_int_mm_node.args[1].op != "get_attr":
+            return False
+
+        if len(match.nodes) == 10:
+            # Check the two tailing reshape nodes can be fused
+            if match.nodes[9].args[1] != match.nodes[6].args[1]:
+                return False
+        if len(match.nodes) == 10 or (
+            len(match.nodes) == 7 and match.nodes[6].target is aten.add.Tensor
+        ):
+            bias_idx = 7 if len(match.nodes) == 10 else 6
+            # Check bias shape
+            bias_node = match.nodes[bias_idx].args[1]
+            if not isinstance(bias_node, torch.fx.node.Node):
+                return False
+            if len(bias_node.meta.get("tensor_meta").shape) != 1:  # type: ignore[union-attr]
+                return False
+        return True
+
+    pattern_to_pass_number = {
+        pattern_no_bias_2: 0,
+        pattern_with_bias_2: 0,
+        pattern_no_bias_1: 1,
+        pattern_with_bias_1: 1,
+        pattern1_with_no_outer_or_act_reshape: 2,
+        pattern2_with_no_outer_or_act_reshape: 2,
+    }
+    for pattern, pass_number in pattern_to_pass_number.items():
+
+        @register_freezing_graph_pattern(
+            pattern,
+            extra_check=_validate_pattern,
+            pass_number=pass_number,
+        )
+        def _int_mm_weight_prepack(match: Match, *args, **kwargs):
+            bias = kwargs.get("bias", None)
+            x = kwargs["a"]
+            weight = kwargs["b"]
+            dtype = kwargs["dtype"]
+            x_scale = kwargs["x_scale"]
+            w_scale = kwargs["w_scale"]
+            x_shape = x.meta.get("tensor_meta").shape
+            if has_free_symbols(x_shape):
+                # For dynamic shape case, we can't get activation shape ahead of runtime.
+                x_shape = None
+
+            out_node = match.output_node()
+            with match.graph.inserting_before(out_node):
+                transpose_node = match.graph.call_function(
+                    aten.permute.default, args=(weight, [1, 0])
+                )
+                contig_node = match.graph.call_function(
+                    aten.contiguous.default, args=(transpose_node,)
+                )
+                packed_weight_inputs = (
+                    contig_node,
+                    x_shape,
+                )
+                packed_weight_op = torch.ops.onednn.qlinear_prepack
+                prepack_weight_node = match.graph.call_function(
+                    packed_weight_op, args=packed_weight_inputs
+                )
+
+                dummy_zp = match.graph.call_function(aten.empty, args=([0],))
+                w_scale = match.graph.call_function(
+                    prims.convert_element_type.default, args=(w_scale, torch.float32)
+                )
+
+                x_scale_shape = x_scale.meta.get("tensor_meta").shape
+                x_scale_is_scalar = False
+                if not has_free_symbols(x_scale_shape):
+                    prod = 1
+                    for d in x_scale_shape:
+                        prod *= d
+                    x_scale_is_scalar = prod == 1
+
+                new_args: tuple[Any, ...]
+                if x_scale_is_scalar:
+                    # in this case, we can call onednn.qlinear directly
+                    new_args = (
+                        x,
+                        x_scale,
+                        dummy_zp,  # x_zp
+                        prepack_weight_node,
+                        w_scale,
+                        dummy_zp,  # w_zp
+                        bias,
+                        1.0,  # output_scale
+                        0,  # output_zero_point
+                        dtype,  # output_dtype
+                        "none",  # post op name
+                        [],  # post op args
+                        "",  # post op algorithm
+                    )
+                    new_linear_node = match.graph.call_function(
+                        torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
+                    )
+                    out_node.replace_all_uses_with(new_linear_node)
+                    new_linear_node.meta.update(out_node.meta)
+                else:
+                    # onednn.qlinear does not support per-channel quantization of x
+                    # so in this case, we have to apply x scale and add bias ourselves after qlinear
+                    in_shape = kwargs.get("in_shape", None)
+                    if in_shape is None:
+                        x_reshaped = x
+                    else:
+                        x_reshaped = match.graph.call_function(
+                            aten.reshape.default, args=(x, in_shape)
+                        )
+                    new_args = (
+                        x_reshaped,
+                        1.0,  # x_scale
+                        0,  # x_zp
+                        prepack_weight_node,
+                        w_scale,
+                        dummy_zp,  # w_zp
+                        None,  # bias
+                        1.0,  # output_scale
+                        0,  # output_zero_point
+                        dtype,  # output_dtype
+                        "none",  # post op name
+                        [],  # post op args
+                        "",  # post op algorithm
+                    )
+                    new_linear_node = match.graph.call_function(
+                        torch.ops.onednn.qlinear_pointwise, args=new_args
+                    )
+                    # apply x scale
+                    new_out_node = match.graph.call_function(
+                        aten.mul.Tensor, args=(new_linear_node, x_scale)
+                    )
+
+                    # Add bias and reshape
+                    has_outer_reshape = (
+                        kwargs.get("out_shape_with_bias", None) is not None
+                        or kwargs.get("out_shape_no_bias", None) is not None
+                    )
+
+                    if has_outer_reshape:
+                        out_shape = kwargs.get(
+                            "out_shape_with_bias", kwargs["out_shape_no_bias"]
+                        )
+                    if bias is not None:
+                        new_out_node = match.graph.call_function(
+                            aten.add.Tensor, args=(new_out_node, bias)
+                        )
+                        if has_outer_reshape:
+                            new_out_node = match.graph.call_function(
+                                aten.reshape.default,
+                                args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
+                            )
+                    else:
+                        if has_outer_reshape:
+                            new_out_node = match.graph.call_function(
+                                aten.reshape.default,
+                                args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
+                            )
+                    out_node.replace_all_uses_with(new_out_node)
+                    new_out_node.meta.update(out_node.meta)
+                for node in reversed(match.nodes):
+                    match.graph.erase_node(node)
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                    match.nodes
+                )
+
+
+def _register_qlinear_post_op_fusion_pass(
+    pattern,
+    pass_number,
+    computation_op,
+    unary_attr,
+):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_linear_optimization_pattern(),
+        pass_number=pass_number,
+    )
+    def qlinear_post_op_fusion(match: Match, *args, **kwargs):
+        """
+        Match the pattern:
+        qlinear - post op
+        """
+        output_dtype = _get_pattern_output_dtype(match)
+        # Activation QParams
+        x, x_scale, x_zp = (
+            kwargs["x"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
+        )
+        # Weight QParams
+        packed_weight, w_scale, w_zp = (
+            kwargs["packed_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+
+        # bias
+        b = kwargs["b"] if "b" in kwargs else None
+
+        # Output QParams
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        assert (
+            kwargs["postop_name"] == "none"
+        )  # Expected no post op fused in weight prepack phase
+
+        out_node = match.output_node()
+        with match.graph.inserting_before(out_node):
+            computation_args = (
+                x,
+                x_scale,
+                x_zp,
+                packed_weight,
+                w_scale,
+                w_zp,
+                b,
+                o_inv_scale,
+                o_zero_point,
+                output_dtype,
+                unary_attr.op_name,
+                unary_attr.scalars_attr,
+                unary_attr.algorithm_attr,
+            )
+            new_linear_node = match.graph.call_function(
+                computation_op, args=computation_args
+            )
+            out_node.replace_all_uses_with(new_linear_node)
+            new_linear_node.meta.update(out_node.meta)
+            for node in reversed(match.nodes):
+                match.graph.erase_node(node)
+        counters["inductor"]["qlinear_unary_matcher_count"] += 1
+        counters["inductor"]["qlinear_unary_matcher_nodes"] += len(match.nodes)
+
+
+def _register_qlinear_unary_fusion():
+    from .mkldnn_fusion import (
+        _gelu_fusion_1 as _gelu_fusion_erf,
+        _gelu_fusion_2 as _gelu_fusion_tanh,
+    )
+
+    class UnaryAttr:
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
+            self.op_name = op_name
+            self.scalars_attr = scalars_attr if scalars_attr else []
+            self.algorithm_attr = algorithm_attr if algorithm_attr else ""
+
+    for original_pattern_output_dtype in [torch.float32, torch.bfloat16]:
+        is_bf16 = original_pattern_output_dtype == torch.bfloat16
+        for x_scale_zp_are_tensors in (False, True):
+            qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
+            computation_op = (
+                torch.ops.onednn.qlinear_pointwise.tensor
+                if x_scale_zp_are_tensors
+                else torch.ops.onednn.qlinear_pointwise.default
+            )
+            # Priority 1 to match: QLinear Unary pattern with int8 output
+            linear_unary_replace_patterns = {
+                UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+                    qlinear_pattern,
+                ),
+                UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+                    generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
+                ),
+                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
+                    ),
+                    with_dtype_convert=is_bf16,
+                ),
+                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                        ),
+                        4,
+                        is_bf16,
+                    ),
+                    with_dtype_convert=is_bf16,
+                ),
+            }
+
+            for unary_attr, patterns in linear_unary_replace_patterns.items():
+                _register_qlinear_post_op_fusion_pass(
+                    patterns,
+                    3,  # pass_number
+                    computation_op,
+                    unary_attr,  # unary_attr
+                )
+
+            # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
+            linear_unary_replace_float_out_patterns = {
+                UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+                    qlinear_pattern, aten.relu.default
+                ),
+                UnaryAttr("gelu", [], "none"): _may_generate_pattern_with_dtype_convert(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
+                    ),
+                    Arg(),
+                    is_bf16,
+                ),
+                UnaryAttr("gelu", [], "tanh"): _may_generate_pattern_with_dtype_convert(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                        ),
+                        4,
+                        is_bf16,
+                    ),
+                    Arg(),
+                    is_bf16,
+                ),
+            }
+
+            for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
+                _register_qlinear_post_op_fusion_pass(
+                    patterns,
+                    4,  # pass_number
+                    computation_op,
+                    unary_attr,  # unary_attr
+                )
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
@@ -2813,6 +3168,12 @@ def _register_quantization_weight_pack_pass():
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
     _register_linear_dynamic_fp16_weight_prepack()
+
+    # Step 4: weight prepack for SmoothQuant from Torchao
+    _register_smooth_quant_int_mm_pattern()
+
+    # Step 5: QLinear post op Fusion
+    _register_qlinear_unary_fusion()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):

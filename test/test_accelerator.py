@@ -51,8 +51,8 @@ class TestAccelerator(TestCase):
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream(), s1)
         event = torch.Event()
-        a = torch.randn(100)
-        b = torch.randn(100)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
         c = a + b
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream(), s2)
@@ -67,6 +67,17 @@ class TestAccelerator(TestCase):
         torch.accelerator.synchronize()
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
+
+    def test_current_stream_query(self):
+        s = torch.accelerator.current_stream()
+        self.assertEqual(torch.accelerator.current_stream(s.device), s)
+        self.assertEqual(torch.accelerator.current_stream(s.device.index), s)
+        self.assertEqual(torch.accelerator.current_stream(str(s.device)), s)
+        other_device = torch.device("cpu")
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.current_stream(other_device)
 
 
 if __name__ == "__main__":
