@@ -229,6 +229,9 @@ class DTensor(torch.Tensor):
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
     requires every Tensor argument of the operator be DTensor.
 
+    .. note:: Directly using the Tensor subclass constructor here is not the recommended way to create a ``DTensor``
+        (i.e. it does not handle autograd correctly hence is not the public API). Please refer to the `create_dtensor`_
+        section to see how to create a ``DTensor``.
     """
 
     _local_tensor: torch.Tensor
@@ -603,6 +606,16 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __create_chunk_list__(self):
+        """
+        Return a list of ChunkStorageMetadata, which is a dataclass that describes the size/offset of the local shard/replica
+        on current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually only
+        has one element.
+
+        This dunder method is primariy used for distributed checkpoint purpose.
+
+        Returns:
+            A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
+        """
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
