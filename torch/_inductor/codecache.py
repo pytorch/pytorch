@@ -50,6 +50,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.version
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -1939,9 +1940,9 @@ def _precompile_header(
 ) -> str:
     compiler_version = get_compiler_version_info(compiler)
     header_hash, header_full_path = write(
-        content=f'#include "{header}"\n',
+        content=f"#include <{header}>\n",
         extension="h",
-        extra=f"{hashable_cmd_line} {compiler_version}",
+        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__}",
         specified_dir=_HEADER_DIR,
     )
 
@@ -1974,14 +1975,10 @@ def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     the path to the cpp_wrapper header file to be precompiled."""
     base_device = device.split(":")[0]
     is_array_ref = config.aot_inductor.allow_stack_allocation
-    return str(
-        Path(torch.__file__).resolve().parent
-        / "include"
-        / "torch"
-        / "csrc"
-        / "inductor"
-        / ("cpp_wrapper_array_ref" if is_array_ref else "cpp_wrapper")
-        / f"{'aoti_' if aot_mode else ''}{base_device}.h"
+    return (
+        "torch/csrc/inductor/"
+        f"{'cpp_wrapper_array_ref' if is_array_ref else 'cpp_wrapper'}/"
+        f"{'aoti_' if aot_mode else ''}{base_device}.h"
     )
 
 
@@ -2267,14 +2264,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
         if device.startswith("cpu"):
-            return str(
-                Path(torch.__file__).resolve().parent
-                / "include"
-                / "torch"
-                / "csrc"
-                / "inductor"
-                / "cpp_prefix.h"
-            )
+            return "torch/csrc/inductor/cpp_prefix.h"
         return None
 
     @classmethod
