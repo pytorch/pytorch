@@ -263,8 +263,8 @@ class TestAttention(TestCase):
 
         return (y,)
 
-    def create_inputs(self, batchsize, seqlen):
-        x = torch.ones(batchsize, seqlen, dtype=torch.int32).to(device="cuda")
+    def gen_rand_inputs(self, batchsize, seqlen):
+        x = torch.randint(0, 128256, (batchsize, seqlen)).to(device="cuda")
         freqs_cis = torch.randn(seqlen, 64, 2).to(device="cuda", dtype=self.dtype)
         mask = torch.ones([batchsize, 1, seqlen, 15], device="cuda")
         input_pos = torch.arange(0, seqlen, dtype=torch.int32, device="cuda")
@@ -292,14 +292,14 @@ class TestAttention(TestCase):
         return inputs_p
 
     def test_attention_all(self):
-        inputs = self.create_inputs(15, 991)
+        inputs = self.gen_rand_inputs(15, 991)
         inputs_p = self.pad_inputs(inputs, 16)
 
         self.run_unpadded_padded(self.f_attention, inputs, inputs_p)
 
     def test_attention_bench(self):
         with torch.no_grad():
-            inputs = self.create_inputs(15, 991)
+            inputs = self.gen_rand_inputs(15, 991)
             inputs_p = self.pad_inputs(inputs, 16)
 
             self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)
