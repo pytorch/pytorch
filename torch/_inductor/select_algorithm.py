@@ -1989,6 +1989,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 autotune_args.verify(**VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
+            elif torch.xpu.is_available():
+                torch.xpu.synchronize()  # shake out any XPU errors
             return result
 
         def benchmark_in_current_process(

@@ -597,11 +597,20 @@ class GPUDeviceBenchmarkMixin:
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
         else:
-            device_idx = torch.cuda.current_device()
+            if torch.cuda.is_available():
+                device_idx = torch.cuda.current_device()
+            elif torch.xpu.is_available():
+                device_idx = torch.xpu.current_device()
 
-        with torch.cuda.device(device_idx):
-            out = benchmarker.benchmark_gpu(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+        
+        if torch.cuda.is_available():
+            with torch.cuda.device(device_idx):
+                out = benchmarker.benchmark_gpu(fn)
+                torch.cuda.synchronize() # shake out any CUDA errors
+        elif torch.xpu.is_available():
+            with torch.xpu.device(device_idx):
+                out = benchmarker.benchmark_gpu(fn)
+                torch.xpu.synchronize() # shake out any XPU errors
 
         return out
 
@@ -666,6 +675,10 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         if output_tensor.device.type == "cpu":
             stream = 0
+        elif output_tensor.device.type == "xpu":
+            from torch._C import _xpu_getCurrentRawStream as get_raw_stream
+
+            stream = get_raw_stream(self.output_tensor_meta.device.index)
         else:
             from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 
