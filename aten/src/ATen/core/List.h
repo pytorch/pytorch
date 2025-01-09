@@ -2,12 +2,12 @@
 
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
-#include <c10/macros/Macros.h>
 #include <c10/macros/Export.h>
-#include <c10/util/TypeTraits.h>
-#include <c10/util/TypeList.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/TypeList.h>
+#include <c10/util/TypeTraits.h>
+#include <c10/util/intrusive_ptr.h>
 #include <optional>
 #include <vector>
 
@@ -16,7 +16,8 @@ class Tensor;
 }
 namespace c10 {
 struct IValue;
-template<class T> class List;
+template <class T>
+class List;
 struct Type;
 
 namespace detail {
@@ -35,41 +36,47 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   }
   friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
-}
+} // namespace detail
 
 namespace impl {
 
-template<class T, class Iterator> class ListIterator;
+template <class T, class Iterator>
+class ListIterator;
 
-template<class T, class Iterator> class ListElementReference;
+template <class T, class Iterator>
+class ListElementReference;
 
-template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) noexcept;
+template <class T, class Iterator>
+void swap(
+    ListElementReference<T, Iterator>&& lhs,
+    ListElementReference<T, Iterator>&& rhs) noexcept;
 
-template<class T, class Iterator>
+template <class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 
-template<class T, class Iterator>
+template <class T, class Iterator>
 bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
 
-template<class T>
+template <class T>
 struct ListElementConstReferenceTraits {
   // In the general case, we use IValue::to().
-  using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+  using const_reference =
+      typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 };
 
 // There is no to() overload for std::optional<std::string>.
-template<>
+template <>
 struct ListElementConstReferenceTraits<std::optional<std::string>> {
-  using const_reference = std::optional<std::reference_wrapper<const std::string>>;
+  using const_reference =
+      std::optional<std::reference_wrapper<const std::string>>;
 };
 
-template<class T, class Iterator>
+template <class T, class Iterator>
 class ListElementReference final {
-public:
+ public:
   operator std::conditional_t<
-      std::is_reference_v<typename c10::detail::
-                            ivalue_to_const_ref_overload_return<T>::type>,
+      std::is_reference_v<
+          typename c10::detail::ivalue_to_const_ref_overload_return<T>::type>,
       const T&,
       T>() const;
 
@@ -84,15 +91,16 @@ public:
     return *iterator_;
   }
 
-  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs) noexcept;
+  friend void swap<T, Iterator>(
+      ListElementReference&& lhs,
+      ListElementReference&& rhs) noexcept;
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
   ~ListElementReference() = default;
 
-private:
-  ListElementReference(Iterator iter)
-  : iterator_(iter) {}
+ private:
+  ListElementReference(Iterator iter) : iterator_(iter) {}
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
@@ -112,7 +120,7 @@ private:
 template <class T, class Iterator>
 class ListIterator final {
  public:
-   // C++17 friendly std::iterator implementation
+  // C++17 friendly std::iterator implementation
   using iterator_category = std::random_access_iterator_tag;
   using value_type = T;
   using difference_type = std::ptrdiff_t;
@@ -128,35 +136,35 @@ class ListIterator final {
   ListIterator& operator=(ListIterator&&) noexcept = default;
 
   ListIterator& operator++() {
-      ++iterator_;
-      return *this;
+    ++iterator_;
+    return *this;
   }
 
   ListIterator operator++(int) {
-      ListIterator copy(*this);
-      ++*this;
-      return copy;
+    ListIterator copy(*this);
+    ++*this;
+    return copy;
   }
 
   ListIterator& operator--() {
-      --iterator_;
-      return *this;
+    --iterator_;
+    return *this;
   }
 
   ListIterator operator--(int) {
-      ListIterator copy(*this);
-      --*this;
-      return copy;
+    ListIterator copy(*this);
+    --*this;
+    return copy;
   }
 
   ListIterator& operator+=(typename List<T>::size_type offset) {
-      iterator_ += offset;
-      return *this;
+    iterator_ += offset;
+    return *this;
   }
 
   ListIterator& operator-=(typename List<T>::size_type offset) {
-      iterator_ -= offset;
-      return *this;
+    iterator_ -= offset;
+    return *this;
   }
 
   ListIterator operator+(typename List<T>::size_type offset) const {
@@ -167,7 +175,9 @@ class ListIterator final {
     return ListIterator{iterator_ - offset};
   }
 
-  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(
+      const ListIterator& lhs,
+      const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 
@@ -175,12 +185,13 @@ class ListIterator final {
     return {iterator_};
   }
 
-  ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
+  ListElementReference<T, Iterator> operator[](
+      typename List<T>::size_type offset) const {
     return {iterator_ + offset};
   }
 
-private:
-  explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
+ private:
+  explicit ListIterator(Iterator iterator) : iterator_(std::move(iterator)) {}
 
   Iterator iterator_;
 
@@ -208,15 +219,20 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<
+      T,
+      typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
-template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toList(List<T>&& list);
-template<class T> List<IValue> toList(const List<T>& list);
+template <class T>
+List<T> toTypedList(List<IValue> list);
+template <class T>
+List<IValue> toList(List<T>&& list);
+template <class T>
+List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-}
+} // namespace impl
 
 /**
  * An object of this class stores a list of values of type T.
@@ -234,24 +250,31 @@ const IValue* ptr_to_first_element(const List<IValue>& list);
  * and switch out the underlying list implementation without
  * breaking backwards compatibility for the kernel API.
  */
-template<class T>
+template <class T>
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class List final {
-private:
+ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
   c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
-  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
+  using internal_reference_type = impl::ListElementReference<
+      T,
+      typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type =
+      typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
-public:
+ public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
-  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
-  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
+  using iterator = impl::
+      ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::
+      ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<
+      T,
+      typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -268,8 +291,8 @@ public:
 
   /**
    * Create a generic list with runtime type information.
-   * This only works for c10::impl::GenericList and is not part of the public API
-   * but only supposed to be used internally by PyTorch.
+   * This only works for c10::impl::GenericList and is not part of the public
+   * API but only supposed to be used internally by PyTorch.
    */
   explicit List(TypePtr elementType);
 
@@ -286,23 +309,27 @@ public:
 
   /**
    * Returns the element at specified location pos, with bounds checking.
-   * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
+   * If pos is not within the range of the container, an exception of type
+   * std::out_of_range is thrown.
    */
   internal_const_reference_type get(size_type pos) const;
 
   /**
-   * Moves out the element at the specified location pos and returns it, with bounds checking.
-   * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
-   * The list contains an invalid element at position pos afterwards. Any operations
-   * on it before re-setting it are invalid.
+   * Moves out the element at the specified location pos and returns it, with
+   * bounds checking. If pos is not within the range of the container, an
+   * exception of type std::out_of_range is thrown. The list contains an invalid
+   * element at position pos afterwards. Any operations on it before re-setting
+   * it are invalid.
    */
   value_type extract(size_type pos) const;
 
   /**
-   * Returns a reference to the element at specified location pos, with bounds checking.
-   * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
+   * Returns a reference to the element at specified location pos, with bounds
+   * checking. If pos is not within the range of the container, an exception of
+   * type std::out_of_range is thrown.
    *
-   * You cannot store the reference, but you can read it and assign new values to it:
+   * You cannot store the reference, but you can read it and assign new values
+   * to it:
    *
    *   List<int64_t> list = ...;
    *   list[2] = 5;
@@ -329,8 +356,9 @@ public:
   iterator begin() const;
 
   /**
-   * Returns an iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
+   * Returns an iterator to the element following the last element of the
+   * container. This element acts as a placeholder; attempting to access it
+   * results in undefined behavior.
    */
   iterator end() const;
 
@@ -345,99 +373,114 @@ public:
   size_type size() const;
 
   /**
-   * Increase the capacity of the vector to a value that's greater or equal to new_cap.
+   * Increase the capacity of the vector to a value that's greater or equal to
+   * new_cap.
    */
   void reserve(size_type new_cap) const;
 
   /**
-   * Erases all elements from the container. After this call, size() returns zero.
-   * Invalidates any references, pointers, or iterators referring to contained elements. Any past-the-end iterators are also invalidated.
+   * Erases all elements from the container. After this call, size() returns
+   * zero. Invalidates any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators are also invalidated.
    */
   void clear() const;
 
   /**
    * Inserts value before pos.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   iterator insert(iterator pos, const T& value) const;
 
   /**
    * Inserts value before pos.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   iterator insert(iterator pos, T&& value) const;
 
   /**
    * Inserts a new element into the container directly before pos.
    * The new element is constructed with the given arguments.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
-  template<class... Args>
+  template <class... Args>
   iterator emplace(iterator pos, Args&&... value) const;
 
   /**
    * Appends the given element value to the end of the container.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   void push_back(const T& value) const;
 
   /**
    * Appends the given element value to the end of the container.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   void push_back(T&& value) const;
 
   /**
-   * Appends the given list to the end of the container. Uses at most one memory allocation.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * Appends the given list to the end of the container. Uses at most one memory
+   * allocation. May invalidate any references, pointers, or iterators referring
+   * to contained elements. Any past-the-end iterators may also be invalidated.
    */
   void append(List<T> lst) const;
 
   /**
    * Appends the given element value to the end of the container.
    * The new element is constructed with the given arguments.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
-  template<class... Args>
+  template <class... Args>
   void emplace_back(Args&&... args) const;
 
   /**
    * Removes the element at pos.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   iterator erase(iterator pos) const;
 
   /**
    * Removes the elements in the range [first, last).
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   iterator erase(iterator first, iterator last) const;
 
   /**
    * Removes the last element of the container.
    * Calling pop_back on an empty container is undefined.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * May invalidate any references, pointers, or iterators referring to
+   * contained elements. Any past-the-end iterators may also be invalidated.
    */
   void pop_back() const;
 
   /**
    * Resizes the container to contain count elements.
-   * If the current size is less than count, additional default-inserted elements are appended.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * If the current size is less than count, additional default-inserted
+   * elements are appended. May invalidate any references, pointers, or
+   * iterators referring to contained elements. Any past-the-end iterators may
+   * also be invalidated.
    */
   void resize(size_type count) const;
 
   /**
    * Resizes the container to contain count elements.
-   * If the current size is less than count, additional copies of value are appended.
-   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   * If the current size is less than count, additional copies of value are
+   * appended. May invalidate any references, pointers, or iterators referring
+   * to contained elements. Any past-the-end iterators may also be invalidated.
    */
   void resize(size_type count, const T& value) const;
 
   /**
-   * Value equality comparison. This function implements Python-like semantics for
-   * equality: two lists with the same identity (e.g. same pointer) trivially
-   * compare equal, otherwise each element is compared for equality.
+   * Value equality comparison. This function implements Python-like semantics
+   * for equality: two lists with the same identity (e.g. same pointer)
+   * trivially compare equal, otherwise each element is compared for equality.
    */
   template <class T_>
   friend bool operator==(const List<T_>& lhs, const List<T_>& rhs);
@@ -465,13 +508,16 @@ public:
   // See [unsafe set type] for why this exists.
   void unsafeSetElementType(TypePtr t);
 
-private:
+ private:
   explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
-  template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toList(List<T_>&&);
-  template<class T_> friend List<IValue> impl::toList(const List<T_>&);
+  template <class T_>
+  friend List<T_> impl::toTypedList(List<IValue>);
+  template <class T_>
+  friend List<IValue> impl::toList(List<T_>&&);
+  template <class T_>
+  friend List<IValue> impl::toList(const List<T_>&);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
 };
 
@@ -481,11 +527,12 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-}
-}
+} // namespace impl
+} // namespace c10
 
 namespace torch {
-  template<class T> using List = c10::List<T>;
+template <class T>
+using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>  // IWYU pragma: keep
+#include <ATen/core/List_inl.h> // IWYU pragma: keep

@@ -4,7 +4,7 @@
 
 namespace c10 {
 
-template<typename T>
+template <typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
@@ -16,8 +16,7 @@ inline void FunctionSchema::checkArg(
   if (!value.type<T>()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
-        formatTypeMismatchMsg(
-            argument, value.type<T>()->repr_str(), pos));
+        formatTypeMismatchMsg(argument, value.type<T>()->repr_str(), pos));
   }
 }
 
@@ -55,7 +54,8 @@ inline void FunctionSchema::checkAndNormalizeInputs(
       inputs.push_back(*argument.default_value());
       continue;
     }
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         name(),
         "() is missing value for argument '",
         argument.name(),
@@ -65,7 +65,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   if (consumed_kwargs != kwargs.size()) {
     std::vector<std::string> names;
     names.reserve(kwargs.size());
-    for(const auto& k : kwargs) {
+    for (const auto& k : kwargs) {
       names.emplace_back(k.first);
     }
     throw std::runtime_error(findErrorInKwargs(names));

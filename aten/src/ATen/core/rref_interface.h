@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/jit_type_base.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 
@@ -38,4 +38,4 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   virtual const TypePtr type() const = 0;
 };
 
-}
+} // namespace c10

@@ -12,22 +12,23 @@ namespace at {
 class DeprecatedTypeProperties;
 
 struct TORCH_API DeprecatedTypePropertiesDeleter {
-  void operator()(DeprecatedTypeProperties * ptr);
+  void operator()(DeprecatedTypeProperties* ptr);
 };
 
 class TORCH_API DeprecatedTypePropertiesRegistry {
  public:
   DeprecatedTypePropertiesRegistry();
 
-  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) const;
+  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s)
+      const;
 
-private:
+ private:
   // NOLINTNEXTLINE(*c-array*)
-  std::unique_ptr<DeprecatedTypeProperties> registry
-    [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
+  std::unique_ptr<DeprecatedTypeProperties> registry[static_cast<int>(
+      Backend::NumOptions)][static_cast<int>(ScalarType::NumOptions)];
 };
 
-TORCH_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
+TORCH_API DeprecatedTypePropertiesRegistry&
+globalDeprecatedTypePropertiesRegistry();
 
 } // namespace at

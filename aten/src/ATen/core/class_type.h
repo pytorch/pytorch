@@ -6,35 +6,32 @@
 #include <ATen/core/jit_type_base.h>
 #include <optional>
 
-
 namespace torch::jit {
 struct CompilationUnit;
 struct Function;
 } // namespace torch::jit
 
-
 namespace c10 {
 
 struct FunctionSchema;
 
-// This enumerator represents the 'kind' of an attribute - a buffer, a parameter, or neither.
-// This state is mutually exclusive. Buffers and Parameters can only appear on modules.
-enum class AttributeKind {
-  BUFFER,
-  PARAMETER,
-  REGULAR_ATTRIBUTE
-};
+// This enumerator represents the 'kind' of an attribute - a buffer, a
+// parameter, or neither. This state is mutually exclusive. Buffers and
+// Parameters can only appear on modules.
+enum class AttributeKind { BUFFER, PARAMETER, REGULAR_ATTRIBUTE };
 
-// This structure represents all notional booking entities in a class attribute: name, kind (see: AttributeKind), and type (see: TypePtr).
-// Note: This structure does not represent the value of the attribute.
+// This structure represents all notional booking entities in a class attribute:
+// name, kind (see: AttributeKind), and type (see: TypePtr). Note: This
+// structure does not represent the value of the attribute.
 struct TORCH_API ClassAttribute {
-  public:
-  ClassAttribute(AttributeKind kind,
-  TypePtr attributeType,
-  std::string attributeName) :
-    kind_(kind),
-    attributeType_(std::move(attributeType)),
-    attributeName_(std::move(attributeName)) {}
+ public:
+  ClassAttribute(
+      AttributeKind kind,
+      TypePtr attributeType,
+      std::string attributeName)
+      : kind_(kind),
+        attributeType_(std::move(attributeType)),
+        attributeName_(std::move(attributeName)) {}
 
   AttributeKind getKind() const {
     return kind_;
@@ -48,7 +45,7 @@ struct TORCH_API ClassAttribute {
     return attributeName_;
   }
 
-  private:
+ private:
   AttributeKind kind_;
   TypePtr attributeType_;
   std::string attributeName_;
@@ -64,8 +61,8 @@ using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct TORCH_API ClassType : public NamedType {
-  // This represents an attribute of a class; a name associated with an attribute, and a
-  // getter and (optional) setter for that attribute.
+  // This represents an attribute of a class; a name associated with an
+  // attribute, and a getter and (optional) setter for that attribute.
   struct Property {
     std::string name;
     torch::jit::Function* getter;
@@ -94,13 +91,14 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-     return annotation_str();
+    return annotation_str();
   }
 
   std::string repr_str() const override {
     std::stringstream ss;
     ss << str()
-       << " (of Python compilation unit at: " << compilation_unit().get() << ")";
+       << " (of Python compilation unit at: " << compilation_unit().get()
+       << ")";
     return ss.str();
   }
 
@@ -124,11 +122,7 @@ struct TORCH_API ClassType : public NamedType {
   const TypePtr& getAttribute(const std::string& name) const {
     auto slot = findAttributeSlot(name);
     TORCH_CHECK(
-        slot,
-        repr_str(),
-        " does not have an attribute with name '",
-        name,
-        "'");
+        slot, repr_str(), " does not have an attribute with name '", name, "'");
     return attributes_[*slot].getType();
   }
 
@@ -177,8 +171,9 @@ struct TORCH_API ClassType : public NamedType {
     return std::find_if(
                attributes_.cbegin(),
                attributes_.cend(),
-               [&](const ClassAttribute& attr) { return attr.getName() == name; }) !=
-        attributes_.cend();
+               [&](const ClassAttribute& attr) {
+                 return attr.getName() == name;
+               }) != attributes_.cend();
   }
 
   bool isUnresolvedClassAttribute(const std::string& name) const;
@@ -206,7 +201,9 @@ struct TORCH_API ClassType : public NamedType {
   // it is unsafe to maintain uses of the old type of the attribute,
   // and any code that works on the attribute is now invalid.
   // Only newly created code is valid again.
-  void unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty);
+  void unsafeChangeAttributeType(
+      const std::string& name,
+      const TypePtr& new_ty);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
@@ -227,20 +224,24 @@ struct TORCH_API ClassType : public NamedType {
         "'");
     const TypePtr& atype = getAttribute(*slot_idx);
     TORCH_CHECK(
-      ty->isSubtypeOf(*atype),
-      ty->repr_str(),
-      " is not compatible with the type ",
-      atype->repr_str(),
-      " for the field '",
-      name,
-      "'");
+        ty->isSubtypeOf(*atype),
+        ty->repr_str(),
+        " is not compatible with the type ",
+        atype->repr_str(),
+        " for the field '",
+        name,
+        "'");
     return *slot_idx;
   }
 
   // Get the property with the given \p name, if it exists on the class.
   std::optional<ClassType::Property> getProperty(const std::string& name);
-  // Add a property named \p name with \p getter and \p setter as its getter and setter.
-  void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
+  // Add a property named \p name with \p getter and \p setter as its getter and
+  // setter.
+  void addProperty(
+      const std::string& name,
+      torch::jit::Function* getter,
+      torch::jit::Function* setter);
   // Get a list of all properties.
   const std::vector<Property>& properties() const {
     return properties_;
@@ -298,12 +299,14 @@ struct TORCH_API ClassType : public NamedType {
   // valid again.
   void unsafeRemoveConstant(const std::string& name);
 
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_, is_module());
     AT_ASSERT(numAttributes() == contained_types.size());
-    for(size_t i = 0; i < attributes_.size(); ++i) {
+    for (size_t i = 0; i < attributes_.size(); ++i) {
       AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
-      ptr->addAttribute(attributes_[i].getName(), std::move(contained_types[i]));
+      ptr->addAttribute(
+          attributes_[i].getName(), std::move(contained_types[i]));
     }
     // Copy methods over
     for (const auto& method : methods()) {
@@ -414,8 +417,9 @@ struct TORCH_API ClassType : public NamedType {
 
   // Holds all atrributes, attribute details are found on ClassAttribute
   std::vector<ClassAttribute> attributes_;
-  // Construct mirroring attributes_, only around due to the fact that `containedTypes()` method returns an ArrayRef.
-  // Never fill this without using the appropriate provideNewClassAttribute method
+  // Construct mirroring attributes_, only around due to the fact that
+  // `containedTypes()` method returns an ArrayRef. Never fill this without
+  // using the appropriate provideNewClassAttribute method
   std::vector<TypePtr> attributeTypes_;
 
   // List of methods associated with this class.
@@ -438,4 +442,4 @@ struct TORCH_API ClassType : public NamedType {
   std::vector<std::string> unresolved_class_attributes_;
 };
 
-}
+} // namespace c10

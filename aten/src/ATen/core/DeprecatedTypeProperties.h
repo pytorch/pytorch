@@ -1,13 +1,12 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/Layout.h>
-#include <c10/core/TensorOptions.h>
-#include <c10/core/Storage.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Generator.h>
-
+#include <c10/core/Backend.h>
+#include <c10/core/Layout.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
 
 namespace at {
 
@@ -20,7 +19,7 @@ class Tensor;
 class TORCH_API DeprecatedTypeProperties {
  public:
   DeprecatedTypeProperties(Backend backend, ScalarType scalar_type)
-    : backend_(backend), scalar_type_(scalar_type) {}
+      : backend_(backend), scalar_type_(scalar_type) {}
 
   Backend backend() const {
     return backend_;
@@ -64,45 +63,48 @@ class TORCH_API DeprecatedTypeProperties {
 
   std::string toString() const {
     std::string base_str;
-    if (backend_ == Backend::Undefined || scalar_type_ == ScalarType::Undefined) {
+    if (backend_ == Backend::Undefined ||
+        scalar_type_ == ScalarType::Undefined) {
       base_str = "UndefinedType";
     } else {
-      base_str = std::string(at::toString(backend_)) + at::toString(scalar_type_) + "Type";
+      base_str = std::string(at::toString(backend_)) +
+          at::toString(scalar_type_) + "Type";
     }
     return base_str;
   }
 
-  DeprecatedTypeProperties & toBackend(Backend b) const {
+  DeprecatedTypeProperties& toBackend(Backend b) const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         b, scalar_type_);
   }
 
-  DeprecatedTypeProperties & toScalarType(ScalarType s) const {
+  DeprecatedTypeProperties& toScalarType(ScalarType s) const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         backend_, s);
   }
 
-  DeprecatedTypeProperties & cpu() const {
+  DeprecatedTypeProperties& cpu() const {
     return toBackend(Backend::CPU);
   }
 
-  DeprecatedTypeProperties & cuda() const {
+  DeprecatedTypeProperties& cuda() const {
     return toBackend(Backend::CUDA);
   }
 
-  DeprecatedTypeProperties & hip() const {
+  DeprecatedTypeProperties& hip() const {
     return toBackend(Backend::HIP);
   }
 
-  DeprecatedTypeProperties & privateUser1() const {
+  DeprecatedTypeProperties& privateUser1() const {
     return toBackend(Backend::PrivateUse1);
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
-    return TensorOptions().dtype(typeMeta())
-                          .device(device_type(), static_cast<c10::DeviceIndex>(device_index))
-                          .layout(layout());
+    return TensorOptions()
+        .dtype(typeMeta())
+        .device(device_type(), static_cast<c10::DeviceIndex>(device_index))
+        .layout(layout());
   }
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
@@ -127,13 +129,16 @@ class TORCH_API DeprecatedTypeProperties {
         static_cast<int64_t>(scalarType());
   }
 
-  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const;
-  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const;
-  Tensor copy(const Tensor & src, bool non_blocking=false, std::optional<Device> to_device={}) const;
+  Tensor unsafeTensorFromTH(void* th_pointer, bool retain) const;
+  Storage unsafeStorageFromTH(void* th_pointer, bool retain) const;
+  Tensor copy(
+      const Tensor& src,
+      bool non_blocking = false,
+      std::optional<Device> to_device = {}) const;
 
  private:
   Backend backend_;
   ScalarType scalar_type_;
 };
 
-}  // namespace at
+} // namespace at

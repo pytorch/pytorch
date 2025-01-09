@@ -31,23 +31,26 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * has been modified to hold 32 bit uints instead of 64 bits.
  *
  * Note that we reimplemented mt19937 instead of using std::mt19937 because,
- * at::mt19937 turns out to be faster in the pytorch codebase. PyTorch builds with -O2
- * by default and following are the benchmark numbers (benchmark code can be found at
- * https://github.com/syed-ahmed/benchmark-rngs):
+ * at::mt19937 turns out to be faster in the pytorch codebase. PyTorch builds
+ * with -O2 by default and following are the benchmark numbers (benchmark code
+ * can be found at https://github.com/syed-ahmed/benchmark-rngs):
  *
  * with -O2
- * Time to get 100000000 philox randoms with at::uniform_real_distribution = 0.462759s
- * Time to get 100000000 at::mt19937 randoms with at::uniform_real_distribution = 0.39628s
- * Time to get 100000000 std::mt19937 randoms with std::uniform_real_distribution = 0.352087s
- * Time to get 100000000 std::mt19937 randoms with at::uniform_real_distribution = 0.419454s
+ * Time to get 100000000 philox randoms with at::uniform_real_distribution =
+ * 0.462759s Time to get 100000000 at::mt19937 randoms with
+ * at::uniform_real_distribution = 0.39628s Time to get 100000000 std::mt19937
+ * randoms with std::uniform_real_distribution = 0.352087s Time to get 100000000
+ * std::mt19937 randoms with at::uniform_real_distribution = 0.419454s
  *
- * std::mt19937 is faster when used in conjunction with std::uniform_real_distribution,
- * however we can't use std::uniform_real_distribution because of this bug:
- * http://open-std.org/JTC1/SC22/WG21/docs/lwg-active.html#2524. Plus, even if we used
- * std::uniform_real_distribution and filtered out the 1's, it is a different algorithm
- * than what's in pytorch currently and that messes up the tests in tests_distributions.py.
- * The other option, using std::mt19937 with at::uniform_real_distribution is a tad bit slower
- * than at::mt19937 with at::uniform_real_distribution and hence, we went with the latter.
+ * std::mt19937 is faster when used in conjunction with
+ * std::uniform_real_distribution, however we can't use
+ * std::uniform_real_distribution because of this bug:
+ * http://open-std.org/JTC1/SC22/WG21/docs/lwg-active.html#2524. Plus, even if
+ * we used std::uniform_real_distribution and filtered out the 1's, it is a
+ * different algorithm than what's in pytorch currently and that messes up the
+ * tests in tests_distributions.py. The other option, using std::mt19937 with
+ * at::uniform_real_distribution is a tad bit slower than at::mt19937 with
+ * at::uniform_real_distribution and hence, we went with the latter.
  *
  * Copyright notice:
  * A C-program for MT19937, with initialization improved 2002/2/10.
@@ -79,8 +82,8 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
@@ -108,8 +111,7 @@ struct mt19937_data_pod {
 };
 
 class mt19937_engine {
-public:
-
+ public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   inline explicit mt19937_engine(uint64_t seed = 5489) {
     init_with_uint32(seed);
@@ -128,9 +130,9 @@ public:
   }
 
   inline bool is_valid() {
-    if ((data_.seeded_ == true)
-      && (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N)
-      && (data_.next_ <= MERSENNE_STATE_N)) {
+    if ((data_.seeded_ == true) &&
+        (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N) &&
+        (data_.next_ <= MERSENNE_STATE_N)) {
       return true;
     }
     return false;
@@ -138,7 +140,7 @@ public:
 
   inline uint32_t operator()() {
     if (--(data_.left_) == 0) {
-        next_state();
+      next_state();
     }
     uint32_t y = *(data_.state_.data() + data_.next_++);
     y ^= (y >> 11);
@@ -149,7 +151,7 @@ public:
     return y;
   }
 
-private:
+ private:
   mt19937_data_pod data_;
 
   inline void init_with_uint32(uint64_t seed) {
@@ -157,7 +159,9 @@ private:
     data_.seeded_ = true;
     data_.state_[0] = seed & 0xffffffff;
     for (const auto j : c10::irange(1, MERSENNE_STATE_N)) {
-      data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
+      data_.state_[j] =
+          (1812433253 * (data_.state_[j - 1] ^ (data_.state_[j - 1] >> 30)) +
+           j);
     }
     data_.left_ = 1;
     data_.next_ = 0;
@@ -168,7 +172,7 @@ private:
   }
 
   inline uint32_t twist(uint32_t u, uint32_t v) {
-    return (mix_bits(u,v) >> 1) ^ (v & 1 ? MATRIX_A : 0);
+    return (mix_bits(u, v) >> 1) ^ (v & 1 ? MATRIX_A : 0);
   }
 
   inline void next_state() {
@@ -176,17 +180,16 @@ private:
     data_.left_ = MERSENNE_STATE_N;
     data_.next_ = 0;
 
-    for(int j = MERSENNE_STATE_N - MERSENNE_STATE_M + 1; --j; p++) {
+    for (int j = MERSENNE_STATE_N - MERSENNE_STATE_M + 1; --j; p++) {
       *p = p[MERSENNE_STATE_M] ^ twist(p[0], p[1]);
     }
 
-    for(int j = MERSENNE_STATE_M; --j; p++) {
+    for (int j = MERSENNE_STATE_M; --j; p++) {
       *p = p[MERSENNE_STATE_M - MERSENNE_STATE_N] ^ twist(p[0], p[1]);
     }
 
     *p = p[MERSENNE_STATE_M - MERSENNE_STATE_N] ^ twist(p[0], data_.state_[0]);
   }
-
 };
 
 typedef mt19937_engine mt19937;

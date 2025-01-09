@@ -36,7 +36,8 @@ struct QualifiedName {
     cacheAccessors();
   }
 
-  explicit QualifiedName(std::vector<std::string> atoms) : atoms_(std::move(atoms)) {
+  explicit QualifiedName(std::vector<std::string> atoms)
+      : atoms_(std::move(atoms)) {
     for (const auto& atom : atoms_) {
       TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
       TORCH_CHECK(
@@ -109,7 +110,7 @@ struct QualifiedName {
   static constexpr char delimiter_ = '.';
 
   // Helper for cacheAccessors() below.
-  template<typename T>
+  template <typename T>
   std::string join(char delimiter, const T& v) {
     std::string out;
     size_t reserve = 0;

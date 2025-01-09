@@ -8,7 +8,6 @@
 
 // TODO move this to c10 namespace
 
-
 namespace torch::jit {
 
 using c10::IValue;
@@ -19,18 +18,20 @@ class Operation {
   using accepts = std::is_constructible<std::function<void(Arg)>, F&&>;
 
  public:
-  template <typename F,
-            std::enable_if_t<accepts<F, Stack*>::value, int> = 0>
-  C10_DEPRECATED_MESSAGE("Please use void(Stack&) to register operator instead.")
+  template <typename F, std::enable_if_t<accepts<F, Stack*>::value, int> = 0>
+  C10_DEPRECATED_MESSAGE(
+      "Please use void(Stack&) to register operator instead.")
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
-    raw(&stack);
-  }) {}
+  Operation(F&& raw)
+      : op_([raw = std::forward<F>(raw)](Stack& stack) { raw(&stack); }) {}
 
-  template <typename F,
-            std::enable_if_t<accepts<F, Stack&>::value &&
-                !std::is_same_v<std::decay_t<F>, Operation>, int> = 0>
-  Operation(F&& op): op_(std::forward<F>(op)) {}
+  template <
+      typename F,
+      std::enable_if_t<
+          accepts<F, Stack&>::value &&
+              !std::is_same_v<std::decay_t<F>, Operation>,
+          int> = 0>
+  Operation(F&& op) : op_(std::forward<F>(op)) {}
 
   Operation(std::nullptr_t) noexcept {}
 
@@ -155,7 +156,8 @@ inline void push_one(Stack& stack, c10::TensorOptions options) {
 
 template <typename... Types>
 inline void push(Stack& stack, Types&&... args) {
-  (void)std::initializer_list<int>{(push_one(stack, std::forward<Types>(args)), 0)...};
+  (void)std::initializer_list<int>{
+      (push_one(stack, std::forward<Types>(args)), 0)...};
 }
 template <typename... Types>
 inline void push(Stack* stack, Types&&... args) {
@@ -196,7 +198,7 @@ struct TuplePacker {
 template <typename... Args>
 struct TuplePacker<0, Args...> {
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){}
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/) {}
 };
 
 template <typename... Args>

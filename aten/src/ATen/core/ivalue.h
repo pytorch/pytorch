@@ -87,10 +87,10 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 } // namespace ivalue
 
 // This is an owning wrapper for a std::optional<std::vector<T>>
-// that can be implicitly converted to a (non-owning) std::optional<ArrayRef<T>>.
-// Its purpose is to be used in generated code to keep the vector alive
-// either until the end of a statement (as a temporary), or as a saved arg
-// in autograd.
+// that can be implicitly converted to a (non-owning)
+// std::optional<ArrayRef<T>>. Its purpose is to be used in generated code to
+// keep the vector alive either until the end of a statement (as a temporary),
+// or as a saved arg in autograd.
 template <typename T>
 struct OptionalArray {
   std::optional<std::vector<T>> list;
@@ -692,7 +692,7 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(std::string_view v) : IValue(std::string(v)){}
+  IValue(std::string_view v) : IValue(std::string(v)) {}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -1133,8 +1133,8 @@ struct TORCH_API IValue final {
 
   using HashIdentityIValues =
       std::unordered_set<IValue, HashIdentityIValue, CompIdentityIValues>;
-  using HashIdentityIValueMap =
-      std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
+  using HashIdentityIValueMap = std::
+      unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -1165,8 +1165,8 @@ struct TORCH_API IValue final {
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
   // is a particular type. Instead we want clients to use the `isX` methods when
-  // possible. If for performance reasons you really, absolutely, must have a jump
-  // table, then we can revisit this.
+  // possible. If for performance reasons you really, absolutely, must have a
+  // jump table, then we can revisit this.
   enum class Tag : uint32_t {
 #define DEFINE_TAG(x) x,
     TORCH_FORALL_TAGS(DEFINE_TAG)

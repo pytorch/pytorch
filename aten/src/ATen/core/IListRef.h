@@ -389,8 +389,7 @@ class IListRefIterator {
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
   // See [Note: MSVC Iterator Debug]
-  IListRefIterator(const IListRefIterator& iterator)
-      : tag_(iterator.tag_) {
+  IListRefIterator(const IListRefIterator& iterator) : tag_(iterator.tag_) {
     switch (tag_) {
       case IListRefTag::Boxed:
         payload_.boxed_iterator = iterator.payload_.boxed_iterator;
@@ -399,7 +398,8 @@ class IListRefIterator {
         payload_.unboxed_iterator = iterator.payload_.unboxed_iterator;
         break;
       case IListRefTag::Materialized:
-        payload_.materialized_iterator = iterator.payload_.materialized_iterator;
+        payload_.materialized_iterator =
+            iterator.payload_.materialized_iterator;
         break;
       default:
         TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");
@@ -434,7 +434,8 @@ class IListRefIterator {
     payload_.unboxed_iterator = unboxed;
   }
 
-  IListRefIterator(materialized_iterator_type materialized) : tag_(IListRefTag::Materialized) {
+  IListRefIterator(materialized_iterator_type materialized)
+      : tag_(IListRefTag::Materialized) {
     payload_.materialized_iterator = materialized;
   }
 
@@ -515,8 +516,7 @@ class IListRef {
       typename detail::IListRefTagImpl<IListRefTag::Unboxed, T>::list_type;
   using boxed_type =
       typename detail::IListRefTagImpl<IListRefTag::Boxed, T>::list_type;
-  using materialized_type =
-      typename detail::MaterializedIListRef<T>;
+  using materialized_type = typename detail::MaterializedIListRef<T>;
 
   using iterator = IListRefIterator<T>;
   using const_iterator = IListRefIterator<T>;
@@ -542,10 +542,12 @@ class IListRef {
       typename = std::enable_if_t<
           std::is_constructible_v<unboxed_type, UnboxedConstructorArgs...>>>
   IListRef(UnboxedConstructorArgs&&... args) : tag_(IListRefTag::Unboxed) {
-    payload_.unboxed = unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
+    payload_.unboxed =
+        unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
   }
 
-  IListRef(const materialized_type& materialized) : tag_(IListRefTag::Materialized) {
+  IListRef(const materialized_type& materialized)
+      : tag_(IListRefTag::Materialized) {
     payload_.materialized = &materialized;
   }
 
@@ -594,8 +596,8 @@ class IListRef {
     return materialized;
   }
 
-#define DEFINE_CHECK(TAG, ...)    \
-  bool is##TAG() const {          \
+#define DEFINE_CHECK(TAG, ...)       \
+  bool is##TAG() const {             \
     return tag_ == IListRefTag::TAG; \
   }
   TORCH_ILISTREF_FORALL_TAGS(DEFINE_CHECK)

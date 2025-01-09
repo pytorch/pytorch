@@ -2,9 +2,9 @@
 
 #include <type_traits>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
-#include <c10/macros/Macros.h>
 
 namespace caffe2 {
 
@@ -144,8 +144,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
    * call is made or the blob is destructed.
    */
   template <class T>
-  std::remove_const_t<T>* ShareExternal(
-      std::remove_const_t<T>* allocated) {
+  std::remove_const_t<T>* ShareExternal(std::remove_const_t<T>* allocated) {
     return static_cast<T*>(ShareExternal(
         static_cast<void*>(allocated),
         TypeMeta::Make<std::remove_const_t<T>>()));
@@ -172,7 +171,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   /**
    * @brief Swaps the underlying storage of two blobs.
    */
-  void swap(Blob& rhs)  noexcept {
+  void swap(Blob& rhs) noexcept {
     using std::swap;
     swap(meta_, rhs.meta_);
     swap(pointer_, rhs.pointer_);
@@ -193,7 +192,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   C10_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
-inline void swap(Blob& lhs, Blob& rhs)  noexcept {
+inline void swap(Blob& lhs, Blob& rhs) noexcept {
   lhs.swap(rhs);
 }
 

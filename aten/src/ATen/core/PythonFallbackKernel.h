@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/core/TorchDispatchUtils.h>
 
-
 namespace at::impl {
 
 struct TORCH_API RestorePythonTLSSnapshot {
@@ -12,15 +11,14 @@ struct TORCH_API RestorePythonTLSSnapshot {
   RestorePythonTLSSnapshot& operator=(RestorePythonTLSSnapshot&&) = delete;
   ~RestorePythonTLSSnapshot();
 
-private:
+ private:
   c10::impl::LocalDispatchKeySet saved_;
   c10::impl::ForceDispatchKeyGuard guard_;
 };
 
-
 // RAII guard to make working with the above TLS safer.
 struct TORCH_API MaybeSetTLSOnEntryGuard {
-public:
+ public:
   MaybeSetTLSOnEntryGuard();
   MaybeSetTLSOnEntryGuard(MaybeSetTLSOnEntryGuard&& other) = delete;
   MaybeSetTLSOnEntryGuard(const MaybeSetTLSOnEntryGuard&) = delete;
@@ -28,7 +26,7 @@ public:
   MaybeSetTLSOnEntryGuard& operator=(MaybeSetTLSOnEntryGuard&&) = delete;
   ~MaybeSetTLSOnEntryGuard();
 
-private:
+ private:
   bool value_set_;
 };
 
