@@ -1203,6 +1203,44 @@ def module_inputs_torch_nn_SiLU(module_info, device, dtype, requires_grad, train
                     reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x))]
 
 
+def module_inputs_torch_nn_SwiGLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def swiglu_reference_fn(m, p, i):
+        dim = m.dim
+        chunks = i.chunk(2, dim)
+        result = chunks[0] * torch.sigmoid(chunks[1])
+        return result
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input((4, 8))),
+            desc='2d_elementwise_affine',
+            reference_fn=swiglu_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input((128, 5, 4))),
+            desc='1d_elementwise_affine_large_batch',
+            reference_fn=swiglu_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((4, 16, 32))),
+            desc='3d_elementwise_affine',
+            reference_fn=swiglu_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput(2),
+            forward_input=FunctionInput(make_input((4, 16, 32, 8))),
+            desc='4d_elementwise_affine',
+            reference_fn=swiglu_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(make_input((0, 8))),
+            desc='1d_empty_elementwise_affine',
+            reference_fn=swiglu_reference_fn),
+    ]
+
+
 def module_inputs_torch_nn_Softmax(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 

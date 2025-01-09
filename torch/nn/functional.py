@@ -1751,6 +1751,19 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     return torch._C._nn.glu(input, dim)
 
 
+def swiglu(input: Tensor, dim: Optional[int] = -1):
+    r"""swiglu(input, dim=-1) -> Tensor
+
+    Applies swish gate linear unit operator.
+
+    See :class:`~torch.nn.SwiGLU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            swiglu, (input,), input, dim)
+    return torch.swiglu(input, dim)
+
+
 def hardtanh(
     input: Tensor,
     min_val: float = -1.0,

@@ -5,6 +5,7 @@ from .activation import (
     ELU,
     GELU,
     GLU,
+    SwiGLU,
     Hardshrink,
     Hardsigmoid,
     Hardswish,

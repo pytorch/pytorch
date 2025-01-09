@@ -2179,6 +2179,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.svd",
         "torch.swapaxes",
         "torch.swapdims",
+        "torch.swiglu",
         "torch.sym_constrain_range_for_size",
         "torch.sym_constrain_range",
         "torch.t_copy",

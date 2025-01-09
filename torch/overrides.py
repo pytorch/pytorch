@@ -981,6 +981,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.softplus: lambda input, beta=1, threshold=20: -1,
         torch.nn.functional.softshrink: lambda input, lambd=0.5: -1,
         torch.nn.functional.softsign: lambda input: -1,
+        torch.nn.functional.swiglu: lambda input, dim=None: -1,
         torch.nn.functional.tanhshrink: lambda input: -1,
         torch.nn.functional.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.nn.functional.triplet_margin_loss: (
@@ -1139,6 +1140,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
         torch.sum: lambda input, dim=None: -1,
+        torch.swiglu: lambda input, dim=None: -1,
         torch.sym_float: lambda input: -1,
         torch.sym_int: lambda input: -1,
         torch.sym_max: lambda a, b: -1,
