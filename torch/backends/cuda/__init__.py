@@ -133,8 +133,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
-        elif name == "use_fp16_accumulation":
-            return torch._C._get_cublas_use_fp16_accumulation()
+        elif name == "allow_fp16_accumulation":
+            return torch._C._get_cublas_allow_fp16_accumulation()
         raise AttributeError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -144,8 +144,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
-        elif name == "use_fp16_accumulation":
-            return torch._C._set_cublas_use_fp16_accumulation(value)
+        elif name == "allow_fp16_accumulation":
+            return torch._C._set_cublas_allow_fp16_accumulation(value)
         raise AttributeError("Unknown attribute " + name)
 
 

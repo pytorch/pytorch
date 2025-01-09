@@ -352,7 +352,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
     abcType = CUDA_C_32F;
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
-    if (at::globalContext().useFP16AccumulationCuBLAS()) {
+    if (at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       halpha = alpha;
       hbeta = beta;
@@ -426,12 +426,12 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      &alpha,
+      alpha_ptr,
       a,
       Adesc.descriptor(),
       b,
       Bdesc.descriptor(),
-      &beta,
+      beta_ptr,
       c,
       Cdesc.descriptor(),
       c,
@@ -543,10 +543,10 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   float fbeta = beta;
   at::Half halpha;
   at::Half hbeta;
-  void * alpha_ptr = &alpha;
-  void * beta_ptr = &beta;
+  void * alpha_ptr = &falpha;
+  void * beta_ptr = &fbeta;
   auto compute_type = CUDA_R_32F;
-  if (at::globalContext().useFP16AccumulationCuBLAS()) {
+  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     halpha = alpha;
     hbeta = beta;
     compute_type = CUDA_R_16F;
@@ -897,7 +897,7 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
   auto compute_type = CUDA_R_32F;
-  if (at::globalContext().useFP16AccumulationCuBLAS()) {
+  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     compute_type = CUDA_R_16F;
     halpha = alpha;
     hbeta = beta;
@@ -1277,7 +1277,7 @@ void gemm_and_bias(
     }
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
-    if (at::globalContext().useFP16AccumulationCuBLAS()) {
+    if (at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       scaleType = CUDA_R_16F;
       halpha_val = alpha_val;

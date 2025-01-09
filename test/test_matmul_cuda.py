@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -72,10 +73,10 @@ class TestMatmulCuda(TestCase):
         # which fail the threshold check
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        orig_fp16_accumulate = torch.backends.cuda.matmul.use_fp16_accumulation
+        orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = reduced_precision
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = reduced_precision
-        torch.backends.cuda.matmul.use_fp16_accumulation = fp16_accumulate
+        torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
         make_arg = partial(make_tensor, dtype=dtype, device="cpu")
@@ -120,7 +121,7 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(res_cpu, res_cuda)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-        torch.backends.cuda.matmul.use_fp16_accumulation = orig_fp16_accumulate
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
@@ -152,6 +153,26 @@ class TestMatmulCuda(TestCase):
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype):
         self.cublas_addmm(size, dtype, False, True)
+
+    @onlyCUDA
+    @skipIfRocm
+    def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
+        orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
+        torch.backends.cuda.matmul.allow_fp16_accumulation = True
+        x = torch.rand(32, 512, 512, device='cuda', dtype=torch.half)
+        w = torch.rand(512, 512, device='cuda', dtype=torch.half)
+        b = torch.rand(512, device='cuda', dtype=torch.half)
+        out = torch.nn.functional.linear(x, w, b)
+        out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), b.cpu())
+        self.assertEqual(out, out_cpu, atol=5e-3, rtol=5e-3)
+
+        a = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        b = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        c = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        out = torch.baddbmm(a, b, c)
+        out_cpu = torch.baddbmm(a.cpu(), b.cpu(), c.cpu())
+        self.assertEqual(out, out_cpu, atol=1e-3, rtol=3e-3)
+        torch.backends.cuda.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
     @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})

@@ -148,7 +148,8 @@ For more information about TF32, see:
 Reduced Precision Reduction in FP16 GEMMs
 -----------------------------------------
 
-(Distinct from full FP16 accumulation, see :ref:`Full FP16 accumulation<fp16accumulation>`)
+(Distinct from full FP16 accumulation that is intended for hardware that has higher throughput
+with FP16 accumulation than FP32 accumulation, see :ref:`Full FP16 accumulation<fp16accumulation>`)
 
 fp16 GEMMs are potentially done with some intermediate reduced precision reductions (e.g., in fp16 rather than fp32). These selective reductions in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
 
@@ -214,17 +215,18 @@ Full FP16 Accmumulation in FP16 GEMMs
 -------------------------------------
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
-in FP16, at the cost of numerical precision. This behavior can be enabled via:
+in FP16, at the cost of numerical precision and greater likelihood of overflow.
+This behavior can be enabled via:
 
 .. code:: python
 
-  torch.backends.cuda.matmul.use_fp16_accumulation = True
+  torch.backends.cuda.matmul.allow_fp16_accumulation = True
 
 To toggle the reduced precision reduction flags in C++, one can do
 
 .. code:: C++
 
-  at::globalContext().setUseFP16AccumulationCuBLAS(true);
+  at::globalContext().setAllowFP16AccumulationCuBLAS(true);
 
 Asynchronous execution
 ----------------------

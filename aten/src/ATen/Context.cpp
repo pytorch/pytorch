@@ -410,12 +410,12 @@ void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
 }
 
-bool Context::useFP16AccumulationCuBLAS() const {
-  return use_fp16_accumulation_cublas;
+bool Context::allowFP16AccumulationCuBLAS() const {
+  return allow_fp16_accumulation_cublas;
 }
 
-void Context::setUseFP16AccumulationCuBLAS(bool b) {
-  use_fp16_accumulation_cublas = b;
+void Context::setAllowFP16AccumulationCuBLAS(bool b) {
+  allow_fp16_accumulation_cublas = b;
 }
 
 
