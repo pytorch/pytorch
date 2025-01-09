@@ -22,4 +22,4 @@ jobs:
     with:
       build-environment: linux-riscv64-binary-manywheel
       docker-image-name: pytorch/manylinuxriscv64-builder:cpu-riscv64
-      runner: ubuntu-24.04
+      runner: ubuntu-latest
