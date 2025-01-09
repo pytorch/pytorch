@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import dataclasses
 import functools
@@ -800,7 +801,6 @@ main()
 
             return torch.compile(gm, backend=inner_compiler)
 
-        fwd_compiler_fn = functools.partial(eager_with_check, is_bwd=False)
         bwd_compiler_fn = functools.partial(eager_with_check, is_bwd=True)
 
         def fn(inputs):
@@ -941,7 +941,7 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            out = compiled_fn(inputs)
+            compiled_fn(inputs)
             self.assertTrue(len(inputs) == 0)
         finally:
             handle.remove()
@@ -2425,7 +2425,9 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
                 yield x.grad
 
         # compiled autograd and dynamo both support symfloat, but not backend
-        self.check_output_and_recompiles(fn, [1, 3])
+        self.check_output_and_recompiles(fn, [1, 4])
+        # 1 restart analysis due to specialize_float=False
+        self.assertEqual(counters["stats"]["unique_graphs"], 3)
 
     @scoped_load_inline
     def test_autograd_cpp_node_data_dependent(self, load_inline):
@@ -2814,6 +2816,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "Cache miss due to new autograd node: torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
+
+    def test_logs_aot_bwd_reuse(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x.sum()
+
+        with compiled_autograd._enable(compiler_fn):
+            x = torch.randn(4, 4, requires_grad=True)
+            y = torch.randn(4, 4, requires_grad=True)
+            z = torch.randn(4, 4, requires_grad=True)
+            # reuse the same AOT bwd graph 3 times
+            out = fn(x) + fn(y) + fn(z)
+            out.backward()
+        # should not RuntimeError: Node redefined name aot0_expand!
 
     @xfailIfS390X
     def test_verbose_logs_graph(self):
@@ -3592,6 +3608,14 @@ known_failing_tests = {
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
+    # Category: Subclasses
+    "test_dtensor_basic",
+    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",
+    "test_dtensor_different_gradient_placement",
+    "test_dtensor_noncontiguous_output",
+    "test_dtensor_partial_placement_graph_output",
+    "test_tp_compile_comm_reordering",
+    "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
 }
 
@@ -3604,6 +3628,11 @@ test_custom_ops = load_test_module("test_custom_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+if torch.distributed.is_available() and HAS_CUDA:
+    test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
+    TestDTensorCompileWithCompiledAutograd = wrap_test_class(
+        test_dtensor.TestDTensorCompile
+    )
 
 if __name__ == "__main__":
     if HAS_CPU:

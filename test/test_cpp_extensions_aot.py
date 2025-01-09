@@ -26,7 +26,7 @@ try:
     import pytest
 
     HAS_PYTEST = True
-except ImportError as e:
+except ImportError:
     HAS_PYTEST = False
 
 # TODO: Rewrite these tests so that they can be collected via pytest without
@@ -311,9 +311,9 @@ class TestPybindTypeCasters(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
     def test_unregistered(self):
-        a = torch.arange(0, 10, device="cpu")
+        torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
-            b = torch.arange(0, 10, device="maia")
+            torch.arange(0, 10, device="maia")
 
     @skipIfTorchDynamo("dynamo cannot model maia device")
     def test_zeros(self):
@@ -336,7 +336,7 @@ class TestMAIATensor(common.TestCase):
         b = torch.empty(5, 5, device="maia")
         self.assertEqual(maia_extension.get_test_int(), 0)
 
-        c = a + b
+        a + b
         self.assertEqual(maia_extension.get_test_int(), 1)
 
     def test_conv_backend_override(self):
