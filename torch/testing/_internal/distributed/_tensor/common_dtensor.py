@@ -332,14 +332,14 @@ class DTensorTestBase(MultiProcessTestCase):
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self, eager_init) -> None:
-        if "nccl" in PG_BACKEND and DEVICE_COUNT < self.world_size:
+        if "nccl" in self.backend and DEVICE_COUNT < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if PG_BACKEND not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
-            raise RuntimeError(f"Backend {PG_BACKEND} not supported!")
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
+            raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" in PG_BACKEND:
+        if "nccl" in self.backend:
             # set device for nccl pg for collectives
             torch.cuda.set_device(self.rank)
             # we only need to set device_id for nccl backend with eager init
@@ -348,7 +348,7 @@ class DTensorTestBase(MultiProcessTestCase):
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
         dist.init_process_group(
-            backend=PG_BACKEND,
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
