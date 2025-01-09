@@ -12201,6 +12201,31 @@ class CommonTemplate:
         self.assertEqual(res1, ref1)
         self.assertEqual(res2, ref2)
 
+    def test_conv_shape_check(self):
+        # https://github.com/pytorch/pytorch/issues/144013
+        class Model(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                conv_t_cls = eval(f"torch.nn.ConvTranspose{dim}d")
+                self.conv_t = conv_t_cls(
+                    1, 1, kernel_size=(2,) * dim, padding=(1,) * dim
+                )
+
+            def forward(self, x):
+                x = self.conv_t(x)
+                x = torch.sigmoid(x)  # tigger condition
+                return x
+
+        for dim in (1, 2, 3):
+            inputs = torch.randn((1,) * (dim + 2))
+            model = Model(dim)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = model(inputs)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = torch.compile(model)(inputs)
+
 
 @dataclasses.dataclass
 class TestFailure:
