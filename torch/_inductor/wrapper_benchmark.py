@@ -6,6 +6,7 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
+from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
@@ -229,8 +230,8 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert set(all_events.keys()).issubset(
-            set(category_list)
+        assert OrderedSet(all_events.keys()).issubset(
+            OrderedSet(category_list)
         ), f"{list(all_events.keys())}"
 
         per_category_wall_time = {}
@@ -395,7 +396,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
 
         if torch.cuda.is_available():
             peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
+            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)

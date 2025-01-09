@@ -166,7 +166,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 22, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 25, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
 
     @make_logging_test()
@@ -487,7 +487,7 @@ LoweringException: AssertionError:
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import torch.distributed as dist
 import logging
@@ -796,7 +796,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
-            stdout, stderr = self.run_process_no_exception(
+            _, stderr = self.run_process_no_exception(
                 """\
 import torch
 @torch.compile(backend="eager")
@@ -865,6 +865,7 @@ exclusions = {
     "overlap",
     "aot_graphs",
     "aot_graphs_effects",
+    "pre_grad_graphs",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",

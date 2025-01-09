@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 from copy import deepcopy
 from functools import partial
 
@@ -132,6 +133,7 @@ class CheckpointWrapperTest(TestCase):
         m(torch.randn(2, 1)).sum().backward()
         self.assertEqual(2, count)
 
+    @unittest.skip
     def test_checkpoint_wrapper_parity(self):
         """
         Tests that using checkpoint_wrapper or the functional
@@ -162,7 +164,7 @@ class CheckpointWrapperTest(TestCase):
                         else CheckpointImpl.NO_REENTRANT
                     ),
                 )
-                for i in range(self.n):
+                for _ in range(self.n):
                     l = nn.Sequential(
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )

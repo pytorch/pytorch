@@ -527,10 +527,12 @@ void onFunctionExit(
         nullptr, &fallback->device_event_end_, nullptr);
   }
 
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::popUserCorrelationId();
-  } else {
-    torch::profiler::impl::kineto::popCorrelationId();
+  if (!config.experimental_config.disable_external_correlation) {
+    if (fn.scope() == at::RecordScope::USER_SCOPE) {
+      torch::profiler::impl::kineto::popUserCorrelationId();
+    } else {
+      torch::profiler::impl::kineto::popCorrelationId();
+    }
   }
 }
 
@@ -769,8 +771,9 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
-                    : pushProfilingCallbacks</*global=*/false>(scopes);
+    config.pushGlobalCallbacks()
+        ? pushProfilingCallbacks</*global=*/true>(scopes)
+        : pushProfilingCallbacks</*global=*/false>(scopes);
   }
 
   if (!config.global()) {
