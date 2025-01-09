@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       cppwrapper:
-        description: Run inductor_cpp_wrapper for inference?
+        description: Run inductor_cpp_wrapper?
         required: false
         type: boolean
         default: false
