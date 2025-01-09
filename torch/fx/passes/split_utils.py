@@ -184,7 +184,7 @@ def split_by_tags(
 
         # Now we process callable nodes which are nodes with op of call_module,
         # call_function or call_method. Every callable nodes should be tagged.
-        assert hasattr(node, "tag")
+        assert hasattr(node, "tag"), f"Node does not have tag: {node.format_node()}"
 
         upstream_components = [
             node_to_component[x]
@@ -199,7 +199,10 @@ def split_by_tags(
         mx = max((c.order for c in upstream_components), default=0)
 
         # Expect the component for `node` has higher order then its upstream components.
-        assert comp.order >= mx
+        assert (
+            comp.order >= mx
+        ), f"Expected order: {comp.order} for the component: {comp.name} to be >= {mx}, the max order for all its "
+        "upstream components."
 
         # Map a input of `node` to nodes in the component's graph.
         def remap_func(x):
