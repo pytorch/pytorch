@@ -206,6 +206,12 @@ class MetalOverrides(OpOverrides):
     def sign(x: CSEVariable) -> str:
         return f"metal::sign({x})"
 
+    @staticmethod
+    def fmod(a: CSEVariable, b: CSEVariable) -> str:
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::fmod({typecast_a}, {typecast_b})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
