@@ -17,7 +17,8 @@
 #include <ATen/ops/mm_native.h>
 #endif
 
-namespace at::native::xpu {
+namespace at::native {
+namespace xpu {
 
 // result = beta * self + alpha * (mat1 * mat2)
 Tensor& addmm_out(
@@ -454,7 +455,7 @@ Tensor& tensordot_out(
 TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
-} // namespace at::native::xpu
+} // namespace xpu
 
 TORCH_IMPL_FUNC(addmm_out_xpu)
 (const Tensor& self,
@@ -510,3 +511,5 @@ TORCH_IMPL_FUNC(addmv_out_xpu)
  const Tensor& result) {
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
+
+} // namespace at::native

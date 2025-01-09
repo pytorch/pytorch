@@ -59,7 +59,6 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
-    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda",)),
 }
 
 if TEST_WITH_ROCM:
