@@ -512,7 +512,7 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices)
 instantiate_device_type_tests(TestParityWithDDP, globals(), only_for=devices)
 instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices)

@@ -70,7 +70,7 @@ class TestInput(FSDPTest):
             optim.zero_grad()
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestInput, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

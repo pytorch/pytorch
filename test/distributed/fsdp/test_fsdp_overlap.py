@@ -256,7 +256,7 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
         return 2
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     TestForwardOverlapWorldSizeOne, globals(), only_for=devices
 )

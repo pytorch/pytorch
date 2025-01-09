@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     TEST_CUDA,
     TEST_HPU,
+    TEST_XPU
 )
 from torch.utils._triton import has_triton
 
@@ -83,6 +84,10 @@ if TEST_CUDA:
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    DISTRIBUTED_BACKEND = "nccl"
+    DEVICE_COUNT = torch.xpu.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"

@@ -61,7 +61,7 @@ class TestMultipleWrapping(FSDPTest):
         self.assertEqual(output, rewrapped_output)
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestMultipleWrapping, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

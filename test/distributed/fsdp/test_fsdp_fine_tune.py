@@ -404,7 +404,7 @@ class TestFSDPFineTune(FSDPTest):
                     self.assertEqual(param, ref_param)
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestFSDPFineTune, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

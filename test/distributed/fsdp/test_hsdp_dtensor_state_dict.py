@@ -324,7 +324,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices
 )
