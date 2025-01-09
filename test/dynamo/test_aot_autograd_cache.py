@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import os
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -19,8 +21,11 @@ from torch._functorch._aot_autograd.autograd_cache import (
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses import FakeTensorMode
+from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -29,7 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfWindows,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -49,6 +54,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         """
         torch._inductor.codecache.FxGraphCache.clear()
         AOTAutogradCache.clear()
+        CacheArtifactManager.clear()
         self._clear_dynamo_and_codecache()
 
     def _clear_dynamo_and_codecache(self):
@@ -57,6 +63,105 @@ class AOTAutogradCacheTests(InductorTestCase):
         """
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+    @requires_triton()
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "autotune_local_cache": True,
+        }
+    )
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dynamic", (False, True))
+    def test_cache_hot_load(self, device, dtype, dynamic):
+        """
+        Verify that we can populate and hot load functions from the cache.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return x.sin() @ y
+
+        a = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
+        b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
+
+        # Record artifacts
+        with fresh_inductor_cache():
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+
+            # A first call should miss in the cache.
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+
+        self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        autotune_expect = 2 if device == GPU_TYPE else 0
+
+        self.assertEqual(len(cache_info.inductor_artifacts), 2)
+        self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+        self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
+        self.assertEqual(len(cache_info.pgo_artifacts), 0)
+
+        self._clear_all_caches()
+
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # We did not load anything so dont hit yet
+        with fresh_inductor_cache():
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            compiled_result.sum().backward()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        self._clear_all_caches()
+
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # Hot load and hit
+        with fresh_inductor_cache():
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            self.assertEqual(len(cache_info.inductor_artifacts), 2)
+            self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
+            self.assertEqual(len(cache_info.pgo_artifacts), 0)
+
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
