@@ -1001,6 +1001,8 @@ class TestInductorOpInfo(TestCase):
             "nn.functional.interpolate.bicubic",
             "nn.functional.upsample_bilinear",
             "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
         ):
             if dtype not in allowed_dtypes:
                 raise unittest.SkipTest("Skipped!")

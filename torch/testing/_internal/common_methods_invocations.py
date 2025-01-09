@@ -1932,6 +1932,10 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     if torch.cuda.is_available():
         inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
 
+    if not dtype.is_signed:
+        # For unsigned dtypes, negative values are converted.
+        inputs.append(((S,), -get_val(dtype), {}))
+
     for shape, fill_value, kwargs in inputs:
         t = make_tensor(shape, dtype=dtype, device=device,
                         low=None, high=None,
@@ -18923,12 +18927,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('full_like',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16,
+                                            torch.uint16, torch.uint32, torch.uint64),
            supports_out=False,
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
-           skips=(
-           )),
+           ),
     OpInfo('new_zeros',
            op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -19665,7 +19669,8 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
         check_batched_forward_grad=False,
-        dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16,
+                                         torch.uint16, torch.uint32, torch.uint64),
         supports_out=False,
         skips=(
             # JIT has issue when op is passed as lambda
