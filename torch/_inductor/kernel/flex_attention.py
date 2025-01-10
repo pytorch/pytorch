@@ -2425,8 +2425,10 @@ def flex_attention_backward(*args, **kwargs):
         grad_value = broadcasted_grad_value
     else:
         assert V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)), (
-            f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
-        )  # noqa: B950
+            f"Bq and Bkv must broadcastable. "
+            f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
+            f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
+        )
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
