@@ -162,6 +162,7 @@ class OptionalArrayRef final {
   }
 
   constexpr const ArrayRef<T>& value() const& {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return wrapped_opt_array_ref.value();
   }
 
