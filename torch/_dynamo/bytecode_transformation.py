@@ -20,6 +20,7 @@ from typing import (
 )
 
 from ..utils._backport_slots import dataclass_slots
+from . import config
 from .bytecode_analysis import (
     get_indexof,
     propagate_line_nums,
@@ -1110,6 +1111,48 @@ def remove_fused_load_store(instructions: List[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+# adds GRAPH_BREAK_IF_LEAF (not a real instruction) before RETURN_* instructions
+# for testing purposes
+def add_graph_break_if_leaf_instructions(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        if "RETURN" in inst.opname:
+            replace_insts = [
+                create_instruction("NOP", argval="GRAPH_BREAK_IF_LEAF"),
+                create_instruction(inst.opname, argval=inst.argval),
+            ]
+            # breakpoint()
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
+    instructions[:] = new_insts
+
+
+def remove_graph_break_if_leaf_instructions(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst, next_inst in zip(instructions, instructions[1:]):
+        if (
+            inst.opname == "NOP"
+            and inst.argval == "GRAPH_BREAK_IF_LEAF"
+            and next_inst.opname.startswith("RETURN")
+        ):
+            # remove this instruction and update all other instructions' jump targets
+            for i in range(len(instructions)):
+                if instructions[i].target is inst:
+                    instructions[i].target = next_inst
+                if instructions[i].exn_tab_entry:
+                    if instructions[i].exn_tab_entry.start is inst:
+                        instructions[i].exn_tab_entry.start = next_inst
+                    if instructions[i].exn_tab_entry.end is inst:
+                        instructions[i].exn_tab_entry.end = next_inst
+                    if instructions[i].exn_tab_entry.target is inst:
+                        instructions[i].exn_tab_entry.target = next_inst
+        else:
+            new_insts.append(inst)
+    new_insts.append(instructions[-1])
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or ()) + (code.co_freevars or ())
@@ -1418,6 +1461,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
+    remove_graph_break_if_leaf_instructions(instructions)
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)
 
@@ -1529,6 +1573,8 @@ def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
                 remove_binary_store_slice(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
+        if config.debug_force_graph_break_on_leaf_return:
+            add_graph_break_if_leaf_instructions(instructions)
     if sys.version_info >= (3, 11):
         update_offsets(instructions)
         devirtualize_jumps(instructions)

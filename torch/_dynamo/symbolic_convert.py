@@ -826,6 +826,7 @@ class InstructionTranslatorBase(
     exn_vt_stack: List[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
+    is_leaf_tracer: bool
 
     def mark_inconsistent_side_effects(self):
         """
@@ -924,6 +925,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
+        self.is_leaf_tracer = False
         return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
 
     def get_line_of_code_header(self, lineno=None):
@@ -2068,8 +2070,15 @@ class InstructionTranslatorBase(
         else:
             unimplemented(f"UNPACK_EX {seq}")
 
+    @break_graph_if_unsupported(push=0)
+    def graph_break_on_leaf_function(self, inst):
+        if self.is_leaf_tracer:
+            unimplemented("forced graph break on leaf function")
+
     def NOP(self, inst):
-        pass
+        # Dynamo-specific testing behavior
+        if inst.argval == "GRAPH_BREAK_IF_LEAF":
+            self.graph_break_on_leaf_function(inst)
 
     def POP_TOP(self, inst):
         self.pop()
@@ -2687,6 +2696,8 @@ class InstructionTranslatorBase(
         self.current_speculation = None
 
         self.strict_checks_fn = None
+
+        self.is_leaf_tracer = True
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (

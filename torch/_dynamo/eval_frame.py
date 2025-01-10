@@ -21,6 +21,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -515,7 +516,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -908,7 +911,7 @@ def _optimize(
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
-    if nopython:
+    if nopython and not config.debug_force_graph_break_on_leaf_return:
         return optimize_assert(
             backend,
             dynamic=dynamic,
@@ -1441,6 +1444,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 

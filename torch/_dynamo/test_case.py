@@ -39,6 +39,11 @@ def run_tests(needs: Union[str, Tuple[str, ...]] = ()) -> None:
     run_tests()
 
 
+class CompileCounterInt(int):
+    def __add__(self, other):
+        return CompileCounterInt(super().__add__(other))
+
+
 class TestCase(TorchTestCase):
     _exit_stack: contextlib.ExitStack
 
@@ -77,3 +82,15 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+
+    def assertEqual(self, x, y, *args, **kwargs):
+        if (
+            config.debug_disable_compile_counter
+            and isinstance(x, CompileCounterInt)
+            or isinstance(y, CompileCounterInt)
+        ):
+            return
+        return super().assertEqual(x, y, *args, **kwargs)
+
+    # assertExpectedInline might also need to be disabled for wrapped nested
+    # graph break tests
