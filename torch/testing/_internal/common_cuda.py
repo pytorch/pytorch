@@ -86,7 +86,7 @@ def evaluate_platform_supports_fp8():
         if torch.version.hip:
             ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             archs = ['gfx94']
-            if ROCM_VERSION >= (6,3):
+            if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx120'])
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
