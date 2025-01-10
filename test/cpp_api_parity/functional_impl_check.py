@@ -233,9 +233,9 @@ def write_test_to_test_class(
 
     functional_name = compute_functional_name(test_params_dict)
 
-    assert hasattr(
-        torch.nn.functional, functional_name
-    ), f"`torch.nn.functional` doesn't have function `{functional_name}`. (Discovered while processing\n{pprint.pformat(test_params_dict)}.)"  # noqa: B950
+    assert hasattr(torch.nn.functional, functional_name), (
+        f"`torch.nn.functional` doesn't have function `{functional_name}`. (Discovered while processing\n{pprint.pformat(test_params_dict)}.)"
+    )  # noqa: B950
 
     functional_full_name = "F::" + functional_name
 

@@ -38,32 +38,22 @@ USE_BLACK_FILELIST = re.compile(
                     # torchgen/**
                     # test/**
                     # test/[a-h]*/**
-                    "test/[a-h]*/**",
                     # test/[i-j]*/**
                     "test/[i-j]*/**",
                     # test/[k-n]*/**
                     "test/[k-n]*/**",
                     # test/optim/**
-                    "test/optim/**",
                     # "test/[p-z]*/**",
                     "test/[p-z]*/**",
                     # torch/**
                     # torch/_[a-h]*/**
-                    "torch/_[a-h]*/**",
                     # torch/_i*/**
-                    "torch/_i*/**",
                     # torch/_[j-z]*/**
-                    "torch/_[j-z]*/**",
                     # torch/[a-c]*/**
-                    "torch/[a-c]*/**",
                     # torch/d*/**
-                    "torch/d*/**",
                     # torch/[e-n]*/**
-                    "torch/[e-n]*/**",
                     # torch/optim/**
-                    "torch/optim/**",
                     # torch/[p-z]*/**
-                    "torch/[p-z]*/**",
                 ],
             ),
         )

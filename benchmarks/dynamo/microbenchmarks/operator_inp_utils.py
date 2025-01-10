@@ -264,9 +264,9 @@ class OperatorInputsLoader:
     def get_inputs_for_operator(
         self, operator, dtype=None, device="cuda"
     ) -> Generator[tuple[Iterable[Any], Dict[str, Any]], None, None]:
-        assert (
-            str(operator) in self.operator_db
-        ), f"Could not find {operator}, must provide overload"
+        assert str(operator) in self.operator_db, (
+            f"Could not find {operator}, must provide overload"
+        )
 
         if "embedding" in str(operator):
             log.warning("Embedding inputs NYI, input data cannot be randomized")
@@ -301,9 +301,9 @@ class OperatorInputsLoader:
             yield op
 
     def get_call_frequency(self, op):
-        assert (
-            str(op) in self.operator_db
-        ), f"Could not find {op}, must provide overload"
+        assert str(op) in self.operator_db, (
+            f"Could not find {op}, must provide overload"
+        )
 
         count = 0
         for counter in self.operator_db[str(op)].values():

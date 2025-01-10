@@ -66,7 +66,9 @@ class _ConvNd(Module):
     ]
     __annotations__ = {"bias": Optional[torch.Tensor]}
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:  # type: ignore[empty-body]
+    def _conv_forward(
+        self, input: Tensor, weight: Tensor, bias: Optional[Tensor]
+    ) -> Tensor:  # type: ignore[empty-body]
         ...
 
     in_channels: int
@@ -187,10 +189,7 @@ class _ConvNd(Module):
                 init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
-        s = (
-            "{in_channels}, {out_channels}, kernel_size={kernel_size}"
-            ", stride={stride}"
-        )
+        s = "{in_channels}, {out_channels}, kernel_size={kernel_size}, stride={stride}"
         if self.padding != (0,) * len(self.padding):
             s += ", padding={padding}"
         if self.dilation != (1,) * len(self.dilation):
@@ -279,9 +278,7 @@ class Conv1d(_ConvNd):
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:
@@ -450,9 +447,7 @@ class Conv2d(_ConvNd):
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:
@@ -619,9 +614,7 @@ class Conv3d(_ConvNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:
@@ -883,9 +876,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:
@@ -1048,9 +1039,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:
@@ -1238,9 +1227,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(
-            **reproducibility_notes, **convolution_notes
-        )
+    """.format(**reproducibility_notes, **convolution_notes)
         + r"""
 
     Shape:

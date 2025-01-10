@@ -775,7 +775,8 @@ def trace_triton_kernel_wrapper(
         out = func_overload(**node_args)
 
     proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy, node_args  # type: ignore[union-attr]
+        proxy_mode.tracer.unwrap_proxy,
+        node_args,  # type: ignore[union-attr]
     )
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1327,9 +1328,9 @@ class TritonHOPifier:
                 for config in new_configs:
                     for name in special_param_names:
                         if name not in config.__dict__["kwargs"]:
-                            assert (
-                                name in config.__dict__
-                            ), f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            assert name in config.__dict__, (
+                                f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            )
                             config.__dict__["kwargs"][name] = config.__dict__[name]
                             updated = True
 
