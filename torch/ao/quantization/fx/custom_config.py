@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Type
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.backend_config import BackendConfig
@@ -38,7 +38,7 @@ class StandaloneModuleConfigEntry:
     # qconfig_mapping for the prepare function called in the submodule,
     # None means use qconfig from parent qconfig_mapping
     qconfig_mapping: Optional[QConfigMapping]
-    example_inputs: Tuple[Any, ...]
+    example_inputs: tuple[Any, ...]
     prepare_custom_config: Optional[PrepareCustomConfig]
     backend_config: Optional[BackendConfig]
 
@@ -81,7 +81,7 @@ class PrepareCustomConfig:
         self,
         module_name: str,
         qconfig_mapping: Optional[QConfigMapping],
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         prepare_custom_config: Optional[PrepareCustomConfig],
         backend_config: Optional[BackendConfig],
     ) -> PrepareCustomConfig:
@@ -101,7 +101,7 @@ class PrepareCustomConfig:
         self,
         module_class: Type,
         qconfig_mapping: Optional[QConfigMapping],
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         prepare_custom_config: Optional[PrepareCustomConfig],
         backend_config: Optional[BackendConfig],
     ) -> PrepareCustomConfig:

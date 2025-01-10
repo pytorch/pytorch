@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple, Union
+from typing import List, Union
 
 import torch
 from torch import fx
@@ -75,8 +75,8 @@ def validate_tensor_metadata(desc, expected, given):
 
 def validate_tensors_metadata(
     desc,
-    expected_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
-    actual_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    expected_tensors: Union[List[torch.Tensor], tuple[torch.Tensor, ...]],
+    actual_tensors: Union[List[torch.Tensor], tuple[torch.Tensor, ...]],
 ):
     if len(expected_tensors) != len(actual_tensors):
         raise PipeliningShapeError(
