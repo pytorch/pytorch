@@ -164,6 +164,20 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
+@contextmanager
+def _disable_custom_triton_op_functional_decomposition():
+    old = torch._functorch.config.decompose_custom_triton_ops
+    try:
+        torch._functorch.config.decompose_custom_triton_ops = False
+        yield torch._functorch.config.decompose_custom_triton_ops
+    finally:
+        torch._functorch.config.decompose_custom_triton_ops = old
+
+
+def custom_triton_ops_decomposition_disabled():
+    return not torch._functorch.config.decompose_custom_triton_ops
+
+
 def _fixup_key(x):
     return "L__self__" + _strip_root(x)
 
@@ -717,6 +731,7 @@ def _export_to_aten_ir(
     decomp_table=None,
     _check_autograd_state: bool = True,
     _is_torch_jit_trace: bool = False,
+    decompose_custom_triton_ops: bool = False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -730,6 +745,11 @@ def _export_to_aten_ir(
         if not pre_dispatch and is_grad_enabled:
             grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
+    custom_triton_ops_decomposition_ctx = (
+        nullcontext
+        if decompose_custom_triton_ops
+        else _disable_custom_triton_op_functional_decomposition
+    )
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -739,7 +759,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context(), custom_triton_ops_decomposition_ctx():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
