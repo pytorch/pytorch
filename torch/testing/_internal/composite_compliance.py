@@ -5,8 +5,8 @@ from torch import Tensor
 import itertools
 
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.pytree.python import tree_map, tree_flatten, tree_unflatten
-import torch.utils.pytree.python as pytree
+from torch.utils.pytree import tree_map, tree_flatten, tree_unflatten
+import torch.utils.pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
@@ -171,8 +171,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = pytree.arg_tree_leaves(*args, **(kwargs or {}))
-            modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
+            modes = tuple(e.mode for e in pytree.tree_iter((args, kwargs or {})) if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
             with modes[0]:

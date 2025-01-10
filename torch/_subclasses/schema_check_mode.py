@@ -5,10 +5,9 @@ from copy import deepcopy
 from itertools import combinations
 
 import torch
-import torch.utils.pytree.python as pytree
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.pytree.python import tree_map
+from torch.utils.pytree import tree_iter, tree_map
 
 
 # Named Tuples used within SchemaCheckMode
@@ -148,9 +147,7 @@ class SchemaCheckMode(TorchDispatchMode):
             name: tree_map(unwrap, c_p_args.get(name)) for name in c_p_args
         }
         cloned_metadata = {
-            name: [
-                parse_metadata(a) for a in pytree.tree_leaves(pre_arguments.get(name))
-            ]
+            name: [parse_metadata(a) for a in tree_iter(pre_arguments.get(name))]
             for name in pre_arguments
         }
 
@@ -205,9 +202,7 @@ However, we found that `outputs[{str(j)}] is {name}"""
                             )
                 if any(
                     has_mutated(a, b, c)
-                    for a, b, c in zip(
-                        pytree.tree_leaves(before), pytree.tree_leaves(after), md
-                    )
+                    for a, b, c in zip(tree_iter(before), tree_iter(after), md)
                 ):
                     if not schema_info.is_mutable(
                         SchemaArgument(SchemaArgType.input, i)

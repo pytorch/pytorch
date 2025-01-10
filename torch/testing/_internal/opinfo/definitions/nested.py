@@ -15,7 +15,7 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
     UnaryUfuncInfo,
 )
-from torch.utils.pytree.python import tree_flatten, tree_map
+from torch.utils.pytree import tree_leaves, tree_map
 
 
 @dataclass
@@ -390,7 +390,7 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             # get all possible dim-related argnames that could be encountered for this op
             argnames = tree_map(
                 lambda a: a.replace("...", ""),
-                tree_flatten(op._extra_op_data.dim_args)[0],
+                tree_leaves(op._extra_op_data.dim_args),
             )
             # for all dim-related args present, convert from outer -> inner dim space
             for argname in {a for a in argnames if a in kwargs}:

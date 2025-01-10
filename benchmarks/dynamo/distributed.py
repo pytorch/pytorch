@@ -5,10 +5,10 @@ from functools import partial
 
 import torch
 import torch._dynamo as dynamo
-import torch.utils.pytree.python as pytree
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import profile, ProfilerActivity, record_function
+from torch.utils.pytree import tree_map
 
 
 try:
@@ -62,7 +62,7 @@ def run_model(args, model, inputs, key):
             return maybe_tensor.to(dev_rank)
         return maybe_tensor
 
-    inputs = pytree.tree_map(move_tensor, inputs)
+    inputs = tree_map(move_tensor, inputs)
 
     if args.fsdp:
         model = apply_fsdp(

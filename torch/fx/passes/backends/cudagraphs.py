@@ -2,7 +2,7 @@
 import operator
 
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport

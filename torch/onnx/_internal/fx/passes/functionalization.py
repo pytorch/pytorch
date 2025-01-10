@@ -8,7 +8,7 @@ import torch
 import torch._ops
 import torch.func
 import torch.fx
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics

@@ -8,7 +8,7 @@ __all__ = ["assert_onnx_program"]
 from typing import Any, TYPE_CHECKING
 
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 
 
 if TYPE_CHECKING:
@@ -53,11 +53,10 @@ def assert_onnx_program(
     if kwargs is None:
         kwargs = {}
     torch_module = exported_program.module()
-    torch_outputs, _ = pytree.tree_flatten(torch_module(*args, **kwargs))
     # ONNX outputs are always real, so we need to convert torch complex outputs to real representations
     torch_outputs = [
         torch.view_as_real(output) if torch.is_complex(output) else output
-        for output in torch_outputs
+        for output in pytree.tree_iter(torch_module(*args, **kwargs))
     ]
     onnx_outputs = program(*args, **kwargs)
     # TODO(justinchuby): Include output names in the error message

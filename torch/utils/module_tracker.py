@@ -9,7 +9,7 @@ from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
-from torch.utils.pytree.python import tree_flatten
+from torch.utils.pytree import tree_iter
 
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ class ModuleTracker:
         name = self._get_mod_name(mod)
         self._get_append_fn(name, False)()
 
-        args, _ = tree_flatten(input)
+        args = tree_iter(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             self._hooks.append(
@@ -139,7 +139,7 @@ class ModuleTracker:
         name = self._get_mod_name(mod)
         self._get_pop_fn(name, False)()
 
-        args, _ = tree_flatten(output)
+        args = tree_iter(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             self._hooks.append(

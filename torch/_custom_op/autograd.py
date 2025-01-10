@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from collections import namedtuple
 import functools
 
@@ -103,7 +103,7 @@ def construct_autograd_kernel(
 
         def forward(ctx, *flat_args):
             ctx.set_materialize_grads(True)
-            args = pytree.tree_unflatten(list(flat_args), spec)
+            args = pytree.tree_unflatten(flat_args, spec)
             with torch._C._AutoDispatchBelowAutograd():
                 output = op_overload(*args)
 
@@ -123,7 +123,7 @@ def construct_autograd_kernel(
 
         def backward(ctx, *flat_grad_output):
             assert out_spec is not None
-            grads = pytree.tree_unflatten(list(flat_grad_output), out_spec)
+            grads = pytree.tree_unflatten(flat_grad_output, out_spec)
             saved, args_info = unpack_saved(ctx)
             # There is nothing on the ctx object for now, it is just there so
             # that we can add additional things in the future.
@@ -142,7 +142,7 @@ def construct_autograd_kernel(
 
         flat_output = generated_cls.apply(*flat_args)
         assert out_spec is not None
-        return pytree.tree_unflatten(list(flat_output), out_spec)
+        return pytree.tree_unflatten(flat_output, out_spec)
     return apply
 
 

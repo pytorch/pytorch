@@ -637,10 +637,10 @@ def wrap_check_inputs(check_inputs):
 
 
 def analyze_ts_result_with_export_result(export, trace):
-    import torch.utils.pytree.python as pytree
+    from torch.utils.pytree import tree_leaves
 
-    flat_export = pytree.tree_leaves(export)
-    flat_trace = pytree.tree_leaves(trace)
+    flat_export = tree_leaves(export)
+    flat_trace = tree_leaves(trace)
 
     for orig, loaded in zip(flat_export, flat_trace):
         if orig.layout != loaded.layout:

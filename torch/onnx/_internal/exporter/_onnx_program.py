@@ -15,7 +15,7 @@ import warnings
 from typing import Callable, Sequence, TYPE_CHECKING
 
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
 
 
@@ -263,7 +263,7 @@ def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
 
 
 def _flatten_inputs(model_args, model_kwargs):
-    flattened_args, _ = pytree.tree_flatten((model_args, model_kwargs))
+    flattened_args = pytree.tree_leaves((model_args, model_kwargs))
     return flattened_args
 
 

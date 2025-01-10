@@ -12,7 +12,7 @@ from weakref import ReferenceType
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._functorch._aot_autograd.functional_utils import is_fun
-from torch.utils.pytree.python import tree_map
+from torch.utils.pytree import tree_map, tree_map_
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -135,7 +135,7 @@ def _infer_device_type(*args):
         nonlocal device_types
         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
             device_types.append(arg.device.type)
-    tree_map(add_device_types, args)
+    tree_map_(add_device_types, args)
 
     device_types_set = set(device_types)
     if len(device_types_set) > 1:
@@ -171,7 +171,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
         nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
-    tree_map(add_device_ids, args)
+    tree_map_(add_device_ids, args)
 
     fwd_device_states = []
     device_module = _get_device_module(_infer_device_type(*args))

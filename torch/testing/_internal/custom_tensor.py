@@ -4,7 +4,7 @@
 from collections import namedtuple
 
 import torch
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 

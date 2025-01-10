@@ -1,8 +1,8 @@
 from typing import Dict, Union
 
 import torch
-import torch.utils.pytree.python as pytree
 from torch.export.exported_program import ExportedProgram
+from torch.utils.pytree import tree_map
 
 
 __all__ = ["move_to_device_pass"]
@@ -59,7 +59,7 @@ def move_to_device_pass(
             kwargs["device"] = _get_new_device(kwargs["device"], location)
             node.kwargs = kwargs
         # move all the tensor metadata
-        node.meta["val"] = pytree.tree_map(
+        node.meta["val"] = tree_map(
             lambda v: v.to(_get_new_device(v.device, location))
             if isinstance(v, torch.Tensor)
             else v,
