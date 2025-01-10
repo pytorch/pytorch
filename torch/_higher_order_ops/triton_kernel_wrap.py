@@ -1253,7 +1253,7 @@ class TritonHOPifier:
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
 
-        # raise an exception if there are multuple @triton.autotune decorators
+        # raise an exception if there are multiple @triton.autotune decorators
         iter_kernel = variable.kernel
         autotuner_count = 0
         while not isinstance(iter_kernel, JITFunction):
