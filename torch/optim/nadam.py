@@ -406,7 +406,9 @@ def _multi_tensor_nadam(
             and p.device.type in capturable_supported_devices
             for p, mp, step in zip(params, mu_products, state_steps)
         ), (
-            f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
+            "If capturable=True, "
+            "params, mu_products, and state_steps must be on supported devices: "
+            f"{capturable_supported_devices}."
         )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
