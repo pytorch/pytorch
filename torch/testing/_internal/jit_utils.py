@@ -39,7 +39,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Union
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -810,7 +810,7 @@ def clone_inputs(args):
 
 def get_traced_sample_variant_pairs(device, dtype, op):
     # tuples of (variant, sample)
-    outputs: List[Tuple[Any, Any]] = []
+    outputs: List[tuple[Any, Any]] = []
 
     samples = op.sample_inputs(device, dtype)
 
