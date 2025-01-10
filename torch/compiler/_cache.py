@@ -19,7 +19,7 @@ class CacheArtifactType(Enum):
 
     INDUCTOR = 0
     AUTOTUNE = 1
-    AOT_AUTOGRAD = 2  # NYI
+    AOT_AUTOGRAD = 2
     PGO = 3
 
 
