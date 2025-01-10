@@ -133,7 +133,6 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   Message(Message&& other) = delete;
   Message& operator=(Message const& rhs) = delete;
   Message& operator=(Message&& rhs) = delete;
-  ~Message() override = default;
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;

@@ -11,7 +11,6 @@
 
 #include <utility>
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
@@ -511,4 +510,3 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 } // namespace at::functorch
-// NOLINTEND(bugprone-unchecked-optional-access)

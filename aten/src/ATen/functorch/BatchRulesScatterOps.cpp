@@ -14,7 +14,6 @@
 #include <torch/library.h>
 
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 namespace {
@@ -1284,4 +1283,3 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 } // namespace at::functorch
-// NOLINTEND(bugprone-unchecked-optional-access)

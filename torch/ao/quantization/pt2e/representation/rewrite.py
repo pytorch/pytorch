@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -608,7 +608,7 @@ class _RewriteInfo:
     """
 
     # example inputs used for exporting the pattern into GraphModule
-    example_inputs: tuple[Any, ...]
+    example_inputs: Tuple[Any, ...]
     pattern: Callable
     replacement: Callable
     # post transformation on the exported pattern and replacement GraphModule

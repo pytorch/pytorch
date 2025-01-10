@@ -526,7 +526,12 @@ Vectorized<c10::BFloat16> inline fmadd(
   // elements, not the bottom and top half, so they don't seem
   // particularly useful here. Ideally we would include dot product in
   // the Vectorized interface...
-  return a * b + c;
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
+  return convert_float_bfloat16(
+      fmadd(a_float_low, b_float_low, c_float_low),
+      fmadd(a_float_high, b_float_high, c_float_high));
 }
 
 template <>
@@ -535,7 +540,12 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
   // See NOTE [BF16 FMA] above.
-  return a * b - c;
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
+  return convert_float_bfloat16(
+      fmsub(a_float_low, b_float_low, c_float_low),
+      fmsub(a_float_high, b_float_high, c_float_high));
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

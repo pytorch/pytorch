@@ -11,6 +11,27 @@
 // sparsification, as a bitmask.
 // NOTE: Algorithms might select LESS than 8 values in total in some cases.
 
+namespace cutlass::platform {
+template <>
+struct numeric_limits<cutlass::bfloat16_t> {
+  CUTLASS_HOST_DEVICE
+  static cutlass::bfloat16_t infinity() {
+    return cutlass::bfloat16_t::bitcast(0x7f80);
+  }
+};
+
+#if CUTLASS_VERSION == 341
+template <>
+struct numeric_limits<cutlass::half_t> {
+  CUTLASS_HOST_DEVICE
+  static cutlass::half_t infinity() {
+    return cutlass::half_t::bitcast(0x7c00);
+  }
+};
+#endif
+
+} // namespace cutlass::platform
+
 namespace at::native {
 
 template <typename Element, typename Pointwise>

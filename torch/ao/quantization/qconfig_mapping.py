@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 
@@ -238,7 +238,7 @@ class QConfigMapping:
         self.module_name_regex_qconfigs: OrderedDict[str, QConfigAny] = OrderedDict()
         self.module_name_qconfigs: OrderedDict[str, QConfigAny] = OrderedDict()
         self.module_name_object_type_order_qconfigs: OrderedDict[
-            tuple[str, Callable, int], QConfigAny
+            Tuple[str, Callable, int], QConfigAny
         ] = OrderedDict()
 
     def set_global(self, global_qconfig: QConfigAny) -> QConfigMapping:
