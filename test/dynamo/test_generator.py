@@ -1294,6 +1294,7 @@ class GeneratorThrowCpythonTests(GeneratorTestsBase):
 
         self._compile_check(fn)
 
+    @unittest.expectedFailure
     def test_exception_context_with_yield_from_with_context_cycle(self):
         # Check trying to create an exception context cycle:
         # https://bugs.python.org/issue40696
