@@ -332,8 +332,10 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+#ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
+#endif
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
   if constexpr (std::is_same_v<Dtype, double>) {
@@ -352,6 +354,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
     abcType = CUDA_C_32F;
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
+#ifndef USE_ROCM
     if (at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       halpha = alpha;
@@ -359,6 +362,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       alpha_ptr = &halpha;
       beta_ptr = &hbeta;
     }
+#endif
     abcType = CUDA_R_16F;
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
