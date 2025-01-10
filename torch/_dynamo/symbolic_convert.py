@@ -1815,9 +1815,9 @@ class InstructionTranslatorBase(
     def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self,
+            self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(inst.argval)],
-            {},  # type: ignore[arg-type]
+            {},
         )
         self.push(result)
 
@@ -1843,9 +1843,9 @@ class InstructionTranslatorBase(
 
         try:
             BuiltinVariable(setattr).call_function(
-                self,
+                self,  # type: ignore[arg-type]
                 [obj, ConstantVariable.create(inst.argval), val],
-                {},  # type: ignore[arg-type]
+                {},
             )
             return
         except Unsupported as e:
@@ -1872,9 +1872,9 @@ class InstructionTranslatorBase(
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
-            self,
+            self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(inst.argval)],
-            {},  # type: ignore[arg-type]
+            {},
         )
 
     def create_call_resume_at(self, offset):
