@@ -22,6 +22,7 @@ typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 typedef id<MTLBuffer> MTLBuffer_t;
 #else
+#include <dispatch/dispatch.h>
 typedef void* MPSCommandBuffer_t;
 typedef void* MPSGraph;
 typedef void* MPSGraphExecutionDescriptor;
@@ -29,7 +30,6 @@ typedef void* MPSGraphCompilationDescriptor;
 typedef void* MTLCommandQueue_t;
 typedef void* MTLComputeCommandEncoder_t;
 typedef void* MTLSharedEvent_t;
-typedef void* dispatch_queue_t;
 typedef void* MTLDevice_t;
 typedef void* MTLBuffer_t;
 typedef void* MTLCommandBufferHandler;
