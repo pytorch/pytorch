@@ -503,6 +503,32 @@ def convolution(
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
+
+    # Always convert conv1D to 2D for Intel GPU.
+    # Only conv2D can be converted to channel last layout,
+    # which have much better performance.
+    if (
+        len(x.get_size()) == 3
+        and len(kernel_shape) == 1
+        and ir.get_device_type(x) == "xpu"
+    ):
+        kwargs.update(
+            {
+                "stride": (1,) + stride,
+                "padding": (0,) + padding,
+                "dilation": (1,) + dilation,
+                "output_padding": (0,) + output_padding,
+            }
+        )
+        # (N, C, L) -> (N, C, 1, L)
+        x = L[aten.unsqueeze](x, dim=2)
+        weight = L[aten.unsqueeze](weight, dim=2)
+
+        return L[aten.squeeze](
+            convolution(x, weight, bias, **kwargs),
+            dim=2,
+        )
+
     ndim = len(kernel_shape)
     stride = pad_listlike(stride, ndim)
     padding = pad_listlike(padding, ndim)
