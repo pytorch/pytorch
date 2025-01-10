@@ -53,7 +53,7 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
     12.6)
-        25.0="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.4)
