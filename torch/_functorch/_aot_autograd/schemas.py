@@ -9,7 +9,18 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    NewType,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -155,9 +166,22 @@ class InputAliasInfo:
 
 
 @dataclass
+class MemoryFormatMeta:
+    size: Sequence[int | torch.SymInt]
+    stride: Sequence[int | torch.SymInt]
+
+    @staticmethod
+    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+        return MemoryFormatMeta(
+            size=t.size(),
+            stride=t.stride(),
+        )
+
+
+@dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
-    memory_format: Optional[torch.memory_format] = None
+    memory_format: Optional[MemoryFormatMeta] = None
 
 
 @dataclass
@@ -203,7 +227,7 @@ class SubclassCreationMeta:
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
-    memory_format: Optional[torch.memory_format] = None
+    memory_format: Optional[MemoryFormatMeta] = None
 
     def compute_outer_size_and_stride(
         self,

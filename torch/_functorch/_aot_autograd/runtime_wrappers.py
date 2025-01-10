@@ -45,6 +45,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputType,
     PlainTensorMeta,
@@ -1692,6 +1693,20 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
     return out
 
 
+def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    expected_size = memory_format.size
+    expected_stride = memory_format.stride
+
+    # We can not use as_strided() when tensor has memory overlap as storage size is different.
+    if torch._debug_has_internal_overlap(x) != 0:
+        return torch.empty_strided(expected_size, expected_stride).copy_(x)
+
+    if x.shape != expected_size or x.stride() != expected_stride:
+        return x.as_strided(size=expected_size, stride=expected_stride)
+
+    return x
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -1701,8 +1716,8 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            if not x.is_contiguous(memory_format=meta.memory_format):
-                x = x.contiguous(memory_format=meta.memory_format)
+            assert meta.memory_format
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1753,8 +1768,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+        assert meta.memory_format
+        expected_size = meta.memory_format.size
+        expected_stride = meta.memory_format.stride
+
+        # We can not use as_strided() when tensor has memory overlap as storage size is different.
+        if torch._debug_has_internal_overlap(x) != 0:
+            x = torch.empty_strided(expected_size, expected_stride).copy_(x)
+        elif x.shape != expected_size or x.stride() != expected_stride:
+            x = x.as_strided(size=expected_size, stride=expected_stride)
+
+        assert meta.memory_format
+        x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]

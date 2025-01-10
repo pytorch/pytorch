@@ -41,6 +41,7 @@ from .functional_utils import (
 from .schemas import (
     FunctionalTensorMetadataEq,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputAliasInfo,
     OutputType,
@@ -73,14 +74,10 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     out = x.detach()
 
-    suggest_memory_format = torch._prims_common.suggest_memory_format
     is_subclass = is_traceable_wrapper_subclass(out)
 
-    memory_format = suggest_memory_format(out)
-
-    was = out
-    out = out.contiguous(memory_format=memory_format)
-    updated = out is not was
+    memory_format = MemoryFormatMeta.from_tensor(out)
+    updated = False
 
     # For subclass we keep memory format of outer strides at the beggining of the list
     out_memory_format = [memory_format] if is_subclass else memory_format

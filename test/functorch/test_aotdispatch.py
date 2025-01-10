@@ -6411,6 +6411,74 @@ metadata incorrectly.
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
 
+    def test_noncontig_nonmemformat_tangents(self):
+        B = 2
+        T = 8
+        E = 16
+
+        def fn(x):
+            x = x + 1
+            return x.transpose(1, 2)
+
+        def _inp():
+            return torch.randn(B, T, E, requires_grad=True)
+
+        fn(_inp())
+
+        inp = _inp()
+
+        comp_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        y = comp_fn(inp)
+        y.backward(torch.ones_like(y))
+
+        # Classic sum().backward() that produces tangent with memory overlap using .expand()
+        y2 = comp_fn(_inp())
+        y2.sum().backward()
+
+    def test_flex_attn_noncontiguous_tangents(self):
+        E = 16  # embedding dim
+        H = 4  # number of heads
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def _compiled_flex_attn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0, is_causal=True
+            )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c_attn = torch.nn.Linear(E, 3 * E)
+
+            def forward(self, x):
+                B, T, E = x.size()
+                q, k, v = self.c_attn(x).split(E, dim=2)
+                # _compiled_flex_attn(q, k, v)
+                y = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0, is_causal=True
+                )
+                k = k.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                q = q.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                v = v.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+
+                y = y.transpose(1, 2).contiguous().view(B, T, E)
+
+                return y
+
+        m = M()
+        B = 1
+        T = 8
+
+        def _inp():
+            return torch.randn(B, T, E, requires_grad=True)
+
+        x_ref = _inp()
+        m(x_ref)
+
+        x = _inp()
+        y_out = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
+        y_out.sum().backward()
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
