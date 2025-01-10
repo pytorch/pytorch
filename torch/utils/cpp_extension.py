@@ -287,7 +287,12 @@ COMMON_SYCL_FLAGS = [
     '-fsycl-targets=spir64_gen,spir64',
 ]
 
-SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST', 'pvc,xe-lpg')
+# Setting same default archs as in third_party/torch-xpu-ops project
+# minus dg2-* since it lacks hardware support for fp64 and requires
+# special consideration from the user. If needed this platform can
+# be requested thru TORCH_XPU_ARCH_LIST environment variable.
+SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST',
+                                'mtl-u,mtl-h,xe2-lpg,xe2-hpg' if IS_WINDOWS else 'pvc,xe-lpg')
 
 SYCL_DLINK_FLAGS = [
     *COMMON_SYCL_FLAGS,
