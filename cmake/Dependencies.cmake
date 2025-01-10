@@ -540,6 +540,12 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+    if(Win32)
+      # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
+      # Windows runtime has provided the math functions - #134989
+      set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
+    endif()
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
@@ -1573,7 +1579,7 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if((NOT USE_XPU) OR WIN32)
+  if((NOT USE_XPU) OR (NOT XPU_ENABLE_KINETO))
     set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")
