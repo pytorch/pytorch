@@ -73,7 +73,8 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
 static void throw_python_error() {
   python_error err;
   err.persist();
-  throw std::move(err);
+  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+  throw err;
 }
 
 static PyObject* check(PyObject* pyresult) {
@@ -108,21 +109,20 @@ struct PythonLogger {
 
   // must be called while GIL is held
   void log(Level level, std::string_view msg) const {
-    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level]));
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
     TORCH_INTERNAL_ASSERT(pymethod != nullptr);
     THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    PyObject* result =
-        PyObject_CallFunction(pyfunc.get(), "s", std::string(msg).c_str());
+    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
     if (result == nullptr) {
       throw_python_error();
     }
   }
 
  private:
-  static constexpr std::array<const char*, COUNT> levelNames_ = {
+  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
       "debug", // Level::DEBUG
       "info", // Level::INFO
       "warning", // Level::WARNING
@@ -421,7 +421,7 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
-static PyObject* wrap_lifted_ivalue_args(
+PyObject* wrap_lifted_ivalue_args(
     const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
   PyObject* pyivalueargs =
       PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
@@ -440,7 +440,7 @@ static PyObject* wrap_lifted_ivalue_args(
   return pyivalueargs;
 }
 
-static PyObject* wrap_node_origins(
+PyObject* wrap_node_origins(
     const AutogradCompilerCall& compiler,
     size_t dynamic_sizes) {
   TORCH_INTERNAL_ASSERT(
@@ -475,7 +475,7 @@ static PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
-static void set_ivalue_proxies(
+void set_ivalue_proxies(
     PyObject* fake_ivalue_args,
     std::vector<LiftedIValueArg>& lifted_ivalue_args) {
   TORCH_INTERNAL_ASSERT(PyList_Check(fake_ivalue_args));
@@ -569,7 +569,7 @@ static SizeInput::DynType get_default_dyn_type() {
 }
 
 // Only call this function while holding GIL
-static CacheNode* _compiled_autograd_impl(
+CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
@@ -808,11 +808,10 @@ struct LockGuardWithErrorLogs {
     mtx_.unlock();
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::mutex& mtx_;
 };
 
-static variable_list compiled_autograd(
+variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,

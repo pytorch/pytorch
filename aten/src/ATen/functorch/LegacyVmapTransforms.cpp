@@ -118,7 +118,6 @@ static Tensor moveDimToFrontAndExpand(Tensor tensor, std::optional<int64_t> dim,
 //    to `batch_sizes`
 VmapPhysicalViewVec
 MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto cur_level = maybeCurrentDynamicLayer().value().layerId();
   c10::SymInt bdim_size = -1;
 

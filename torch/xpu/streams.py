@@ -15,9 +15,7 @@ class Stream(torch._C._XpuStreamBase):
     r"""Wrapper around a XPU stream.
 
     A XPU stream is a linear sequence of execution that belongs to a specific
-    device, independent from other streams. It supports with statement as a
-    context manager to ensure the operators within the with block are running
-    on the corresponding stream.
+    device, independent from other streams.
 
     Args:
         device(torch.device or int, optional): a device on which to allocate

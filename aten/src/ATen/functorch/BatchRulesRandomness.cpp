@@ -16,7 +16,6 @@
 // registered to FuncTorchVmapMode. This is because we need to interpose on
 // random operations even if they're not on a BatchedTensor.
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -502,4 +501,3 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 }
 
 } // namespace at::functorch
-// NOLINTEND(bugprone-unchecked-optional-access)

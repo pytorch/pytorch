@@ -16,6 +16,7 @@ from typing import (
     Optional,
     overload,
     Sequence,
+    Tuple,
     TypeVar,
     Union,
 )
@@ -140,7 +141,7 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
+    out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
 ) -> float:
     ...
 

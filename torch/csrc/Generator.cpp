@@ -26,7 +26,7 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
+  self_->cdata = std::move(cdata);
   return self.release();
 }
 

@@ -118,7 +118,8 @@ struct TensorDataContainer {
         type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S)                            \
   TensorDataContainer(T value)                  \
-      : scalar_type_(at::k##S),                 \
+      : sizes_(),                               \
+        scalar_type_(at::k##S),                 \
         type_(TensorDataContainerType::Scalar), \
         scalar_(value) {}
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
