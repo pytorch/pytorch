@@ -14,6 +14,7 @@ import builtins
 import ctypes
 import glob
 import importlib
+import importlib.util
 import inspect
 import math
 import os
@@ -301,10 +302,10 @@ def _preload_pypi_cuda_deps() -> None:
 
         for lib, lib_name in cuda_libs.items():
             current_lib = lib
-            if lib == 'cusparselt':
-                lib_pkg = importlib.import_module('cusparselt')
-            else:
+            try:
                 lib_pkg = importlib.import_module("." + lib, package="nvidia")
+            except ModuleNotFoundError:
+                lib_pkg = importlib.import_module(lib)
             candidate_lib_paths = glob.glob(
                 os.path.join(lib_pkg.__path__[0], "lib", lib_name)
             )
