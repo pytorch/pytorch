@@ -239,9 +239,7 @@ with torch.no_grad():
     ep = torch.export.export(
         model, example_inputs, kwargs
     )
-    torch._inductor.aoti_compile_and_package(
-        ep, example_inputs, kwargs
-    )
+    torch._inductor.aoti_compile_and_package(ep)
 """
         return self._run_full_test(run_code, None, expected_error, isolate=True)
 

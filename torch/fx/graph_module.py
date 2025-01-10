@@ -899,8 +899,9 @@ class {module_name}(torch.nn.Module):
         if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
             for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
                 setattr(res, attr_name, attr)
-        for hook in self._deepcopy_hooks:
-            hook(res)
+        if hasattr(self, "_deepcopy_hooks"):
+            for hook in self._deepcopy_hooks:
+                hook(res)
         return res
 
     def __copy__(self):
