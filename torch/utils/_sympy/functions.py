@@ -25,6 +25,7 @@ from sympy.core.numbers import equal_valued
 from sympy.core.operations import LatticeOp, ShortCircuit
 from sympy.core.sorting import ordered
 from sympy.core.traversal import walk
+from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
@@ -203,8 +204,8 @@ class FloorDiv(sympy.Function):
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
     # Automatic evaluation.
@@ -1350,8 +1351,16 @@ OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 
 
 def make_opaque_bitwise_fn(name, real_op_name):
+    if name == "bitwise_and":
+        prec = PRECEDENCE["BitwiseAnd"]
+    elif name == "bitwise_or":
+        prec = PRECEDENCE["BitwiseOr"]
+    else:
+        raise AssertionError(f"unrecognized {name}")
+
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
+        precedence: int = prec
 
         @classmethod
         def eval(cls, a, b):
