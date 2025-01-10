@@ -870,6 +870,8 @@ aten::kthvalue
 aten::kthvalue.values
 aten::lift_fresh_copy
 aten::lift_fresh_copy.out
+aten::linalg_cholesky
+aten::linalg_cholesky.out
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
