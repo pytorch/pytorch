@@ -111,8 +111,10 @@ def get_artifacts_urls(results, suites):
         if (
             r["workflowName"] in ("inductor", "inductor-periodic")
             and "test" in r["jobName"]
+            and "build" not in r["jobName"]
+            and "runner-determinator" not in r["jobName"]
         ):
-            config_str, test_str = parse_job_name(r["jobName"])
+            *_, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]
