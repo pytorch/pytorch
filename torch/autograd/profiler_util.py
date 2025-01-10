@@ -126,9 +126,9 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
-                        assert (
-                            event.cpu_parent is None
-                        ), f"There is already a CPU parent event for {event.key}"
+                        assert event.cpu_parent is None, (
+                            f"There is already a CPU parent event for {event.key}"
+                        )
                         event.set_cpu_parent(parent)
                         break
 

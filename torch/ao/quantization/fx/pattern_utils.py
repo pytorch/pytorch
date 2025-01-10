@@ -47,9 +47,9 @@ def _register_quant_pattern(pattern, fixed_qparams_observer=None):
     def insert(fn):
         _DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
         if fixed_qparams_observer is not None:
-            _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[
-                pattern
-            ] = FixedQParamsFakeQuantize.with_args(observer=fixed_qparams_observer)
+            _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[pattern] = (
+                FixedQParamsFakeQuantize.with_args(observer=fixed_qparams_observer)
+            )
             _DEFAULT_OUTPUT_OBSERVER_MAP[pattern] = fixed_qparams_observer
         return fn
 
@@ -81,7 +81,7 @@ def get_default_output_activation_post_process_map(
 
 
 def _sorted_patterns_dict(
-    patterns_dict: Dict[Pattern, QuantizeHandler]
+    patterns_dict: Dict[Pattern, QuantizeHandler],
 ) -> Dict[Pattern, QuantizeHandler]:
     """
     Return a sorted version of the patterns dictionary such that longer patterns are matched first,
