@@ -533,8 +533,10 @@ def tuned_b2b_gemm(
     B.realize()
     C.realize()
     layout = FixedLayout(
-        A.get_device_or_error(), A.get_dtype(), [A.shape[0], C.shape[1]]
-    )  # type: ignore[index]
+        A.get_device_or_error(),
+        A.get_dtype(),
+        [A.shape[0], C.shape[1]],  # type: ignore[index]
+    )
     subgraph_buffer = build_subgraph_buffer(
         [create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())],
         subgraph,
