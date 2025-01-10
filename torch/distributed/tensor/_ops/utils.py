@@ -44,7 +44,7 @@ def register_prop_rule(
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(
-        impl: Callable[[OpSchema], OutputSharding]
+        impl: Callable[[OpSchema], OutputSharding],
     ) -> Callable[[OpSchema], OutputSharding]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
@@ -101,7 +101,7 @@ def register_op_strategy(
 
 
 def as_list(
-    x: Union[List[object], object]
+    x: Union[List[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
 ) -> Union[List[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,

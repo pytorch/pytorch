@@ -110,7 +110,7 @@ def main() -> None:
         print("More than 100 items needs to be rebuild, run `ninja torch_python` first")
         sys.exit(-1)
     for idx, (name, cmd) in enumerate(build_plan):
-        print(f"[{idx + 1 } / {len(build_plan)}] Building {name}")
+        print(f"[{idx + 1} / {len(build_plan)}] Building {name}")
         if args.verbose:
             print(cmd)
         subprocess.check_call(["sh", "-c", cmd], cwd=BUILD_DIR)
