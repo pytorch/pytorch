@@ -27,8 +27,9 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def _compile_check(self, fn):
         eager = EagerAndRecordGraphs()
         t = torch.randn(2)
-        torch.compile(fn, backend=eager, fullgraph=True)(t)
+        r = torch.compile(fn, backend=eager, fullgraph=True)(t)
         self.assertGreater(len(eager.graphs), 0)
+        return t, r
 
 
 class GeneratorTests(GeneratorTestsBase):
@@ -629,8 +630,7 @@ class GraphModule(torch.nn.Module):
                 pass
             return (i, t.sin())
 
-        t = torch.randn(3)
-        i, y = fn(t)
+        t, (i, y) = self._compile_check(fn)
         self.assertEqual(i, 3)
         self.assertEqual(y, t.sin())
 
