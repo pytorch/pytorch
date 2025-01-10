@@ -4,7 +4,7 @@ import operator
 import warnings
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -74,7 +74,7 @@ NON_QUANTIZABLE_WEIGHT_OPS = {
 @dataclass
 class ObservedGraphModuleAttrs:
     node_name_to_qconfig: Dict[str, QConfigAny]
-    node_name_to_scope: Dict[str, Tuple[str, type]]
+    node_name_to_scope: Dict[str, tuple[str, type]]
     prepare_custom_config: PrepareCustomConfig
     equalization_node_name_to_qconfig: Dict[str, Any]
     qconfig_mapping: QConfigMapping
@@ -450,7 +450,7 @@ def maybe_get_next_module(
 
 def create_node_from_old_node_preserve_meta(
     quantized_graph: Graph,
-    create_node_args: Tuple[Any, ...],
+    create_node_args: tuple[Any, ...],
     old_node: Node,
 ) -> Node:
     """
@@ -463,7 +463,7 @@ def create_node_from_old_node_preserve_meta(
 
 def get_skipped_module_name_and_classes(
     prepare_custom_config: PrepareCustomConfig, is_standalone_module: bool
-) -> Tuple[List[str], List[Type[Any]]]:
+) -> tuple[List[str], List[Type[Any]]]:
     skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
     skipped_module_classes = copy.copy(
         prepare_custom_config.non_traceable_module_classes
@@ -758,7 +758,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         index_stack: List[int],
         current_pattern: List[Node],
         matched_patterns: List[List[Node]],
-        seen: Set[Tuple[Node, Tuple[int, ...]]],
+        seen: Set[tuple[Node, tuple[int, ...]]],
     ):
         """
         Traverse the graph recursively to match for the N-tuple - N-getitem patterns,
@@ -804,7 +804,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
 
     # Collect all matched patterns
     matched_patterns: List[List[Node]] = []
-    seen: Set[Tuple[Node, Tuple[int, ...]]] = set()  # (node, index_stack)
+    seen: Set[tuple[Node, tuple[int, ...]]] = set()  # (node, index_stack)
     for node in graph.nodes:
         find_patterns(node, [], [], matched_patterns, seen)
 
