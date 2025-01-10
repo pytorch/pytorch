@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
 
@@ -120,6 +120,12 @@ class DeviceInterface:
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False):
         raise NotImplementedError
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
     def memory_allocated(device: _device_t = None) -> int:
@@ -340,8 +346,16 @@ class CpuInterface(DeviceInterface):
 
 class MpsInterface(DeviceInterface):
     @staticmethod
-    def is_bf16_supported(including_emulation: bool = False):
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.backends.mps.is_macos_or_newer(14, 0)
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        if dtype == torch.float64:
+            return False
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
     def is_available() -> bool:

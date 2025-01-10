@@ -1,6 +1,6 @@
 import logging
 import operator
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 import torch.fx
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation

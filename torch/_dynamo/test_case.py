@@ -1,7 +1,7 @@
 import contextlib
 import importlib
 import logging
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 import torch.testing

@@ -4,7 +4,7 @@ import functools
 import logging
 import sys
 from importlib.metadata import EntryPoint
-from typing import Callable, Dict, List, Optional, Protocol, Sequence
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
