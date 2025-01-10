@@ -154,9 +154,9 @@ class InPlaceCompilationTests(TestCase):
 
     def test_compilation_evnum_hasattr_fail(self):
         from enum import Enum
-        class TestEnum(Enum):
-            VALID=1
 
+        class TestEnum(Enum):
+            VALID = 1
 
         @torch.compile(backend="eager")
         def fn(x):
