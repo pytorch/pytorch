@@ -38,7 +38,7 @@ from functorch_additional_op_db import additional_op_db
 import functorch
 import torch
 import torch.nn.functional as F
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
 from functorch.experimental import chunk_vmap
 from torch import Tensor
@@ -1342,7 +1342,7 @@ def _vmap_test(
     check_propagates_grad=True,
 ):
     result = vmap(op, in_dims, out_dims)(*inputs)
-    are_nested = [t.is_nested for t in pytree.tree_leaves(result)]
+    are_nested = [t.is_nested for t in pytree.tree_iter(result)]
     reference_result = reference_vmap(
         op, inputs, in_dims, out_dims, return_nt=any(are_nested)
     )

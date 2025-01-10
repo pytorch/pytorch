@@ -751,6 +751,12 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
+    def children(self) -> List["TreeSpec"]:
+        return self.children_specs.copy()
+
+    def child(self, index: int) -> "TreeSpec":
+        return self.children_specs[index]
+
     def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
         def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
             if treespec.is_leaf():

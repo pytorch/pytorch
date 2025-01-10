@@ -41,6 +41,7 @@ if _TYPE_CHECKING:
     from types import ModuleType
 
     from torch.utils._cxx_pytree import (  # noqa: TC004
+        _broadcast_to_and_flatten as _broadcast_to_and_flatten,
         PyTreeSpec as PyTreeSpec,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
@@ -225,6 +226,10 @@ tree_any = _reexport(implementation.module.tree_any)
 tree_all_only = _reexport(implementation.module.tree_all_only)
 tree_any_only = _reexport(implementation.module.tree_any_only)
 treespec_pprint = _reexport(implementation.module.treespec_pprint)
+
+
+# Used in vmap
+_broadcast_to_and_flatten = _reexport(implementation.module._broadcast_to_and_flatten)
 
 
 del _reexport
