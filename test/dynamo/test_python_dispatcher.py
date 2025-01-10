@@ -1,7 +1,11 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 import torch
 import torch._dynamo.test_case
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
@@ -19,6 +23,34 @@ class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         with enable_python_dispatcher():
             self.assertEqual(fn(x), torch.sin(x + 1))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_dispatch_key_set_guard(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, dks):
+            if dks.has("CPU"):
+                return torch.sin(x + 1)
+            else:
+                return torch.sin(x - 1)
+
+        x1 = torch.randn(2, 3)
+        dks1 = torch._C._dispatch_keys(x1)
+        self.assertEqual(fn(x1, dks1), torch.sin(x1 + 1))
+        self.assertEqual(counter.frame_count, 1)
+
+        x2 = torch.randn(2, 3)
+        dks2 = torch._C._dispatch_keys(x2)
+        self.assertEqual(fn(x2, dks2), torch.sin(x2 + 1))
+        # No recompile since the dispatch key set is the same though the tensor is different.
+        self.assertEqual(counter.frame_count, 1)
+
+        x3 = torch.randn(2, 3, device="cuda")
+        dks3 = torch._C._dispatch_keys(x3)
+        self.assertEqual(fn(x3, dks3), torch.sin(x3 - 1))
+        # Re-compile since the dispatch key set is different.
+        self.assertEqual(counter.frame_count, 2)
 
     def test_functorch_interpreter(self):
         def square_and_add(x, y):
