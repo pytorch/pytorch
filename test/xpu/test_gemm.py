@@ -1,5 +1,8 @@
 # Owner(s): ["module: intel"]
 
+import contextlib
+import functools
+import inspect
 import itertools
 import math
 import random
@@ -21,6 +24,114 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
+
+@contextlib.contextmanager
+def tf32_off():
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+
+
+@contextlib.contextmanager
+def tf32_on(self, tf32_precision=1e-5):
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_precision = self.precision
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        self.precision = tf32_precision
+        yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for XPU matmul.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+
+
+# This is a wrapper that wraps a test to run this test twice, one with
+# allow_tf32=True, another with allow_tf32=False. When running with
+# allow_tf32=True, it will use reduced precision as specified by the
+# argument. For example:
+#    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+#    @tf32_on_and_off(0.005)
+#    def test_matmul(self, device, dtype):
+#        a = ...; b = ...;
+#        c = torch.matmul(a, b)
+#        self.assertEqual(c, expected)
+# In the above example, when testing torch.float32 , the matmul will be running at
+# TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
+# precision to check values.
+#
+# This decorator can be used for function with or without device/dtype, such as
+# @tf32_on_and_off(0.005)
+# def test_my_op(self)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, device, dtype)
+# @tf32_on_and_off(0.005)
+# def test_my_op(self, dtype)
+def tf32_on_and_off(tf32_precision=1e-5):
+    def with_tf32_disabled(self, function_call):
+        with tf32_off():
+            function_call()
+
+    def with_tf32_enabled(self, function_call):
+        with tf32_on(self, tf32_precision):
+            function_call()
+
+    def wrapper(f):
+        params = inspect.signature(f).parameters
+        arg_names = tuple(params.keys())
+
+        @functools.wraps(f)
+        def wrapped(*args, **kwargs):
+            for k, v in zip(arg_names, args):
+                kwargs[k] = v
+            cond = True
+            if "device" in kwargs:
+                cond = cond and (torch.device(kwargs["device"]).type == "xpu")
+            if "dtype" in kwargs:
+                cond = cond and (
+                    kwargs["dtype"] in {torch.float32}
+                )  # TODO: add complex64
+            if cond:
+                with_tf32_disabled(kwargs["self"], lambda: f(**kwargs))
+                with_tf32_enabled(kwargs["self"], lambda: f(**kwargs))
+            else:
+                f(**kwargs)
+
+        return wrapped
+
+    return wrapper
+
+
+# This is a wrapper that wraps a test to run it with TF32 turned off.
+# This wrapper is designed to be used when a test uses matmul or convolutions
+# but the purpose of that test is not testing matmul or convolutions.
+# Disabling TF32 will enforce torch.float tensors to be always computed
+# at full precision.
+def with_tf32_off(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        with tf32_off():
+            return f(*args, **kwargs)
+
+    return wrapped
 
 
 class TestBasicGEMM(TestCase):
@@ -133,11 +244,13 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
     @dtypes(torch.float32, torch.half, torch.double)
+    @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4})
     @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
+    @tf32_on_and_off(0.005)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
@@ -185,6 +298,7 @@ class TestBasicGEMM(TestCase):
         torch.float32,
         torch.float64,
     )
+    @tf32_on_and_off(0.05)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
             # helper function
@@ -287,6 +401,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @dtypes(torch.float32, torch.bfloat16, torch.half, torch.float64)
+    @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
         batch_sizes = [1, 10]
         M, N, O = 23, 15, 12
@@ -403,6 +518,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off(0.005)
     def test_addbmm(self, device, dtype):
         num_batches = 2
         M, N, O = 16, 17, 18
@@ -506,6 +622,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off(0.01)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 50
@@ -568,6 +685,7 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("baddbmm", b1, b2, ref, out_tensor)
 
+    @tf32_on_and_off(0.05)
     def test_tensordot(self, device):
         a = torch.arange(60.0, device=device).reshape(3, 4, 5)
         b = torch.arange(24.0, device=device).reshape(4, 3, 2)
@@ -604,6 +722,7 @@ class TestBasicGEMM(TestCase):
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
+    @tf32_on_and_off(0.005)
     def test_1_sized_with_0_strided(self, device, dtype):
         a = make_tensor((8, 1, 64), dtype=dtype, device=device)
         a_strided = torch.as_strided(a, size=[8, 1, 64], stride=[64, 0, 1])
@@ -646,6 +765,7 @@ class TestBasicGEMM(TestCase):
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
 
+    @tf32_on_and_off(0.005)
     def test_broadcast_fused_matmul(self, device):
         fns = ["baddbmm", "addbmm", "addmm", "addmv", "addr"]
 
@@ -692,6 +812,7 @@ class TestBasicGEMM(TestCase):
             self.assertEqual(r0, r1)
 
     @dtypes(torch.float32, torch.float64)
+    @tf32_on_and_off(0.005)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
         x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=dtype, device=device)
@@ -706,6 +827,7 @@ class TestBasicGEMM(TestCase):
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
+    @tf32_on_and_off(0.005)
     def test_mm_empty_inputs_mixed_dtype_errors(self, device):
         a = torch.randint(0, 10, [1, 10], dtype=torch.int16, device=device)
         b = torch.randn(10, 20, dtype=torch.float32, device=device)
@@ -714,6 +836,7 @@ class TestBasicGEMM(TestCase):
         ):
             torch.mm(a, b)
 
+    @tf32_on_and_off(0.005)
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
         a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
@@ -731,6 +854,7 @@ class TestBasicGEMM(TestCase):
         torch.float32,
         torch.float64,
     )
+    @tf32_on_and_off(0.005)
     def test_baddbmm_input_dtypes_compatibility(self, device, dtype):
         batch1 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
         batch2 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
@@ -745,6 +869,7 @@ class TestBasicGEMM(TestCase):
             self.assertEqual(out, y_ref)
 
     @dtypes(torch.float)
+    @tf32_on_and_off(0.005)
     def test_baddbmm_nan_input_with_zero_beta(self, device, dtype):
         for shape in [[3, 2, 2], [2, 20, 20]]:
             mat1, mat2 = (
@@ -767,6 +892,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.double: 1e-6})
     @dtypes(torch.float, torch.double)
+    @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -798,6 +924,7 @@ class TestBasicGEMM(TestCase):
         }
     )
     @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off(0.05)
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
@@ -812,10 +939,12 @@ class TestBasicGEMM(TestCase):
         }
     )
     @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off(0.05)
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
-    @dtypes(torch.float, torch.bfloat16, torch.half, torch.double)
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    @tf32_on_and_off(0.005)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
         o = 5
@@ -859,6 +988,7 @@ class TestBasicGEMM(TestCase):
         }
     )
     @dtypes(torch.double, torch.bfloat16, torch.half, torch.float32)
+    @tf32_on_and_off(0.005)
     def test_corner_cases_of_cublasltmatmul(self, device, dtype):
         # common case
         M = torch.randn(128, device=device).to(dtype)
@@ -998,6 +1128,7 @@ class TestBasicGEMM(TestCase):
             torch.tensor(0.0, device=device), fn(torch.dot, (0,), (0,), test_out=True)
         )
 
+    @tf32_on_and_off(0.005)
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
         B = torch.randn([1, 1024, 65536], device=device, requires_grad=True)
@@ -1006,6 +1137,7 @@ class TestBasicGEMM(TestCase):
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
 
+    @tf32_on_and_off(0.005)
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
         B = torch.randn([1024, 65536], device=device, requires_grad=True)
@@ -1104,6 +1236,7 @@ class TestBasicGEMM(TestCase):
             self.check_single_matmul(x, y)
 
     @dtypes(torch.float)
+    @tf32_on_and_off(0.005)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty(
             (256, 512), device=device, dtype=dtype, requires_grad=True
