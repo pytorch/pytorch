@@ -3386,6 +3386,14 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
+    def test_normal_default_device(self, device):
+        try:
+            torch.set_default_device(device)
+            t = torch.normal(0, 1, (10, 10))
+        finally:
+            torch.set_default_device(None)
+        self.assertEqual(str(t.device), device)
+
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
