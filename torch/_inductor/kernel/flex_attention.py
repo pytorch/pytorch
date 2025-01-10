@@ -905,8 +905,9 @@ def lower_cpu(
     assert cur_qSplitSize not in shape_env.var_to_range
     assert cur_kvSplitSize not in shape_env.var_to_range
 
-    # TODO: Mark them > 1 since eq(var, 1) is evaluated during the broadcast lowering
-    # Check the case where they're equal to 1.
+    # We don't know the concret value of cur_qSplitSize and cur_kvSplitSize during the compilation.
+    # Mark symbols > 1 to ensure broadcasting is always applied.
+    # This avoids treating them as equal when `eq(var, 1)` is evaluated in `broadcast_symbolic_shapes`.
     shape_env.var_to_range[cur_qSplitSize] = ValueRanges(2, int_oo)
     shape_env.var_to_range[cur_kvSplitSize] = ValueRanges(2, int_oo)
 
