@@ -1719,10 +1719,10 @@ class Module:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = (
-                torch.jit._trace._trace_module_map[self]
-                if self in torch.jit._trace._trace_module_map
+                torch.jit._trace._trace_module_map[self]  # type: ignore[index]
+                if self in torch.jit._trace._trace_module_map  # type: ignore[operator]
                 else None
-            )  # type: ignore[index, operator] # noqa: B950
+            )  # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
