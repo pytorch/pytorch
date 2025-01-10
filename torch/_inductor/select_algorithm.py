@@ -592,9 +592,9 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        return scatter_graph.data.store_output(
+        return scatter_graph.data.store_output(  # type: ignore[attr-defined]
             scatter_graph.name, contiguous_strides, []
-        )  # type: ignore[attr-defined]
+        )
 
     def modification(
         self,

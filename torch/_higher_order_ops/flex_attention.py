@@ -634,9 +634,11 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return out, logsumexp
 
     @staticmethod
-    def backward(
-        ctx: Any, grad_out: Tensor, grad_logsumexp: Tensor
-    ) -> Tuple[Optional[Tensor], ...]:  # type: ignore[override]
+    def backward(  # type: ignore[override]
+        ctx: Any,
+        grad_out: Tensor,
+        grad_logsumexp: Tensor,
+    ) -> Tuple[Optional[Tensor], ...]:
         fw_args = saved_tensors_and_symints(ctx)
         (
             query,

@@ -775,8 +775,8 @@ def trace_triton_kernel_wrapper(
         out = func_overload(**node_args)
 
     proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy,
-        node_args,  # type: ignore[union-attr]
+        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
+        node_args,
     )
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
