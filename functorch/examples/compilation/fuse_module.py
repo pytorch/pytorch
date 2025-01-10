@@ -51,6 +51,6 @@ for a, b in zip(run(mod, input), run(compiled_mod, input)):
 for _ in range(5):
     i = 10000
     t = timeit.Timer("mod(input)", globals=globals()).timeit(10000)
-    print(f"eager {t/i*1e6}")
+    print(f"eager {t / i * 1e6}")
     t = timeit.Timer("compiled_mod(input)", globals=globals()).timeit(10000)
-    print(f"compiled {t/i*1e6}")
+    print(f"compiled {t / i * 1e6}")
