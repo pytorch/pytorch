@@ -497,7 +497,6 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
 // runtime for device XXX (which can poison child processes while detecting the
 // current accelerator).
 
-
 inline bool hasCUDA() {
   return globalContext().hasCUDA() &&
       (detail::getCUDAHooks().deviceCount() > 0);
