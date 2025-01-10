@@ -323,6 +323,8 @@ def forward(self, x):
             self.assertEqual(node.inputs[1].name, "dim")
 
     def test_serialize_sym_float(self) -> None:
+        # TODO(rec): This doesn't seem to test anything!
+
         class DynamicFloatSimpleModel(torch.nn.Module):
             def __init__(self, multiplier: torch.SymFloat):
                 super().__init__()
@@ -338,14 +340,14 @@ def forward(self, x):
                 return torch.cat([f, f])
 
         multiplier_sym = torch.SymFloat("multiplier_sym")
-        model = DynamicFloatSimpleModel(multiplier_sym)
-        inputs = (
+        _model = DynamicFloatSimpleModel(multiplier_sym)
+        _inputs = (
             torch.randn(2, 4),
             torch.randn(4, 7),
             torch.randn(2, 7),
         )
-        dim0_ac = Dim("dim0_ac")
-        dim1_bc = Dim("dim1_b")
+        _dim0_ac = Dim("dim0_ac")
+        _dim1_bc = Dim("dim1_b")
 
     def test_serialize_infinite_sym_int(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
@@ -663,7 +665,11 @@ class TestDeserialize(TestCase):
 
             for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
                 self.assertEqual(type(orig), type(loaded))
-                if isinstance(orig, torch.Tensor):
+                # torch.allclose doesn't work for float8
+                if isinstance(orig, torch.Tensor) and orig.dtype not in [
+                    torch.float8_e4m3fn,
+                    torch.float8_e5m2,
+                ]:
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
                     else:
@@ -840,6 +846,29 @@ class TestDeserialize(TestCase):
 
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
+
+    def test_sym_bool_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z == 2)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0]),))
+
+    def test_sym_int_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z % 3 == 0)
+                torch._check(z == 3)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0, 1, 0]),))
 
     def test_shape(self):
         class Foo(torch.nn.Module):
@@ -1146,6 +1175,17 @@ def forward(self, x):
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
+    def test_serialize_float8(self):
+        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    return x.to(dtype)
+
+            m = MyModule()
+            inputs = (torch.ones(2, 3),)
+            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)

@@ -56,7 +56,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return getCurrentCUDAStream(d.index()).unwrap();
   }
   Stream getDefaultStream(Device d) const override {
@@ -70,7 +70,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return getStreamFromPool(isHighPriority, d.index());
   }
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     CUDAStream cs(s);
     auto old_stream = getCurrentCUDAStream(s.device().index());
     setCurrentCUDAStream(cs);

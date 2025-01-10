@@ -2,7 +2,7 @@
 import functools
 import logging
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, no_type_check, Optional, Set
 
 import torch
 import torch.distributed as dist
@@ -57,7 +57,7 @@ class _PrefetchMode(Enum):
 
 def _get_fsdp_root_states_with_modules(
     module: nn.Module,
-) -> Tuple[List[_FSDPState], List[nn.Module]]:
+) -> tuple[List[_FSDPState], List[nn.Module]]:
     """
     Returns a tuple containing:
     1. A list of the root ``_FSDPState`` instances in the module tree rooted at
@@ -346,9 +346,9 @@ def _pre_forward(
     handle: Optional[FlatParamHandle],
     unshard_fn: Callable,
     module: nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
-) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+) -> tuple[tuple[Any, ...], Dict[str, Any]]:
     """
     Runs the pre-forward logic. This includes an opportunity to unshard
     currently sharded parameters such as those for the current forward and
@@ -534,7 +534,13 @@ def _root_pre_forward(
         if handle:
             should_cast_buffers_to_full_prec = handle._force_full_precision
         else:
-            should_cast_buffers_to_full_prec = True
+            # If the root has no handle (no managed parameters), then we fall
+            # back to checking if any child wants to force full precision as a
+            # workaround
+            handles = traversal_utils._get_fsdp_handles(module)
+            should_cast_buffers_to_full_prec = any(
+                handle._force_full_precision for handle in handles
+            )
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(
@@ -599,7 +605,7 @@ def _root_pre_forward(
 @no_type_check
 def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     if state._handle:
         force_full_precision = not state._handle._force_full_precision
     else:
@@ -879,7 +885,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
 @no_type_check
 def _get_reduce_scatter_tensors(
     state: _FSDPState, unsharded_grad: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Returns the input and output tensors to reduce-scatter, respectively.
     """
@@ -1462,7 +1468,7 @@ def _register_post_backward_hook(
 def _register_post_backward_reshard_only_hook(
     state: _FSDPState,
     handle: Optional[FlatParamHandle],
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> None:
     """
@@ -1567,7 +1573,7 @@ def _reset_flat_param_grad_info_if_needed(
 def _get_buffers_and_dtypes_for_computation(
     state: _FSDPState,
     root_module: nn.Module,
-) -> Tuple[List[torch.Tensor], List[Optional[torch.dtype]]]:
+) -> tuple[List[torch.Tensor], List[Optional[torch.dtype]]]:
     """
     Returns all buffers in the module tree rooted at ``root_module`` and a
     corresponding list of the buffer dtypes for computation. Each buffer dtype
