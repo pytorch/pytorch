@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._ops import OpOverload
@@ -21,7 +21,7 @@ except ImportError:
 
 
 # Common type aliases
-ArgsType = Tuple[object, ...]
+ArgsType = tuple[object, ...]
 KwargsType = Dict[str, object]
 
 PlacementList = List[Optional[Placement]]
@@ -79,7 +79,7 @@ class PlacementStrategy:
     output_specs is a tuple of Optional[DTensorSpec].
     """
 
-    output_specs: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
+    output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
@@ -236,7 +236,7 @@ class OpSchema:
     schema_info: Optional[RuntimeSchemaInfo] = None
 
     @property
-    def args_spec(self) -> Tuple[DTensorSpec, ...]:
+    def args_spec(self) -> tuple[DTensorSpec, ...]:
         """
         args_spec: Tuple[DTensorSpec, ...]: contains a clean list of args spec list
             with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
@@ -250,7 +250,7 @@ class OpSchema:
         return tuple(item for item in args if isinstance(item, DTensorSpec))
 
     @property
-    def args_strategy(self) -> Tuple[OpStrategy, ...]:
+    def args_strategy(self) -> tuple[OpStrategy, ...]:
         # filter out non-relevant values from args schema to get a clean OpStrategy list
         # separate with args_spec for the ease of type annotation
         # TODO: see if we should merge this with args_spec
