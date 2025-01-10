@@ -808,7 +808,7 @@ class TestFlexAttention(InductorTestCase):
         score_mod, mask_mod = score_mask_mod
 
         # First batch with original dimensions (B, H, S, D)
-        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
 
         q1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
@@ -826,7 +826,7 @@ class TestFlexAttention(InductorTestCase):
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
-        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
 
         q2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
@@ -845,7 +845,7 @@ class TestFlexAttention(InductorTestCase):
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
-        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
 
         q3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
@@ -1080,7 +1080,7 @@ class TestFlexAttention(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256)
+        block_mask = create_block_mask(causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256, device=self.device)
         attention = functools.partial(
             flex_attention,
             score_mod=score_mod,
@@ -1706,9 +1706,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask_slidewindow_mod(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (q_idx <= kv_idx + window_size)
 
-        mask1 = create_block_mask(causal_mask, 1, None, 512, 512, _compile=False)
+        mask1 = create_block_mask(causal_mask, 1, None, 512, 512, _compile=False, device=self.device)
         mask2 = create_block_mask(
-            causal_mask_slidewindow_mod, 1, None, 512, 512, _compile=False
+            causal_mask_slidewindow_mod, 1, None, 512, 512, _compile=False, device=self.device
         )
 
         def f(q, k, v):
@@ -1782,7 +1782,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
 
         (
             k_cache1,
@@ -1852,7 +1852,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
         (
             k_cache1,
             v_cache1,
@@ -1940,7 +1940,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return q_idx >= kv_idx
 
         block_mask_a = torch.compile(create_block_mask)(causal_mask, 1, 1, 512, 512)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, device=self.device)
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -1957,21 +1957,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return (q - kv) <= 512
 
         block_mask = create_block_mask(
-            and_masks(causal_mask, sliding_window), 1, 1, S, S
+            and_masks(causal_mask, sliding_window), 1, 1, S, S, device=self.device
         )
         self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
         attention = functools.partial(flex_attention, block_mask=block_mask)
         self.run_test_with_call(attention)
 
         block_mask = create_block_mask(
-            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=self.device
         )
         self.assertEqual(block_mask.kv_num_blocks.sum(), 0)
 
         block_mask1 = create_block_mask(
-            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=self.device
         )
-        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S, device=self.device)
         self.assertEqual(block_mask1.sparsity(), block_mask2.sparsity())
 
     @supported_platform
@@ -2104,7 +2104,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
@@ -2114,7 +2114,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
         self.run_test_with_paged_attention(score_mod=_identity, block_mask=block_mask)
 
     @supported_platform
@@ -2132,7 +2132,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             h_ = h.new_zeros(h.shape)
             return attn_mask[b, h_, q_idx, kv_idx]
 
-        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S, device=self.device)
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
@@ -2140,7 +2140,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S // 8, S // 8)
+        block_mask = create_block_mask(mask_mod, B, 1, S // 8, S // 8, device=self.device)
         attention = functools.partial(
             flex_attention, block_mask=block_mask, enable_gqa=True
         )
@@ -2171,7 +2171,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        auto_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        auto_mask = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         BLOCK_SIZE = 128
 
         def causal_constructor(S):
@@ -2382,7 +2382,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
 
-        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        block_mask = create_block_mask(mask, None, None, 4096, 4096, device=self.device)
         # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
         torch.compile(flex_attention, dynamic=True)(
             make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
@@ -2408,7 +2408,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k.grad = None
         v.grad = None
 
-        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048, device=self.device)
         # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
         out2 = torch.compile(flex_attention, dynamic=True)(
             q, k, v, block_mask=block_mask2
@@ -2505,7 +2505,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         func = torch.compile(flex_attention, backend=mode, fullgraph=True)
 
-        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128)
+        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128, device=self.device)
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
 
@@ -2577,7 +2577,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q < M
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
 
         flex = (
             torch.compile(flex_attention, dynamic=False) if compile else flex_attention
@@ -2598,7 +2598,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q < M
 
-        block_mask = create_block_mask(mask_mod, B, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S, device=self.device)
 
         def noop_mod(score, b, h, q_idx, kv_idx):
             return score
@@ -2634,10 +2634,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod_sparse_flex = functools.partial(
             flex_attention,
             score_mod=causal,
-            block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048),
+            block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048, device=self.device),
         )
         mask_mod_sparse_flex = functools.partial(
-            flex_attention, block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048)
+            flex_attention, block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048, device=self.device)
         )
         for attention_call in [
             no_sparse_flex,
@@ -2699,8 +2699,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mod(b, h, q, kv):
             return seq[q] == seq[kv]
 
-        block_mask = create_block_mask(mod, None, None, 1023, 1023, device=GPU_TYPE)
-        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device=GPU_TYPE)
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device=GPU_TYPE, device=self.device)
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device=GPU_TYPE, device=self.device)
         self.run_test_with_call(
             lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
             Q_S=1023,
@@ -2950,7 +2950,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, S - 1, S - 1)
+        block_mask = create_block_mask(mask_mod, B, 1, S - 1, S - 1, device=self.device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
@@ -3052,10 +3052,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return causal_mask & window_mask
 
         sliding_window_causal = torch.nn.attention.flex_attention.create_block_mask(
-            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX, device=self.device
         )
         global_causal = torch.nn.attention.flex_attention.create_block_mask(
-            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX, device=self.device
         )
 
         local_attn = functools.partial(
@@ -3179,7 +3179,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         expected_error_message = (
             "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
         )
-        block_mask = create_block_mask(noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96)
+        block_mask = create_block_mask(noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=self.device)
 
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
@@ -3280,7 +3280,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=self.device)
 
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
@@ -3435,7 +3435,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128)
+        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128, device=self.device)
 
         func = torch.compile(flex_attention, backend=cnt, fullgraph=True)
         out = func(query, key, value, _squared, block_mask=block_mask)
@@ -3588,6 +3588,16 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = test_device
+        if self.device == "cpu":
+            if LONG_COMPILATION_ON_CPU:
+                self.skipTest(
+                    "skip UT for CPU due to long compilation time found in CI"
+                )
+            if not IS_PLATFORM_SUPPORTED:
+                self.skipTest("skip UT due to not support on those platforms")
     @supported_platform
     def test_block_mask_attributes(self):
         offset = torch.zeros(8, device=GPU_TYPE)
@@ -3595,7 +3605,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=self.device)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
@@ -3606,7 +3616,7 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
         offset = torch.arange(8, device=GPU_TYPE)
-        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048, device=self.device)
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
@@ -3623,7 +3633,7 @@ class TestBlockMask(InductorTestCase):
             Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
         block_mask = create_block_mask(
-            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE, device=self.device
         )
 
         self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
@@ -3636,7 +3646,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=self.device)
         assert block_mask.kv_num_blocks.shape == (4, 2, 4)
         assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
@@ -3693,7 +3703,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512)
+        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=self.device)
         assert block_mask.kv_indices.is_cuda
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
@@ -3756,7 +3766,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=self.device)
 
         def replace_non_printable(s):
             def replace(c):
@@ -3797,7 +3807,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_offset_mask(b, h, q, kv):
             return (q + offset[b] * 128) >= kv
 
-        block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048, device=self.device)
         str_block_mask = str(block_mask)
         self.assertTrue("sparsity=29.10" in str_block_mask)
 
@@ -3945,7 +3955,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=self.device)
         # manually set q_num_blocks and q_indices to None
         block_mask.q_num_blocks = None
         block_mask.q_indices = None
@@ -4056,7 +4066,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v = (
                 torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
             )
-            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i, device=self.device)
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @supported_platform
@@ -4109,12 +4119,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
             return q, k, v
 
-        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=self.device)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
-        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=self.device)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
@@ -4240,7 +4250,7 @@ class TestPagedAttention(InductorTestCase):
             return q >= kv
 
         block_mask = create_block_mask(
-            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
+            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len, device=self.device
         )
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
