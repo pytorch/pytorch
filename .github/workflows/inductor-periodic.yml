@@ -67,6 +67,44 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
 
+  linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build:
+    name: rocm6_3-py3_10-periodic-dynamo-benchmarks
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
+    with:
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      build-environment: linux-focal-rocm6_3-py3_10
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      test-matrix: |
+        { include: [
+          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-test:
+    name: rocm6_3-py3_10-periodic-dynamo-benchmarks
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build
+    with:
+      build-environment: linux-focal-rocm6_3-py3_10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+    secrets: inherit
+
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp:
     name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
