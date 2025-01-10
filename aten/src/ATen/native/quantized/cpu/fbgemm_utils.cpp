@@ -149,7 +149,7 @@ Tensor MakeStridedQTensorCPU(
     const IntArrayRef& sizes,
     const IntArrayRef& strides,
     const TensorOptions& options,
-    QuantizerPtr quantizer) {
+    const QuantizerPtr& quantizer) {
   AT_ASSERT(options.device().is_cpu());
   at::native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();

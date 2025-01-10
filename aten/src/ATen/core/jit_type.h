@@ -231,7 +231,7 @@ struct TORCH_API OptionalType : public UnionType {
   static TypePtr ofTensor();
   //
   // global singleton
-  static TypePtr get(TypePtr inner);
+  static TypePtr get(const TypePtr& inner);
 
  private:
   explicit OptionalType(const TypePtr& contained);
@@ -888,7 +888,7 @@ struct TORCH_API ListType
   // the type List<T>.
   // The extra "identifier" argument is needed because we have multiple container types
   // that all reuse this function (List<T>, array<T, N>, etc.)
-  static TypePtr get(const std::string& identifier, TypePtr inner);
+  static TypePtr get(const std::string& identifier, const TypePtr& inner);
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
