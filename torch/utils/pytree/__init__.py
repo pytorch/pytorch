@@ -245,7 +245,6 @@ def __getattr__(name: str) -> _Any:
         _sys.modules[f"{__name__}.cxx"] = cxx
         return cxx
 
-    name = {"PyTreeSpec": "TreeSpec"}.get(name, name)
     try:
         return getattr(implementation.module, name)
     except AttributeError as ex:
