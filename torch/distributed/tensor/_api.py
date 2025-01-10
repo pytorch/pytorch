@@ -932,8 +932,8 @@ def distribute_module(
                 stacklevel=2,
             )
             module.register_forward_pre_hook(
-                lambda _, inputs: input_fn(inputs, device_mesh)
-            )  # type: ignore[call-arg]
+                lambda _, inputs: input_fn(inputs, device_mesh)  # type: ignore[call-arg]
+            )
         elif num_args == 3:
             # input_fn takes in module, inputs, device mesh
             module.register_forward_pre_hook(

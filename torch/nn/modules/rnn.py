@@ -253,8 +253,8 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr()
-            for p in self._flat_weights  # type: ignore[union-attr]
+            p.data_ptr()  # type: ignore[union-attr]
+            for p in self._flat_weights
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
