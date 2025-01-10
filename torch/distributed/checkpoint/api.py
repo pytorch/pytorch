@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import traceback as tb
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 
-WRAPPED_EXCEPTION = Tuple[BaseException, tb.StackSummary]
+WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
 
 __all__ = ["CheckpointException"]
 
