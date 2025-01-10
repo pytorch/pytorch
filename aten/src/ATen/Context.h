@@ -484,6 +484,19 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
       Backend::MPS, s);
 }
 
+// Note [at::hasXXX() vs. at::globalContext().hasXXX()]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// The purpose of `at::hasXXX()` is to check if device XXX is available at
+// runtime. In contrast, `at::globalContext().hasXXX()` determines support for
+// device XXX was included in the PyTorch build (enabled at compile time) or if
+// a device XXX extension has already been registered with PyTorch.
+//
+// `at::globalContext().hasXXX()` is often used in functions like
+// `getAccelerator()` instead of `at::hasXXX()` to avoid initializing the
+// runtime for device XXX (which can poison child processes while detecting the
+// current accelerator).
+
 inline bool hasCUDA() {
   return globalContext().hasCUDA() &&
       (detail::getCUDAHooks().deviceCount() > 0);
