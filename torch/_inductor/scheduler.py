@@ -189,9 +189,9 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
-        self.debug_device_str: Callable[
-            [BaseSchedulerNode], List[str]
-        ] = lambda *args, **kwargs: []
+        self.debug_device_str: Callable[[BaseSchedulerNode], List[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
@@ -221,7 +221,7 @@ class BaseSchedulerNode:
         buf = IndentedBuffer()
         buf.splice(
             f"""\
-{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
+{name}: {type(self).__name__}({type(getattr(self, "node", None)).__name__})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
@@ -499,9 +499,9 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[
-                            buf.get_name()
-                        ] = input_buf.get_name()
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -767,9 +767,7 @@ class BaseSchedulerNode:
                     display=False
                 ) as flop_counter_mode, V.set_current_node(
                     self.node.fx_node
-                ), V.set_fake_mode(
-                    fake_mode
-                ):
+                ), V.set_fake_mode(fake_mode):
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
@@ -1090,15 +1088,15 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return bool(self.node.get_reduction_type())
 
     def is_split_scan(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
         )
@@ -1695,7 +1693,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @staticmethod
     def set_group_algorithm_for_combo_kernels(
-        custom_group_algorithm: Callable[[Scheduler], List[List[BaseSchedulerNode]]]
+        custom_group_algorithm: Callable[[Scheduler], List[List[BaseSchedulerNode]]],
     ) -> None:
         ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels = (
             custom_group_algorithm
@@ -1915,9 +1913,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_donated_buffer: Dict[
-            str, SchedulerDonatedBuffer
-        ] = self.get_donated_buffers()
+        self.name_to_donated_buffer: Dict[str, SchedulerDonatedBuffer] = (
+            self.get_donated_buffers()
+        )
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -2039,9 +2037,9 @@ class Scheduler:
                 node.log_details()
 
     def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
-        assert (
-            node.get_origins() is not None
-        ), "All nodes passed to scheduling must have an origin"
+        assert node.get_origins() is not None, (
+            "All nodes passed to scheduling must have an origin"
+        )
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2200,9 +2198,9 @@ class Scheduler:
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node}"
+                )
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
@@ -2250,9 +2248,9 @@ class Scheduler:
                 for alt_name in buf.get_mutations():
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
-                    self.mutation_real_name[
-                        buf.get_name()
-                    ] = self.mutation_real_name.get(alt_name, alt_name)
+                    self.mutation_real_name[buf.get_name()] = (
+                        self.mutation_real_name.get(alt_name, alt_name)
+                    )
 
         # make sure outputs aren't dead-code-eliminated
         for buf_name in V.graph.get_output_names():
@@ -2262,9 +2260,9 @@ class Scheduler:
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
             for s in out.get_unbacked_symbol_uses():
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                )
                 if r := unbacked_symbol_to_origin_node[s]:
                     for buf_name in self.name_to_node[r].get_buffer_names():
                         log.debug(
@@ -3066,9 +3064,9 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[
-                    buf_name
-                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                reasons[buf_name] = (
+                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                )
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -3077,9 +3075,9 @@ class Scheduler:
                 continue
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                reasons[buf_name] = (
+                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                )
                 continue
 
             lhs_off = lhs_dep.get_offset()
@@ -3099,9 +3097,9 @@ class Scheduler:
                 continue
 
             # Add more rules here
-            reasons[
-                buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            reasons[buf_name] = (
+                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            )
 
         return str(reasons)
 
@@ -3617,9 +3615,9 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        assert (
-            not is_gpu(device.type) or device.index is not None
-        ), f"{device} should have been normalized in lowering"
+        assert not is_gpu(device.type) or device.index is not None, (
+            f"{device} should have been normalized in lowering"
+        )
         V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)

@@ -43,10 +43,10 @@ def _apply_optimizer_in_backward(
         param_1 = next(params_generator)
         remainder_params = list(params_generator)
 
-        apply_optimizer_in_backward(torch.optim.SGD, [param_1], {"lr": .02})
-        apply_optimizer_in_backward(torch.optim.Adam, remainder_params, {"lr": .04})
+        apply_optimizer_in_backward(torch.optim.SGD, [param_1], {"lr": 0.02})
+        apply_optimizer_in_backward(torch.optim.Adam, remainder_params, {"lr": 0.04})
 
-        model(...).sum().backward() # after backward, parameters will already
+        model(...).sum().backward()  # after backward, parameters will already
         # have their registered optimizer(s) applied.
 
     """
@@ -110,7 +110,7 @@ def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Opt
         List[torch.optim.Optimizer]: the in-backward optimizers.
 
     Example::
-        _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {'lr': 0.01})
+        _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {"lr": 0.01})
         optims = _get_optimizers_in_backward(model)
     """
     optims: List[torch.optim.Optimizer] = []

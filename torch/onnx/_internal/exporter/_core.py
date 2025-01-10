@@ -323,9 +323,9 @@ def _handle_getitem_node(
     assert len(node.all_input_nodes) == 1
     source = node.all_input_nodes[0]
     source_outputs = node_name_to_values[source.name]
-    assert isinstance(
-        source_outputs, Sequence
-    ), f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    assert isinstance(source_outputs, Sequence), (
+        f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    )
     index = typing.cast(int, node.args[1])
     value = source_outputs[index]
     # Save the getitem value to the values mapping to in case
@@ -645,9 +645,9 @@ def _handle_output_node(
         graph_like: The ONNX graph at construction.
     """
     output_value_name = node.args[0][0].name  # type: ignore[index,union-attr]
-    assert isinstance(
-        output_value_name, str
-    ), f"Bug: Expected {output_value_name!r} to be a string"
+    assert isinstance(output_value_name, str), (
+        f"Bug: Expected {output_value_name!r} to be a string"
+    )
     values = node_name_to_values[output_value_name]
     if isinstance(values, Sequence):
         graph_like.outputs.extend(values)
@@ -750,9 +750,9 @@ def _get_inputs_and_attributes(
         return inputs, {}, [], [node.name]  # type: ignore[return-value]
 
     # The target should be an ATen operator now
-    assert hasattr(
-        node.target, "_schema"
-    ), f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    assert hasattr(node.target, "_schema"), (
+        f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    )
     node_schema: torch.FunctionSchema = node.target._schema
 
     # This function assumes the order of arguments in FX op is the
@@ -1046,9 +1046,9 @@ def _exported_program_to_onnx_program(
         persistent = spec.persistent
         value = values[value_name]
 
-        assert not isinstance(
-            value, Sequence
-        ), f"Input '{value_name}' should not be a sequence. This is unexpected."
+        assert not isinstance(value, Sequence), (
+            f"Input '{value_name}' should not be a sequence. This is unexpected."
+        )
 
         value.metadata_props["pkg.torch.export.graph_signature.InputSpec.kind"] = (
             input_kind.name

@@ -530,7 +530,8 @@ class CompilerBisector:
                 )
                 if result:
                     curr_subsystem = cls.get_subsystem_object(
-                        curr_backend, cls.get_subsystem()  # type: ignore[arg-type]
+                        curr_backend,
+                        cls.get_subsystem(),  # type: ignore[arg-type]
                     )
 
                     if isinstance(curr_subsystem, BinarySubsystem):
