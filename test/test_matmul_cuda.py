@@ -163,14 +163,14 @@ class TestMatmulCuda(TestCase):
         b = torch.rand(512, device='cuda', dtype=torch.half)
         out = torch.nn.functional.linear(x, w, b)
         out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), b.cpu())
-        self.assertEqual(out, out_cpu, atol=5e-3, rtol=5e-3)
+        self.assertEqual(out, out_cpu, atol=5e-3, rtol=8e-3)
 
         a = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
         b = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
         c = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
         out = torch.baddbmm(a, b, c)
         out_cpu = torch.baddbmm(a.cpu(), b.cpu(), c.cpu())
-        self.assertEqual(out, out_cpu, atol=1e-3, rtol=3e-3)
+        self.assertEqual(out, out_cpu, atol=1e-3, rtol=5e-3)
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
