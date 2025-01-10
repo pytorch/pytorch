@@ -61,10 +61,10 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
-          dimensions including none and :math:`H_{in} = \text{in\_features}`.
-        - Output: :math:`(*, H_{out})` where all but the last dimension
-          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
+        - Input: :math:`(*, H_\text{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_\text{in} = \text{in\_features}`.
+        - Output: :math:`(*, H_\text{out})` where all but the last dimension
+          are the same shape as the input and :math:`H_\text{out} = \text{out\_features}`.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -154,15 +154,15 @@ class Bilinear(Module):
         in1_features: size of each first input sample
         in2_features: size of each second input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
+        bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
 
     Shape:
-        - Input1: :math:`(*, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
+        - Input1: :math:`(*, H_\text{in1})` where :math:`H_\text{in1}=\text{in1\_features}` and
           :math:`*` means any number of additional dimensions including none. All but the last dimension
           of the inputs should be the same.
-        - Input2: :math:`(*, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
-        - Output: :math:`(*, H_{out})` where :math:`H_{out}=\text{out\_features}`
+        - Input2: :math:`(*, H_\text{in2})` where :math:`H_\text{in2}=\text{in2\_features}`.
+        - Output: :math:`(*, H_\text{out})` where :math:`H_\text{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
 
     Attributes:
