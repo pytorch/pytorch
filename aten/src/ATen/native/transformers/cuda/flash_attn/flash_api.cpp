@@ -480,8 +480,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
 
     // Keep references to these tensors to extend their lifetime
-    at::Tensor softmax_lse_accum, out_accum;
-    std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
+    auto [softmax_lse_accum, out_accum] = set_params_splitkv(params, batch_size, num_heads,
                         head_size, seqlen_k, seqlen_q,
                         head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
 
@@ -1487,8 +1486,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
     }
 
     // Keep references to these tensors to extend their lifetime
-    at::Tensor softmax_lse_accum, out_accum;
-    std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
+    auto [softmax_lse_accum, out_accum] = set_params_splitkv(params, batch_size, num_heads,
                        head_size, seqlen_k, seqlen_q,
                        head_size_rounded, /*dropout*/0.f, num_splits, dprops, opts);
 
