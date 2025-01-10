@@ -11,10 +11,6 @@ class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
       size_t num_models = 1);
 
   ~AOTIModelContainerRunnerCpu() override;
-
-  std::vector<at::Tensor> run(
-      const std::vector<at::Tensor>& inputs,
-      void* stream_handle = nullptr) override;
 };
 
 } // namespace torch::inductor
