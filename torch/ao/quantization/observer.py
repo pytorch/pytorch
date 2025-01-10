@@ -13,7 +13,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -339,7 +339,7 @@ class UniformQuantizationObserverBase(ObserverBase):
     @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
@@ -1113,7 +1113,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         return norm.sum().item()
 
-    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _non_linear_param_search(self) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -1682,7 +1682,7 @@ class PerBlock(Granularity):
         block_size (Tuple[int, ...]): The size of each quantization group
     """
 
-    block_size: Tuple[int, ...]
+    block_size: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -1763,8 +1763,8 @@ class PerToken(Granularity):
 
 
 def get_block_size(
-    input_shape: Tuple[int, ...], granularity: Granularity
-) -> Tuple[int, ...]:
+    input_shape: tuple[int, ...], granularity: Granularity
+) -> tuple[int, ...]:
     """Get the block size based on the input shape and granularity type.
 
     Args:
@@ -1845,7 +1845,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """
 
     @abstractmethod
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate quantization parameter based on the stats attached to the observer module
         and returns a tuple of scale and zero_point Tensor
         """

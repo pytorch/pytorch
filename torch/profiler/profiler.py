@@ -7,7 +7,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -21,6 +21,7 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_trace_observer,
 )
+from torch._environment import is_fbcode
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -394,11 +395,11 @@ class _KinetoProfile:
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
         # Default to device 0, if unset. Fallback on cpu.
-        if device is None and self.use_device and self.use_device != "cuda":
-            device = self.use_device + ":0"
-
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if self.use_device and self.use_device != "cuda":
+                device = self.use_device + ":0"
+            else:
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
@@ -723,7 +724,7 @@ class profile(_KinetoProfile):
         self.step_rec_fn: Optional[prof.record_function] = None
 
         self.action_map: Dict[
-            Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+            tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
@@ -821,7 +822,10 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
-        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
+        if os.environ.get("KINETO_USE_DAEMON", "") or (
+            is_fbcode() and os.environ.get("KINETO_FORCE_STEP_HOOK", "")
+        ):
+            prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
