@@ -1,5 +1,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/ScalarType.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -34,7 +35,7 @@ void quantized_matmul(
   // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
   // weight: s8; per_tensor/per_channel calibrated; symmetric
   bool m2_trans = true;
-  auto attr = Attr(output_scale, output_zero_point);
+  auto attr = Attr(1.0 / output_scale, output_zero_point);
   construct_attr_by_post_op(
       binary_post_op,
       binary_alpha,
@@ -173,8 +174,9 @@ void quantized_matmul(
   std::unordered_map<int, dnnl::memory> args;
 
   dnnl::post_ops po;
-  po = attr.extract_post_ops(dst, true);
+  po = attr.extract_post_ops(dst);
   bool m1_need_zp = (input_zero_point != 0);
+  bool dst_need_zp = (output_zero_point != 0);
   bool wgh_is_per_channel = weight_scales.numel() > 1;
 
   dnnl::matmul matmul_p;
@@ -201,6 +203,10 @@ void quantized_matmul(
   pattr.set_scales_mask(DNNL_ARG_SRC, mask_ac);
   if (m1_need_zp) {
     pattr.set_zero_points_mask(DNNL_ARG_SRC, mask_ac);
+  }
+  pattr.set_scales_mask(DNNL_ARG_DST, mask_ac);
+  if (dst_need_zp) {
+    pattr.set_zero_points_mask(DNNL_ARG_DST, mask_ac);
   }
 
   if (with_bias) {
@@ -248,9 +254,12 @@ void quantized_matmul(
   }
 
   // Add scale/zp md
+  weight_scales = weight_scales.to(at::kFloat);
   dnnl::memory m2_sc_m, m2_zp_m;
   dnnl::memory::desc m2_sc_md = dnnl::memory::desc(
-      {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+      get_onednn_dims(weight_scales),
+      dnnl::memory::data_type::f32,
+      dnnl::memory::format_tag::x);
   m2_sc_m = make_onednn_memory(m2_sc_md, engine, weight_scales.data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, m2_sc_m});
 
@@ -264,6 +273,17 @@ void quantized_matmul(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
+  }
+
+  dnnl::memory dst_sc_m, dst_zp_m;
+  Tensor dst_sc_tensor, dst_zp_tensor;
+  dst_sc_m = dnnl_memory_from_host_scalar(
+      static_cast<float>(output_scale), dst_sc_tensor, engine);
+  dst_zp_m = dnnl_memory_from_host_scalar(
+      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
+  if (dst_need_zp) {
+    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
   }
 
   auto qmatmul_event = dnnl::sycl_interop::execute(matmul_p, stream, args);
