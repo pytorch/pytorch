@@ -715,7 +715,7 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             benchmark_iters = max(
                 min(
                     benchmark_iters,
-                    int(max_benchmark_duration // mean(estimated_timings))
+                    int(max_benchmark_duration // mean(estimated_timings)),
                 ),
                 1,
             )
@@ -817,6 +817,10 @@ class LazyInductorBenchmarker(GroupedInductorBenchmarker):
             # should be cached in memory, so we should return that cached timing
             if key in self.memory_cache:
                 return self.memory_cache[key]
+
+            print(self.memory_cache)
+            print(kwargs_hash)
+            print(self.kwargs_hash_to_futures_gpu)
 
             futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
             callables, keys = zip(*futures_gpu)
