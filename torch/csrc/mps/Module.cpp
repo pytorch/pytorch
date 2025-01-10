@@ -17,6 +17,7 @@
 #endif
 
 #ifdef USE_MPS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
@@ -503,6 +504,18 @@ void initModule(PyObject* module) {
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
+  });
+  m.def("_mps_isCaptureEnabled", []() {
+    return at::mps::getMPSProfiler().isCaptureEnabled();
+  });
+  m.def("_mps_isCapturing", []() {
+    return at::mps::getMPSProfiler().isCapturing();
+  });
+  m.def("_mps_startCapture", [](const std::string& fileName) {
+    at::mps::getMPSProfiler().startCapture(fileName);
+  });
+  m.def("_mps_stopCapture", []() {
+    at::mps::getMPSProfiler().stopCapture();
   });
 }
 #endif /* USE_MPS */
