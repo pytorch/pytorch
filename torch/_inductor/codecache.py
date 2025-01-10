@@ -1977,8 +1977,8 @@ def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     is_array_ref = config.aot_inductor.allow_stack_allocation
     return (
         "torch/csrc/inductor/"
-        f"{'cpp_wrapper_array_ref' if is_array_ref else 'cpp_wrapper'}/"
-        f"{'aoti_' if aot_mode else ''}{base_device}.h"
+        f"{'aoti_include' if aot_mode else 'cpp_wrapper'}/"
+        f"{'array_ref' if is_array_ref else base_device}.h"
     )
 
 
