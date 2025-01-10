@@ -246,6 +246,13 @@ class ComposabilityTest(MultiProcContinousTest):
             pipeline_schedule._step_microbatches(
                 arg_mbs=[[] for _ in input_mb], target_mbs=target_mb
             )
+        for m in partial_models:
+            for p in m.parameters():
+                assert p.grad is not None
+                # introduce a race condition for FSDP's reduce-scatter which could corrupt gradients if pipelining
+                # does not properly synchronize with FSDP
+                p.grad.div_(2.0)
+                p.grad.mul_(2.0)
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
