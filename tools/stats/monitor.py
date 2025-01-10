@@ -35,7 +35,7 @@ _HAS_AMDSMI = False
 @dataclasses.dataclass
 class UsageData:
     """
-    Dataclass for storing usage data.
+    Dataclass for storing usage data. This is the data that will be logged to the usage_log file.
     """
 
     cpu_percent: float
@@ -47,7 +47,7 @@ class UsageData:
 @dataclasses.dataclass
 class GpuData:
     """
-    Dataclass for storing gpu data.
+    Dataclass for storing gpu data. This is the data that will be logged to the usage_log file.
     """
 
     uuid: str
