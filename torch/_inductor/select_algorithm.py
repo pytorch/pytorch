@@ -2036,7 +2036,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     except ImportError:
                         raise e from None
 
-                timings[choice] = timing                
+                timings[choice] = timing
 
             return timings
 
@@ -2053,10 +2053,12 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = benchmark_in_current_process(extern)
             timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
-        
+
         def benchmark(
             choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
-        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+        ) -> Dict[
+            Union[ExternKernelCaller, TritonTemplateCaller], float
+        ]:
             if config.autotune_in_subproc:
                 maybe_lazy_benchmarks = benchmark_in_sub_process(choices)
             else:
@@ -2064,9 +2066,10 @@ class AlgorithmSelectorCache(PersistentCache):
             # we want to convert all benchmark results into floats at this point,
             # this will cause any lazy benchmarks to finalize (i.e. by executing
             # a grouped benchmark).
-            timings: Dict[
-                Union[ExternKernelCaller, TritonTemplateCaller], float
-            ] = {choice: float(timing) for choice, timing in maybe_lazy_benchmarks.items()}
+            timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = {
+                choice: float(timing)
+                for choice, timing in maybe_lazy_benchmarks.items()
+            }
             return timings
 
         return benchmark
