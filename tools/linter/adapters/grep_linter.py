@@ -254,10 +254,7 @@ def main() -> None:
     lines = proc.stdout.decode().splitlines()
     # matching_line looks like:
     #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
-    files = set(
-        line.split(":")[0]
-        for line in lines
-    )
+    files = {line.split(":")[0] for line in lines}
     for file in files:
         lint_message = lint_file(
             file,
