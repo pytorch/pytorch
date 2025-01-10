@@ -2054,19 +2054,20 @@ class AlgorithmSelectorCache(PersistentCache):
             timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
         
-        def benchmark() -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+        def benchmark(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             if config.autotune_in_subproc:
-                maybe_lazy_benchmarks = benchmark_in_sub_process()
+                maybe_lazy_benchmarks = benchmark_in_sub_process(choices)
             else:
-                maybe_lazy_benchmarks = benchmark_in_current_process()
-            # if we lazily benchmarked any values, we need to finalize
-            # those results by triggering the benchmark. this can be
-            # done by converting the lazy benchmark to a float
-            # mypy gets confused about types (since it does not realize that
-            # all lazy benchmarks will get finalized), so let's give it a hint
+                maybe_lazy_benchmarks = benchmark_in_current_process(choices)
+            # we want to convert all benchmark results into floats at this point,
+            # this will cause any lazy benchmarks to finalize (i.e. by executing
+            # a grouped benchmark).
             timings: Dict[
                 Union[ExternKernelCaller, TritonTemplateCaller], float
             ] = {choice: float(timing) for choice, timing in maybe_lazy_benchmarks.items()}
+            return timings
 
         return benchmark
 
