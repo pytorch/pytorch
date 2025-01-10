@@ -3,16 +3,7 @@
 import functools
 import itertools
 import operator
-from typing import (
-    Callable,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    TypeVar,
-    Union,
-)
+from typing import Callable, cast, Iterable, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
