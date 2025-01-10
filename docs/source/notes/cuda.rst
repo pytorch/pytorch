@@ -209,7 +209,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 
   at::globalContext().setAllowBF16ReductionCuBLAS(true);
 
-.. _fp16accmulation:
+.. _fp16accumulation:
 
 Full FP16 Accmumulation in FP16 GEMMs
 -------------------------------------
