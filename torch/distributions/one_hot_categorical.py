@@ -39,6 +39,7 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities (unnormalized)
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.one_hot
     has_enumerate_support = True
@@ -125,6 +126,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
     (Bengio et al., 2013)
     """
+
     has_rsample = True
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:

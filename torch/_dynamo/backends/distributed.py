@@ -371,9 +371,9 @@ class DDPOptimizer:
             self.first_bucket_cap = bucket_bytes_cap
 
         self.bucket_bytes_cap = bucket_bytes_cap
-        assert (
-            self.first_bucket_cap <= self.bucket_bytes_cap
-        ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
+        assert self.first_bucket_cap <= self.bucket_bytes_cap, (
+            "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
+        )
 
         self.backend_compile_fn = backend_compile_fn
 

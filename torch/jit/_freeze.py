@@ -155,9 +155,12 @@ def run_frozen_optimizations(
     Example (Freezing a module with Conv->Batchnorm)
     .. code-block:: python
         import torch
+
         in_channels, out_channels = 3, 32
-        conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
-        bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
+        conv = torch.nn.Conv2d(
+            in_channels, out_channels, kernel_size=3, stride=2, bias=True
+        )
+        bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs run_frozen_optimizations
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
@@ -202,9 +205,12 @@ def optimize_for_inference(
     Example (optimizing a module with Conv->Batchnorm)::
 
         import torch
+
         in_channels, out_channels = 3, 32
-        conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
-        bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
+        conv = torch.nn.Conv2d(
+            in_channels, out_channels, kernel_size=3, stride=2, bias=True
+        )
+        bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         mod = torch.nn.Sequential(conv, bn)
         frozen_mod = torch.jit.optimize_for_inference(torch.jit.script(mod.eval()))
         assert "batch_norm" not in str(frozen_mod.graph)

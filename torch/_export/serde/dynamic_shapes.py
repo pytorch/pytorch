@@ -108,20 +108,20 @@ def _dump_dynamic_shapes(
     would generate the following output:
     ```
     {
-        'dynamic_shapes': (
+        "dynamic_shapes": (
             [
-                ['dx', 4],
-                ['dx + 1', 4],
+                ["dx", 4],
+                ["dx + 1", 4],
             ],
-            ['_DimHint.STATIC'],
-            ['_DimHint.STATIC', '_DimHint.STATIC'],
+            ["_DimHint.STATIC"],
+            ["_DimHint.STATIC", "_DimHint.STATIC"],
             None,
         ),
-        'dims': {
-            'dx': {
-                'min': 4,
-                'max': 16,
-                'derived': ['dx + 1'],
+        "dims": {
+            "dx": {
+                "min": 4,
+                "max": 16,
+                "derived": ["dx + 1"],
             },
         },
     }
@@ -150,7 +150,7 @@ def _dump_dynamic_shapes(
         return out
 
     def _track_dim_from_dims(
-        val: Union[None, int, _DimHint, _Dim]
+        val: Union[None, int, _DimHint, _Dim],
     ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
@@ -296,7 +296,7 @@ def _load_dynamic_shapes(
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
-        val: Union[None, int, str]
+        val: Union[None, int, str],
     ) -> Union[None, int, _Dim, _DimHint]:
         if val is None or isinstance(val, int):
             return val
