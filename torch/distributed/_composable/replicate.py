@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ class _ReplicateState(_State):
         self._orig_module = self.module
         self._param_names: List[str] = []
         self._no_sync: bool = False
-        self._init_args: Optional[Tuple[Any, ...]] = None
+        self._init_args: Optional[tuple[Any, ...]] = None
         self._init_kwargs: Dict[str, Any] = {}
         self._comm_hook_args: List[Any] = []
 
@@ -125,7 +125,7 @@ class _ReplicateState(_State):
         self._init_kwargs = kwargs
 
     def forward_pre_hook(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         if self._init_args or self._init_kwargs:
             self.lazy_init()
@@ -135,7 +135,7 @@ class _ReplicateState(_State):
     def forward_post_hook(
         self,
         module: nn.Module,
-        input: Tuple[torch.Tensor],
+        input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
