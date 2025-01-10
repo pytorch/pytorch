@@ -323,9 +323,9 @@ class CppTemplateKernel(CppKernel):
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst,
-                    epilogue_nodes,
+                    epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
-                    reindexers,  # type: ignore[arg-type]
+                    reindexers,
                 )
         else:
             if dst.get_name() != src.get_name():

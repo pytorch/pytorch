@@ -658,9 +658,9 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target,
-                node.args,
-                node.kwargs,  # type: ignore[arg-type]
+                node.target,  # type: ignore[arg-type]
+                node.args,  # type: ignore[arg-type]
+                node.kwargs,
             )
 
             if normalized_args_and_kwargs is None:
@@ -1928,9 +1928,9 @@ def fx_to_pattern(
 
         def placeholder(
             self,
-            target: str,
+            target: str,  # type: ignore[override]
             args: Sequence[Any],
-            kwargs: Mapping[str, Any],  # type: ignore[override]
+            kwargs: Mapping[str, Any],
         ) -> Union[ExclusiveKeywordArg, KeywordArg]:
             n = next(argnum)
             if n < len(argnames):
@@ -1948,9 +1948,9 @@ def fx_to_pattern(
 
         def call_function(
             self,
-            target: str,
+            target: str,  # type: ignore[override]
             args: Sequence[Any],
-            kwargs: Mapping[str, Any],  # type: ignore[override]
+            kwargs: Mapping[str, Any],
         ) -> PatternExpr:
             process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
