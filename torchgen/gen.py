@@ -1642,9 +1642,6 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                 lambda: {
                     "ns_prologue": ns_helper.prologue,
                     "ns_epilogue": ns_helper.epilogue,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
-                    if gen_dispatch_helpers
-                    else [],
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
@@ -2331,7 +2328,9 @@ def gen_source_files(
                     backend_index, per_operator_headers, rocm
                 ),
                 "ops_headers": operator_headers(),
-                "dispatch_helpers": "",
+                "dispatch_helpers": dest.gen_registration_helpers(backend_index)
+                if gen_dispatch_helpers
+                else [],
                 "dispatch_definitions": dispatch_definitions,
             },
         )
