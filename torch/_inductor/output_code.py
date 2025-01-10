@@ -35,7 +35,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -309,7 +308,7 @@ class CompiledFxGraph(OutputCode):
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[Tuple[int, str]]]
+    cache_linemap: Optional[List[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -324,7 +323,7 @@ class CompiledFxGraph(OutputCode):
     allocated_constant_name: Optional[Dict[str, str]]
     constants: Optional[Dict[str, torch.Tensor]]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
+    output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     counter_deltas: Counter[str]
@@ -348,7 +347,7 @@ class CompiledFxGraph(OutputCode):
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
         gm: torch.fx.GraphModule,
-        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
+        output_strides: List[Optional[tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
@@ -462,7 +461,15 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
-            return self.current_callable(inputs)
+            result = self.current_callable(inputs)
+
+            from torch._inductor.graph import GraphLowering, SaveOutputCodeContext
+
+            GraphLowering.save_output_code(
+                self.source_code, SaveOutputCodeContext.AFTER_COMPILE
+            )
+
+            return result
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
@@ -551,10 +558,12 @@ class CompiledFxGraph(OutputCode):
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        from .graph import GraphLowering
+        from .graph import GraphLowering, SaveOutputCodeContext
 
         # This is used by tests to check the output for specific details.
-        GraphLowering.save_output_code(code)
+        GraphLowering.save_output_code(
+            code, SaveOutputCodeContext.AFTER_DESERIALIZATION
+        )
 
         try:
             with dynamo_timed(

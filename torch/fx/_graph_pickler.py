@@ -30,7 +30,7 @@ class GraphPickler(pickle.Pickler):
     """
 
     def __init__(self, file: io.BytesIO) -> None:
-        super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
+        super().__init__(file)
 
         # This abomination is so we can pass external decoding state to the
         # unpickler functions. We serialize _unpickle_state as a persistent
@@ -319,10 +319,11 @@ class _GraphModulePickleData:
         )
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
-        # if isinstance(gm, torch.fx._lazy_graph_module._LazyGraphModule):
-        #     python_code = gm._real_recompile()
-        # else:
-        #     python_code = gm.recompile()
+        # Need to do this to ensure the code is created for later pickling.
+        if isinstance(gm, torch.fx._lazy_graph_module._LazyGraphModule):
+            _python_code = gm._real_recompile()
+        else:
+            _python_code = gm.recompile()
         self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph)

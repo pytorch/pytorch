@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import enum
 import functools
 import io
 import itertools
 import json
 import logging
+import os
 import sys
 import time
 import warnings
@@ -23,7 +25,6 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -46,11 +47,11 @@ from torch._dynamo import (
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
+    CompileEventLogger,
     counters,
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
-    get_chromium_event_logger,
     lazy_format_graph_code,
     set_feature_use,
 )
@@ -157,9 +158,42 @@ if TYPE_CHECKING:
         GraphSignature,
     )
 
+
 # For testing - use the serde FxCompile scheme to debug serialization and
 # deserialization of GraphMoule and CompiledFxGraph.
-_debug_serde_compile = False
+class FxCompileMode(enum.Enum):
+    NORMAL = 0
+    # For testing - use the serde FxCompile scheme to debug serialization and
+    # deserialization of GraphMoule and CompiledFxGraph.
+    SERIALIZE = 1
+
+
+def _fx_compile_mode_default() -> FxCompileMode:
+    name = "TORCHINDUCTOR_FX_COMPILE_MODE"
+    value = os.environ.get(name)
+    NORMAL = FxCompileMode.NORMAL
+    if value is None:
+        return NORMAL
+    try:
+        value = value.upper()
+        return FxCompileMode[value]
+    except KeyError:
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.error(
+            "Invalid value of %s for %s. Expected one of %s. Using default.",
+            value,
+            name,
+            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
+        )
+        # Remove from the environment so subprocesses don't ALSO complain.
+        os.environ.pop(name)
+        return FxCompileMode.NORMAL
+
+
+fx_compile_mode = _fx_compile_mode_default()
+
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -358,7 +392,7 @@ def split_const_gm(
     skip_constructor: bool = True,
     lifted_constant_names: Optional[List[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
-) -> Tuple[GraphModule, Dict[str, int]]:
+) -> tuple[GraphModule, Dict[str, int]]:
     """
     This function takes an GraphModule input "gm".
     The gm will be split into 2 components,
@@ -581,12 +615,10 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
-
-        get_chromium_event_logger().add_event_data(
+        CompileEventLogger.pt2_compile(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
-
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
@@ -645,7 +677,7 @@ def _compile_fx_inner(
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
-        set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", use_cache)
+        set_feature_use("fx_cache", use_cache)
 
         # TODO: This is a hack purely to get some info to extract_tensor_metadata_for_cache_key,
         # figure out how to not have to modify example inputs
@@ -748,7 +780,6 @@ def _compile_fx_inner(
         # and a tlparse log for every cache action.
         # In the event of a bypass, we also logged to the remote table earlier
         # with log_cache_bypass.
-        chromium_log = get_chromium_event_logger()
         cache_state = (
             cache_info["cache_state"] if cache_info is not None else "disabled"
         )
@@ -757,14 +788,14 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        chromium_log.log_instant_event(
+        CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            start_time,
-            metadata=cache_info,
+            metadata=cache_info or {},
+            time_ns=start_time,
         )
         # Add event data about cache hits/miss
         # TODO: add remote cache get/put timings here too
-        chromium_log.add_event_data(
+        CompileEventLogger.pt2_compile(
             "inductor_compile",
             cache_state=cache_state,
             cache_event_time=start_time,
@@ -804,6 +835,11 @@ def _compile_fx_inner(
 
 
 class FxCompile(ABC):
+    """
+    An FxCompile represents a mechanism that can turn a GraphModule into an
+    OutputCode.
+    """
+
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
     # to know what kind of API we want for that first.
@@ -1003,7 +1039,7 @@ class _InProcessFxCompile(FxCompile):
                 metrics_helper = metrics.CachedMetricsHelper()
                 with V.set_graph_handler(graph):
                     graph.run(*example_inputs)
-                    output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
+                    output_strides: List[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
                         # We'll put the output strides in the compiled graph so we
                         # can later return them to the caller via TracingContext
@@ -1156,7 +1192,7 @@ def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
 @dataclass
 class _WireProtocolInput:
     """
-    For _FxCompileSerialized - encapsulates all the data being transferred
+    For _SerializedFxCompile - encapsulates all the data being transferred
     (sent) from the parent to the child.
     """
 
@@ -1164,6 +1200,7 @@ class _WireProtocolInput:
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
     graph_kwargs: _CompileFxKwargs
+    # TODO: Add additional state to transfer to the child.
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -1194,7 +1231,7 @@ class _WireProtocolPickledInput:
 @dataclass
 class _WireProtocolOutput:
     """
-    For _FxCompileSerialized - encapsulates all the data being transferred
+    For _SerializedFxCompile - encapsulates all the data being transferred
     (returned) back from the child to the parent.
     """
 
@@ -1230,7 +1267,7 @@ class _WireProtocolPickledOutput:
         return result
 
 
-class _FxCompileSerialized(FxCompile):
+class _SerializedFxCompile(FxCompile):
     """
     This is used to represent an FxCompile which occurs across a serialized
     boundary.
@@ -1320,7 +1357,7 @@ class _FxCompileSerialized(FxCompile):
 
 # This is a debugging/testing implementation of FxCompile which serializes the
 # input and output but still runs the FxCompile in-process.
-class _DebugSerdeFxCompile(_FxCompileSerialized):
+class _DebugSerdeFxCompile(_SerializedFxCompile):
     @override
     def _send_to_child(
         self, pickled_input: _WireProtocolPickledInput
@@ -1339,10 +1376,12 @@ def fx_codegen_and_compile(
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     scheme: FxCompile
-    if _debug_serde_compile:
+    if fx_compile_mode == FxCompileMode.NORMAL:
+        scheme = _InProcessFxCompile()
+    elif fx_compile_mode == FxCompileMode.SERIALIZE:
         scheme = _DebugSerdeFxCompile()
     else:
-        scheme = _InProcessFxCompile()
+        raise NotImplementedError
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
@@ -1390,9 +1429,9 @@ def cudagraphify(
     stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
-    constants: Tuple[torch.Tensor, ...] = (),
+    constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
-    mutated_input_idxs: Tuple[int, ...] = (),
+    mutated_input_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -2015,7 +2054,7 @@ def compile_fx(
             gm: GraphModule,
             joint_inputs: Sequence[object],
             **kwargs: object,
-        ) -> Tuple[GraphModule, GraphModule]:
+        ) -> tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
                 _recursive_joint_graph_passes(gm)
@@ -2219,11 +2258,11 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
 def _aoti_flatten_inputs(
     gm: torch.fx.GraphModule,
-    args: Union[List[Any], Tuple[Any, ...]],
+    args: Union[List[Any], tuple[Any, ...]],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     options: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> tuple[List[Any], Dict[str, Any]]:
     """
     Flatten the inputs to the graph module and return the flat inputs and options.
     Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.
