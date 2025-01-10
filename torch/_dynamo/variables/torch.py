@@ -1199,6 +1199,9 @@ class TorchDispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         return cls(value, source=source)
 
+    def is_constant_fold_method(self, name):
+        return name in ["has"]
+
     def call_method(
         self,
         tx,
@@ -1206,6 +1209,16 @@ class TorchDispatchKeySetVariable(BaseTorchVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "highestPriorityTypeId":
+        if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
+            args, kwargs
+        ):
+            method = getattr(self.value, name)
+            return variables.ConstantVariable.create(
+                method(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        elif name == "highestPriorityTypeId":
             return variables.EnumVariable(self.value.highestPriorityTypeId())
         return super().call_method(tx, name, args, kwargs)
