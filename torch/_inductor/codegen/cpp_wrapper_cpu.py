@@ -128,7 +128,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def get_device_include(self):
         if V.graph.aot_mode:
-            return f"#include <torch/csrc/inductor/cpp_wrapper/aoti_{self.device}.h>"
+            return f"#include <torch/csrc/inductor/aoti_include/{self.device}.h>"
         return f"#include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>"
 
     def write_header(self):
