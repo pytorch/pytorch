@@ -6,9 +6,9 @@ import torch
 import torch.nn
 import torch.nn.functional as F
 from torch.backends.cuda import (
+    can_use_cudnn_attention,
     can_use_efficient_attention,
     can_use_flash_attention,
-    can_use_cudnn_attention,
     cudnn_sdp_enabled,
     flash_sdp_enabled,
     math_sdp_enabled,
@@ -137,7 +137,6 @@ def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
             )
         return False
     return True
-
 
 
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
@@ -289,6 +288,7 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
             )
         return False
     return True
+
 
 def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable_gqa):
     if (
@@ -867,7 +867,7 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_kv,
             seed,
             offset,
-            _
+            _,
         ) = torch.ops.aten._cudnn_attention_forward(
             query_reshaped,
             key_reshaped,
@@ -881,7 +881,8 @@ def jagged_scaled_dot_product_attention(
             dropout_p,
             is_causal,
             False,
-            scale=scale)
+            scale=scale,
+        )
         return nested_view_from_values_offsets_lengths(
             attention,
             **output_nt_info,

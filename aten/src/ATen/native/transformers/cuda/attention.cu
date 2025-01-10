@@ -792,14 +792,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
         attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_kv});
       }
     }
-  
+
     Tensor attention, log_sumexp;
     at::Tensor cudnn_seed, cudnn_offset;
     cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-  
+
     const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-  
+
     // See Note [Seed and Offset Device] in _efficient_attention_forward
     at::PhiloxCudaState philox_state;
     const bool in_capture_stream =
@@ -808,7 +808,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       // Device
       auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
           std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
-  
+
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen->mutex_);
       // if using dropout, we produce 1 random number for each element of the
@@ -818,10 +818,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       at::cuda::philox::unpack_cudnn_wrapper(
                                         philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()), at::cuda::getCurrentCUDAStream());
     }
-  
+
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     Tensor debugmask;
-  
+
     run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
                         num_heads/*int64_t h*/,
                         max_seqlen_batch_q/*int64_t s_q*/,
@@ -840,7 +840,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                         attention/*Tensor o*/,
                         cudnn_seed/*Tensor dropoutseed*/,
                         cudnn_offset/*Tensor dropoutoffset*/);
-  
+
     // TODO(eqy): support debug_attn_mask
     return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   } else {
@@ -905,8 +905,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
 
     run_cudnn_SDP_fprop_nestedtensor(batch_size/*int64_t b*/,
                                      num_heads_q/*int64_t h*/,
-          			   num_heads_k,
-          			   num_heads_v,
+                                     num_heads_k,
+                                     num_heads_v,
                                      max_seqlen_batch_q/*int64_t s_q*/,
                                      max_seqlen_batch_kv/*int64_t s_kv*/,
                                      head_dim_qk/*int64_t d_qk*/,
@@ -915,8 +915,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                      compute_logsumexp/* bool */,
                                      is_causal/* bool */,
                                      dropout_p/*double dropout_probability*/,
-          			   cumulative_sequence_length_q.value(),
-          			   cumulative_sequence_length_kv.value(),
+                                     cumulative_sequence_length_q.value(),
+                                     cumulative_sequence_length_kv.value(),
                                      query/* Tensor q*/,
                                      key/* Tensor k*/,
                                      value/* Tensor v*/,

@@ -2723,7 +2723,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "Fused SDPA was not built for this system")
-    @unittest.skipIf(not "TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED" in os.environ, "cuDNN Nested Tensor support not enabled")
+    @unittest.skipIf("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED" not in os.environ, "cuDNN Nested Tensor support not enabled")
     @parametrize("type", ["nested"])
     @parametrize("is_contiguous", [True])
     def test_scaled_dot_product_attention_cudnn_nested(self, device, type: str, is_contiguous: bool):

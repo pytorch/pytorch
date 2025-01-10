@@ -617,8 +617,8 @@ auto build_graph_and_tensors_nestedtensor(
   auto V = mha_graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("V")
                                  .set_dim({b, h_v, s_kv, d_v})
-                                 .set_stride({
-                                     INT_MAX,
+                                 .set_stride(
+                                     {INT_MAX,
                                      v_strides[strideidx0],
                                      v_strides[strideidx1],
                                      v_strides[strideidx2]}));
@@ -654,11 +654,11 @@ auto build_graph_and_tensors_nestedtensor(
                                          .set_dim({b + 1, 1, 1, 1})
                                          .set_stride({1, 1, 1, 1})
                                          .set_data_type(fe::DataType_t::INT32));
-  //auto RAG_STATS_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
-  //                                    .set_name("cum_seq_stats")
-  //                                    .set_dim({b + 1, 1, 1, 1})
-  //                                    .set_stride({1, 1, 1, 1})
-  //                                    .set_data_type(fe::DataType_t::INT32));
+  // auto RAG_STATS_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+  //                                     .set_name("cum_seq_stats")
+  //                                     .set_dim({b + 1, 1, 1, 1})
+  //                                     .set_stride({1, 1, 1, 1})
+  //                                     .set_data_type(fe::DataType_t::INT32));
   auto RAG_STATS_OFF = nullptr;
   Q->set_ragged_offset(RAG_Q_OFF);
   K->set_ragged_offset(RAG_K_OFF);
@@ -993,7 +993,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
        offset,
        O,
        Stats,
-       RAG_Q_OFF, 
+       RAG_Q_OFF,
        RAG_K_OFF,
        RAG_V_OFF,
        RAG_O_OFF,
