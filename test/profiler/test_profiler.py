@@ -950,6 +950,8 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
         called_num = [0]
 
@@ -1034,6 +1036,8 @@ class TestProfiler(TestCase):
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_multiple_steppers(self):
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()

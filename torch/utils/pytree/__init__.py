@@ -41,6 +41,7 @@ if _TYPE_CHECKING:
     from types import ModuleType
 
     from torch.utils._cxx_pytree import (  # noqa: TC004
+        PyTreeSpec as PyTreeSpec,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
         tree_any as tree_any,
@@ -59,6 +60,7 @@ if _TYPE_CHECKING:
 
 
 __all__ = [
+    "PyTreeSpec",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
