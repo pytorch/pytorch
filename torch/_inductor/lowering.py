@@ -5509,8 +5509,8 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data,
-            Reduction,  # type: ignore[attr-defined]
+            result.data.data,  # type: ignore[attr-defined]
+            Reduction,
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result

@@ -1307,7 +1307,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
             update_histogram = torch.histc(
                 x,
                 self.bins,
-                min=new_min,
+                min=new_min,  # type: ignore[arg-type]
                 max=new_max,  # type: ignore[arg-type]
             ).to(self.histogram.device)
             if new_min == current_min and new_max == current_max:

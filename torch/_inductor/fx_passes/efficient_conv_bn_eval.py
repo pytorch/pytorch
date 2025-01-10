@@ -381,8 +381,8 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         # `graph.call_function` does not allow the `name` argument.
         conv_get_node = graph.create_node(
             op="get_attr",
-            target=conv_node.target,
-            name="get_conv",  # type: ignore[union-attr]
+            target=conv_node.target,  # type: ignore[union-attr]
+            name="get_conv",
         )
         bn_get_node = graph.create_node(
             op="get_attr", target=bn_node.target, name="get_bn"

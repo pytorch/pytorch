@@ -433,8 +433,11 @@ class PackageImporter(Importer):
 
                 return module
         return self._make_module(
-            name, cur.source_file, isinstance(cur, _PackageNode), parent
-        )  # type: ignore[attr-defined]
+            name,
+            cur.source_file,  # type: ignore[attr-defined]
+            isinstance(cur, _PackageNode),
+            parent,
+        )
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)

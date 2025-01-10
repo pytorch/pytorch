@@ -134,8 +134,8 @@ def _convert_out_params(f):
         # Drop the out parameter and concatenate the new kwargs in the signature
         params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params,
-            return_annotation=sig.return_annotation,  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
         # Drop the out parameter and concatenate the new kwargs in the annotations
         _fn.__annotations__ = {k: v for k, v in f.__annotations__.items() if k != "out"}
@@ -171,8 +171,8 @@ def _convert_out_params(f):
             (v for k, v in sig.parameters.items() if k != "out"), (out_param,)
         )
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params,
-            return_annotation=sig.return_annotation,  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
 
         # Drop the out parameter and concatenate the new kwargs in the annotations

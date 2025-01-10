@@ -357,9 +357,9 @@ def create_submodule_from_subgraph(
                     for inner_kwarg in kwarg:
                         p = _add_placeholder(
                             g,
-                            inner_kwarg,
+                            inner_kwarg,  # type: ignore[arg-type]
                             seen_names,
-                            old_name_to_new_node,  # type: ignore[arg-type]
+                            old_name_to_new_node,
                         )
                         new_kwarg.append(p)
                     cur_kwargs_copy[kwarg_name] = new_kwarg
