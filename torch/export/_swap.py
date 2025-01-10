@@ -2,7 +2,7 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -173,8 +173,8 @@ def _construct_inputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
     node_name_map: Dict[str, torch.fx.Node],
-) -> Tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
-    tree_unflatten_args: List[Optional[torch.fx.Node]] = []
+) -> Tuple[list[torch.fx.Node], Dict[str, torch.fx.Node]]:
+    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used
@@ -213,7 +213,7 @@ def _construct_inputs(
 
 def _insert_call_module(
     gm: torch.fx.GraphModule,
-    args_nodes: List[torch.fx.Node],
+    args_nodes: list[torch.fx.Node],
     kwargs_nodes: Dict[str, torch.fx.Node],
     module_to_swap: torch.nn.Module,
     name: str,

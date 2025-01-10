@@ -3,7 +3,7 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, Optional, Set, Union
 
 import torch
 from functorch.experimental.control_flow import _unstack_pytree
@@ -277,7 +277,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
-    def inputs(self, graph_module: torch.fx.GraphModule) -> List[Argument]:
+    def inputs(self, graph_module: torch.fx.GraphModule) -> list[Argument]:
         # TODO(angelayi): Update this with what we decide to do for metadata in
         # the exported graph module
         if (args := graph_module.meta.get("args", None)) is not None:
@@ -345,7 +345,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         pred: ProxyValue,
         true_fn: torch.fx.GraphModule,
         false_fn: torch.fx.GraphModule,
-        inputs: List[Argument],
+        inputs: list[Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         true_branch = self.call_submodule(true_fn, tuple(inputs))
@@ -363,8 +363,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        mapped_args: List[ProxyValue],
-        operands: List[ProxyValue],
+        mapped_args: list[ProxyValue],
+        operands: list[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
         xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
@@ -383,7 +383,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     ) -> ProxyValue:
         return self._fx("call_function", operator.getitem, (value, key), {}, meta)
 
-    def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
+    def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
         return self._fx("output", "output", (results,), {}, meta)
 
     def call_submodule(

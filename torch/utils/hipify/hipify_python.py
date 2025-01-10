@@ -239,7 +239,7 @@ def add_dim3(kernel_string, cuda_kernel):
     count = 0
     closure = 0
     kernel_string = kernel_string.replace("<<<", "").replace(">>>", "")
-    arg_locs: List[Dict[str, int]] = [{} for _ in range(2)]
+    arg_locs: list[Dict[str, int]] = [{} for _ in range(2)]
     arg_locs[count]['start'] = 0
     for ind, c in enumerate(kernel_string):
         if count > 1:

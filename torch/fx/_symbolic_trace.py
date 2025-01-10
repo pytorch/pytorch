@@ -14,7 +14,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     NamedTuple,
     Optional,
     Set,
@@ -305,7 +304,7 @@ class Tracer(TracerBase):
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
-        self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+        self._autowrap_search: list[ModuleType] = list(autowrap_modules)
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
@@ -626,7 +625,7 @@ class Tracer(TracerBase):
         total_args = co.co_argcount + co.co_kwonlyargcount
         orig_args = list(co.co_varnames)
         names_iter = iter(co.co_varnames)
-        args: List[Any] = []
+        args: list[Any] = []
         skip_arg_idx = 0
         if is_module:
             if total_args == 0:
@@ -781,7 +780,7 @@ class Tracer(TracerBase):
                 Union[torch.Tensor, ScriptObject, FakeScriptObject], str
             ] = {}
 
-            def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
+            def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: list[str]):
                 for k, v in m.__dict__.items():
                     if isinstance(v, (torch.Tensor, ScriptObject, FakeScriptObject)):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
@@ -936,7 +935,7 @@ _wrapped_fns_to_patch: Dict[Tuple[int, str], dict] = {}
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
-_wrapped_methods_to_patch: List[Tuple[type, str]] = []
+_wrapped_methods_to_patch: list[Tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
     # This change is needed to trace models like PositionalEmbedding from BERT:
@@ -1043,7 +1042,7 @@ class _PatchedFnSetAttr(_PatchedFn):
 class _Patcher:
     def __init__(self) -> None:
         super().__init__()
-        self.patches_made: List[_PatchedFn] = []
+        self.patches_made: list[_PatchedFn] = []
         self.visited: Set[int] = set()
 
     def patch(

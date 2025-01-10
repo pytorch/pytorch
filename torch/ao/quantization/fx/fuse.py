@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, Union
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -150,7 +150,7 @@ def _find_matches(
     def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
         if isinstance(pattern, tuple):
             s, *args = pattern
-            current_node_pattern: List[Node] = []
+            current_node_pattern: list[Node] = []
             apply_match(s, node, match, current_node_pattern, node_to_subpattern)
             for subpattern, arg in zip(args, node.args):
                 apply_match(
@@ -177,7 +177,7 @@ def _find_matches(
     for node in reversed(graph.nodes):
         if node.name not in match_map:
             for pattern, fuse_handler_cls in pattern_to_fuse_handler_cls.items():
-                matched_node_pattern: List[Node] = []
+                matched_node_pattern: list[Node] = []
                 if _is_match(modules, node, pattern):
                     apply_match(
                         pattern,

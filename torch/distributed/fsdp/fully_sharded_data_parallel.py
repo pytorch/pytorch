@@ -15,7 +15,6 @@ from typing import (
     Generator,
     Iterable,
     Iterator,
-    List,
     Optional,
     Tuple,
     Union,
@@ -563,7 +562,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     def fsdp_modules(
         module: nn.Module,
         root_only: bool = False,
-    ) -> List["FullyShardedDataParallel"]:
+    ) -> list["FullyShardedDataParallel"]:
         """Return all nested FSDP instances.
 
         This possibly includes ``module`` itself and only includes FSDP root modules if ``root_only=True``.
@@ -1014,7 +1013,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
 
-    def _assert_state(self, state: Union[TrainingState, List[TrainingState]]) -> None:
+    def _assert_state(self, state: Union[TrainingState, list[TrainingState]]) -> None:
         """Assert we are in the given state."""
         # Since assert can be turned off and this error checking
         # is really important, we use explicit error checking
@@ -1136,7 +1135,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # iteration order and hence deterministic total norm computation
         sharded_params = []
         nonsharded_params = []
-        grads: List[torch.Tensor] = []
+        grads: list[torch.Tensor] = []
         for handle in self._all_handles:
             if handle.uses_sharded_strategy:
                 target_set = sharded_params_set
@@ -1261,7 +1260,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim_state_dict: Dict[str, Any],
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1317,7 +1316,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1377,7 +1376,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim: torch.optim.Optimizer,
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1487,7 +1486,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1605,7 +1604,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1690,7 +1689,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim_input: Optional[
             Union[
-                List[Dict[str, Any]],
+                list[Dict[str, Any]],
                 Iterable[torch.nn.Parameter],
             ]
         ] = None,
@@ -1763,7 +1762,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 else _get_param_key_to_param(optim)
             )
             param_to_param_name = _get_param_to_fqn(model)
-            param_id_to_param_name: List[str] = [
+            param_id_to_param_name: list[str] = [
                 param_to_param_name[param] for param in param_id_to_param.values()
             ]
             new_osd["state"] = {

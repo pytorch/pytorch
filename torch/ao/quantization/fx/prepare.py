@@ -2,7 +2,7 @@
 import copy
 import warnings
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Dict, Optional, Set, Type, Union
 
 import torch
 from torch._subclasses import FakeTensor
@@ -387,7 +387,7 @@ def _is_observer_in_same_graph(
 
 def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     pattern: Optional[Pattern],
-    matched_node_pattern: Optional[List[Node]],
+    matched_node_pattern: Optional[list[Node]],
     qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
@@ -399,7 +399,7 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
         return True
     assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
-    dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
+    dtype_configs: list[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
     pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
 
     root_node_getter = pattern_to_root_node_getter.get(
@@ -1506,8 +1506,8 @@ def insert_observers_for_model(
     # other nodes output dtype is specified by the qconfig
     named_modules = dict(model.named_modules(remove_duplicate=False))
 
-    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
+    input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
+    output_quantized_idxs: list[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
     # initialize target_dtype_info
     for node in model.graph.nodes:
@@ -2173,8 +2173,8 @@ def prepare(
         # these inputs are observed in parent
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
-        input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-        output_quantized_idxs: List[
+        input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
+        output_quantized_idxs: list[
             int
         ] = prepare_custom_config.output_quantized_indexes
         observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]

@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, Callable, cast, Dict, Iterable, Optional, Sequence, Union
 
 import sympy
 from sympy import Expr
@@ -221,7 +221,7 @@ class SizeVarAllocator:
         return expr
 
     def _simplify_loops_impl(
-        self, index_vars: List[sympy.Symbol], sizes, index_formulas
+        self, index_vars: list[sympy.Symbol], sizes, index_formulas
     ):
         """
         Try to remove as many axis from loop iterations as possible, by:
@@ -337,7 +337,7 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     # See Note - [On Statically Known]
-    def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+    def statically_known_list_equals(self, left: list[Expr], right: list[Expr]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
@@ -501,7 +501,7 @@ class SizeVarAllocator:
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
-    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> List[int]:
+    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> list[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
@@ -582,7 +582,7 @@ class SizeVarAllocator:
             index: Expr,
             vars: Sequence[sympy.Symbol],
             support_vars: Optional[Sequence[sympy.Symbol]] = None,
-        ) -> List[Expr]:
+        ) -> list[Expr]:
             if not support_vars:
                 support_vars = vars
             return cache(index, tuple(vars), tuple(support_vars))
@@ -594,7 +594,7 @@ class SizeVarAllocator:
         index: Expr,
         vars: Sequence[sympy.Symbol],
         support_vars: Sequence[sympy.Symbol],
-    ) -> List[Expr]:
+    ) -> list[Expr]:
         """Convert an indexing expression back into strides
 
         NOTE: This is only valid if the index is a standard strided offset
@@ -647,7 +647,7 @@ class SizeVarAllocator:
         }
         return expr.subs(size_dict)
 
-    def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
+    def offset_var(self, index: Expr, vars: list[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
@@ -657,7 +657,7 @@ class SizeVarAllocator:
         index: Expr,
         vars: Sequence[sympy.Symbol],
         support_vars: Optional[Sequence[sympy.Symbol]] = None,
-    ) -> List[int]:
+    ) -> list[int]:
         for v in index.free_symbols:
             if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
@@ -669,7 +669,7 @@ class SizeVarAllocator:
                 result.append(0)
         return result
 
-    def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
+    def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
         strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))

@@ -413,7 +413,7 @@ def buffer_from_jagged(jagged):
 
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
-    tensors: List[torch.Tensor],
+    tensors: list[torch.Tensor],
     offsets: Optional[torch.Tensor],
     dtype=None,
     device=None,

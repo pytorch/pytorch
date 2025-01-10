@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
 import torch.distributed as dist
@@ -44,7 +44,7 @@ def build_reshard_metadata(
     st_size: torch.Size,
     sharding_spec: shard_spec.ShardingSpec,
     world_size: int,
-) -> Tuple[List[ShardMetadata], List[int]]:
+) -> Tuple[list[ShardMetadata], list[int]]:
     """
     Based the given sharding spec, we calculate the offset and local shard size.
     We then build a ShardMetadata on top of the calculation result.
@@ -86,7 +86,7 @@ def reshuffle_local_shard(
     sharding_spec: shard_spec.ShardingSpec,
     resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
-) -> Tuple[List[Shard], List[ShardMetadata]]:
+) -> Tuple[list[Shard], list[ShardMetadata]]:
     """
     Reshuffle the local shard directly when the reshard dim is same as the original
     sharding dim. Logically we do this in two step:
@@ -155,7 +155,7 @@ def reshard_local_shard(
     sharding_spec: shard_spec.ShardingSpec,
     resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
-) -> Tuple[List[Shard], List[ShardMetadata]]:
+) -> Tuple[list[Shard], list[ShardMetadata]]:
     """
     Reshard a sharded tensor given the ``resharding_spec``. When the reshard dim is
     different from the original sharding dim, we need to do two steps logically:
@@ -198,7 +198,7 @@ def reshard_local_shard(
 
     if rearrange_input:
         # Need to re-arrange reshard_dim of local_tensor before all2all.
-        indices: List[int] = []
+        indices: list[int] = []
         for metadata in shards_metadata:
             offset_start_idx = metadata.shard_offsets[reshard_dim]
             split_size = metadata.shard_sizes[reshard_dim]

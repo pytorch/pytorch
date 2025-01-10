@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import deque
-from typing import List, Set
+from typing import Set
 
 
 class DiGraph:
@@ -140,7 +140,7 @@ class DiGraph:
 
         return result_graph.to_dot()
 
-    def first_path(self, dst: str) -> List[str]:
+    def first_path(self, dst: str) -> list[str]:
         """Returns a list of nodes that show the first path that resulted in dst being added to the graph."""
         path = []
 

@@ -1,5 +1,5 @@
 import itertools
-from typing import List, Optional, Set, Tuple, Union
+from typing import Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -70,8 +70,8 @@ def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
     return torch.device(mesh.device_type, device_handle.current_device())
 
 
-def _get_managed_modules(root_modules: Tuple[nn.Module, ...]) -> List[nn.Module]:
-    modules: List[nn.Module] = []
+def _get_managed_modules(root_modules: Tuple[nn.Module, ...]) -> list[nn.Module]:
+    modules: list[nn.Module] = []
     root_modules_set = set(root_modules)
     # Track visisted modules to avoid visiting shared modules multiple times
     visited_modules: Set[nn.Module] = set()
@@ -113,10 +113,10 @@ def _verify_managed_param(name: str, param: nn.Parameter) -> None:
 
 
 def _get_managed_states(
-    modules: List[nn.Module],
-) -> Tuple[List[nn.Parameter], List[torch.Tensor]]:
-    params: List[nn.Parameter] = []
-    buffers: List[torch.Tensor] = []
+    modules: list[nn.Module],
+) -> Tuple[list[nn.Parameter], list[torch.Tensor]]:
+    params: list[nn.Parameter] = []
+    buffers: list[torch.Tensor] = []
     # Track visited parameters/buffers to avoid visiting shared parameters and
     # buffers multiple times
     visited_params: Set[nn.Parameter] = set()
@@ -135,8 +135,8 @@ def _get_managed_states(
 
 
 def _move_states_to_device(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
+    params: list[nn.Parameter],
+    buffers: list[torch.Tensor],
     device: torch.device,
 ) -> None:
     """

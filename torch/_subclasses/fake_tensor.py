@@ -160,8 +160,8 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
-) -> List[Union[Tensor, int, SymInt]]:
+    subclass: Tensor, *, out: list[Union[Tensor, int, SymInt]]
+) -> list[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -240,7 +240,7 @@ def torch_decomp_decompositions(func: OpOverload) -> bool:
     ) and decomposition_table[func].__name__ in dir(decompositions)
 
 
-def tree_flatten_only(ty: Type[T], tree: PyTree) -> List[T]:
+def tree_flatten_only(ty: Type[T], tree: PyTree) -> list[T]:
     flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
@@ -273,7 +273,7 @@ class FakeTensorConverter:
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    constant_storage_mapping: Dict[StorageWeakRef, list[ReferenceType]]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -666,13 +666,13 @@ class FakeTensor(Tensor):
 
     # We don't support named tensors; graph break
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         raise UnsupportedFakeTensorException(
             "torch.compile doesn't support named tensors"
         )
 
     @names.setter
-    def names(self, _: List[str]) -> None:
+    def names(self, _: list[str]) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -953,7 +953,7 @@ class TensorMetadata:
 
     def _flatten_into(
         self,
-        result: List[object],
+        result: list[object],
         mode: FakeTensorMode,
         state: _CacheKeyState,
     ) -> None:
@@ -1200,7 +1200,7 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: List[
+        self.enter_stack: list[
             Tuple[bool, Optional[TorchDispatchMode], Optional[bool]]
         ] = []
 
@@ -1466,7 +1466,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _prep_args_for_hash(
         self,
-        result: List[object],
+        result: list[object],
         args: Union[Mapping[str, object], Sequence[object], Iterable[object]],
         state: _CacheKeyState,
     ) -> None:
@@ -2428,13 +2428,13 @@ class FakeTensorMode(TorchDispatchMode):
         converter: FakeTensorConverter,
         flat_args: Sequence[object],
         args_spec: TreeSpec,
-    ) -> Tuple[List[object], List[FakeTensor]]:
+    ) -> Tuple[list[object], list[FakeTensor]]:
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
         Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
-        flat_arg_fake_tensors: List[FakeTensor] = []
+        flat_arg_fake_tensors: list[FakeTensor] = []
 
         def validate(x: T) -> Union[T, FakeTensor]:
             if not isinstance(x, Tensor):

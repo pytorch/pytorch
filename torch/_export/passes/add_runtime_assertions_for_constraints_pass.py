@@ -3,7 +3,7 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, Dict, List, NamedTuple, Set
+from typing import Callable, Dict, NamedTuple, Set
 
 import sympy
 
@@ -105,8 +105,8 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
                 # need the proxy for shape, which further requires the proxy for ret[1], etc.
 
                 def add_assertions(val):
-                    call_backs: List[Callable] = []
-                    messages: List[str] = []
+                    call_backs: list[Callable] = []
+                    messages: list[str] = []
                     if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                         symbol = val.node.expr
                         if symbol in self.existing_inline_assertions:

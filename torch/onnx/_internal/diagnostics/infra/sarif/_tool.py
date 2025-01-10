@@ -16,7 +16,7 @@ class Tool(object):
     driver: _tool_component.ToolComponent = dataclasses.field(
         metadata={"schema_property_name": "driver"}
     )
-    extensions: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    extensions: Optional[list[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "extensions"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

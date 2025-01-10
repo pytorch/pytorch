@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, Dict, List, TYPE_CHECKING, TypedDict, Union
+from typing import Callable, Dict, TYPE_CHECKING, TypedDict, Union
 
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -61,7 +61,7 @@ class FreeableInputBuffer:
 
 
 def get_freeable_input_buf(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     graph_inputs: OrderedSet[str],
 ) -> Dict[str, FreeableInputBuffer]:
     """
@@ -175,7 +175,7 @@ def compute_size_for_scheduler_buffer(
 
 
 def assign_memory_planning_info_for_scheduler_buffers(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     name_to_buf: Dict[str, SchedulerBuffer],
 ) -> None:
     """
@@ -205,7 +205,7 @@ def assign_memory_planning_info_for_scheduler_buffers(
 
 
 def assign_memory_planning_info_for_scheduler_nodes(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
     name_to_buf: Dict[str, SchedulerBuffer],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
@@ -243,10 +243,10 @@ def assign_memory_planning_info_for_scheduler_nodes(
 
 
 def estimate_peak_memory(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> tuple[int, List[int]]:
+) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
     keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
@@ -272,7 +272,7 @@ def estimate_peak_memory(
         node_to_step[node] = step
 
     # get buffers' size and liveliness information
-    buf_info_list: List[BufferInfo] = []
+    buf_info_list: list[BufferInfo] = []
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
         end_step = (
@@ -340,11 +340,11 @@ def estimate_peak_memory(
 
 
 def topological_sort_lpmf(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
     name_to_buf: Dict[str, SchedulerBuffer],
     graph_outputs: OrderedSet[str],
-) -> List[BaseSchedulerNode]:
+) -> list[BaseSchedulerNode]:
     """
     A bfs-based greedy topological order. LPMF stands for "Least Peak Memory First".
 
@@ -422,7 +422,7 @@ def topological_sort_lpmf(
                 node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
 
     # schedule nodes one at a time
-    schedule: List[BaseSchedulerNode] = []
+    schedule: list[BaseSchedulerNode] = []
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
@@ -464,7 +464,7 @@ def topological_sort_lpmf(
     return schedule
 
 
-def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     A BFS topological sort that selects nodes whose dependencies are executed the
     earliest. This follows a FIFO idea. Specifically, at every iteration, for each node
@@ -482,7 +482,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
     @dataclasses.dataclass
     class NodeWithPriority:
-        priority: List[int]
+        priority: list[int]
         node: BaseSchedulerNode
 
         def __lt__(self, other: NodeWithPriority) -> bool:
@@ -490,7 +490,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
                 return self.node.mpi_node.index < other.node.mpi_node.index
             return self.priority < other.priority
 
-    def _node_priority(node: BaseSchedulerNode) -> List[int]:
+    def _node_priority(node: BaseSchedulerNode) -> list[int]:
         # priority is the order in which predecessor nodes are executed
         assert node_info[node]["indegree"] == 0
         exec_orders = sorted(
@@ -502,7 +502,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled
-    nodes_to_schedule: List[NodeWithPriority] = []
+    nodes_to_schedule: list[NodeWithPriority] = []
     for node in nodes:
         node_info[node] = {"indegree": len(node.mpi_node.pred_nodes), "order": -1}
         if node_info[node]["indegree"] == 0:
@@ -511,7 +511,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
             )
 
     # schedule nodes one at a time
-    schedule: List[BaseSchedulerNode] = []
+    schedule: list[BaseSchedulerNode] = []
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule
@@ -536,7 +536,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     return schedule
 
 
-def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def topological_sort_dfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     This is a DFS topological sort. The setup is similar to `topological_sort_schedule`
     in scheduler.py. The difference is the order nodes are visited in the outer loop.
@@ -547,7 +547,7 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     """
     seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
     name_to_node: Dict[str, BaseSchedulerNode] = dict()
-    result: List[BaseSchedulerNode] = []
+    result: list[BaseSchedulerNode] = []
     size_with_reads: Dict[BaseSchedulerNode, int] = dict()
 
     def visit(n: BaseSchedulerNode) -> None:
@@ -579,17 +579,17 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
 
 def reorder_for_peak_memory(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     name_to_buf: Dict[str, SchedulerBuffer],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
     graph_inputs: OrderedSet[str],
     graph_outputs: OrderedSet[str],
-    methods: List[Callable[..., List[BaseSchedulerNode]]] = [  # noqa: B006
+    methods: list[Callable[..., list[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
         topological_sort_bfs,
         topological_sort_dfs,
     ],
-) -> List[BaseSchedulerNode]:
+) -> list[BaseSchedulerNode]:
     """
     Try a few heuristics based topological sort algorithms, and pick the one whose
     resulting topological order has the lowest peak memory estimation.
@@ -599,7 +599,7 @@ def reorder_for_peak_memory(
 
     @dataclasses.dataclass
     class PeakMemoryResult:
-        order: List[BaseSchedulerNode]
+        order: list[BaseSchedulerNode]
         peak_memory: int
         method: str
 
@@ -614,7 +614,7 @@ def reorder_for_peak_memory(
     )
 
     # keep track of the peak memory estimates of different methods
-    peak_memory_diff_methods: List[PeakMemoryResult] = []
+    peak_memory_diff_methods: list[PeakMemoryResult] = []
 
     # the default
     estimated_peak_memory, _ = estimate_peak_memory(

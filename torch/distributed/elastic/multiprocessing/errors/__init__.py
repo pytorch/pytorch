@@ -248,7 +248,7 @@ class ChildFailedError(Exception):
         root_rank, _root_failure = self.get_first_failure()
 
         root_failure_fmt: str = ""
-        other_failures_fmt: List[str] = []
+        other_failures_fmt: list[str] = []
         width = len(title)
         for idx, (rank, failure) in enumerate(self.failures.items()):
             fmt, w = self._format_failure(idx, rank, failure)

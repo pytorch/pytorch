@@ -580,7 +580,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     # except C++ nested tensor but we're going to have nested int to make this
     # defined on NJT
     size: Tuple[int, ...]
-    dynamo_dynamic_indices: List[int]
+    dynamo_dynamic_indices: list[int]
 
     layout: torch.layout = torch.strided
     is_inference: bool = False
@@ -649,7 +649,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
     current_level: Optional[int] = None
-    functorch_stack: Optional[List[CInterpreter]] = None
+    functorch_stack: Optional[list[CInterpreter]] = None
     autograd_meta_from: Optional[torch.Tensor] = None
 
     # This is only populated on copy_data, and typically is not used at all,

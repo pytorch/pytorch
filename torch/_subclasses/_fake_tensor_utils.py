@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Type, TYPE_CHECKING, Union
+from typing import Dict, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
@@ -241,7 +241,7 @@ class _CacheKeyState:
         """
         return bool(self.sym_node_lookup)
 
-    def convert_sym_int(self, result: List[object], arg: SymInt) -> None:
+    def convert_sym_int(self, result: list[object], arg: SymInt) -> None:
         node_id = id(arg.node)
         if node_id in self.sym_node_lookup:
             result.append(_InputBackref(self.sym_node_lookup[node_id]))

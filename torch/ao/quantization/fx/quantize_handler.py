@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Dict, Optional, Type
 
 import torch
 from torch.ao.quantization.backend_config import (
@@ -102,7 +102,7 @@ class QuantizeHandler(ABC):  # noqa: B024
 
 def _get_quantize_handler_cls(
     observation_type: ObservationType,
-    dtype_configs: List[DTypeConfig],
+    dtype_configs: list[DTypeConfig],
     num_tensor_args_to_observation_type: Dict[int, ObservationType],
 ) -> Type[QuantizeHandler]:
     """

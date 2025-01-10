@@ -15,7 +15,6 @@ from typing import (
     Dict,
     final,
     Iterator,
-    List,
     Optional,
     Tuple,
     Type,
@@ -100,11 +99,11 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 @dataclasses.dataclass
 class ModuleCallSignature:
-    inputs: List[ArgumentSpec]
-    outputs: List[ArgumentSpec]
+    inputs: list[ArgumentSpec]
+    outputs: list[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
-    forward_arg_names: Optional[List[str]] = None
+    forward_arg_names: Optional[list[str]] = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -748,7 +747,7 @@ def _common_getitem_elimination_pass(
 
 def _get_updated_module_call_graph(
     gm: torch.fx.GraphModule,
-    old_module_call_graph: List[ModuleCallEntry],
+    old_module_call_graph: list[ModuleCallEntry],
 ):
     new_module_call_graph = copy.deepcopy(old_module_call_graph)
 
@@ -843,13 +842,13 @@ class ExportedProgram:
         graph_signature: ExportGraphSignature,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: "Dict[sympy.Symbol, Any]",
-        module_call_graph: List[ModuleCallEntry],
+        module_call_graph: list[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
         *,
-        verifiers: Optional[List[Type[Verifier]]] = None,
+        verifiers: Optional[list[Type[Verifier]]] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -864,7 +863,7 @@ class ExportedProgram:
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         assert module_call_graph is not None
-        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._module_call_graph: list[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
         self._constants = constants or {}

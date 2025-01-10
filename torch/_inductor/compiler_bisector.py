@@ -7,7 +7,7 @@ import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -43,7 +43,7 @@ class ConfigChange(BinarySubsystem):
 
 
 # Dictionary of backend -> subsystems
-BACKENDS: Dict[str, List[Subsystem]] = {
+BACKENDS: Dict[str, list[Subsystem]] = {
     # run dynamo without aot_autograd
     "eager": [],
     # run dynamo with aot_autograd, but no partitioner or decomps
@@ -123,13 +123,13 @@ class CompilerBisector:
         return f"{cache_dir() if not cls.in_process_cache else cls.in_process_cache}/{SUBDIR_NAME}"
 
     @classmethod
-    def write_lines_to_file(cls, file_path: str, lines: List[str]) -> None:
+    def write_lines_to_file(cls, file_path: str, lines: list[str]) -> None:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as file:
             file.writelines(lines)
 
     @classmethod
-    def read_lines_from_file(cls, file_path: str) -> List[str]:
+    def read_lines_from_file(cls, file_path: str) -> list[str]:
         if os.path.exists(file_path):
             with open(file_path) as file:
                 return file.readlines()

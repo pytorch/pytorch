@@ -17,7 +17,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class CodeFlow(object):
     """A set of threadFlows which together describe a pattern of code execution relevant to detecting a result."""
 
-    thread_flows: List[_thread_flow.ThreadFlow] = dataclasses.field(
+    thread_flows: list[_thread_flow.ThreadFlow] = dataclasses.field(
         metadata={"schema_property_name": "threadFlows"}
     )
     message: Optional[_message.Message] = dataclasses.field(

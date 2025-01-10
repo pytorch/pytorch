@@ -17,7 +17,7 @@ import os
 import re
 import warnings
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, Optional, Set, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -112,7 +112,7 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            in_args: List[torch.Tensor] = []
+            in_args: list[torch.Tensor] = []
             for i in range(len(in_vars)):
                 if not isinstance(args[i], torch.Tensor):
                     raise RuntimeError("Expected Tensor argument")

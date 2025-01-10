@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, Dict, Set, Tuple, Union
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -86,12 +86,12 @@ _blocklisted_modules = [
 _marked_safe_globals_set: Set[Union[Callable, Tuple[Callable, str]]] = set()
 
 
-def _add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: list[Union[Callable, Tuple[Callable, str]]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def _get_safe_globals() -> list[Union[Callable, Tuple[Callable, str]]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -102,14 +102,14 @@ def _clear_safe_globals():
 
 
 def _remove_safe_globals(
-    globals_to_remove: List[Union[Callable, Tuple[Callable, str]]],
+    globals_to_remove: list[Union[Callable, Tuple[Callable, str]]],
 ):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+    def __init__(self, safe_globals: list[Union[Callable, Tuple[Callable, str]]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -311,7 +311,7 @@ class Unpickler:
         Return the reconstituted object hierarchy specified in the file.
         """
         self.metastack = []
-        self.stack: List[Any] = []
+        self.stack: list[Any] = []
         self.append = self.stack.append
         read = self.read
         while True:

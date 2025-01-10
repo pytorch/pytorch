@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, Optional, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -103,7 +103,7 @@ class Interpreter:
             # execution order of the program, which we will use to free unused
             # values
             node_to_last_use: Dict[Node, Node] = {}
-            self.user_to_last_uses: Dict[Node, List[Node]] = {}
+            self.user_to_last_uses: Dict[Node, list[Node]] = {}
 
             def register_last_uses(n: Node, user: Node):
                 if n not in node_to_last_use:

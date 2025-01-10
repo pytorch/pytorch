@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, Type, TYPE_CHECKING, TypeVar, Union
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -156,7 +156,7 @@ class NullKernelHandler(NullHandler):
 
 _ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
     "kernel", NullKernelHandler

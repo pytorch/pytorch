@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, overload, Tuple, Union
+from typing import Any, Dict, Iterable, Optional, overload, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -115,7 +115,7 @@ class ShardedGradScaler(GradScaler):
         ...
 
     @overload
-    def scale(self, outputs: List[torch.Tensor]) -> List[torch.Tensor]:
+    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]:
         ...
 
     @overload
@@ -145,7 +145,7 @@ class ShardedGradScaler(GradScaler):
             # format (fp16, bf16) and so the scaled loss should be of the same dtype.
             return scaled_output.type(outputs.dtype)
 
-        stash: List[_GeneralMultiDeviceReplicator] = []
+        stash: list[_GeneralMultiDeviceReplicator] = []
 
         def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):

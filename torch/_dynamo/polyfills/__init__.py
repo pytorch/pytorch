@@ -148,7 +148,7 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
 
 def foreach_map_fn(*args):
     op = args[0]
-    new_args: List[Any] = []
+    new_args: list[Any] = []
     at_least_one_list = False
     for arg in args[1:]:
         if not isinstance(arg, (list, tuple)):

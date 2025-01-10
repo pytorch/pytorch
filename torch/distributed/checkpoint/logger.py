@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import time
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, Dict, TypeVar
 from typing_extensions import ParamSpec
 from uuid import uuid4
 
@@ -9,7 +9,7 @@ import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 global _dcp_logger
 _dcp_logger = c10d_logger._get_or_create_logger(DCP_LOGGER_NAME)

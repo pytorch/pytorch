@@ -9,7 +9,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     Set,
     Tuple,
@@ -128,7 +127,7 @@ class _ModMemStats:
         self.input_mem: int
         self.output_mem: int
         self.local_peak: Dict[torch.device, int] = {}
-        self.snapshots: Dict[_ModState, List[Dict[torch.device, Dict[str, int]]]] = {}
+        self.snapshots: Dict[_ModState, list[Dict[torch.device, Dict[str, int]]]] = {}
 
 
 class _WeakRefInfo:
@@ -298,7 +297,7 @@ def _print_snapshot_tabular(
 
 
 def _print_state_snapshots(
-    snapshots: Dict[_State, List[Dict[torch.device, Dict[str, int]]]], units: str
+    snapshots: Dict[_State, list[Dict[torch.device, Dict[str, int]]]], units: str
 ) -> None:
     for state, snapshot_list in snapshots.items():
         print(f"{state}")
@@ -309,7 +308,7 @@ def _print_state_snapshots(
 
 
 def _print_state_snapshots_tabular(
-    snapshots: Dict[_State, List[Dict[torch.device, Dict[str, int]]]], units: str
+    snapshots: Dict[_State, list[Dict[torch.device, Dict[str, int]]]], units: str
 ) -> None:
     try:
         from tabulate import tabulate
@@ -876,7 +875,7 @@ class MemTracker(TorchDispatchMode):
             tabulate (bool, optional): Whether to display the snapshot in a tabular format. Defaults to False.
         """
 
-        def natural_sort_key(s: str) -> List[Union[int, str]]:
+        def natural_sort_key(s: str) -> list[Union[int, str]]:
             return [
                 int(text) if text.isdigit() else text.lower()
                 for text in re.split("([0-9]+)", s)

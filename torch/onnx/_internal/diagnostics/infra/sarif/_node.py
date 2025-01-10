@@ -19,7 +19,7 @@ class Node(object):
     """Represents a node in a graph."""
 
     id: str = dataclasses.field(metadata={"schema_property_name": "id"})
-    children: Optional[List[_node.Node]] = dataclasses.field(
+    children: Optional[list[_node.Node]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "children"}
     )
     label: Optional[_message.Message] = dataclasses.field(

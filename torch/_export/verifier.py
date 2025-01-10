@@ -426,7 +426,7 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     num_tokens = len(gs.output_tokens)
     end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
-    mutate_nodes: List[str] = output_nodes[num_tokens:end]
+    mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:

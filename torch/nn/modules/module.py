@@ -11,7 +11,6 @@ from typing import (
     Callable,
     Dict,
     Iterator,
-    List,
     Mapping,
     Optional,
     overload,
@@ -712,7 +711,7 @@ class Module:
         if target == "":
             return self
 
-        atoms: List[str] = target.split(".")
+        atoms: list[str] = target.split(".")
         mod: torch.nn.Module = self
 
         for item in atoms:
@@ -769,7 +768,7 @@ class Module:
         if target == "":
             raise ValueError("Cannot set the submodule without a target name!")
 
-        atoms: List[str] = target.split(".")
+        atoms: list[str] = target.split(".")
         name = atoms.pop(-1)
         mod: torch.nn.Module = self
 
@@ -1485,13 +1484,13 @@ class Module:
         It returns two lists, one with the full backward hooks and one with the non-full
         backward hooks.
         """
-        full_backward_hooks: List[Callable] = []
+        full_backward_hooks: list[Callable] = []
         if _global_is_full_backward_hook is True:
             full_backward_hooks += _global_backward_hooks.values()
         if self._is_full_backward_hook is True:
             full_backward_hooks += self._backward_hooks.values()
 
-        non_full_backward_hooks: List[Callable] = []
+        non_full_backward_hooks: list[Callable] = []
         if _global_is_full_backward_hook is False:
             non_full_backward_hooks += _global_backward_hooks.values()
         if self._is_full_backward_hook is False:
@@ -1500,7 +1499,7 @@ class Module:
         return full_backward_hooks, non_full_backward_hooks
 
     def _get_backward_pre_hooks(self):
-        backward_pre_hooks: List[Callable] = []
+        backward_pre_hooks: list[Callable] = []
         backward_pre_hooks += _global_backward_pre_hooks.values()
         backward_pre_hooks += self._backward_pre_hooks.values()
 
@@ -2514,9 +2513,9 @@ class Module:
                 f"Expected state_dict to be dict-like, got {type(state_dict)}."
             )
 
-        missing_keys: List[str] = []
-        unexpected_keys: List[str] = []
-        error_msgs: List[str] = []
+        missing_keys: list[str] = []
+        unexpected_keys: list[str] = []
+        error_msgs: list[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, "_metadata", None)

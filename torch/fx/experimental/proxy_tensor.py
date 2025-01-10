@@ -24,7 +24,6 @@ from typing import (
     Callable,
     Dict,
     Generator,
-    List,
     Mapping,
     Optional,
     overload,
@@ -377,7 +376,7 @@ _ExtractValType = Optional[
         PySymType,
         _AnyScriptObjectType,
         BackwardState,
-        List["_ExtractValType"],
+        list["_ExtractValType"],
         Tuple["_ExtractValType", ...],
         Dict[str, "_ExtractValType"],
         Tensor,
@@ -770,7 +769,7 @@ def proxy_call(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-    unrecognized_types: List[Type] = []
+    unrecognized_types: list[Type] = []
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
 
     def can_handle_tensor(x: Tensor) -> bool:
@@ -1259,7 +1258,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # The input to torch.amp.autocast_mode._exit_autocast graph node should be the
         # enter_autocast node. So we have to save the enter autocast node here, and assign it
         # to the exit_autocast call_function node.
-        self.enter_autocast_nodes: List[torch.fx.Node] = []
+        self.enter_autocast_nodes: list[torch.fx.Node] = []
 
     def __torch_function__(
         self,
@@ -1324,7 +1323,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Every time we enter a mode, we maintain a stack telling us what the previous
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
-        self.enter_stack: List[Optional[ProxyTorchDispatchMode]] = []
+        self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
         self.decomp_layers = 0
         from torch._inductor import config
 
@@ -1517,12 +1516,12 @@ class DecompositionInterpreter(fx.Interpreter):
 
 def wrapper_and_args_for_make_fx(
     func: Callable[..., R], args: Tuple[object, ...], kwargs: Dict[str, object]
-) -> Tuple[Callable[[List[object]], R], List[object]]:
+) -> Tuple[Callable[[list[object]], R], list[object]]:
     # make_fx doesn't support kwargs, so we need to do this flattening
     # and then unflatten the args before calling func
     flat_args, spec = pytree.tree_flatten((args, kwargs))
 
-    def wrapped(flat_args: List[object]) -> R:
+    def wrapped(flat_args: list[object]) -> R:
         fn_args, fn_kwargs = pytree.tree_unflatten(flat_args, spec)
         return func(*fn_args, **fn_kwargs)
 
@@ -1702,7 +1701,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # to the tracer while tracing, the proxy object gets registered
         # first. So we need to replace the proxy modules with the real ones
         # This can happen during HOO tracing
-        proxy_module_names_to_be_replaced: List[Tuple[str, _AttrProxy]] = []
+        proxy_module_names_to_be_replaced: list[Tuple[str, _AttrProxy]] = []
         for name, module in self.root.named_modules():
             if module in self.proxy_modules:
                 proxy_module_names_to_be_replaced.append((name, module))
@@ -1885,7 +1884,7 @@ class _MakefxTracer:
             nullcontext, TorchFunctionMetadataMode
         ] = nullcontext()
 
-    def _checkpoint_modes(self) -> List[Any]:
+    def _checkpoint_modes(self) -> list[Any]:
         return [
             self.fake_tensor_mode,
             self.proxy_mode,
@@ -2202,7 +2201,7 @@ def make_fx(
     return wrapped
 
 
-def get_torch_dispatch_modes() -> List[TorchDispatchMode]:
+def get_torch_dispatch_modes() -> list[TorchDispatchMode]:
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
 
 
@@ -2240,7 +2239,7 @@ def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs)
     # dispatch machinery which disables it for us
     with disable_proxy_modes_tracing():
         # TODO: properly compute types
-        types: List[Type] = []
+        types: list[Type] = []
         return mode.__sym_dispatch__(func, types, args, kwargs)  # type: ignore[arg-type, return-value]
 
 

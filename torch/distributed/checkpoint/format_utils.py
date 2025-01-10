@@ -2,7 +2,7 @@
 import argparse
 import os
 from enum import Enum
-from typing import cast, Dict, List, Optional, Union
+from typing import cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -133,7 +133,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         """Implementation of the StorageReader method"""
         return plan
 
-    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
         """Implementation of the StorageReader method"""
         return global_plan
 

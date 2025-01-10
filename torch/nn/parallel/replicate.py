@@ -3,7 +3,6 @@ from typing import (
     cast,
     Dict,
     Iterator,
-    List,
     Optional,
     Sequence,
     Set,
@@ -92,7 +91,7 @@ def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
-) -> List[List[torch.Tensor]]:
+) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
 
     if detach:
@@ -116,7 +115,7 @@ def replicate(
     network: T,
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
-) -> List[T]:
+) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
             "Cannot replicate network where python modules are "
@@ -134,8 +133,8 @@ def replicate(
     param_copies = _broadcast_coalesced_reshape(params, devices, detach)
 
     buffers = list(network.buffers())
-    buffers_rg: List[torch.Tensor] = []
-    buffers_not_rg: List[torch.Tensor] = []
+    buffers_rg: list[torch.Tensor] = []
+    buffers_not_rg: list[torch.Tensor] = []
     for buf in buffers:
         if buf.requires_grad and not detach:
             buffers_rg.append(buf)
@@ -151,7 +150,7 @@ def replicate(
     )
 
     modules = list(network.modules())
-    module_copies: List[List[Module]] = [[] for _ in devices]
+    module_copies: list[list[Module]] = [[] for _ in devices]
     module_indices: Dict[Module, int] = {}
 
     for i, module in enumerate(modules):

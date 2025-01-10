@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
@@ -346,9 +346,9 @@ class FuzzedTensor:
 class Fuzzer:
     def __init__(
         self,
-        parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
-        tensors: List[Union[FuzzedTensor, List[FuzzedTensor]]],
-        constraints: Optional[List[Callable]] = None,
+        parameters: list[Union[FuzzedParameter, list[FuzzedParameter]]],
+        tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
+        constraints: Optional[list[Callable]] = None,
         seed: Optional[int] = None
     ):
         """

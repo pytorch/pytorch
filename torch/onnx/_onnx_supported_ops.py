@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
-from typing import Dict, List, Union
+from typing import Dict, Union
 
 from torch import _C
 from torch.onnx import _constants
@@ -12,10 +12,10 @@ class _TorchSchema:
         if isinstance(schema, _C.FunctionSchema):
             self.name: str = schema.name
             self.overload_name: str = schema.overload_name
-            self.arguments: List[str] = [arg.name for arg in schema.arguments]
-            self.optional_arguments: List[str] = []
-            self.returns: List[str] = [ret.name for ret in schema.returns]
-            self.opsets: List[int] = []
+            self.arguments: list[str] = [arg.name for arg in schema.arguments]
+            self.optional_arguments: list[str] = []
+            self.returns: list[str] = [ret.name for ret in schema.returns]
+            self.opsets: list[int] = []
         else:
             self.name = schema
             self.overload_name = ""

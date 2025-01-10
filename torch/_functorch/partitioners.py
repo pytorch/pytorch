@@ -9,7 +9,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -81,14 +81,14 @@ class OpTypes:
 class NodeInfo:
     # Be careful about iterating over these explicitly, as their order may not
     # be deterministic
-    inputs: List[fx.Node]
+    inputs: list[fx.Node]
     _required_fw_nodes: Set[fx.Node]
     required_bw_nodes: Set[fx.Node]
     unclaimed_nodes: Set[fx.Node]
     fw_order: Dict[fx.Node, int]
 
     @functools.cached_property
-    def required_fw_nodes(self) -> List[fx.Node]:
+    def required_fw_nodes(self) -> list[fx.Node]:
         return sorted(
             (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
         )
@@ -158,8 +158,8 @@ InvalidNode = InvalidNodeBase()
 
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
-    inputs: List[fx.Node],
-    outputs: List[fx.Node],
+    inputs: list[fx.Node],
+    outputs: list[fx.Node],
     subgraph: Optional[str] = None,
 ) -> fx.Graph:
     """
@@ -272,7 +272,7 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs
-) -> Tuple[List[fx.Node], List[fx.Node]]:
+) -> Tuple[list[fx.Node], list[fx.Node]]:
     outputs = pytree.arg_tree_leaves(
         *(node.args for node in joint_module.graph.find_nodes(op="output"))
     )
@@ -281,7 +281,7 @@ def _extract_fwd_bwd_outputs(
     return fwd_outputs, bwd_outputs
 
 
-def _remove_by_name(saved_values: List[fx.Node], name: str):
+def _remove_by_name(saved_values: list[fx.Node], name: str):
     for saved_value in saved_values:
         if saved_value.name == name:
             saved_values.remove(saved_value)
@@ -290,8 +290,8 @@ def _remove_by_name(saved_values: List[fx.Node], name: str):
 
 def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
-    saved_values: List[fx.Node],
-    saved_sym_nodes: List[fx.Node],
+    saved_values: list[fx.Node],
+    saved_sym_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
@@ -537,7 +537,7 @@ def pointwise_ops():
     return ops
 
 
-def sort_depths(args, depth_map: Dict[fx.Node, int]) -> List[Tuple[fx.Node, int]]:
+def sort_depths(args, depth_map: Dict[fx.Node, int]) -> list[Tuple[fx.Node, int]]:
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
@@ -1074,12 +1074,12 @@ def solve_min_cut(
     # backwards pass instead of only relying on whether it's unfusible in the
     # forwards.
 
-    def find_first_unfusible(start_nodes: List[fx.Node], max_range: int) -> int:
+    def find_first_unfusible(start_nodes: list[fx.Node], max_range: int) -> int:
         """
         Finds the first unfusible node in the chain of nodes starting from
         `start_nodes` and returns its position.
         """
-        sorted_nodes: List[Tuple[int, fx.Node, bool]] = []
+        sorted_nodes: list[Tuple[int, fx.Node, bool]] = []
         for n in start_nodes:
             heapq.heappush(sorted_nodes, (node_info.get_fw_order(n), n, True))
 
@@ -1219,7 +1219,7 @@ def visualize_min_cut_graph(nx_graph):
 
 
 def get_default_op_list() -> OpTypes:
-    default_recomputable_ops: List[Callable] = [
+    default_recomputable_ops: list[Callable] = [
         aten.add,
         aten.sub,
         aten.div,
@@ -1392,12 +1392,12 @@ def get_name_to_node(graph: fx.Graph):
 
 def _optimize_runtime_with_given_memory(
     joint_graph: fx.Graph,
-    memory: List[float],
-    runtimes: List[float],
+    memory: list[float],
+    runtimes: list[float],
     max_memory: float,
     node_info: NodeInfo,
-    all_recomputable_banned_nodes: List[fx.Node],
-) -> Tuple[float, List[int], List[int]]:
+    all_recomputable_banned_nodes: list[fx.Node],
+) -> Tuple[float, list[int], list[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
         return greedy_knapsack(memory, runtimes, max_memory)
@@ -1490,7 +1490,7 @@ def choose_saved_values_set(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     memory_budget=1,
-) -> List[fx.Node]:
+) -> list[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
             f"The valid ranges for memory budget are 0 <= m <= 1. The provided value is {memory_budget}"
@@ -1523,7 +1523,7 @@ def choose_saved_values_set(
     if memory_budget == 1:
         return runtime_optimized_saved_values
 
-    def estimate_activations_size(saved_values: List[fx.Node]) -> float:
+    def estimate_activations_size(saved_values: list[fx.Node]) -> float:
         return sum(map(_size_of, saved_values)) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
@@ -1535,7 +1535,7 @@ def choose_saved_values_set(
     def get_normalized_size(sz):
         return (sz / 1e9) / (max_act_size - min_act_size)
 
-    def get_mem_ratio(activations: List[fx.Node]):
+    def get_mem_ratio(activations: list[fx.Node]):
         return (estimate_activations_size(activations) - min_act_size) / (
             max_act_size - min_act_size
         )
@@ -1567,7 +1567,7 @@ def choose_saved_values_set(
 
     input_storages = {get_node_storage(node) for node in node_info.inputs}
 
-    def get_recomputable_banned_nodes(banned_nodes: Set[fx.Node]) -> List[fx.Node]:
+    def get_recomputable_banned_nodes(banned_nodes: Set[fx.Node]) -> list[fx.Node]:
         return [
             i
             for i in banned_nodes
@@ -1906,7 +1906,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Optional[Union[str, List[str]]] = None,
+    prog: Optional[Union[str, list[str]]] = None,
     parse_stack_trace: bool = False,
     dot_graph_shape: Optional[str] = None,
 ) -> None:

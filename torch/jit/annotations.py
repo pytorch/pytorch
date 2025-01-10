@@ -351,7 +351,7 @@ def try_real_annotations(fn, loc):
 # Finds common type for enum values belonging to an Enum class. If not all
 # values have the same type, AnyType is returned.
 def get_enum_value_type(e: Type[enum.Enum], loc):
-    enum_values: List[enum.Enum] = list(e)
+    enum_values: list[enum.Enum] = list(e)
     if not enum_values:
         raise ValueError(f"No enum values defined for: '{e.__class__}'")
 

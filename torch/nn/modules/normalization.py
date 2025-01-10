@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 from torch import Size, Tensor
@@ -88,7 +88,7 @@ class CrossMapLRN2d(Module):
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
-_shape_t = Union[int, List[int], Size]
+_shape_t = Union[int, list[int], Size]
 
 
 class LayerNorm(Module):

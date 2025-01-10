@@ -32,7 +32,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, Dict, Optional, Set, Type, Union
 
 import torch
 import torch._inductor.test_operators
@@ -3074,7 +3074,7 @@ def _builtin_constant_ids() -> Dict[int, str]:
     return rv
 
 
-_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+_lazy_module_init: Dict[str, list[Callable[[], None]]] = defaultdict(list)
 
 
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:

@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from functools import lru_cache
-from typing import cast, List, NamedTuple, Tuple
+from typing import cast, NamedTuple, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -24,13 +24,13 @@ class _TransformInfo(NamedTuple):
     mesh_dim: int
     src_dst_placements: Tuple[Placement, Placement]
     # logical_shape on this mesh dimension
-    logical_shape: List[int]
+    logical_shape: list[int]
 
 
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     """
     Generate the transform infos from the source placements to the target placements.
 
@@ -42,7 +42,7 @@ def _gen_transform_infos_non_cached(
     the former is a nested-sharding of a tensor already already sharded dimension 0, whereras
     the latter is the first sharding on tensor dimension 0.
     """
-    transform_infos: List[_TransformInfo] = []
+    transform_infos: list[_TransformInfo] = []
 
     device_mesh = src_spec.device_mesh
     my_coordinate = device_mesh.get_coordinate()
@@ -149,7 +149,7 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(src_spec, dst_spec)
 
 
@@ -332,7 +332,7 @@ class Redistribute(torch.autograd.Function):
             is_backward=True,
         )
         # normalize the target placement to replicate if it is partial
-        normalized_placements: List[Placement] = []
+        normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
             if previous_placement.is_partial():
                 # keep target placement to replicate instead of partial in this case

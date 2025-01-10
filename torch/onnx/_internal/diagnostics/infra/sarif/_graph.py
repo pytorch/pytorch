@@ -21,10 +21,10 @@ class Graph(object):
     description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    edges: Optional[List[_edge.Edge]] = dataclasses.field(
+    edges: Optional[list[_edge.Edge]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "edges"}
     )
-    nodes: Optional[List[_node.Node]] = dataclasses.field(
+    nodes: Optional[list[_node.Node]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "nodes"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

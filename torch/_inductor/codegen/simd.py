@@ -16,7 +16,6 @@ from typing import (
     Counter,
     Dict,
     Iterable,
-    List,
     no_type_check,
     Optional,
     Sequence,
@@ -105,7 +104,7 @@ class IterationRanges:
     def __init__(
         self,
         name: str,
-        var_list: List[sympy.Symbol],
+        var_list: list[sympy.Symbol],
         var_ranges: Dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
@@ -219,7 +218,7 @@ class IterationRangesRoot(IterationRanges):
             self.nodes[expr] = node
         return self.nodes[expr]
 
-    def construct_entries(self, lengths: List[sympy.Expr]):
+    def construct_entries(self, lengths: list[sympy.Expr]):
         divisor = sympy.S.One
         itervars = []
         for length in reversed(lengths):
@@ -227,7 +226,7 @@ class IterationRangesRoot(IterationRanges):
             divisor = divisor * length
         return list(reversed(itervars))
 
-    def construct(self, lengths: List[sympy.Expr]):
+    def construct(self, lengths: list[sympy.Expr]):
         return [e.symbol() for e in self.construct_entries(lengths)]
 
     def vars_and_sizes(self, index: sympy.Expr):
@@ -303,7 +302,7 @@ class IterationRangesEntry(IterationRanges):
 
     def precomputed_args(self):
         # for dynamic shapes, find parts of indexing expressions that have to be precomputed
-        precomputed_args: List[sympy.Expr] = []
+        precomputed_args: list[sympy.Expr] = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
         assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
@@ -361,7 +360,7 @@ class SIMDKernel(Kernel):
         self.numels = {
             prefix: V.graph.sizevars.simplify(val) for prefix, val in tiling.items()
         }
-        self.range_trees: List[IterationRangesRoot] = []
+        self.range_trees: list[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = features.is_reduction()
@@ -500,7 +499,7 @@ class SIMDKernel(Kernel):
         sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
-    def dense_size_list(self) -> List[str]:
+    def dense_size_list(self) -> list[str]:
         sizes = ["1"] * self.triton_tensor_ndim()
         for tree in self.range_trees:
             if tree.tensor_dim is None:
@@ -597,7 +596,7 @@ class SIMDKernel(Kernel):
             return [[] for group in groups], []
 
         sv = V.graph.sizevars
-        new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
+        new_ranges: list[list[sympy.Expr]] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
@@ -699,7 +698,7 @@ class SIMDKernel(Kernel):
         groups: Sequence[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
         set_ranges,
-    ) -> List[List[sympy.Expr]]:
+    ) -> list[list[sympy.Expr]]:
         """
         We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
 
@@ -1186,7 +1185,7 @@ class SIMDScheduling(BaseScheduling):
     can_fuse_horizontal = can_fuse
 
     def generate_node_schedule(self, nodes, numel, rnumel):
-        node_schedule: List[Any] = []
+        node_schedule: list[Any] = []
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
@@ -1288,7 +1287,7 @@ class SIMDScheduling(BaseScheduling):
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
 
-        nodes: List[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+        nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
@@ -1392,7 +1391,7 @@ class SIMDScheduling(BaseScheduling):
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
-    ) -> List[SIMDKernel]:
+    ) -> list[SIMDKernel]:
         return [
             self.kernel_type(
                 *kernel_args,
@@ -1560,12 +1559,12 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_combo_kernel_code(
         self,
-        subkernel_nodes: List[BaseSchedulerNode],
+        subkernel_nodes: list[BaseSchedulerNode],
         custom_part_algorithm: bool,
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
-    ) -> List[tuple[str, Any, Any]]:
+    ) -> list[tuple[str, Any, Any]]:
         from .triton_combo_kernel import ComboKernel
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
@@ -1641,10 +1640,10 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(cls, node, numel, reduction_numel) -> List[CandidateTiling]:
+    def candidate_tilings(cls, node, numel, reduction_numel) -> list[CandidateTiling]:
         is_pointwise = reduction_numel == 1
 
-        def tile_ranges(is_pointwise: bool, ranges, rw) -> List[CandidateTiling]:
+        def tile_ranges(is_pointwise: bool, ranges, rw) -> list[CandidateTiling]:
             """
             Compute tiling candidates by dividing up the iteration ranges.
             """
@@ -1815,7 +1814,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         pointwise_numel,
         reduction_numel,
-    ) -> List[Dict[str, tuple[sympy.Expr]]]:
+    ) -> list[Dict[str, tuple[sympy.Expr]]]:
         """
         Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
@@ -1970,7 +1969,7 @@ class SIMDScheduling(BaseScheduling):
                     seen_names.add(candidate_tiling.name)
                 candidate_tiles[candidate_tiling] += candidate_tiling.score
 
-        ranked_tilings: List[Dict[str, sympy.Expr]] = [
+        ranked_tilings: list[Dict[str, sympy.Expr]] = [
             candidate_tiling.tiling
             for candidate_tiling, score in candidate_tiles.most_common()
         ]

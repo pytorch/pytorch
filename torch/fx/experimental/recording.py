@@ -4,7 +4,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -83,11 +83,11 @@ class ShapeEnvEvent:
     f: Callable
 
     # Arguments and keyword arguments called with.
-    args: Optional[List[Any]] = None
+    args: Optional[list[Any]] = None
     kwargs: Optional[Dict[str, Any]] = None
 
     # List of tracked_fakes at the time the method was called.
-    tracked_fakes: Optional[List[Any]] = None
+    tracked_fakes: Optional[list[Any]] = None
 
     # Name of the captured event.
     # Used for special handling of particular methods.
@@ -445,7 +445,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # compare the two values.
     def compare_vars(
         map_value: Callable[[str, Any], Any]
-    ) -> List[Tuple[str, str, str]]:
+    ) -> list[Tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 
         # First, compare the set of keys in each vars dictionary.
@@ -489,7 +489,7 @@ class NotEqualError(Exception):
     def __init__(
         self,
         msg: str,
-        mismatched: List[Tuple[str, str, str]],
+        mismatched: list[Tuple[str, str, str]],
     ) -> None:
         details = "\n".join(
             [

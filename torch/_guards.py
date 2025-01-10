@@ -19,7 +19,6 @@ from typing import (
     Callable,
     Dict,
     Generic,
-    List,
     NamedTuple,
     Optional,
     Set,
@@ -260,8 +259,8 @@ class Guard:
     create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[List[str]] = None
-    code_list: Optional[List[str]] = None
+    guard_types: Optional[list[str]] = None
+    code_list: Optional[list[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
@@ -448,8 +447,8 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 
 @dataclasses.dataclass
 class StorageOverlap(GuardEnvExpr):
-    overlapping_sources: List[Source]
-    non_overlapping_sources: List[Source]
+    overlapping_sources: list[Source]
+    non_overlapping_sources: list[Source]
 
 
 """
@@ -641,7 +640,7 @@ class GuardsSet:
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
-        self.aotautograd_guards: List[GuardEnvExpr] = []
+        self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards.inner))
@@ -748,7 +747,7 @@ class CompileContext:
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
-        self.shape_env_guards: List[str] = []
+        self.shape_env_guards: list[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -816,7 +815,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+        self.output_strides: Optional[list[Optional[Tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of

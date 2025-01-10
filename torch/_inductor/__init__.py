@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[InputType],
+    example_inputs: list[InputType],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -202,7 +202,7 @@ def aot_compile(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     options: Optional[Dict[str, Any]] = None,
-) -> Union[str, List[str]]:
+) -> Union[str, list[str]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -267,7 +267,7 @@ def list_mode_options(
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
 
 
-def list_options() -> List[str]:
+def list_options() -> list[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 

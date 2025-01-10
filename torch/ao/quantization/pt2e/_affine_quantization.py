@@ -3,7 +3,7 @@
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch.ao.quantization.observer import (
@@ -234,7 +234,7 @@ def choose_qparams_affine_with_min_max(
 def _choose_qparams_affine(
     input: Optional[torch.Tensor],
     mapping_type: str,
-    block_size: List[int],
+    block_size: list[int],
     target_dtype: torch.dtype,
     quant_min: Optional[Union[int, float, bool]] = None,
     quant_max: Optional[Union[int, float, bool]] = None,
@@ -422,7 +422,7 @@ def quantize_affine(
 @register_custom_op
 def _quantize_affine(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     output_dtype: torch.dtype,
@@ -457,7 +457,7 @@ def _quantize_affine(
 
 def _quantize_affine_no_dtype_cast(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     quant_min: Union[int, float],
@@ -570,7 +570,7 @@ def dequantize_affine(
 @register_custom_op
 def _dequantize_affine(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     input_dtype: torch.dtype,
@@ -605,7 +605,7 @@ def _dequantize_affine(
 
 def _dequantize_affine_no_dtype_check(
     input: torch.Tensor,
-    block_size: List[int],
+    block_size: list[int],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     quant_min: Union[int, float],

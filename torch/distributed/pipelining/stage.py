@@ -176,11 +176,11 @@ class _PipelineStageBase(ABC):
         # Run time states
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
-        self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
+        self.fwd_cache: Dict[int, Tuple[Any, list[torch.Tensor]]] = {}
         # map microbatch ID to list of backward grad tensor args
         self.bwd_cache: Dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
         # Caching chunk outputs for final output merge or reduction
-        self.output_chunks: List[Any] = []
+        self.output_chunks: list[Any] = []
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -259,11 +259,11 @@ class _PipelineStageBase(ABC):
     def _create_grad_send_info(
         self,
         args_recv_info: Tuple,
-    ) -> List[Optional[int]]:
+    ) -> list[Optional[int]]:
         """
         Create a list of stage indices to send gradients to.
         """
-        grad_send_info: List[Optional[int]] = []
+        grad_send_info: list[Optional[int]] = []
 
         def map_recv_to_send(a):
             # Note: we send gradients back to previous stage as long as in
@@ -310,12 +310,12 @@ class _PipelineStageBase(ABC):
     def _get_recv_ops(
         self,
         recv_infos: Tuple[InputInfo, ...],
-    ) -> List[dist.P2POp]:
+    ) -> list[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
         Returns a list of ops that correspond to the recv infos.
         """
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
         for info in recv_infos:
             if not isinstance(info, _RecvInfo):
                 continue
@@ -410,7 +410,7 @@ class _PipelineStageBase(ABC):
             ), f"Expected a recv info, got {type(info)}"
             info.buffer = tensor
 
-    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
@@ -419,7 +419,7 @@ class _PipelineStageBase(ABC):
 
         return self._get_recv_ops(recv_infos)
 
-    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the gradients
         for this stage.
@@ -430,7 +430,7 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[bwd_chunk_id]
         return self._get_recv_ops(recv_infos)
 
-    def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the activation send ops for current stage's forward.
         """
@@ -439,7 +439,7 @@ class _PipelineStageBase(ABC):
         # `act_send_info`
         output_tuple = output if type(output) is tuple else (output,)
 
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
 
         for idx, out in enumerate(output_tuple):
             dst_stages = self.act_send_info[idx]
@@ -462,7 +462,7 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def get_bwd_send_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_bwd_send_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the gradient send ops for current stage's backward.
         """
@@ -479,7 +479,7 @@ class _PipelineStageBase(ABC):
             # `grad_send_info` is a mirror of `args_recv_info`
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
 
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
         for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
@@ -576,7 +576,7 @@ class _PipelineStageBase(ABC):
 
     def backward_maybe_with_nosync(
         self, backward_type, bwd_kwargs: Dict, last_backward=False
-    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
+    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[list[Dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -588,7 +588,7 @@ class _PipelineStageBase(ABC):
             backward_type,
         ) -> Callable[
             [],
-            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]],
+            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[list[Dict[str, Any]]]],
         ]:
             if backward_type == "full":
                 return lambda: (
@@ -790,7 +790,7 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                param_groups: List[Dict[str, Any]] | None = None
+                param_groups: list[Dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
@@ -1057,7 +1057,7 @@ class _PipelineStage(_PipelineStageBase):
                 buffer,
             )
 
-        args_recv_info: List[InputInfo] = []
+        args_recv_info: list[InputInfo] = []
         # Filter out placeholder nodes from `self.submod` (a GraphModule)
         placeholders = filter(  # type: ignore[var-annotated]
             lambda node: node.op == "placeholder", self.submod.graph.nodes  # type: ignore[arg-type, union-attr]
@@ -1248,7 +1248,7 @@ class PipelineStage(_PipelineStageBase):
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
-        self.inputs: Optional[List[torch.Tensor]] = None
+        self.inputs: Optional[list[torch.Tensor]] = None
         self.inputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) becuase it
         # might be breaking for existing users.
@@ -1286,7 +1286,7 @@ class PipelineStage(_PipelineStageBase):
             )
 
         # these are the buffers used in backwards send/recv, they are allocated later
-        self.outputs_grad: List[torch.Tensor] = []
+        self.outputs_grad: list[torch.Tensor] = []
 
         def stage_global_rank(peer_rank):
             return (

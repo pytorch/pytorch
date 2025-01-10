@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -14,14 +14,14 @@ from torch.masked.maskedtensor.creation import as_masked_tensor
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
+    DimOrDims = Optional[Union[int, Tuple[int], list[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
     DimOrDims = Optional[Tuple[int]]
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -463,7 +463,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
 
 def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     """Return dim argument as a tuple of sorted dim values."""
-    dims: List[int] = []
+    dims: list[int] = []
     if dim == ():
         # Currently, `dim=()` in reductions operations means "reduce
         # over all dimensions" while in future, it will read "no

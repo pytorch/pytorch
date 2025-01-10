@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Dict,
     Final,
-    List,
     Mapping,
     Optional,
     Sequence,
@@ -643,7 +642,7 @@ class OrtExecutionInfoForAllGraphModules:
         # All sessions (and their related information) created by exporting the same GraphModule
         # with different inputs.
         self.execution_info_per_graph_module: Dict[
-            torch.fx.GraphModule, List[OrtExecutionInfoPerSession]
+            torch.fx.GraphModule, list[OrtExecutionInfoPerSession]
         ] = {}
 
     def search_reusable_session_execution_info(
@@ -1169,7 +1168,7 @@ class OrtBackend:
         return self.compile(graph_module, args)
 
     __instance_cache_max_count: Final = 8
-    __instance_cache: Final[List["OrtBackend"]] = []
+    __instance_cache: Final[list["OrtBackend"]] = []
 
     @staticmethod
     def get_cached_instance_for_options(

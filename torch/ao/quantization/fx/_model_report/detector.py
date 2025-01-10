@@ -1517,7 +1517,7 @@ class OutlierDetector(DetectorBase):
         percentile_ratios: torch.Tensor,
         counted_batches: torch.Tensor,
         total_batches: int,
-    ) -> Dict[str, List[bool]]:
+    ) -> Dict[str, list[bool]]:
         r"""
         Gives info on whether the percentile ratios calculated would be considered outliers
         Also gives information on whether the collected data is statistically significant to make this claim
@@ -1532,7 +1532,7 @@ class OutlierDetector(DetectorBase):
             "is_sufficient_batches": if o_r was >= fraction_batches_used_threshold:
                 where o_r = counted_batches / total_batches
         """
-        outlier_dict: Dict[str, List[bool]] = {
+        outlier_dict: Dict[str, list[bool]] = {
             self.OUTLIER_KEY: [],
             self.IS_SUFFICIENT_BATCHES_KEY: [],
         }

@@ -2,7 +2,7 @@
 
 import time
 import io
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Tuple, Any
 
 import torch
 import torch.distributed as dist
@@ -42,13 +42,13 @@ def rref_local_value(rref: RRef[Tensor]) -> Tensor:
 
 
 @torch.jit.script
-def list_create() -> List[int]:
+def list_create() -> list[int]:
     global_list = [1, 2, 3]
     return global_list
 
 
 @torch.jit.script
-def rref_list_mutate(rref: RRef[List[int]]) -> None:
+def rref_list_mutate(rref: RRef[list[int]]) -> None:
     rref.local_value().append(4)
     rref.to_here().append(5)
     rref.to_here(5.0).append(6)

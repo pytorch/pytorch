@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import itertools as it
 import logging
-from typing import Any, cast, DefaultDict, Dict, Iterator, List, Optional, Set, Union
+from typing import Any, cast, DefaultDict, Dict, Iterator, Optional, Set, Union
 from typing_extensions import Literal
 
 import torch
@@ -226,7 +226,7 @@ class SchemaMatcher:
         overload. If we cannot find any valid schema then we must be
         conservative and assume all inputs are mutable.
         """
-        mutable: Optional[List[bool]] = None
+        mutable: Optional[list[bool]] = None
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
@@ -571,7 +571,7 @@ class DataFlowGraph:
         form the logical nodes in our data flow graph.
         """
 
-        leaf_events: List[_ProfilerEvent] = []
+        leaf_events: list[_ProfilerEvent] = []
 
         def leaf_op(e: _ProfilerEvent) -> bool:
             return e.typed[0] == _EventType.TorchOp and (
@@ -666,7 +666,7 @@ class MemoryProfile:
 
     @property
     def timeline(self) -> tuple[tuple[int, Action, KeyAndID, int], ...]:
-        output: List[tuple[int, Action, KeyAndID, int]] = []
+        output: list[tuple[int, Action, KeyAndID, int]] = []
         allocation_times: Dict[tuple[TensorKey, bool], int] = {}
         live_unknown: Dict[tuple[int, torch.device], Literal[True]] = {}
         for event in self._op_tree.dfs():
@@ -701,7 +701,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
         last_version = dict(sorted(snapshot.keys()))
 
-        events: List[tuple[int, Action, TensorAndID]] = [
+        events: list[tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
             for key, version in snapshot.keys()
             if (key, True) not in allocation_times and version == 0
@@ -993,8 +993,8 @@ class MemoryProfileTimeline:
         Output: [timestamps, sizes by category]
         """
         device = torch.device(device_str)
-        times: List[int] = []
-        sizes: List[List[int]] = []
+        times: list[int] = []
+        sizes: list[list[int]] = []
 
         def update(key, version, delta):
             category = (
@@ -1061,7 +1061,7 @@ class MemoryProfileTimeline:
         as a JSON formatted file to the given path for the given
         device."""
         device = torch.device(device_str)
-        raw_events: List[tuple[int, int, int, int]] = []
+        raw_events: list[tuple[int, int, int, int]] = []
 
         def get_category_index(key, version):
             category = (

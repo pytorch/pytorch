@@ -4,7 +4,7 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 from types import ModuleType
 
 import torch
@@ -100,8 +100,8 @@ class ExportCase:
 
 _EXAMPLE_CASES: Dict[str, ExportCase] = {}
 _MODULES: Set[ModuleType] = set()
-_EXAMPLE_CONFLICT_CASES: Dict[str, List[ExportCase]] = {}
-_EXAMPLE_REWRITE_CASES: Dict[str, List[ExportCase]] = {}
+_EXAMPLE_CONFLICT_CASES: Dict[str, list[ExportCase]] = {}
+_EXAMPLE_REWRITE_CASES: Dict[str, list[ExportCase]] = {}
 
 
 def register_db_case(case: ExportCase) -> None:

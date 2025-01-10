@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
@@ -1493,7 +1493,7 @@ class Tensor(torch._C.TensorBase):
         return self.to_sparse()
 
     def dim_order(
-        self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
+        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
     ):
         """
         dim_order(ambiguity_check=False) -> tuple

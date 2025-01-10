@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Iterable, Optional, Tuple, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -803,11 +803,11 @@ class OpInfo:
 
     # If `supports_cow_input_no_materialize_forward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_forward: List[Union[int, str]] = None
+    allow_cow_input_materialize_forward: list[Union[int, str]] = None
 
     # If `supports_cow_input_no_materialize_backward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_backward: List[Union[int, str]] = None
+    allow_cow_input_materialize_backward: list[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -853,13 +853,13 @@ class OpInfo:
     # a list of strings with node names that are expected to be in a
     # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'],
     # default is populated to be ['aten::(name of Python operator)']
-    autodiff_nonfusible_nodes: List[str] = None
+    autodiff_nonfusible_nodes: list[str] = None
 
     # a list of strings with node names that are expected to be in FusionGroups
     # inside of DifferentiableGraphs when this operation is autodiffed.
     # Ex: ['aten::add', 'aten::mm'], defaults to an empty list
     # Note: currently no ops use fusible nodes
-    autodiff_fusible_nodes: List[str] = None
+    autodiff_fusible_nodes: list[str] = None
 
     # the following metadata relates to sparse support and is used in test_sparse.py
 

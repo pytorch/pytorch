@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, Optional, Set, Type, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -1127,8 +1127,8 @@ def convert(
     # additional state to override inputs to be quantized, if specified
     # by the user
     placeholder_node_seen_cnt = 0
-    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
+    input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
+    output_quantized_idxs: list[int] = prepare_custom_config.output_quantized_indexes
 
     root_module_to_quantized_reference_module = (
         get_root_module_to_quantized_reference_module(backend_config)

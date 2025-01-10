@@ -5,7 +5,7 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Dict, Iterable, Optional, Protocol
 
 import sympy
 
@@ -241,7 +241,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
          a.get_live_ranges().overlaps(b.get_live_ranges())
     """
 
-    allocations: List[AllocationTreeNode]
+    allocations: list[AllocationTreeNode]
 
     def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
@@ -371,7 +371,7 @@ class AllocationPool:
     can_expand: bool = True
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
-    names_to_del: List[str] = dataclasses.field(default_factory=list)
+    names_to_del: list[str] = dataclasses.field(default_factory=list)
     creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: Allocation, is_last: bool):
@@ -445,7 +445,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
+    device_to_pools: Dict[torch.device, list[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 
@@ -609,9 +609,9 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[List[BufferGroup]] = None
+    buffer_groups: Optional[list[BufferGroup]] = None
 
-    def plan(self, lines: List[Any]) -> List[Any]:
+    def plan(self, lines: list[Any]) -> list[Any]:
         """Call all the memory planning passes in sequence"""
         lines = [*lines]
         self.drop_removed_buffers(lines)
@@ -714,8 +714,8 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs: List[Allocation] = []
-        intermediates: List[Allocation] = []
+        outputs: list[Allocation] = []
+        intermediates: list[Allocation] = []
         for group in self.buffer_groups:
             assert group.allocation
             if group.is_output and config.memory_pool != "combined":

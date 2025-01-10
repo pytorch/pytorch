@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,7 @@ class _ParamUsageInfo(NamedTuple):
     """
 
     module: nn.Module
-    named_params: List[Tuple[str, nn.Parameter]]
+    named_params: list[Tuple[str, nn.Parameter]]
 
 
 class _ExecutionInfo:
@@ -79,11 +79,11 @@ class _ExecutionInfo:
 
     def __init__(self, root_module: nn.Module) -> None:
         self.curr_module: nn.Module = root_module
-        self.module_forward_order: List[nn.Module] = [root_module]
-        self.module_to_param_usage_infos: Dict[nn.Module, List[_ParamUsageInfo]] = {
+        self.module_forward_order: list[nn.Module] = [root_module]
+        self.module_to_param_usage_infos: Dict[nn.Module, list[_ParamUsageInfo]] = {
             root_module: []
         }
-        self.param_forward_order: List[nn.Parameter] = []
+        self.param_forward_order: list[nn.Parameter] = []
         self.visited_params: Set[nn.Parameter] = set()
 
 
@@ -210,7 +210,7 @@ class _ExecOrderTracer:
         curr_module = exec_info.curr_module
         if kind in ("call_function", "call_method"):
             if args is not None:
-                named_params: List[Tuple[str, nn.Parameter]] = []
+                named_params: list[Tuple[str, nn.Parameter]] = []
                 for arg in args:
                     if (
                         isinstance(arg, torch.fx.Proxy)

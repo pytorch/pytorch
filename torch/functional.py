@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.nn.functional as F
@@ -154,7 +154,7 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor,
-    split_size_or_sections: Union[int, List[int]],
+    split_size_or_sections: Union[int, list[int]],
     dim: int = 0,
 ) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
@@ -421,7 +421,7 @@ def einsum(*args: Any) -> Tensor:
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(
-        *tensors: Union[Tensor, List[Tensor]], indexing: Optional[str] = None
+        *tensors: Union[Tensor, list[Tensor]], indexing: Optional[str] = None
     ) -> Tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 
@@ -1236,7 +1236,7 @@ else:
     def tensordot(  # noqa: F811
         a,
         b,
-        dims: Tuple[List[int], List[int]],
+        dims: Tuple[list[int], list[int]],
         out: Optional[torch.Tensor] = None,
     ):
         pass
@@ -1245,7 +1245,7 @@ else:
     def tensordot(  # noqa: F811
         a,
         b,
-        dims: List[List[int]],
+        dims: list[list[int]],
         out: Optional[torch.Tensor] = None,
     ):
         pass
@@ -1327,8 +1327,8 @@ def tensordot(  # noqa: F811
             + f"dims={dims}"
         )
 
-    dims_a: List[int] = []
-    dims_b: List[int] = []
+    dims_a: list[int] = []
+    dims_b: list[int] = []
 
     if isinstance(dims, (tuple, list)):
         dims_a, dims_b = dims
@@ -1337,8 +1337,8 @@ def tensordot(  # noqa: F811
         num_elements = dims.numel()
         if num_elements > 1:
             assert dims.size()[0] == 2
-            dims_a = torch.jit.annotate(List[int], dims[0].tolist())
-            dims_b = torch.jit.annotate(List[int], dims[1].tolist())
+            dims_a = torch.jit.annotate(list[int], dims[0].tolist())
+            dims_b = torch.jit.annotate(list[int], dims[1].tolist())
         else:
             dims_val = int(dims.item())
             if dims_val < 0:
@@ -2143,7 +2143,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]
 else:
-    _ListOrSeq = List[Tensor]
+    _ListOrSeq = list[Tensor]
 
 
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:

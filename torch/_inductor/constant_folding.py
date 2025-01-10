@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -57,7 +57,7 @@ def replace_node_with_constant(
 
 
 def is_const_source(
-    node: torch.fx.Node, lifted_constant_names: Optional[List[str]]
+    node: torch.fx.Node, lifted_constant_names: Optional[list[str]]
 ) -> bool:
     return node.op == "get_attr" or node.name in (lifted_constant_names or ())
 
@@ -67,7 +67,7 @@ class ConstantFolder(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         skip_constructors: bool = False,
-        lifted_constant_names: Optional[List[str]] = None,
+        lifted_constant_names: Optional[list[str]] = None,
         skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
     ) -> None:
         super().__init__(gm)
@@ -141,7 +141,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return True
         return False
 
-    def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+    def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, list[torch.fx.Node]]:
         last_non_output_use = collections.defaultdict(list)
         seen_uses = OrderedSet[torch.fx.Node]()
         output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
@@ -304,7 +304,7 @@ def constant_fold(
 def constant_graph_tag(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[List[str]] = None,
+    lifted_constant_names: Optional[list[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
@@ -332,7 +332,7 @@ def constant_graph_tag(
 def run_and_get_constant_graph(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[List[str]] = None,
+    lifted_constant_names: Optional[list[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> torch.fx.GraphModule:
     """

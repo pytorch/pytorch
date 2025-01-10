@@ -2,7 +2,7 @@
 import operator
 import warnings
 from collections import namedtuple
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -25,7 +25,7 @@ from .utils import (
 )
 
 
-CUSTOM_MODULE_SUPP_LIST: List[Any] = []
+CUSTOM_MODULE_SUPP_LIST: list[Any] = []
 
 
 def reshape_scale(scale: torch.Tensor, axis: int, input: torch.Tensor) -> torch.Tensor:
@@ -87,7 +87,7 @@ class _InputEqualizationObserver(nn.Module):
         )
 
         self.equalization_scale = torch.tensor(1)
-        self.equalization_shape: List[int] = []
+        self.equalization_shape: list[int] = []
 
     def forward(self, x_orig):
         if not (x_orig.ndim >= 2 and x_orig.ndim <= 5):

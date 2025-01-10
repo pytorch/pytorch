@@ -6,7 +6,7 @@ import collections.abc
 import functools
 import math
 import warnings
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Tuple, Union
 
 import torch
 
@@ -43,7 +43,7 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
+    *shape: Union[int, torch.Size, list[int], Tuple[int, ...]],
     dtype: torch.dtype,
     device: Union[str, torch.device],
     low: Optional[float] = None,

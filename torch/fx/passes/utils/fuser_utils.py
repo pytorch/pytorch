@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
-from typing import Dict, List, Optional as _Optional, Tuple
+from typing import Dict, Optional as _Optional, Tuple
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -250,7 +250,7 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
     gm: GraphModule,
-    partitions: List[Dict[Node, None]],
+    partitions: list[Dict[Node, None]],
     prefix: str = "fused_",
     always_return_tuple: bool = False,
 ) -> GraphModule:

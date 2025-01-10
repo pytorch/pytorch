@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, Optional, Set, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -234,14 +234,14 @@ def _insert_quantize_per_tensor_node(
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
-    prev_node_c: Union[Node, List[Node]],
+    prev_node_c: Union[Node, list[Node]],
     gm_a: GraphModule,
     gm_b: GraphModule,
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
     node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
-) -> Union[Node, List[Node]]:
+) -> Union[Node, list[Node]]:
     """
     Given a starting graph C (derived from graph B) of
 
@@ -526,8 +526,8 @@ def _can_insert_copy_of_subgraph_a(
 
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
-    input_node_c: Union[Node, List[Node]],
-    input_node_c_2: Optional[Union[Node, List[Node]]],
+    input_node_c: Union[Node, list[Node]],
+    input_node_c_2: Optional[Union[Node, list[Node]]],
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -569,8 +569,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 
 def _insert_copy_of_node_a_after_input_node_c(
-    input_node_c: Union[Node, List[Node]],
-    input_node_c_2: Optional[Union[Node, List[Node]]],
+    input_node_c: Union[Node, list[Node]],
+    input_node_c_2: Optional[Union[Node, list[Node]]],
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -990,7 +990,7 @@ def create_a_shadows_b(
                             index_of_arg=0,
                             fqn=fqn_base_a,
                         )
-                        input_logger: Union[Node, List[Node]] = dtype_cast_node
+                        input_logger: Union[Node, list[Node]] = dtype_cast_node
                     else:
                         assert isinstance(dtype_cast_node, list)
                         new_loggers = []

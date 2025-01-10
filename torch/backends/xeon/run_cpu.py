@@ -132,7 +132,7 @@ import subprocess
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
-from typing import Dict, List
+from typing import Dict
 
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs as _DefaultLogsSpecs,
@@ -181,8 +181,8 @@ class _CPUinfo:
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
-            self.node_physical_cores: List[List[int]] = []  # node_id is index
-            self.node_logical_cores: List[List[int]] = []  # node_id is index
+            self.node_physical_cores: list[list[int]] = []  # node_id is index
+            self.node_logical_cores: list[list[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}  # logical core to numa node id
 
@@ -623,7 +623,7 @@ won't take effect even if it is set explicitly."
                         * args.ncores_per_instance
                     ]
 
-                core_ranges: List[Dict] = []
+                core_ranges: list[Dict] = []
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size

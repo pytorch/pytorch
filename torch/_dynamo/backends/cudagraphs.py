@@ -2,7 +2,7 @@
 
 import functools
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import torch
 from torch._dynamo import config
@@ -111,7 +111,7 @@ def get_device_index(gm) -> int:
     return device.index
 
 
-def get_stack_traces(gm) -> List[Optional[str]]:
+def get_stack_traces(gm) -> list[Optional[str]]:
     output = output_node(gm)
     assert len(output.args) == 1
     return [

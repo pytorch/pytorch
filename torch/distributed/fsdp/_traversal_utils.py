@@ -48,7 +48,7 @@ def _composable(module: nn.Module) -> bool:
 # `FlatParameter` registration, which is not needed for `use_orig_params=True`.
 def _get_fsdp_states_with_modules(
     module: nn.Module,
-) -> Tuple[List[_FSDPState], List[nn.Module]]:
+) -> Tuple[list[_FSDPState], list[nn.Module]]:
     """
     Returns a tuple containing:
     1. A list of the ``_FSDPState`` instances in the module tree rooted at
@@ -65,8 +65,8 @@ def _get_fsdp_states_with_modules(
     NOTE: The traversal does not proceed into any module annotated by an
     incompatible API (e.g. ``replicate``).
     """
-    fsdp_states: List[_FSDPState] = []
-    fsdp_modules: List[nn.Module] = []
+    fsdp_states: list[_FSDPState] = []
+    fsdp_modules: list[nn.Module] = []
     # Track the visited FSDP states since multiple modules may share the same
     # one and we want to return a de-duplicated list
     visited_fsdp_states: Set[_FSDPState] = set()
@@ -94,7 +94,7 @@ def _get_fsdp_states_with_modules(
     return fsdp_states, fsdp_modules
 
 
-def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
+def _get_fsdp_states(module: nn.Module) -> list[_FSDPState]:
     """See :func:`_get_fsdp_states_with_modules`."""
     fsdp_states, _ = _get_fsdp_states_with_modules(module)
     return fsdp_states

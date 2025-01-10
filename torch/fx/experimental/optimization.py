@@ -5,7 +5,7 @@ import operator
 import time
 from collections import defaultdict
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, cast, Dict, Iterable, Optional, Tuple, Type
 
 import torch
 import torch.fx as fx
@@ -133,9 +133,9 @@ def remove_dropout(model: nn.Module) -> nn.Module:
 
 def extract_subgraph(
     orig_module: nn.Module,
-    nodes: List[fx.Node],
-    inputs: List[fx.Node],
-    outputs: List[fx.Node],
+    nodes: list[fx.Node],
+    inputs: list[fx.Node],
+    outputs: list[fx.Node],
 ):
     """
     Given lists of nodes from an existing graph that represent a subgraph, returns a submodule that executes that subgraph.
@@ -180,7 +180,7 @@ mkldnn_map = {
 }
 
 
-def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+def modules_to_mkldnn(nodes: list[fx.Node], modules: Dict[str, nn.Module]):
     """
     For each node, if it's a module that can be preconverted into MKLDNN,
     then we do so and create a mapping to allow us to convert from the MKLDNN
@@ -200,7 +200,7 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
 
 
 def reset_modules(
-    nodes: List[fx.Node],
+    nodes: list[fx.Node],
     modules: Dict[str, nn.Module],
     old_modules: Dict[nn.Module, nn.Module],
 ):
@@ -219,9 +219,9 @@ def reset_modules(
 class MklSubgraph:
     def __init__(self, fx_graph: fx.Graph):
         self.fx_graph = fx_graph
-        self.nodes: List[fx.Node] = []
-        self.start_nodes: List[fx.Node] = []
-        self.end_nodes: List[fx.Node] = []
+        self.nodes: list[fx.Node] = []
+        self.start_nodes: list[fx.Node] = []
+        self.end_nodes: list[fx.Node] = []
 
 
 def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
@@ -244,7 +244,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
             old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
         sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
-        output_args = cast(List[fx.Node], [node.args[0] for node in graph.end_nodes])
+        output_args = cast(list[fx.Node], [node.args[0] for node in graph.end_nodes])
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
         def benchmark(f):
@@ -281,8 +281,8 @@ def use_mkl_length(graph: MklSubgraph) -> bool:
 
 class UnionFind:
     def __init__(self, n):
-        self.parent: List[Optional[int]] = [None] * n
-        self.size: List[int] = [0] * n
+        self.parent: list[Optional[int]] = [None] * n
+        self.size: list[int] = [0] * n
 
     def make_set(self, v: int):
         self.parent[v] = v

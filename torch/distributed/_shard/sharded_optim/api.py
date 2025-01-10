@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Mapping, Union
+from typing import Any, Dict, Mapping, Union
 
 import torch.optim as optim
 from torch import Tensor
@@ -28,7 +28,7 @@ class ShardedOptimizer(optim.Optimizer):
             **optimizer_kwargs: the key-word arguments to initialize the optimizer.
 
         """
-        tensors: List[Tensor] = []
+        tensors: list[Tensor] = []
         for value in named_params.values():
             if isinstance(value, ShardedTensor):
                 tensors.extend(

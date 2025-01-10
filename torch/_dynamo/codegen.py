@@ -4,7 +4,7 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from typing import Counter, Dict, Optional
 
 import torch.nn
 
@@ -59,7 +59,7 @@ class PyCodegen:
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
         self.graph_outputs: Dict[int, GraphOutputEntry] = {}
-        self._output: List[Instruction] = []
+        self._output: list[Instruction] = []
         # This determines which VariableTracker should be stored as locals, and
         # maps the VariableTracker to the local variable name. Note that it
         # could map to None initially, in which case we'll overwrite it to map
@@ -323,7 +323,7 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self) -> List[Instruction]:
+    def get_instructions(self) -> list[Instruction]:
         return self._output
 
     def create_load(self, name) -> Instruction:
@@ -526,7 +526,7 @@ class PyCodegen:
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
-    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
             assert output[-1].opname == "CALL"

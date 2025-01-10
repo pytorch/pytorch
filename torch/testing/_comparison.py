@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Collection,
     Dict,
-    List,
     NoReturn,
     Optional,
     Sequence,
@@ -453,7 +452,7 @@ class BooleanPair(Pair):
 
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
-        cls: List[Type] = [bool]
+        cls: list[Type] = [bool]
         if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
@@ -1058,7 +1057,7 @@ def originate_pairs(
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     id: Tuple[Any, ...] = (),
     **options: Any,
-) -> List[Pair]:
+) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1195,7 +1194,7 @@ def not_close_error_metas(
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
-) -> List[ErrorMeta]:
+) -> list[ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1226,7 +1225,7 @@ def not_close_error_metas(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None  # noqa: RSE102
 
-    error_metas: List[ErrorMeta] = []
+    error_metas: list[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()

@@ -2,7 +2,7 @@
 import operator
 import warnings
 from itertools import chain
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Dict, Generic, Optional, Sequence, Tuple, TypeVar, Union
 
 import torch
 from torch._utils import (
@@ -195,7 +195,7 @@ class DataParallel(Module, Generic[T]):
 
     def replicate(
         self, module: T, device_ids: Sequence[Union[int, torch.device]]
-    ) -> List[T]:
+    ) -> list[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
@@ -208,7 +208,7 @@ class DataParallel(Module, Generic[T]):
 
     def parallel_apply(
         self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
-    ) -> List[Any]:
+    ) -> list[Any]:
         return parallel_apply(
             replicas, inputs, kwargs, self.device_ids[: len(replicas)]
         )

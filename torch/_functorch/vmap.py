@@ -52,7 +52,7 @@ def doesnt_support_saved_tensors_hooks(f):
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: List[Optional[int]], flat_args: List
+    flat_in_dims: list[Optional[int]], flat_args: List
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
@@ -91,7 +91,7 @@ def _as_tuple(
 
 def _process_batched_inputs(
     in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], TreeSpec]:
+) -> Tuple[int, list[Any], list[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -152,7 +152,7 @@ def _process_batched_inputs(
 
 
 def _create_batched_inputs(
-    flat_in_dims: List[Any], flat_args: List[Any], vmap_level: int, args_spec
+    flat_in_dims: list[Any], flat_args: list[Any], vmap_level: int, args_spec
 ) -> Tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [

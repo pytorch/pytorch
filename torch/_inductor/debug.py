@@ -12,7 +12,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
+from typing import Any, Callable, Dict, IO, Iterator, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -39,7 +39,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-SchedulerNodeList = List[Any]
+SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
@@ -54,7 +54,7 @@ def has_dot() -> bool:
 
 
 def draw_buffers(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     print_graph: bool = False,
     fname: Optional[str] = None,
 ) -> None:
@@ -99,7 +99,7 @@ def draw_buffers(
     )
 
 
-def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
@@ -309,7 +309,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
-    _inductor_triton_kernel_to_post_grad_node_info: Dict[str, List[str]] = {}
+    _inductor_triton_kernel_to_post_grad_node_info: Dict[str, list[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -474,7 +474,7 @@ class DebugFormatter:
     def fx_graph(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_dir = None
@@ -504,7 +504,7 @@ class DebugFormatter:
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -557,7 +557,7 @@ class DebugFormatter:
     def log_autotuning_results(
         self,
         name: str,
-        input_nodes: List[ir.IRNode],
+        input_nodes: list[ir.IRNode],
         timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,

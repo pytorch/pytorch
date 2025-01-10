@@ -7,7 +7,6 @@ from typing import (
     Callable,
     Collection,
     Dict,
-    List,
     Mapping,
     Optional,
     overload,
@@ -21,7 +20,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +333,6 @@ class _NamedOptimizer(optim.Optimizer):
         return state_dict
 
 
-def _gen_param_group_key(param_keys: List[str]) -> str:
+def _gen_param_group_key(param_keys: list[str]) -> str:
     """Concatenate all param keys as a unique indentifier for one param group."""
     return "/".join(sorted(param_keys))

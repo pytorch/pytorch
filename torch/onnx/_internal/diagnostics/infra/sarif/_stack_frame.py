@@ -19,7 +19,7 @@ class StackFrame(object):
     module: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "module"}
     )
-    parameters: Optional[List[str]] = dataclasses.field(
+    parameters: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

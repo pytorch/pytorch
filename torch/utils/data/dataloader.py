@@ -51,7 +51,7 @@ _worker_init_fn_t = Callable[[int], None]
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[_T]], Any]
+_collate_fn_t = Callable[[list[_T]], Any]
 
 
 # These functions used to be defined in this file. However, it was moved to

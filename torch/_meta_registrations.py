@@ -1384,7 +1384,7 @@ def _linalg_svd_meta(
 def _linalg_broadcast_batch_dims(
     arg1: Tensor,
     arg2: Tensor,
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[list[int], list[int]]:
     # broadcast the batch dimensions of arg1 and arg2.
     arg1_batch_sizes = arg1.shape[:-2]
     arg2_batch_sizes = arg2.shape[:-2]
@@ -2158,12 +2158,12 @@ def device_hint(tensor) -> "str":
 def calc_conv_nd_return_shape(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    stride: Union[List[int], int],
-    padding: Union[List[int], int],
-    dilation: Union[List[int], int],
+    stride: Union[list[int], int],
+    padding: Union[list[int], int],
+    dilation: Union[list[int], int],
     is_transposed: bool,
     groups: int,
-    output_padding: Optional[Union[List[int], int]] = None,
+    output_padding: Optional[Union[list[int], int]] = None,
 ):
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
@@ -2226,7 +2226,7 @@ def calc_conv_nd_return_shape(
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
 
-    output_padding_list: Optional[List[int]] = None
+    output_padding_list: Optional[list[int]] = None
     if output_padding:
         if isinstance(output_padding, IntLike):
             output_padding_list = [output_padding] * len(dims)
@@ -2309,11 +2309,11 @@ def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     is_transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
 ):
     def pick_memory_format():
@@ -3089,7 +3089,7 @@ def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
-    result: List[Optional[Tensor]] = []
+    result: list[Optional[Tensor]] = []
     for i, index in enumerate(indices):
         if index is not None:
             torch._check(
@@ -3170,9 +3170,9 @@ def meta_index_Tensor(self, indices):
     # to put the input and indices in a form so that TensorIterator can
     # take them.  If we write a ref for this, probably that logic should
     # get implemented
-    before_shape: List[int] = []
-    after_shape: List[int] = []
-    replacement_shape: List[int] = []
+    before_shape: list[int] = []
+    after_shape: list[int] = []
+    replacement_shape: list[int] = []
     for dim, index in enumerate(indices):
         if index is None:
             if replacement_shape:
@@ -5518,7 +5518,7 @@ def meta__scaled_dot_product_efficient_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
-    grad_input_mask: List[bool],
+    grad_input_mask: list[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -6741,8 +6741,8 @@ def meta_local_scalar_dense(self: Tensor):
 @register_meta(aten._jagged_to_padded_dense_forward.default)
 def meta__jagged_to_padded_dense_forward(
     values: Tensor,
-    offsets: List[Tensor],
-    max_lengths: List[int],
+    offsets: list[Tensor],
+    max_lengths: list[int],
     padding_value: float = 0.0,
 ):
     # only one jagged dim is supported for now

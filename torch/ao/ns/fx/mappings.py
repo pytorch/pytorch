@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, Optional, Set
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -24,7 +24,7 @@ toq = torch.ops.quantized
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # note: this set is modified below by items from backend_config
-    sets_of_related_ops: List[Set[NSNodeTargetType]] = [
+    sets_of_related_ops: list[Set[NSNodeTargetType]] = [
         # conv modules
         {
             nn.Conv1d,
@@ -357,7 +357,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # backend_config
     backend_config = get_native_backend_config()
 
-    new_connections: List[tuple[Callable, Callable]] = [
+    new_connections: list[tuple[Callable, Callable]] = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]

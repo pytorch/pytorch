@@ -1534,8 +1534,8 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
         )
         raise ValueError(msg)
 
-    new_shape: List[int] = []
-    new_strides: List[int] = []
+    new_shape: list[int] = []
+    new_strides: list[int] = []
     for idx in range(a.ndim):
         if idx == dim:
             new_shape.extend((outer_length, inner_length))
@@ -1797,7 +1797,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     )
 
 
-def _cat_aten(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int) -> Tensor:
+def _cat_aten(tensors: Union[Tuple[Tensor, ...], list[Tensor]], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 

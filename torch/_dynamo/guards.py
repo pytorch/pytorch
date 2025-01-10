@@ -25,7 +25,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     Set,
     Tuple,
@@ -461,15 +460,15 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: Union[str | List[str]], guard: Guard
-) -> List[str]:
+    code_parts: Union[str | list[str]], guard: Guard
+) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
 
 
 def convert_to_concrete_values(size_or_stride):
-    converted: List[Optional[int]] = []
+    converted: list[Optional[int]] = []
     for dim in size_or_stride:
         if not is_symbolic(dim):
             converted.append(dim)
@@ -571,7 +570,7 @@ def match_on_id_for_tensor(guard):
 # the original guard object that created it for provenance
 @dataclasses.dataclass
 class GuardCodeList:
-    code_list: List[str]
+    code_list: list[str]
     guard: Guard
 
 
@@ -614,19 +613,19 @@ class GuardBuilder(GuardBuilderBase):
             self.scope[name] = package_module
         self.guard_manager = guard_manager
 
-        self.argnames: List[str] = []
+        self.argnames: list[str] = []
         # Code is python expression strings generated for each guard
-        self.code: List[GuardCodeList] = []
+        self.code: list[GuardCodeList] = []
         # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
-        self.shape_env_code: List[GuardCodeList] = []
+        self.shape_env_code: list[GuardCodeList] = []
 
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
-        self.no_tensor_aliasing_names: List[str] = []
-        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
+        self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_guard_managers: list[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -1818,8 +1817,8 @@ class GuardBuilder(GuardBuilderBase):
 
         if output_graph.export_constraints:
             names: Dict[str, Tuple[int, int]] = {}
-            source_pairs: List[Tuple[Source, Source]] = []
-            derived_equalities: List[  # type: ignore[type-arg]
+            source_pairs: list[Tuple[Source, Source]] = []
+            derived_equalities: list[  # type: ignore[type-arg]
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
@@ -1920,7 +1919,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
-            code: List[str] = []
+            code: list[str] = []
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 terms = [
@@ -2130,7 +2129,7 @@ class PyExprCSEPass:
             super().__init__()
             self._config = config
             self._gen_name = gen_name
-            self.preface: List[str] = []
+            self.preface: list[str] = []
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
@@ -2169,7 +2168,7 @@ class PyExprCSEPass:
         self._counter += 1
         return name
 
-    def count(self, exprs: List[str]) -> None:
+    def count(self, exprs: list[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
             try:
@@ -2178,7 +2177,7 @@ class PyExprCSEPass:
                 log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
                 raise
 
-    def replace(self, expr: str) -> Tuple[List[str], str]:
+    def replace(self, expr: str) -> Tuple[list[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
         new_node = replacer.visit(ast.parse(expr))
         return replacer.preface, _ast_unparse(new_node)
@@ -2430,7 +2429,7 @@ class CheckFunctionManager:
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
-        aotautograd_guards: List[GuardEnvExpr] = (
+        aotautograd_guards: list[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
             if self.output_graph
             else []
@@ -2565,7 +2564,7 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     csepass = PyExprCSEPass()
     csepass.count(code_parts)
 
-    def replace(expr: str) -> Tuple[List[str], str]:
+    def replace(expr: str) -> Tuple[list[str], str]:
         return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
@@ -2651,11 +2650,11 @@ def get_guard_fail_reason_helper(
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
-    verbose_code_parts: List[str] = []
+    verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
@@ -2732,7 +2731,7 @@ def get_guard_fail_reason(
 
 def get_and_maybe_log_recompilation_reason(
     cache_entry, frame: DynamoFrameType
-) -> List[str]:
+) -> list[str]:
     """
     Return the list of guard failure reasons using cache_entry.
     Logs the recompilation reason if `recompiles` logging is enabled.

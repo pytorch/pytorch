@@ -14,7 +14,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import CompileEventLogger, counters
@@ -304,7 +304,7 @@ def autograd_cache_key(
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
-) -> Tuple[str, List[str]]:
+) -> Tuple[str, list[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -390,7 +390,7 @@ class CompiledBackward(FXGraphCacheLoadable):
     """
 
     # Used by AOTDispatchAutograd.post_compile
-    backward_state_indices: List[int]
+    backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
     def is_backward(self):
@@ -415,14 +415,14 @@ class AOTAutogradCacheEntry:
     runtime_metadata: ViewAndMutationMeta
 
     # Wrappers that run after each aot_dispatch_* function
-    dispatch_wrappers: List[CompilerWrapper]
+    dispatch_wrappers: list[CompilerWrapper]
 
     # Used by AOTSubclassWrapper
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
 
     # Used by RuntimeWrapepr
-    indices_of_inps_to_detach: List[int]
+    indices_of_inps_to_detach: list[int]
 
     # Time taken to trace/compile the forward
     # forward_time_taken includes AOTAutograd tracing time + inductor compilation time
@@ -433,7 +433,7 @@ class AOTAutogradCacheEntry:
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
-        args: List[torch.Tensor],
+        args: list[torch.Tensor],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
     ) -> Callable:
@@ -668,7 +668,7 @@ class AOTAutogradCache:
             compiled_fn = None
             cache_info: Dict[str, Any] = {}
             cache_key = None
-            debug_lines: List[str] = []
+            debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
             fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}

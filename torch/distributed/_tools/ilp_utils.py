@@ -1,5 +1,5 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+from typing import cast, Dict, OrderedDict, Tuple, TypedDict
 
 import numpy as np
 
@@ -15,10 +15,10 @@ from torch.distributed._tools.sac_estimator import SACEstimator, SACTradeOffStat
 
 
 class ModOrder(TypedDict):
-    fw_pre_order: List[str]
-    bw_pre_order: List[str]
-    fw_post_order: List[str]
-    bw_post_order: List[str]
+    fw_pre_order: list[str]
+    bw_pre_order: list[str]
+    fw_post_order: list[str]
+    bw_post_order: list[str]
 
 
 class ModRuntime(TypedDict):
@@ -60,18 +60,18 @@ class ModStats(TypedDict):
     # Number of piecewise-linear functions used for approximating ac tradeoff curve
     n_segments: int
     # Slopes of the of piecewise-linear functions
-    slopes: List[float]
+    slopes: list[float]
     # Intercepts of the of piecewise-linear functions
-    intercepts: List[float]
+    intercepts: list[float]
     # X breakpoints of the of piecewise-linear functions
-    breakpoints: List[float]
+    breakpoints: list[float]
     # Original trade-off curves
     tradeoff_curve: OrderedDict[float, float]
 
 
 class ModuleInfo(TypedDict):
     mod_order: ModOrder
-    mod_stats: List[ModStats]
+    mod_stats: list[ModStats]
 
 
 def aggregate_stats(
@@ -192,10 +192,10 @@ class Node(ModStats):
 
 class Graph:
     def __init__(self, n: int) -> None:
-        self.nodes: List[Node] = []
+        self.nodes: list[Node] = []
         self.name2node: Dict[str, Node] = {}
         self.ad_matrix = np.zeros((n, n))
-        self.fw_post_order: List[str] = []
+        self.fw_post_order: list[str] = []
 
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)

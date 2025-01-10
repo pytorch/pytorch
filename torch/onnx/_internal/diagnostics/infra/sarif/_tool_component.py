@@ -26,7 +26,7 @@ class ToolComponent(object):
             default=None, metadata={"schema_property_name": "associatedComponent"}
         )
     )
-    contents: List[Literal["localizedData", "nonLocalizedData"]] = dataclasses.field(
+    contents: list[Literal["localizedData", "nonLocalizedData"]] = dataclasses.field(
         default_factory=lambda: ["localizedData", "nonLocalizedData"],
         metadata={"schema_property_name": "contents"},
     )
@@ -62,7 +62,7 @@ class ToolComponent(object):
     localized_data_semantic_version: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "localizedDataSemanticVersion"}
     )
-    locations: Optional[List[_artifact_location.ArtifactLocation]] = dataclasses.field(
+    locations: Optional[list[_artifact_location.ArtifactLocation]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
     minimum_required_localized_data_semantic_version: Optional[str] = dataclasses.field(
@@ -71,7 +71,7 @@ class ToolComponent(object):
             "schema_property_name": "minimumRequiredLocalizedDataSemanticVersion"
         },
     )
-    notifications: Optional[List[_reporting_descriptor.ReportingDescriptor]] = (
+    notifications: Optional[list[_reporting_descriptor.ReportingDescriptor]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "notifications"}
         )
@@ -91,7 +91,7 @@ class ToolComponent(object):
     release_date_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "releaseDateUtc"}
     )
-    rules: Optional[List[_reporting_descriptor.ReportingDescriptor]] = (
+    rules: Optional[list[_reporting_descriptor.ReportingDescriptor]] = (
         dataclasses.field(default=None, metadata={"schema_property_name": "rules"})
     )
     semantic_version: Optional[str] = dataclasses.field(
@@ -103,11 +103,11 @@ class ToolComponent(object):
         default=None, metadata={"schema_property_name": "shortDescription"}
     )
     supported_taxonomies: Optional[
-        List[_tool_component_reference.ToolComponentReference]
+        list[_tool_component_reference.ToolComponentReference]
     ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "supportedTaxonomies"}
     )
-    taxa: Optional[List[_reporting_descriptor.ReportingDescriptor]] = dataclasses.field(
+    taxa: Optional[list[_reporting_descriptor.ReportingDescriptor]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "taxa"}
     )
     translation_metadata: Optional[_translation_metadata.TranslationMetadata] = (

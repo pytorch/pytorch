@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
+from typing import Any, Dict, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
 from typing_extensions import TypeIs
 from collections import deque
 
@@ -522,8 +522,8 @@ class AliasInfo:
 
 @dataclass
 class SchemaInfo:
-    args: List[AliasInfo]
-    outs: List[AliasInfo]
+    args: list[AliasInfo]
+    outs: list[AliasInfo]
 
 
 # Can't import torch._ops.OpOverload due to circular reference

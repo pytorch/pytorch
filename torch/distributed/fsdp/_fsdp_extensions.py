@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -64,7 +64,7 @@ class FSDPExtensions(ABC):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> Tuple[torch.Tensor, list[Shard]]:
         """
         This is to be called before loading a *sharded* model state dict and
         should return the tensor and list of shards from which to load data.
@@ -157,7 +157,7 @@ def _ext_chunk_dtensor(
 def _ext_pre_load_state_dict_transform(
     tensor: torch.Tensor,
     fsdp_extension: Optional[FSDPExtensions] = None,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> Tuple[torch.Tensor, list[Shard]]:
     if fsdp_extension is not None:
         return fsdp_extension.pre_load_state_dict_transform(tensor)
 

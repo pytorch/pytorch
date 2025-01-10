@@ -1,5 +1,5 @@
 import re
-from typing import Any, DefaultDict, Dict, List, Tuple, Union
+from typing import Any, DefaultDict, Dict, Tuple, Union
 
 import numpy as np
 import sympy as sp
@@ -13,10 +13,10 @@ s_pattern = r"s\d+"
 
 
 def infer_symbol_values(
-    symints: List[Union[torch.SymInt, int]],
-    init_symints: List[Union[torch.SymInt, int]],
+    symints: list[Union[torch.SymInt, int]],
+    init_symints: list[Union[torch.SymInt, int]],
     symbol_idx_dict: Dict[str, int],
-    padding_constraints: DefaultDict[torch.SymInt, List[Union[sp.Expr, int]]],
+    padding_constraints: DefaultDict[torch.SymInt, list[Union[sp.Expr, int]]],
     constraint: str,
 ) -> None:
     if constraint.find("non-singleton") != -1:
@@ -83,7 +83,7 @@ def infer_symbol_values(
 def calculate_value(
     left_expression: Union[str, Any, None],
     right_expression: Union[str, Any, None],
-    symints: List[Union[torch.SymInt, int]],
+    symints: list[Union[torch.SymInt, int]],
     symbol_idx_dict: Dict[str, int],
 ) -> None:
     var, val = solve_equation(left_expression, right_expression)
@@ -116,9 +116,9 @@ def solve_equation(
 
 
 def update_equation(
-    symints: List[Union[torch.SymInt, int]],
-    init_symints: List[Union[torch.SymInt, int]],
-    padding_constraints: DefaultDict[torch.SymInt, List[Union[sp.Expr, int]]],
+    symints: list[Union[torch.SymInt, int]],
+    init_symints: list[Union[torch.SymInt, int]],
+    padding_constraints: DefaultDict[torch.SymInt, list[Union[sp.Expr, int]]],
     init_eq: sp.Expr,
     new_mod_num: int,
     var: torch.SymInt,

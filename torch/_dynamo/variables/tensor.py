@@ -1391,7 +1391,7 @@ class TensorSubclassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
@@ -1431,7 +1431,7 @@ class UntypedStorageVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":

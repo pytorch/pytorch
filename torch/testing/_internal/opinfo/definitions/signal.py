@@ -3,7 +3,7 @@
 import unittest
 from functools import partial
 from itertools import product
-from typing import Callable, List, Tuple
+from typing import Callable, Tuple
 
 import numpy
 
@@ -346,7 +346,7 @@ def make_signal_windows_opinfo(
     )
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
         ref=reference_signal_window(scipy.signal.windows.hamming)

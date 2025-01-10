@@ -1,5 +1,5 @@
 import math
-from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Iterable, Literal, NamedTuple, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims as prims
@@ -566,7 +566,7 @@ def ihfft2(
     return torch.fft.ihfftn(input, s=s, dim=dim, norm=norm)
 
 
-def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
+def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> list[int]:
     """Convert Optional[DimsType] to a simple list, defaulting to all dimensions"""
     if dim is None:
         return list(range(x.ndim))

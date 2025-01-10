@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List
+from typing import Dict
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -452,7 +452,7 @@ unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
 
 
 def build_subgraph_buffer(
-    args: List[TensorBox],
+    args: list[TensorBox],
     subgraph: Subgraph,
 ):
     """
@@ -667,7 +667,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list: List[
+    subgraph_node_list: list[
         torch.fx.Node
     ] = []  # ordered list of nodes used for node removal later
     new_graph: torch.fx.Graph = torch.fx.Graph()

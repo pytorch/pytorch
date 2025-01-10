@@ -17,7 +17,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class ThreadFlow(object):
     """Describes a sequence of code locations that specify a path through a single thread of execution such as an operating system or fiber."""
 
-    locations: List[_thread_flow_location.ThreadFlowLocation] = dataclasses.field(
+    locations: list[_thread_flow_location.ThreadFlowLocation] = dataclasses.field(
         metadata={"schema_property_name": "locations"}
     )
     id: Optional[str] = dataclasses.field(

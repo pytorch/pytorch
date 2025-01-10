@@ -27,7 +27,6 @@ from typing import (
     Dict,
     final,
     Iterator,
-    List,
     Optional,
     Set,
     Type,
@@ -436,9 +435,9 @@ def _is_single_tensor_list_return(target: Any) -> bool:
 
 @dataclass
 class GraphState:
-    inputs: List[Argument] = field(default_factory=list)
-    outputs: List[Argument] = field(default_factory=list)
-    nodes: List[Node] = field(default_factory=list)
+    inputs: list[Argument] = field(default_factory=list)
+    outputs: list[Argument] = field(default_factory=list)
+    nodes: list[Node] = field(default_factory=list)
     tensor_values: Dict[str, TensorMeta] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
@@ -460,7 +459,7 @@ class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
-        module_call_graph: List[ep.ModuleCallEntry],
+        module_call_graph: list[ep.ModuleCallEntry],
     ):
         self.graph_state = GraphState()
         self.graph_signature = graph_signature
@@ -652,7 +651,7 @@ class GraphModuleSerializer(metaclass=Final):
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def serialize_sym_op_inputs(self, op, args) -> List[NamedArgument]:
+    def serialize_sym_op_inputs(self, op, args) -> list[NamedArgument]:
         if isinstance(op, torch._ops.OpOverload):
             args_names = [arg.name for arg in op._schema.arguments]
         else:
@@ -670,7 +669,7 @@ class GraphModuleSerializer(metaclass=Final):
         target: Any,  # torch._ops.OpOverload and other custom operator types.
         args,
         kwargs=None
-    ) -> List[NamedArgument]:
+    ) -> list[NamedArgument]:
         assert isinstance(target, (torch._ops.OpOverload, *_registered_extension_types()))
         kwargs = kwargs or {}
         serialized_args = []
@@ -699,7 +698,7 @@ class GraphModuleSerializer(metaclass=Final):
 
         return serialized_args
 
-    def serialize_hoo_inputs(self, args, kwargs) -> List[NamedArgument]:
+    def serialize_hoo_inputs(self, args, kwargs) -> list[NamedArgument]:
         """
         For serializing HOO inputs since HOOs do not have a schema.
         """
@@ -1174,8 +1173,8 @@ class GraphModuleSerializer(metaclass=Final):
         )
 
     def serialize_module_call_graph(
-        self, module_call_graph: List[ep.ModuleCallEntry]
-    ) -> List[ModuleCallEntry]:
+        self, module_call_graph: list[ep.ModuleCallEntry]
+    ) -> list[ModuleCallEntry]:
         return [
             ModuleCallEntry(
                 fqn=entry.fqn,
@@ -1188,7 +1187,7 @@ class GraphModuleSerializer(metaclass=Final):
             for entry in module_call_graph
         ]
 
-    def serialize_outputs(self, node: torch.fx.Node) -> List[Argument]:
+    def serialize_outputs(self, node: torch.fx.Node) -> list[Argument]:
         """For a given node, return the dataclass representing its output values.
 
         [NOTE: Multiple outputs] We handle aggregates differently than FX. For
@@ -1276,7 +1275,7 @@ class GraphModuleSerializer(metaclass=Final):
 
         return output_arguments
 
-    def serialize_hoo_outputs(self, node: torch.fx.Node) -> List[Argument]:
+    def serialize_hoo_outputs(self, node: torch.fx.Node) -> list[Argument]:
         """
         For serializing HOO outputs since HOOs do not have a schema.
         """
@@ -1353,7 +1352,7 @@ class GraphModuleSerializer(metaclass=Final):
         # list outputs should've been handled earlier
         raise SerializeError(f"Unable to serialize output {meta_val}")
 
-    def _handle_getitem_users(self, node: torch.fx.Node) -> List[TensorArgument]:
+    def _handle_getitem_users(self, node: torch.fx.Node) -> list[TensorArgument]:
         meta_val = node.meta["val"]
 
         idx_to_name = {}
@@ -1490,7 +1489,7 @@ class GraphModuleDeserializer(metaclass=Final):
     class Result:
         graph_module: torch.fx.GraphModule
         signature: ep.ExportGraphSignature
-        module_call_graph: List[ep.ModuleCallEntry]
+        module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
         constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
@@ -2044,7 +2043,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     kwargs[schema_arg.name] = actual_args[schema_arg.name]
         return tuple(args), kwargs
 
-    def deserialize_hoo_inputs(self, inputs: List[NamedArgument]):
+    def deserialize_hoo_inputs(self, inputs: list[NamedArgument]):
         """
         For deserializing HOO inputs since HOOs do not have a schema.
         """
@@ -2266,7 +2265,7 @@ class GraphModuleDeserializer(metaclass=Final):
         # return value.
         # This performs the inverse mapping of the `serialize_outputs` call in
         # serialization, see [NOTE: Multiple outputs]
-        meta_val: List[Any] = []
+        meta_val: list[Any] = []
         if len(serialized_node.outputs) == 1:
             assert isinstance(serialized_node.outputs[0].value, list)
             assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
@@ -2369,8 +2368,8 @@ class GraphModuleDeserializer(metaclass=Final):
         )
 
     def deserialize_module_call_graph(
-        self, module_call_graph: List[ModuleCallEntry]
-    ) -> List[ep.ModuleCallEntry]:
+        self, module_call_graph: list[ModuleCallEntry]
+    ) -> list[ep.ModuleCallEntry]:
         return [
             ep.ModuleCallEntry(
                 fqn=entry.fqn,
@@ -2633,15 +2632,15 @@ def _canonicalize_graph(
     def sort_nodes(nodes):
         @dataclass
         class Edges:
-            outs: List[int]
+            outs: list[int]
             ins: int
 
         graph_inputs: Set[str] = set()
         def_table: Dict[str, int] = {}
         edges: Dict[int, Edges] = {}
-        candidates: List[tuple[str, List[tuple[str, List[int]]], int]] = []
+        candidates: list[tuple[str, list[tuple[str, list[int]]], int]] = []
         rank: Dict[str, int] = {}
-        ret: List[Node] = []
+        ret: list[Node] = []
 
         def get_name(a) -> Optional[str]:
             if a is None:

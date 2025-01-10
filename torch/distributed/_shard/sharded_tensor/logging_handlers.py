@@ -7,10 +7,10 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import Dict, List
+from typing import Dict
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _log_handlers: Dict[str, logging.Handler] = {
     "default": logging.NullHandler(),

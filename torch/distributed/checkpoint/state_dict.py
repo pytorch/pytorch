@@ -12,7 +12,6 @@ from typing import (
     Dict,
     Generator,
     Iterable,
-    List,
     no_type_check,
     Optional,
     Set,
@@ -80,10 +79,10 @@ _STATE = "state"
 FQNS_T = Set[str]
 PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
 ValueType = Union[
-    PrimitiveType, List[PrimitiveType], Tuple[PrimitiveType], Dict[str, "ValueType"]
+    PrimitiveType, list[PrimitiveType], Tuple[PrimitiveType], Dict[str, "ValueType"]
 ]
 DictValueType = Dict[str, ValueType]
-ListDictValueType = List[DictValueType]
+ListDictValueType = list[DictValueType]
 OptimizerStateType = Dict[str, Union[DictValueType, ListDictValueType]]
 
 
@@ -160,7 +159,7 @@ class _StateDictInfo(StateDictOptions):
     handle_model: bool = True
     handle_optim: bool = True
     fsdp_context: Callable = contextlib.nullcontext
-    fsdp_modules: List[nn.Module] = field(default_factory=list)
+    fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
 @functools.lru_cache(maxsize=None)
@@ -385,7 +384,7 @@ def _verify_options(
         shared_params_mapping=shared_params_mapping,
         submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
-        fsdp_modules=cast(List[nn.Module], fsdp_modules),
+        fsdp_modules=cast(list[nn.Module], fsdp_modules),
         handle_model=not optim_only,
         handle_optim=(len(optims) > 0),
     )
@@ -695,7 +694,7 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
 
     for param_group in cast(ListDictValueType, state_dict[_PG]):
         fqns = param_group.pop(_PARAMS)
-        for fqn in cast(List[str], fqns):
+        for fqn in cast(list[str], fqns):
             for k, v in param_group.items():
                 ret[f"{_PG}.{fqn}.{k}"] = v
     return ret
@@ -729,7 +728,7 @@ def _unflatten_optim_state_dict(
                         f"{_STATE}.{fqn}.{state_name}"
                     ]
 
-        first_param_fqn = cast(List[str], pg_state[-1][_PARAMS])[0]
+        first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
         for k in param_group.keys():
             if k == _PARAMS:
                 continue
@@ -850,7 +849,7 @@ def _split_optim_state_dict(
                     for loaded_param_group in cast(
                         ListDictValueType, optim_state_dict[_PG]
                     ):
-                        if fqn in cast(List[str], loaded_param_group[_PARAMS]):
+                        if fqn in cast(list[str], loaded_param_group[_PARAMS]):
                             in_params = True
                             break
                 else:
@@ -866,7 +865,7 @@ def _split_optim_state_dict(
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
-                    if fqn in cast(List[str], loaded_param_group[_PARAMS]):
+                    if fqn in cast(list[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):

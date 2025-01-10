@@ -28,7 +28,7 @@ def post_training_sparse_quantize(
     model,
     data_sparsifier_class,
     sparsify_first=True,
-    select_embeddings: Optional[List[nn.Module]] = None,
+    select_embeddings: Optional[list[nn.Module]] = None,
     **sparse_config,
 ):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.

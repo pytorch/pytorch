@@ -38,7 +38,6 @@ from typing import (
     cast,
     Dict,
     Generator,
-    List,
     NoReturn,
     Optional,
     Sequence,
@@ -276,7 +275,7 @@ class PersistentCache(CacheBase):
 
     def lookup(
         self,
-        choices: List[ChoiceCaller],
+        choices: list[ChoiceCaller],
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
@@ -461,7 +460,7 @@ class TensorMetadataAndValues:
     """
 
     tensor_metadata: TensorMetadata
-    values: List[Any]
+    values: list[Any]
 
 
 def _ident(x: T) -> T:
@@ -629,7 +628,7 @@ class FxGraphCachePickler(pickle.Pickler):
         serialized_data = self.dumps(obj)
         return sha256_hash(serialized_data)
 
-    def debug_lines(self, inp: FxGraphHashDetails) -> List[str]:
+    def debug_lines(self, inp: FxGraphHashDetails) -> list[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
@@ -664,7 +663,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 def build_code_hash(
-    roots: List[str] | None, prefix: str, hasher: hashlib._Hash
+    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
 ) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
@@ -726,7 +725,7 @@ class OrderedSetHolder:
     of set kwargs.
     """
 
-    items: List[Any]
+    items: list[Any]
 
 
 class BypassFxGraphCache(Exception):
@@ -779,7 +778,7 @@ class FxGraphHashDetails:
 
         # Node meta will not be part of gm's reduce function, so lets remember
         # the kernel source code separately
-        self.user_defined_triton_source: List[Any] = []
+        self.user_defined_triton_source: list[Any] = []
         if gm is not None:
             for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
@@ -861,7 +860,7 @@ def compiled_fx_graph_hash(
     example_inputs: Sequence[InputType],
     fx_kwargs: _CompileFxKwargs,
     inputs_to_check: Sequence[int],
-) -> tuple[str, List[str]]:
+) -> tuple[str, list[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -957,7 +956,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: Sequence[InputType]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: Sequence[InputType]) -> list[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
@@ -1239,7 +1238,7 @@ class FxGraphCache:
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
-    ) -> tuple[Optional[tuple[str, List[str]]], Dict[str, Any]]:
+    ) -> tuple[Optional[tuple[str, list[str]]], Dict[str, Any]]:
         """
         Checks that the inductor input is cacheable, then computes
         and returns the cache key for the input.
@@ -1285,7 +1284,7 @@ class FxGraphCache:
     @staticmethod
     def load_with_key(
         key: str,
-        debug_lines: List[str],
+        debug_lines: list[str],
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
@@ -1410,8 +1409,8 @@ class AotCodeCompiler:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         device_type: str,
-        additional_files: List[str],
-    ) -> Union[List[str], str]:
+        additional_files: list[str],
+    ) -> Union[list[str], str]:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
@@ -1845,14 +1844,14 @@ def cpp_prefix() -> str:
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
 def compile_file(
-    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+    input_path: Union[str, list[str]], output_path: str, cmd: list[str]
 ) -> None:
     with dynamo_timed("compile_file"):
         return _compile_file(input_path, output_path, cmd)
 
 
 def _compile_file(
-    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+    input_path: Union[str, list[str]], output_path: str, cmd: list[str]
 ) -> None:
     input_paths = [input_path] if isinstance(input_path, str) else input_path
     input_files = [
@@ -2215,7 +2214,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     @classmethod
     def load_pybinding_async(
         cls,
-        argtypes: List[str],
+        argtypes: list[str],
         source_code: str,
         device_type: str = "cpu",
         num_outputs: int = -1,
@@ -2415,7 +2414,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     )
 
     @classmethod
-    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> List[str]:
+    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> list[str]:
         assert arg.shape is not None
         assert arg.stride is not None and len(arg.shape) == len(arg.stride)
         assert arg.offset is not None
@@ -2576,7 +2575,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         donefile = str(dirpath / "done")
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
-        jobs: List[Any] = []
+        jobs: list[Any] = []
         if need_compile:
             write_atomic(genfile, source_code)
             cmd = [
@@ -2688,7 +2687,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return sofile
 
 
-def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
+def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
     from torch.utils._filelock import FileLock
 
     try:
@@ -2736,8 +2735,8 @@ class PyCodeCache:
     # clearing the cache. Note also that we may load the same path more
     # than once, but attach different attributes, i.e., due to different
     # constant values.
-    modules: List[ModuleType] = []
-    linemaps: Dict[str, List[tuple[Any, ...]]] = {}
+    modules: list[ModuleType] = []
+    linemaps: Dict[str, list[tuple[Any, ...]]] = {}
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> tuple[str, str]:
@@ -2748,7 +2747,7 @@ class PyCodeCache:
         cls,
         source_code: str,
         extra: str = "",
-        linemap: Optional[List[tuple[int, str]]] = None,
+        linemap: Optional[list[tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
     ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
@@ -2759,7 +2758,7 @@ class PyCodeCache:
         cls,
         key: str,
         path: str,
-        linemap: Optional[List[tuple[int, str]]] = None,
+        linemap: Optional[list[tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
     ) -> ModuleType:
         if linemap is None:
@@ -2801,7 +2800,7 @@ class PyCodeCache:
     @functools.lru_cache(None)
     def stack_frames_for_code(
         cls, path: str, lineno: int
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> Optional[list[Dict[str, Any]]]:
         if path not in cls.linemaps:
             return None
         # [(starting_line, <fx node>), ...]
@@ -2813,7 +2812,7 @@ class PyCodeCache:
         if not entry:
             return None
 
-        def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
+        def parse_stack_trace(stack_trace: str) -> list[Dict[str, Any]]:
             # ideally fx stores stack traces as data rather than a string
             # but this is not along a performance critical path
             regex = r'File "(.+)", line (\d+), in (.+)\n'
@@ -2844,7 +2843,7 @@ def _cuda_compiler() -> Optional[str]:
     return "nvcc"
 
 
-def _cutlass_include_paths() -> List[str]:
+def _cutlass_include_paths() -> list[str]:
     if config.is_fbcode():
         from libfb.py import parutil
 
@@ -2860,14 +2859,14 @@ def _cutlass_include_paths() -> List[str]:
     ]
 
 
-def _cuda_lib_options() -> List[str]:
+def _cuda_lib_options() -> list[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
     lpaths = cpp_extension.library_paths(device_type="cuda") + [
         sysconfig.get_config_var("LIBDIR")
     ]
-    extra_ldflags: List[str] = []
+    extra_ldflags: list[str] = []
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
@@ -2883,7 +2882,7 @@ def _cuda_lib_options() -> List[str]:
     return extra_ldflags
 
 
-def _nvcc_host_compiler_options() -> List[str]:
+def _nvcc_host_compiler_options() -> list[str]:
     return [
         "-fPIC",
         "-fno-strict-aliasing",
@@ -2892,7 +2891,7 @@ def _nvcc_host_compiler_options() -> List[str]:
     ]
 
 
-def _nvcc_compiler_options() -> List[str]:
+def _nvcc_compiler_options() -> list[str]:
     arch = cuda_env.get_cuda_arch()
     if arch == "90":
         # Required by cutlass compilation.
@@ -2937,10 +2936,10 @@ def _nvcc_compiler_options() -> List[str]:
 
 
 def cuda_compile_command(
-    src_files: List[str],
+    src_files: list[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args: Optional[List[str]] = None,
+    extra_args: Optional[list[str]] = None,
 ) -> str:
     if extra_args is None:
         extra_args = []
@@ -3076,7 +3075,7 @@ class CUDACodeCache:
 
     @classmethod
     def compile(
-        cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
+        cls, source_code: str, dst_file_ext: str, extra_args: Optional[list[str]] = None
     ) -> tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
@@ -3162,7 +3161,7 @@ class ROCmCodeCache:
 
     @classmethod
     def compile(
-        cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
+        cls, source_code: str, dst_file_ext: str, extra_args: Optional[list[str]] = None
     ) -> tuple[str, str, str]:
         """
         Compiles source_code into a file with dst_file_ext extension,

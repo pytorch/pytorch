@@ -29,7 +29,6 @@ from typing import (
     Dict,
     Generic,
     Iterable,
-    List,
     NamedTuple,
     Optional,
     Protocol,
@@ -308,7 +307,7 @@ def _type_of(key):
 
 def convert_shape_to_inductor(
     lst: Iterable[Union[int, torch.SymInt]]
-) -> List[sympy.Expr]:
+) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -319,7 +318,7 @@ def convert_shape_to_inductor(
 
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]]
-) -> List[Union[int, torch.SymInt]]:
+) -> list[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
@@ -433,7 +432,7 @@ def precompute_method(obj: Any, method: str):
     setattr(obj, method, lambda: result)
 
 
-def precompute_methods(obj: Any, methods: List[str]):
+def precompute_methods(obj: Any, methods: list[str]):
     """Replace methods with new methods that returns a precomputed constants."""
     for method in methods:
         precompute_method(obj, method)
@@ -451,7 +450,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x: tuple[_T, ...]) -> List[_T]:
+def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
     if len(x) == 0:
         return []
 
@@ -804,7 +803,7 @@ def output_node(gm: torch.fx.GraphModule):
     return last_node
 
 
-_registered_caches: List[Any] = []
+_registered_caches: list[Any] = []
 
 
 def clear_on_fresh_inductor_cache(obj: Any):
@@ -871,7 +870,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         clear_inductor_caches()
 
 
-def argsort(seq) -> List[int]:
+def argsort(seq) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -880,7 +879,7 @@ def argsort(seq) -> List[int]:
 
 def argsort_sym(
     shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
-) -> List[int]:
+) -> list[int]:
     def cmp(a, b):
         a_idx, a_val = a
         b_idx, b_val = b
@@ -1180,7 +1179,7 @@ def use_max_autotune() -> bool:
     )
 
 
-def _use_template_for_gpu(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+def _use_template_for_gpu(layout, allowed_layout_dtypes: list[torch.dtype]) -> bool:
     return (
         is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
@@ -1462,10 +1461,10 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str):
         source_codes.append(code)
@@ -1476,7 +1475,7 @@ def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
     return result, source_codes
 
 
-def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1497,7 +1496,7 @@ def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str):
         source_codes.append(code)
@@ -2192,13 +2191,13 @@ def shape_env_from_inputs(inputs: Sequence[InputType]):
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[List[InputType]], Any],
+    model: Callable[[list[InputType]], Any],
     inputs_to_check: Sequence[int],
-) -> Callable[[List[InputType]], Any]:
+) -> Callable[[list[InputType]], Any]:
     if len(inputs_to_check) == 0:
         return model
 
-    def run(new_inputs: List[InputType]):
+    def run(new_inputs: list[InputType]):
         copy_misaligned_inputs(new_inputs, inputs_to_check)
         return model(new_inputs)
 
@@ -2218,7 +2217,7 @@ def clone_preserve_strides(x: torch.Tensor):
 
 
 def copy_misaligned_inputs(
-    new_inputs: List[InputType], check_inputs_idxs: Sequence[int]
+    new_inputs: list[InputType], check_inputs_idxs: Sequence[int]
 ) -> None:
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
@@ -2420,7 +2419,7 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     return wrap(cls)
 
 
-def get_donated_idxs() -> Optional[List[int]]:
+def get_donated_idxs() -> Optional[list[int]]:
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs

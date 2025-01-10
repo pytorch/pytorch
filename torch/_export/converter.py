@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Dict, Optional, Sequence, Set, Union
 
 import torch
 import torch.export._trace
@@ -72,7 +72,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+) -> tuple[torch.Graph, list["_C.IValue"], Any, Optional[torch.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -406,12 +406,12 @@ class TS2FXGraphConverter:
         self.name_to_buffer = name_to_buffer
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
-        self.input_specs: List[InputSpec] = []
-        self.output_specs: List[OutputSpec] = []
+        self.input_specs: list[InputSpec] = []
+        self.output_specs: list[OutputSpec] = []
 
         # Mapping of TS node name to converted FX node
         self.name_to_node: Dict[
-            str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
+            str, Union[torch.fx.Node, list[torch.fx.Node], Dict[Any, torch.fx.Node]]
         ] = {}
         # Mapping of TS node name to constant value (int, str, TorchBind obj,
         # tensor constants ...)
@@ -469,7 +469,7 @@ class TS2FXGraphConverter:
             )
         )
 
-    def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: List[str]):
+    def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: list[str]):
         subgraph_nodes, subgraph_converters = [], []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
@@ -1350,7 +1350,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
         )
 
         # Data to keep track of unsupported nodes.
-        self.unsupported_node_list: List[torch._C.Node] = []
+        self.unsupported_node_list: list[torch._C.Node] = []
 
         # Add mock to needed attributes.
         self.name_to_node = ExplainTS2FXGraphConverter._DictMock(

@@ -5,7 +5,7 @@ import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, overload, Tuple, Union
+from typing import Any, cast, Dict, Iterable, Optional, overload, Tuple, Union
 
 import torch
 
@@ -175,7 +175,7 @@ class GradScaler:
         ...
 
     @overload
-    def scale(self, outputs: List[torch.Tensor]) -> List[torch.Tensor]:
+    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]:
         ...
 
     @overload
@@ -210,7 +210,7 @@ class GradScaler:
             return outputs * self._scale.to(device=outputs.device, non_blocking=True)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
-        stash: List[
+        stash: list[
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
@@ -248,7 +248,7 @@ class GradScaler:
         # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
         # Google says mypy struggles with defaultdicts type annotations.
         per_device_and_dtype_grads: Dict[
-            torch.device, Dict[torch.dtype, List[torch.Tensor]]
+            torch.device, Dict[torch.dtype, list[torch.Tensor]]
         ] = defaultdict(lambda: defaultdict(list))
         with torch.no_grad():
             for group in optimizer.param_groups:

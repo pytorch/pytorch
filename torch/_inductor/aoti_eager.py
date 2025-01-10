@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 from unittest import mock
 
 import torch
@@ -31,7 +31,7 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
 
 def load_aoti_eager_cache(
     ns: str, op_func_name_with_overload: str, device_type: str
-) -> List[Optional[Dict[str, Any]]]:
+) -> list[Optional[Dict[str, Any]]]:
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
@@ -110,7 +110,7 @@ def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> Dict[str, Any
 
 def extract_tensor_list_metadata(
     dynamic: bool,
-    input: List[torch.Tensor],
+    input: list[torch.Tensor],
 ) -> Dict[str, Any]:
     metadata_list = []
     for item in input:

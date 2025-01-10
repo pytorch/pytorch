@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import sympy
 
@@ -533,7 +533,7 @@ def tuned_scaled_mm(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices: List[ChoiceCaller] = []
+    choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 

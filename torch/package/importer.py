@@ -7,7 +7,7 @@ from pickle import (  # type: ignore[attr-defined]
     whichmodule as _pickle_whichmodule,
 )
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -184,7 +184,7 @@ class OrderedImporter(Importer):
     """
 
     def __init__(self, *args):
-        self._importers: List[Importer] = list(args)
+        self._importers: list[Importer] = list(args)
 
     def _is_torchpackage_dummy(self, module):
         """Returns true iff this module is an empty PackageNode in a torch.package.

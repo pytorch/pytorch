@@ -6,7 +6,6 @@ from typing import (
     Callable,
     Dict,
     Generic,
-    List,
     Optional,
     overload,
     Protocol,
@@ -153,9 +152,9 @@ def contract(
             # `func` is allowed to return different module instances than the
             # input modules as long as FQNs are preserved following the input
             # module order
-            all_orig_named_params: List[Dict[str, nn.Parameter]] = []
-            all_orig_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_orig_named_modules: List[Dict[str, nn.Module]] = []
+            all_orig_named_params: list[Dict[str, nn.Parameter]] = []
+            all_orig_named_buffers: list[Dict[str, torch.Tensor]] = []
+            all_orig_named_modules: list[Dict[str, nn.Module]] = []
 
             for module in modules:
                 default_all_state: Dict[Callable, _State] = OrderedDict()
@@ -195,9 +194,9 @@ def contract(
             else:
                 updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
 
-            all_new_named_params: List[Dict[str, nn.Parameter]] = []
-            all_new_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_new_named_modules: List[Dict[str, nn.Module]] = []
+            all_new_named_params: list[Dict[str, nn.Parameter]] = []
+            all_new_named_buffers: list[Dict[str, torch.Tensor]] = []
+            all_new_named_modules: list[Dict[str, nn.Module]] = []
             for module in updated_modules:
                 all_new_named_params.append(OrderedDict(module.named_parameters()))
                 all_new_named_buffers.append(OrderedDict(module.named_buffers()))
@@ -212,7 +211,7 @@ def contract(
                     f"Outputs: {num_new_modules} modules"
                 )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
+            def check_fqn(orig_fqns: list[str], new_fqns: list[str], check_key: str):
                 if orig_fqns == new_fqns:
                     return
 

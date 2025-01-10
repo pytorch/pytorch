@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, Optional
 
 from torch._export.serde.union import _Union
 
@@ -96,10 +96,10 @@ class SymBool(_Union):
 @dataclass
 class TensorMeta:
     dtype: Annotated[ScalarType, 10]
-    sizes: Annotated[List[SymInt], 20]
+    sizes: Annotated[list[SymInt], 20]
     requires_grad: Annotated[bool, 30]
     device: Annotated[Device, 40]
-    strides: Annotated[List[SymInt], 50]
+    strides: Annotated[list[SymInt], 50]
     storage_offset: Annotated[SymInt, 60]
     layout: Annotated[Layout, 70]
 
@@ -175,29 +175,29 @@ class CustomObjArgument:
 class Argument(_Union):
     as_none: Annotated[bool, 10]
     as_tensor: Annotated[TensorArgument, 20]
-    as_tensors: Annotated[List[TensorArgument], 30]
+    as_tensors: Annotated[list[TensorArgument], 30]
     as_int: Annotated[int, 50]
-    as_ints: Annotated[List[int], 70]
+    as_ints: Annotated[list[int], 70]
     as_float: Annotated[float, 80]
-    as_floats: Annotated[List[float], 90]
+    as_floats: Annotated[list[float], 90]
     as_string: Annotated[str, 100]
-    as_strings: Annotated[List[str], 101]
+    as_strings: Annotated[list[str], 101]
     as_sym_int: Annotated[SymIntArgument, 110]
-    as_sym_ints: Annotated[List[SymIntArgument], 120]
+    as_sym_ints: Annotated[list[SymIntArgument], 120]
     as_scalar_type: Annotated[ScalarType, 130]
     as_memory_format: Annotated[MemoryFormat, 140]
     as_layout: Annotated[Layout, 150]
     as_device: Annotated[Device, 160]
     as_bool: Annotated[bool, 170]
-    as_bools: Annotated[List[bool], 180]
+    as_bools: Annotated[list[bool], 180]
     as_sym_bool: Annotated[SymBoolArgument, 182]
-    as_sym_bools: Annotated[List[SymBoolArgument], 184]
+    as_sym_bools: Annotated[list[SymBoolArgument], 184]
     as_graph: Annotated[GraphArgument, 200]
-    as_optional_tensors: Annotated[List[OptionalTensorArgument], 190]
+    as_optional_tensors: Annotated[list[OptionalTensorArgument], 190]
     as_custom_obj: Annotated[CustomObjArgument, 210]
     as_operator: Annotated[str, 220]
     as_sym_float: Annotated[SymFloatArgument, 230]
-    as_sym_floats: Annotated[List[SymFloatArgument], 240]
+    as_sym_floats: Annotated[list[SymFloatArgument], 240]
 
 @dataclass
 class NamedArgument:
@@ -209,16 +209,16 @@ class NamedArgument:
 @dataclass
 class Node:
     target: Annotated[str, 10]
-    inputs: Annotated[List[NamedArgument], 20]
-    outputs: Annotated[List[Argument], 30]
+    inputs: Annotated[list[NamedArgument], 20]
+    outputs: Annotated[list[Argument], 30]
     metadata: Annotated[Dict[str, str], 40]
 
 
 @dataclass
 class Graph:
-    inputs: Annotated[List[Argument], 10]
-    outputs: Annotated[List[Argument], 20]
-    nodes: Annotated[List[Node], 30]
+    inputs: Annotated[list[Argument], 10]
+    outputs: Annotated[list[Argument], 20]
+    nodes: Annotated[list[Node], 30]
     tensor_values: Annotated[Dict[str, TensorMeta], 40]
     sym_int_values: Annotated[Dict[str, SymInt], 50]
     sym_bool_values: Annotated[Dict[str, SymBool], 60]
@@ -345,8 +345,8 @@ class OutputSpec(_Union):
 
 @dataclass
 class GraphSignature:
-    input_specs: Annotated[List[InputSpec], 10]
-    output_specs: Annotated[List[OutputSpec], 20]
+    input_specs: Annotated[list[InputSpec], 10]
+    output_specs: Annotated[list[OutputSpec], 20]
 
 
 @dataclass
@@ -357,8 +357,8 @@ class RangeConstraint:
 
 @dataclass
 class ModuleCallSignature:
-    inputs: Annotated[List[Argument], 10]
-    outputs: Annotated[List[Argument], 20]
+    inputs: Annotated[list[Argument], 10]
+    outputs: Annotated[list[Argument], 20]
 
     # These are serialized by calling pytree.treespec_loads
     # And deserialized by calling pytree.treespec_dumps
@@ -367,7 +367,7 @@ class ModuleCallSignature:
 
     # This field is used to prettify the graph placeholders
     # after we ser/der and retrace
-    forward_arg_names: Annotated[Optional[List[str]], 50] = None
+    forward_arg_names: Annotated[Optional[list[str]], 50] = None
 
 
 @dataclass
@@ -383,7 +383,7 @@ class GraphModule:
     # This is used for unflattening, by tracking the calling structure of all of
     # the modules in order to unflatten the modules back to the eager calling
     # conventions.
-    module_call_graph: Annotated[List[ModuleCallEntry], 60]
+    module_call_graph: Annotated[list[ModuleCallEntry], 60]
     metadata: Annotated[Dict[str, str], 40] = field(default_factory=dict)
 
 
@@ -402,5 +402,5 @@ class ExportedProgram:
     opset_version: Annotated[Dict[str, int], 20]
     range_constraints: Annotated[Dict[str, RangeConstraint], 30]
     schema_version: Annotated[SchemaVersion, 60]
-    verifiers: Annotated[List[str], 70] = field(default_factory=list)
+    verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"

@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -374,7 +374,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Nod
         "conv_bias_q", "conv_bias_dq"
     """
 
-    def _get_nodes(nodes: List[Node]) -> tuple[Node, Node, Optional[Node]]:
+    def _get_nodes(nodes: list[Node]) -> tuple[Node, Node, Optional[Node]]:
         """
         Return a 3-tuple of (conv_node, bn_node, getitem_node).
         This asserts that the match contains exactly one of each node.

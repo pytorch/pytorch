@@ -4,7 +4,7 @@ import functools
 import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Generator, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -30,13 +30,13 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     lowering object. Errors if buffers are created unexpectedly
     """
 
-    graph_outputs: Optional[List[ir.IRNode]]
+    graph_outputs: Optional[list[ir.IRNode]]
     root_graph: torch._inductor.graph.GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
     allowed_mutations: Optional[OrderedSet[OpOverload]]
     additional_lowerings: Optional[LoweringDict]
-    buffers: List[ir.Buffer]
+    buffers: list[ir.Buffer]
     mutated_buffers: OrderedSet[str]
 
     def __init__(
@@ -155,7 +155,7 @@ class TracingOpsHandler(WrapperHandler[T]):
 
 
 def lower_pointwise_subgraph(
-    subgraph: ir.Subgraph, inputs: List[InputDescriptor]
+    subgraph: ir.Subgraph, inputs: list[InputDescriptor]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(

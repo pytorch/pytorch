@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 import torch
 from torch.ao.quantization import FakeQuantizeBase, ObserverBase
@@ -21,7 +21,7 @@ from .pattern_utils import (
 toq = torch.ops.quantized
 
 
-def _get_output_nodes(g: Graph) -> List[Node]:
+def _get_output_nodes(g: Graph) -> list[Node]:
     return [n for n in g.nodes if n.op == "output"]
 
 
@@ -46,7 +46,7 @@ class _NSGraphMatchableSubgraphsIterator:
         self.non_matchable_modules: Set[NSNodeTargetType] = non_matchable_modules
         self.non_matchable_methods: Set[NSNodeTargetType] = non_matchable_methods
         self.seen_nodes: Set[Node] = set()
-        self.stack: List[Node] = []
+        self.stack: list[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
             self.stack.append(start_node)
 

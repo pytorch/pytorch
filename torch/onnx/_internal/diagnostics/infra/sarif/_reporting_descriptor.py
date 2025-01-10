@@ -24,13 +24,13 @@ class ReportingDescriptor(object):
             default=None, metadata={"schema_property_name": "defaultConfiguration"}
         )
     )
-    deprecated_guids: Optional[List[str]] = dataclasses.field(
+    deprecated_guids: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedGuids"}
     )
-    deprecated_ids: Optional[List[str]] = dataclasses.field(
+    deprecated_ids: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedIds"}
     )
-    deprecated_names: Optional[List[str]] = dataclasses.field(
+    deprecated_names: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedNames"}
     )
     full_description: Optional[_multiformat_message_string.MultiformatMessageString] = (
@@ -57,7 +57,7 @@ class ReportingDescriptor(object):
         default=None, metadata={"schema_property_name": "properties"}
     )
     relationships: Optional[
-        List[_reporting_descriptor_relationship.ReportingDescriptorRelationship]
+        list[_reporting_descriptor_relationship.ReportingDescriptorRelationship]
     ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "relationships"}
     )

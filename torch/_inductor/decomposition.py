@@ -4,7 +4,7 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -122,7 +122,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
+    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:
@@ -169,7 +169,7 @@ def clamp(
 
 @register_decomposition([aten.full])
 def full(
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
     fill_value: torch.types.Number,
     **kwargs: Any,
 ) -> torch.Tensor:
@@ -204,8 +204,8 @@ def index_add(
 # cool with strides and everything goes to empty_strided)
 @register_decomposition([aten.empty_permuted.default])
 def empty_permuted(
-    size: List[Union[int, torch.SymInt]],
-    physical_layout: List[int],
+    size: list[Union[int, torch.SymInt]],
+    physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
     perm = [0] * len(size)
@@ -219,14 +219,14 @@ def convolution_backward(
     grad_output: torch.Tensor,
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias_sizes: List[int],
-    stride: Union[int, List[int]],
-    padding: Union[int, List[int]],
-    dilation: Union[int, List[int]],
+    bias_sizes: list[int],
+    stride: Union[int, list[int]],
+    padding: Union[int, list[int]],
+    dilation: Union[int, list[int]],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
-    output_mask: List[bool],
+    output_mask: list[bool],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
@@ -344,7 +344,7 @@ def mm(
 #   don't remove ALL empty tensors, only the naughty ones)
 @register_decomposition([aten.cat.default])
 def cat(
-    tensors: List[torch.Tensor],
+    tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -514,7 +514,7 @@ def narrow_copy(
 @register_decomposition([aten.view_copy.default])
 def view_copy_default(
     self: torch.Tensor,
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
 ) -> torch.Tensor:
     return aten.view(self, size).clone()
 
@@ -638,7 +638,7 @@ def randint_like_low(
 @register_decomposition(aten.randint.default)
 def randint(
     high: int,
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
     **kwargs: Any,
 ) -> torch.Tensor:
     return aten.randint.low(0, high, size, **kwargs)
@@ -730,11 +730,11 @@ def grid_sampler_2d(
 
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(
-    self: List[torch.Tensor],
-    left_tensors: List[torch.Tensor],
-    right_tensors: List[torch.Tensor],
+    self: list[torch.Tensor],
+    left_tensors: list[torch.Tensor],
+    right_tensors: list[torch.Tensor],
     scalar: float = 1,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
     )
@@ -742,11 +742,11 @@ def _foreach_addcmul_scalar(
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
 def _foreach_addcdiv_scalar(
-    self: List[torch.Tensor],
-    left_tensors: List[torch.Tensor],
-    right_tensors: List[torch.Tensor],
+    self: list[torch.Tensor],
+    left_tensors: list[torch.Tensor],
+    right_tensors: list[torch.Tensor],
     scalar: float = 1,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
     )
@@ -754,10 +754,10 @@ def _foreach_addcdiv_scalar(
 
 @register_decomposition(aten._foreach_lerp.Scalar)
 def _foreach_lerp_scalar(
-    start_tensors: List[torch.Tensor],
-    end_tensors: List[torch.Tensor],
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
     weight: torch.types.Number,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         start_tensors,
         aten._foreach_mul.Scalar(
@@ -768,10 +768,10 @@ def _foreach_lerp_scalar(
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
 def _foreach_lerp_scalarlist(
-    start_tensors: List[torch.Tensor],
-    end_tensors: List[torch.Tensor],
-    scalars: List[torch.types.Number],
-) -> List[torch.Tensor]:
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
+    scalars: list[torch.types.Number],
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         start_tensors,
         aten._foreach_mul.ScalarList(
@@ -964,10 +964,10 @@ def index_reduce(
 @register_decomposition(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x: torch.Tensor,
-    kernel_size: List[int],
-    stride: Optional[Union[int, List[int]]] = None,
-    padding: Union[int, List[int]] = 0,
-    dilation: Union[int, List[int]] = 1,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]] = None,
+    padding: Union[int, list[int]] = 0,
+    dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if dilation == 1:
@@ -1014,7 +1014,7 @@ def max_pool2d_with_indices(
 
 @register_decomposition(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: List[int]
+    x: torch.Tensor, output_size: list[int]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     *batch, h_in, w_in = x.shape
     h_out, w_out = output_size

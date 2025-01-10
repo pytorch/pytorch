@@ -1016,7 +1016,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values: List[torch.nn.attention.SDPBackend],
+        target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
         **kwargs,
     ) -> None:

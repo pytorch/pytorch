@@ -36,7 +36,7 @@ class Notification(object):
     level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    locations: Optional[List[_location.Location]] = dataclasses.field(
+    locations: Optional[list[_location.Location]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

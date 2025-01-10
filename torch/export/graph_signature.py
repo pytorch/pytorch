@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
+from typing import Collection, Dict, Mapping, Optional, Set, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import is_fake
@@ -221,8 +221,8 @@ class ExportGraphSignature:
         )
     """
 
-    input_specs: List[InputSpec]
-    output_specs: List[OutputSpec]
+    input_specs: list[InputSpec]
+    output_specs: list[OutputSpec]
 
     # A list of parameters uniquely identified by mangled fully qualified name
     @property
@@ -276,7 +276,7 @@ class ExportGraphSignature:
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_inputs: List[Union[int, float, bool, None, str]] = []
+        user_inputs: list[Union[int, float, bool, None, str]] = []
         for s in self.input_specs:
             if s.kind != InputKind.USER_INPUT:
                 continue
@@ -302,7 +302,7 @@ class ExportGraphSignature:
     # For joint-graph purposes, will include the loss output.
     @property
     def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_outputs: List[Union[int, float, bool, None, str]] = []
+        user_outputs: list[Union[int, float, bool, None, str]] = []
         for s in self.output_specs:
             if s.kind not in [
                 OutputKind.USER_OUTPUT,

@@ -1,12 +1,12 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field  # noqa: F811
-from typing import Any, Callable, Generator, List
+from typing import Any, Callable, Generator
 
 
 @dataclass
 class CompilationCallbackHandler:
-    start_callbacks: List[Callable[[], None]] = field(default_factory=list)
-    end_callbacks: List[Callable[[], None]] = field(default_factory=list)
+    start_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    end_callbacks: list[Callable[[], None]] = field(default_factory=list)
 
     def register_start_callback(
         self, callback: Callable[[], None]

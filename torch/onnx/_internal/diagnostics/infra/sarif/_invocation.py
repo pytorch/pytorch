@@ -24,7 +24,7 @@ class Invocation(object):
     account: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "account"}
     )
-    arguments: Optional[List[str]] = dataclasses.field(
+    arguments: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "arguments"}
     )
     command_line: Optional[str] = dataclasses.field(
@@ -57,7 +57,7 @@ class Invocation(object):
         default=None, metadata={"schema_property_name": "machine"}
     )
     notification_configuration_overrides: Optional[
-        List[_configuration_override.ConfigurationOverride]
+        list[_configuration_override.ConfigurationOverride]
     ] = dataclasses.field(
         default=None,
         metadata={"schema_property_name": "notificationConfigurationOverrides"},
@@ -71,13 +71,13 @@ class Invocation(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    response_files: Optional[List[_artifact_location.ArtifactLocation]] = (
+    response_files: Optional[list[_artifact_location.ArtifactLocation]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "responseFiles"}
         )
     )
     rule_configuration_overrides: Optional[
-        List[_configuration_override.ConfigurationOverride]
+        list[_configuration_override.ConfigurationOverride]
     ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "ruleConfigurationOverrides"}
     )
@@ -96,13 +96,13 @@ class Invocation(object):
     stdout_stderr: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stdoutStderr"}
     )
-    tool_configuration_notifications: Optional[List[_notification.Notification]] = (
+    tool_configuration_notifications: Optional[list[_notification.Notification]] = (
         dataclasses.field(
             default=None,
             metadata={"schema_property_name": "toolConfigurationNotifications"},
         )
     )
-    tool_execution_notifications: Optional[List[_notification.Notification]] = (
+    tool_execution_notifications: Optional[list[_notification.Notification]] = (
         dataclasses.field(
             default=None,
             metadata={"schema_property_name": "toolExecutionNotifications"},

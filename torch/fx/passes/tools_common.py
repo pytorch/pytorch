@@ -2,7 +2,7 @@
 import collections
 import operator
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx
@@ -18,11 +18,11 @@ __all__ = [
     "legalize_graph",
 ]
 
-Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
+Tensors = Union[Tuple[torch.Tensor], list[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
-NodeList = List[torch.fx.Node]
+NodeList = list[torch.fx.Node]
 NodeSet = Set[torch.fx.Node]
-Names = List[str]
+Names = list[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 

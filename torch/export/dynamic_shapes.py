@@ -5,7 +5,7 @@ import logging
 import sys
 from collections import defaultdict
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (
@@ -401,11 +401,11 @@ Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 def _process_equalities(
     constraint: Constraint,
-    get_sources: Callable[[int, int], List["Source"]],
+    get_sources: Callable[[int, int], list["Source"]],
     shape_env: "ShapeEnv",
     names: Dict[str, Tuple[int, int]],
-    source_pairs: List[Tuple["Source", "Source"]],
-    derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
+    source_pairs: list[Tuple["Source", "Source"]],
+    derived_equalities: list[Tuple["Source", Union["Source", "Symbol"], Callable]],
     phantom_symbols: Dict[str, "Symbol"],
     relaxed_sources: Set["Source"],
 ):
@@ -685,7 +685,7 @@ def _warn_on_None_dynamic_shape_dimension():
 
 def _check_dynamic_shapes(
     combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], list[Any], None],
 ):
     """
     Checks the dynamic_shapes specification for correctness,
@@ -800,8 +800,8 @@ def _check_dynamic_shapes(
 
 def _process_dynamic_shapes(
     combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
-) -> List[Constraint]:
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], list[Any], None],
+) -> list[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
     """
@@ -814,12 +814,12 @@ def _process_dynamic_shapes(
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
 
     # map of Dim names representing input shape dimensions to constraints on them
-    symbols: Dict[str, List[Constraint]] = defaultdict(list)
+    symbols: Dict[str, list[Constraint]] = defaultdict(list)
     # track roots that do not directly represent input shape dimensions
     phantom_roots: Dict[str, _PhantomRoot] = {}
-    derived_constraints_with_phantom_root: List[_DerivedConstraint] = []
+    derived_constraints_with_phantom_root: list[_DerivedConstraint] = []
     # list of constraints to return
-    constraints: List[Constraint] = []
+    constraints: list[Constraint] = []
 
     def to_constraint(dim, tensor, i):
         import sympy
@@ -979,7 +979,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], list[Any], None]
 ):
     name_to_dim = {}
     for dim in tree_flatten(
@@ -1002,8 +1002,8 @@ def _get_dim_name_mapping(
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
-) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], list[Any]],
+) -> Union[Dict[str, Any], Tuple[Any], list[Any]]:
     """
     When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
     doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -

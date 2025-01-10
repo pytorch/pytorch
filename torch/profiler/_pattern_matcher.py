@@ -3,7 +3,7 @@ import json
 import math
 import os
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 import torch
 import torch.utils.benchmark as benchmark
@@ -34,7 +34,7 @@ class Pattern:
         self.url = ""
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
         self.event_tree = prof.profiler.kineto_results.experimental_event_tree()
-        self.tid_root: Dict[int, List[_ProfilerEvent]] = {}
+        self.tid_root: Dict[int, list[_ProfilerEvent]] = {}
         for event in self.event_tree:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 
@@ -55,7 +55,7 @@ class Pattern:
         """
         yield from traverse_dfs(self.event_tree)
 
-    def summary(self, events: List[_ProfilerEvent]):
+    def summary(self, events: list[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
         if self.should_benchmark:
             # If benchmark summary is not empty, use it.
@@ -66,7 +66,7 @@ class Pattern:
             )
         return default_summary
 
-    def benchmark_summary(self, events: List[_ProfilerEvent]):
+    def benchmark_summary(self, events: list[_ProfilerEvent]):
         def format_time(time_ns: int):
             unit_lst = ["ns", "us", "ms"]
             for unit in unit_lst:
@@ -215,7 +215,7 @@ class ExtraCUDACopyPattern(Pattern):
         return event.name in self.init_ops
         # TODO: Check if tensor is reused
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         shapes_factor_map = {input_shapes(event): 0.0 for event in events}
         for shape in shapes_factor_map:
             size = shape[0]
@@ -326,7 +326,7 @@ class FP32MatMulPattern(Pattern):
     def report(self, event: _ProfilerEvent):
         return self.description
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         shapes_factor_map = {input_shapes(event): 0.0 for event in events}
         for shape in shapes_factor_map:
             matrixA = torch.randn(shape[0], device="cuda", dtype=torch.float32)
@@ -553,7 +553,7 @@ class MatMulDimInFP16Pattern(Pattern):
             return True
         return False
 
-    def benchmark(self, events: List[_ProfilerEvent]):
+    def benchmark(self, events: list[_ProfilerEvent]):
         def closest_multiple(shapes, multiple):
             return [multiple * math.ceil(shape / multiple) for shape in shapes]
 

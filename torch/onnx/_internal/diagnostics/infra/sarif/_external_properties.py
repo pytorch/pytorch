@@ -26,10 +26,10 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class ExternalProperties(object):
     """The top-level element of an external property file."""
 
-    addresses: Optional[List[_address.Address]] = dataclasses.field(
+    addresses: Optional[list[_address.Address]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "addresses"}
     )
-    artifacts: Optional[List[_artifact.Artifact]] = dataclasses.field(
+    artifacts: Optional[list[_artifact.Artifact]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "artifacts"}
     )
     conversion: Optional[_conversion.Conversion] = dataclasses.field(
@@ -38,33 +38,33 @@ class ExternalProperties(object):
     driver: Optional[_tool_component.ToolComponent] = dataclasses.field(
         default=None, metadata={"schema_property_name": "driver"}
     )
-    extensions: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    extensions: Optional[list[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "extensions"}
     )
     externalized_properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "externalizedProperties"}
     )
-    graphs: Optional[List[_graph.Graph]] = dataclasses.field(
+    graphs: Optional[list[_graph.Graph]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "graphs"}
     )
     guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    invocations: Optional[List[_invocation.Invocation]] = dataclasses.field(
+    invocations: Optional[list[_invocation.Invocation]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "invocations"}
     )
-    logical_locations: Optional[List[_logical_location.LogicalLocation]] = (
+    logical_locations: Optional[list[_logical_location.LogicalLocation]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "logicalLocations"}
         )
     )
-    policies: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    policies: Optional[list[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "policies"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    results: Optional[List[_result.Result]] = dataclasses.field(
+    results: Optional[list[_result.Result]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "results"}
     )
     run_guid: Optional[str] = dataclasses.field(
@@ -73,24 +73,24 @@ class ExternalProperties(object):
     schema: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "schema"}
     )
-    taxonomies: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    taxonomies: Optional[list[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "taxonomies"}
     )
-    thread_flow_locations: Optional[List[_thread_flow_location.ThreadFlowLocation]] = (
+    thread_flow_locations: Optional[list[_thread_flow_location.ThreadFlowLocation]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "threadFlowLocations"}
         )
     )
-    translations: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    translations: Optional[list[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "translations"}
     )
     version: Optional[Literal["2.1.0"]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}
     )
-    web_requests: Optional[List[_web_request.WebRequest]] = dataclasses.field(
+    web_requests: Optional[list[_web_request.WebRequest]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequests"}
     )
-    web_responses: Optional[List[_web_response.WebResponse]] = dataclasses.field(
+    web_responses: Optional[list[_web_response.WebResponse]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponses"}
     )
 

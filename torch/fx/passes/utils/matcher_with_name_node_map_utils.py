@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 from torch.fx import Graph, GraphModule, Node
 from torch.fx._compatibility import compatibility
@@ -88,7 +88,7 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             ignore_literals,
         )
 
-    def match(self, graph: Graph) -> List[InternalMatch]:
+    def match(self, graph: Graph) -> list[InternalMatch]:
         """The returned InternalMatch will have name_node_map populated with a map
         from node name (str) to the target node, e.g.
         {"conv": target_conv_ndoe, "relu": target_relu_node}

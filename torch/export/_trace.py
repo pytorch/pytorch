@@ -10,7 +10,7 @@ import time
 import types
 import warnings
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch._dynamo
@@ -206,8 +206,8 @@ def _extract_fake_inputs(gm, args, kwargs):
     Also return the fake mode used to fakify those inputs.
     """
 
-    fake_inps: List[torch.Tensor] = []
-    fake_vals: List[torch.Tensor] = []
+    fake_inps: list[torch.Tensor] = []
+    fake_vals: list[torch.Tensor] = []
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -356,7 +356,7 @@ def _preserve_requires_grad_pass(
     sig: ExportGraphSignature,
     fake_params_buffers: Dict[str, torch.Tensor],
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-    flat_fake_args: List[Any],
+    flat_fake_args: list[Any],
 ):
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     assert len(sig.input_specs) == len(placeholders)
@@ -396,7 +396,7 @@ def _remap_constants(
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
-    remap_table: Dict[str, List[str]] = {}
+    remap_table: Dict[str, list[str]] = {}
     for name, value in constants.items():
         if value in orig_constant_attrs:
             remap_table[name] = orig_constant_attrs[value]
@@ -610,8 +610,8 @@ def _make_module_call_graph(
     in_spec: TreeSpec,
     out_spec: TreeSpec,
     module_call_signatures: Dict[str, ModuleCallSignature],
-    forward_arg_names: Optional[List[str]] = None,
-) -> List[ModuleCallEntry]:
+    forward_arg_names: Optional[list[str]] = None,
+) -> list[ModuleCallEntry]:
     original = [
         ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
         for fqn in _EXPORT_MODULE_HIERARCHY  # type: ignore[union-attr]
@@ -636,7 +636,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -814,7 +814,7 @@ def _get_forward_arg_names(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-) -> List[str]:
+) -> list[str]:
     """
     Gets the argument names to forward that are used, for restoring the
     original signature when unlifting the exported program module.
@@ -827,7 +827,7 @@ def _get_forward_arg_names(
     sig = inspect.signature(mod.forward)
     _args = sig.bind_partial(*args).arguments
 
-    names: List[str] = []
+    names: list[str] = []
     for name, value in _args.items():
         # handle variable number of positional args
         if sig.parameters[name].kind == inspect._ParameterKind.VAR_POSITIONAL:
@@ -1097,8 +1097,8 @@ def _get_module_call_graph(
     original_in_spec: TreeSpec,
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
-    forward_arg_names: Optional[List[str]] = None,
-) -> Tuple[torch.fx.GraphModule, List[ModuleCallEntry]]:
+    forward_arg_names: Optional[list[str]] = None,
+) -> Tuple[torch.fx.GraphModule, list[ModuleCallEntry]]:
     """
     In-place modify the graph module in export_artifact, remove _export_tracepoint nodes and
     return module_call_graph.
@@ -1250,7 +1250,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
@@ -1278,7 +1278,7 @@ def _strict_export_lower_to_aten_ir(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
@@ -1456,7 +1456,7 @@ def _export_to_aten_ir_make_fx(
             mod, params_spec, params_len, store_orig_mod=True
         )
 
-        params_buffers_args: List[Any] = []
+        params_buffers_args: list[Any] = []
         params_buffers_args.extend(params_and_buffers_flat)
         params_buffers_args.extend(args)
 
@@ -1534,7 +1534,7 @@ def _export_to_aten_ir_make_fx(
                 ] = {}
                 for arg in args:
                     subclass_types_to_instances: Dict[
-                        Type[torch.Tensor], List[Type[torch.Tensor]]
+                        Type[torch.Tensor], list[Type[torch.Tensor]]
                     ] = get_subclass_typing_container(arg)
                     for subclass_type in subclass_types_to_instances:
                         if subclass_type not in tensor_type_to_old_getattribute:
@@ -1724,7 +1724,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
@@ -1890,7 +1890,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
@@ -1982,7 +1982,7 @@ def _export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),

@@ -20,7 +20,7 @@ class ArtifactChange(object):
     artifact_location: _artifact_location.ArtifactLocation = dataclasses.field(
         metadata={"schema_property_name": "artifactLocation"}
     )
-    replacements: List[_replacement.Replacement] = dataclasses.field(
+    replacements: list[_replacement.Replacement] = dataclasses.field(
         metadata={"schema_property_name": "replacements"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

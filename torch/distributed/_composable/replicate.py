@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, NoReturn, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -24,11 +24,11 @@ class _ReplicateState(_State):
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
         self._orig_module = self.module
-        self._param_names: List[str] = []
+        self._param_names: list[str] = []
         self._no_sync: bool = False
         self._init_args: Optional[Tuple[Any, ...]] = None
         self._init_kwargs: Dict[str, Any] = {}
-        self._comm_hook_args: List[Any] = []
+        self._comm_hook_args: list[Any] = []
 
     def _collect_params(
         self,

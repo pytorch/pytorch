@@ -22,7 +22,7 @@ import typing
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -158,7 +158,7 @@ class TODO_UNKNOWN:
 
 class Tracker:
     def __init__(self) -> None:
-        self.seen: List[ReferenceType[CodeType]] = []
+        self.seen: list[ReferenceType[CodeType]] = []
         self.seen_ids: Set[int] = set()
 
     def add(self, strong_obj: CodeType) -> None:
@@ -646,13 +646,13 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
+    tf_mode_stack: list[
         torch.overrides.TorchFunctionMode
     ] = torch.overrides._get_current_function_mode_stack()
 
     @preserve_global_state
     def transform(
-        instructions: List[Instruction], code_options: Dict[str, object]
+        instructions: list[Instruction], code_options: Dict[str, object]
     ) -> None:
         nonlocal output
         nonlocal tracer
@@ -707,7 +707,7 @@ def _compile(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -732,7 +732,7 @@ def _compile(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+        transform: Callable[[list[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()

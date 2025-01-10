@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from typing import Generator, List, Type, TYPE_CHECKING, TypeVar
+from typing import Generator, Type, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
@@ -94,7 +94,7 @@ def dataclass_slots(cls: Type[_T]) -> Type[DataclassInstance]:
             fields = dataclasses.fields(self)
             return [getattr(self, f.name) for f in fields]
 
-        def _dataclass_setstate(self: _T, state: List[object]) -> None:
+        def _dataclass_setstate(self: _T, state: list[object]) -> None:
             fields = dataclasses.fields(self)
             for field, value in zip(fields, state):
                 # use setattr because dataclass may be frozen

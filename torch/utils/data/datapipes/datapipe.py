@@ -1,6 +1,6 @@
 import functools
 import pickle
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, TypeVar
+from typing import Callable, Dict, Iterable, Iterator, Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -35,7 +35,7 @@ UNTRACABLE_DATAFRAME_PIPES = [
 ]
 
 
-class DataChunk(List[_T]):
+class DataChunk(list[_T]):
     def __init__(self, items: Iterable[_T]) -> None:
         items = list(items)
         super().__init__(items)

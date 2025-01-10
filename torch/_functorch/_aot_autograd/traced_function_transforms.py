@@ -14,7 +14,7 @@ It does so by:
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -190,7 +190,7 @@ def fn_prepped_for_autograd(
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
-    def inner_fn(primals: List[Any], tangents: List[Any]):
+    def inner_fn(primals: list[Any], tangents: list[Any]):
         outs, tangent_mask = fn(*primals)
 
         assert len(tangent_mask) == len(outs)
@@ -733,7 +733,7 @@ def handle_effect_tokens_fn(
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
 def aot_dispatch_subclass(
     flat_fn_maybe_joint,
-    args: List[Any],
+    args: list[Any],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,

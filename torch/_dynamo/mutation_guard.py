@@ -1,6 +1,6 @@
 import functools
 import weakref
-from typing import Any, List, Type
+from typing import Any, Type
 
 import torch.nn
 from torch.nn import Module
@@ -17,7 +17,7 @@ class MutationTracker:
 
     def __init__(self) -> None:
         self.mutation_count: int = 0
-        self.watchers: List[weakref.ReferenceType[Any]] = []
+        self.watchers: list[weakref.ReferenceType[Any]] = []
 
     def on_mutation(self, name: str) -> None:
         self.mutation_count += 1

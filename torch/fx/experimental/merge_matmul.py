@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -10,7 +10,7 @@ from torch.fx.passes.tools_common import legalize_graph
 
 
 def split_result_tensors(
-    result: torch.Tensor, inputs: List[torch.Tensor]
+    result: torch.Tensor, inputs: list[torch.Tensor]
 ) -> Tuple[torch.Tensor, ...]:
     """
     A free function for use in the merge_matmul graph transformation below that
@@ -71,7 +71,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
     return False
 
 
-def are_nodes_independent(nodes: List[Node]):
+def are_nodes_independent(nodes: list[Node]):
     """
     Check if all of the given nodes are pairwise-data independent.
 
@@ -102,8 +102,8 @@ def merge_matmul(in_mod: torch.nn.Module):
     """
     gm = symbolic_trace(in_mod)
 
-    rhs_users: Dict[Node, List[Node]] = {}
-    lhs_users: Dict[Node, List[Node]] = {}
+    rhs_users: Dict[Node, list[Node]] = {}
+    lhs_users: Dict[Node, list[Node]] = {}
 
     # Populate rhs_users and lhs_users - maps from LHS/RHS matrix multiply operands to
     # the matmul of which they are the LHS/RHS.

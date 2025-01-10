@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Callable, Dict, List, Optional, Set, TypeVar
+from typing import Callable, Dict, Optional, Set, TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -49,7 +49,7 @@ class GraphTransformObserver:
             self.created_nodes: Set[str] = set()
             self.name_to_node: Dict[str, Node] = {}
             # record graph modules deepcopied from self.gm, so we can remove hoooks on them when exiting the context
-            self.copied_gms: List[GraphModule] = []
+            self.copied_gms: list[GraphModule] = []
 
             self._node_creation_hook = self.get_node_creation_hook()
             self._node_erase_hook = self.get_node_erase_hook()

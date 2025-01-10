@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, Dict, Set, Union
 
 import torch
 import torch.nn as nn
@@ -48,7 +48,7 @@ NSFusionType = Union[
 ]
 
 
-def get_reversed_fusions() -> List[tuple[NSFusionType, int]]:
+def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
     """
     Set of potential fusions, in reverse order.  The order is reversed
     to match how fusion patterns are defined in quantization code.
@@ -61,7 +61,7 @@ def get_reversed_fusions() -> List[tuple[NSFusionType, int]]:
     of 0 represents the first op in regular (non-reverse) order, 1 represents the
     second op, etc.
     """
-    results: List[tuple[NSFusionType, int]] = []
+    results: list[tuple[NSFusionType, int]] = []
 
     # Possible syntaxes:
     # * single op: torch.nn.Conv2d

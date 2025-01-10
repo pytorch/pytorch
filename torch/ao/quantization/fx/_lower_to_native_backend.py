@@ -83,7 +83,7 @@ def is_default_node(node, modules):
         torch.nn.functional.leaky_relu,
         torch.nn.functional.dropout,
     ]
-    method_list: List[Any] = []
+    method_list: list[Any] = []
     module_type_list = [
         nnqr.ConvTranspose1d,
         nnqr.ConvTranspose2d,
@@ -194,8 +194,8 @@ def is_other_node(node, modules):
     func_list = [
         torch.cat,
     ]
-    method_list: List[Any] = []
-    module_type_list: List[Any] = []
+    method_list: list[Any] = []
+    module_type_list: list[Any] = []
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 
@@ -550,8 +550,8 @@ def _match_static_pattern(
     node: Node,
     modules: Dict[str, nn.Module],
     qconfig_map: Dict[str, QConfigAny],
-    matching_modules_or_ops: List[Callable],
-    dequantize_node_arg_indices: List[int],
+    matching_modules_or_ops: list[Callable],
+    dequantize_node_arg_indices: list[int],
 ) -> Union[tuple[Node, Node, Node], tuple[None, None, None]]:
     """
     Match the pattern (dequantize - ref node - quantize) against the node provided.
@@ -628,7 +628,7 @@ def _match_static_pattern_with_two_inputs(
     node: Node,
     modules: Dict[str, nn.Module],
     qconfig_map: Dict[str, QConfigAny],
-    matching_modules_or_ops: List[Callable],
+    matching_modules_or_ops: list[Callable],
 ) -> Union[tuple[Node, Node], tuple[None, None]]:
     """
                       (dequantize \
@@ -1103,7 +1103,7 @@ def _lower_dynamic_weighted_ref_functional(
 
 
 def _lower_quantized_binary_op(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
-    binary_ops_to_lower: List[Callable] = [
+    binary_ops_to_lower: list[Callable] = [
         operator.add,
         torch.add,
         operator.mul,
@@ -1244,7 +1244,7 @@ def special_pattern_replacement(model: GraphModule):
                 setattr(modules[parent_name], module_name, qmodule)
 
         # reroute around dq node:
-        dq_nodes: List[Node] = []
+        dq_nodes: list[Node] = []
         if isinstance(dq_node_or_nodes, Node):
             dq_nodes = [dq_node_or_nodes]
         elif isinstance(dq_node_or_nodes, (tuple, list)):

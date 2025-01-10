@@ -5,7 +5,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     NamedTuple,
     Optional,
     Tuple,
@@ -124,7 +123,7 @@ class _FSDPModMemStats:
         self.mod_fqn = mod_fqn
         self.local_peak: Dict[torch.device, int] = {}
         self.snapshots: Dict[
-            _FSDPModState, List[Dict[torch.device, Dict[str, int]]]
+            _FSDPModState, list[Dict[torch.device, Dict[str, int]]]
         ] = {}
 
 
@@ -549,7 +548,7 @@ class FSDPMemTracker(MemTracker):
         def barrier(
             group: Union[ProcessGroup, None] = dist.GroupMember.WORLD,
             async_op: bool = False,
-            device_ids: Union[List[int], None] = None,
+            device_ids: Union[list[int], None] = None,
         ) -> Union[Work, None]:
             if self._in_fake_mode:
                 return None

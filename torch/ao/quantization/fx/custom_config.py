@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, Optional, Type
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.backend_config import BackendConfig
@@ -67,11 +67,11 @@ class PrepareCustomConfig:
         self.standalone_module_names: Dict[str, StandaloneModuleConfigEntry] = {}
         self.standalone_module_classes: Dict[Type, StandaloneModuleConfigEntry] = {}
         self.float_to_observed_mapping: Dict[QuantType, Dict[Type, Type]] = {}
-        self.non_traceable_module_names: List[str] = []
-        self.non_traceable_module_classes: List[Type] = []
-        self.input_quantized_indexes: List[int] = []
-        self.output_quantized_indexes: List[int] = []
-        self.preserved_attributes: List[str] = []
+        self.non_traceable_module_names: list[str] = []
+        self.non_traceable_module_classes: list[Type] = []
+        self.input_quantized_indexes: list[int] = []
+        self.output_quantized_indexes: list[int] = []
+        self.preserved_attributes: list[str] = []
 
     def __repr__(self):
         dict_nonempty = {k: v for k, v in self.__dict__.items() if len(v) > 0}
@@ -139,7 +139,7 @@ class PrepareCustomConfig:
         return self
 
     def set_non_traceable_module_names(
-        self, module_names: List[str]
+        self, module_names: list[str]
     ) -> PrepareCustomConfig:
         """
         Set the modules that are not symbolically traceable, identified by name.
@@ -148,7 +148,7 @@ class PrepareCustomConfig:
         return self
 
     def set_non_traceable_module_classes(
-        self, module_classes: List[Type]
+        self, module_classes: list[Type]
     ) -> PrepareCustomConfig:
         """
         Set the modules that are not symbolically traceable, identified by class.
@@ -156,7 +156,7 @@ class PrepareCustomConfig:
         self.non_traceable_module_classes = module_classes
         return self
 
-    def set_input_quantized_indexes(self, indexes: List[int]) -> PrepareCustomConfig:
+    def set_input_quantized_indexes(self, indexes: list[int]) -> PrepareCustomConfig:
         """
         Set the indexes of the inputs of the graph that should be quantized.
         Inputs are otherwise assumed to be in fp32 by default instead.
@@ -164,7 +164,7 @@ class PrepareCustomConfig:
         self.input_quantized_indexes = indexes
         return self
 
-    def set_output_quantized_indexes(self, indexes: List[int]) -> PrepareCustomConfig:
+    def set_output_quantized_indexes(self, indexes: list[int]) -> PrepareCustomConfig:
         """
         Set the indexes of the outputs of the graph that should be quantized.
         Outputs are otherwise assumed to be in fp32 by default instead.
@@ -172,7 +172,7 @@ class PrepareCustomConfig:
         self.output_quantized_indexes = indexes
         return self
 
-    def set_preserved_attributes(self, attributes: List[str]) -> PrepareCustomConfig:
+    def set_preserved_attributes(self, attributes: list[str]) -> PrepareCustomConfig:
         """
         Set the names of the attributes that will persist in the graph module even if they are not used in
         the model's ``forward`` method.
@@ -384,7 +384,7 @@ class ConvertCustomConfig:
 
     def __init__(self) -> None:
         self.observed_to_quantized_mapping: Dict[QuantType, Dict[Type, Type]] = {}
-        self.preserved_attributes: List[str] = []
+        self.preserved_attributes: list[str] = []
 
     def __repr__(self):
         dict_nonempty = {k: v for k, v in self.__dict__.items() if len(v) > 0}
@@ -407,7 +407,7 @@ class ConvertCustomConfig:
         self.observed_to_quantized_mapping[quant_type][observed_class] = quantized_class
         return self
 
-    def set_preserved_attributes(self, attributes: List[str]) -> ConvertCustomConfig:
+    def set_preserved_attributes(self, attributes: list[str]) -> ConvertCustomConfig:
         """
         Set the names of the attributes that will persist in the graph module even if they are not used in
         the model's ``forward`` method.
@@ -478,13 +478,13 @@ class FuseCustomConfig:
     """
 
     def __init__(self) -> None:
-        self.preserved_attributes: List[str] = []
+        self.preserved_attributes: list[str] = []
 
     def __repr__(self):
         dict_nonempty = {k: v for k, v in self.__dict__.items() if len(v) > 0}
         return f"FuseCustomConfig({dict_nonempty})"
 
-    def set_preserved_attributes(self, attributes: List[str]) -> FuseCustomConfig:
+    def set_preserved_attributes(self, attributes: list[str]) -> FuseCustomConfig:
         """
         Set the names of the attributes that will persist in the graph module even if they are not used in
         the model's ``forward`` method.

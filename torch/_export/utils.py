@@ -13,7 +13,6 @@ from typing import (
     Callable,
     Dict,
     Iterable,
-    List,
     Optional,
     Set,
     Type,
@@ -238,7 +237,7 @@ def _rename_without_collisions(
 
 
 def _check_input_constraints_for_graph(
-    input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
+    input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
 ) -> None:
     def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
@@ -377,7 +376,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> tuple[List[Any], Context]:
+    def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -394,7 +393,7 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
-    def default_flatten_fn_with_keys(obj: Any) -> tuple[List[Any], Context]:
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
@@ -529,7 +528,7 @@ def sequential_split(
     return new_gm
 
 
-def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
     """Returns the nodes that match the node_call_back as a list."""
     return [node for node in nodes if node_call_back(node)]
 
@@ -564,7 +563,7 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
 
 
 def nodes_first(
-    nodes: List[torch.fx.Node], node_call_back=None
+    nodes: list[torch.fx.Node], node_call_back=None
 ) -> Optional[torch.fx.Node]:
     """
     Returns the first node that matches the node_call_back. If no node matches, returns None.
@@ -576,12 +575,12 @@ def nodes_first(
     return None
 
 
-def nodes_count(nodes: List[torch.fx.Node], node_call_back) -> int:
+def nodes_count(nodes: list[torch.fx.Node], node_call_back) -> int:
     """Returns the number of nodes that match the node_call_back."""
     return len(nodes_filter(nodes, node_call_back))
 
 
-def nodes_map(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+def nodes_map(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
     """
     Sequentially visit the nodes list and invoke node_call_back on each element.
     Returns the nodes list after the node_call_back is invoked on each element.
@@ -740,7 +739,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     and gather the top-level named placeholder nodes.
     """
     # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    subgraph_ph_tuples: list[tuple[torch.fx.GraphModule, list[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.HigherOrderOperator
@@ -949,8 +948,8 @@ def _detect_fake_mode_from_gm(
     If no fake mode is found, we return None for fake_mode.
     """
 
-    fake_inps: List[torch.Tensor] = []
-    fake_vals: List[torch.Tensor] = []
+    fake_inps: list[torch.Tensor] = []
+    fake_vals: list[torch.Tensor] = []
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]

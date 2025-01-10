@@ -1,6 +1,6 @@
 import dataclasses
 import types
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Protocol, Union
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -24,9 +24,9 @@ class GuardFail(NamedTuple):
 
 class GuardFn(Protocol):
     closure_vars: Dict[str, object]
-    args: List[str]
-    code_parts: List[str]
-    verbose_code_parts: List[str]
+    args: list[str]
+    code_parts: list[str]
+    verbose_code_parts: list[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
     cache_entry: Optional[CacheEntry]

@@ -50,7 +50,6 @@ from typing import (
     Iterable,
     Iterator,
     KeysView,
-    List,
     Optional,
     overload,
     Set,
@@ -144,7 +143,7 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time by function
-compilation_time_metrics: Dict[str, List[float]] = {}
+compilation_time_metrics: Dict[str, list[float]] = {}
 
 # This supports calculate_time_spent(), which reports cumulative times
 # across the process for any "phase" populated by dynamo_timed. Reset if
@@ -202,8 +201,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: Union[List[Tuple[str, object]], List[List[object]]],
-    headers: Union[Tuple[str, ...], List[str]],
+    rows: Union[list[Tuple[str, object]], list[list[object]]],
+    headers: Union[Tuple[str, ...], list[str]],
 ) -> str:
     try:
         import tabulate
@@ -590,7 +589,7 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> Tuple[List[str], List[object]]:
+) -> Tuple[list[str], list[object]]:
     ...
 
 
@@ -797,7 +796,7 @@ def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
 
 @overload
 def istype(
-    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+    obj: object, allowed_types: Tuple[Type[list[T]], Type[Tuple[T, ...]]]
 ) -> TypeIs[T]:
     ...
 
@@ -1351,7 +1350,7 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> List[CompilationMetrics]:
+def get_compilation_metrics() -> list[CompilationMetrics]:
     return list(_compilation_metrics)
 
 
@@ -1362,7 +1361,7 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self) -> List[str]:
+    def get_stack(self) -> list[str]:
         """
         The main event stack, with every chromium event.
         Logged to tlparse.
@@ -1778,7 +1777,7 @@ def clone_input(x, *, dtype=None):
 
 
 def clone_inputs(example_inputs):
-    res: Union[Dict[Any, Any], List[Any]]
+    res: Union[Dict[Any, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2681,10 +2680,10 @@ def disable_cache_limit():
 orig_code_map = ExactWeakKeyDictionary()
 
 # keep a record of code_obj -> list of guard failure reasons for logging
-guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
+guard_failures: DefaultDict[Any, list[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
+graph_break_reasons: list[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -3610,7 +3609,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         markers = [marker.replace("~", "^") for marker in markers]
     else:
         # make markers mutable
-        mutable_markers: List[List[str]] = [list(marker) for marker in markers]
+        mutable_markers: list[list[str]] = [list(marker) for marker in markers]
 
         # anchor positions do not take start_offset into account
         if anchors.left_end_lineno == 0:
@@ -3795,7 +3794,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
-        args: List[Any] = list(args)
+        args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
 

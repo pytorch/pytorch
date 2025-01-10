@@ -48,7 +48,7 @@ class ArgsKwargsPair(NamedTuple):
     kwargs: Dict[str, Any]
 
 
-_manual_overrides: Dict[Callable, List[inspect.Signature]] = {}
+_manual_overrides: Dict[Callable, list[inspect.Signature]] = {}
 
 
 def _nonzero_schemas():
@@ -108,7 +108,7 @@ def _torchscript_schema_to_signature_impl(
 ) -> inspect.Signature:
     from inspect import Parameter
 
-    parameters: List[Parameter] = []
+    parameters: list[Parameter] = []
     for arg in ts_schema.arguments:
         arg_type = _torchscript_type_to_python_type(arg.type)
         default = arg.default_value if arg.has_default_value() else Parameter.empty
@@ -265,7 +265,7 @@ def create_type_hint(x):
             if isinstance(x, list):
 
                 def ret_type(x):
-                    return List[x]  # type: ignore[valid-type]
+                    return list[x]  # type: ignore[valid-type]
 
             else:
 
@@ -304,7 +304,7 @@ def type_matches(signature_type: Any, argument_type: Any):
         sig_contained = signature_type.__args__
         return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if signature_type is List[int] and argument_type is int:
+    if signature_type is list[int] and argument_type is int:
         # int can be promoted to List[int]
         return True
 
@@ -553,7 +553,7 @@ def _args_kwargs_to_normalized_args_kwargs(
     bound_args.apply_defaults()
 
     new_kwargs: Dict[str, Any] = {}
-    new_args: List[Any] = []
+    new_args: list[Any] = []
     for i, param in enumerate(sig.parameters):
         if not normalize_to_only_use_kwargs and i < len(args):
             new_args.append(bound_args.arguments[param])

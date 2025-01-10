@@ -39,7 +39,7 @@ def _to_device_map(
     return full_device_map
 
 
-def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
+def _to_device_list(devices: list[DeviceType]) -> list[torch.device]:
     return list(map(_to_device, devices))
 
 
@@ -84,7 +84,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
         device_maps: Optional[Dict[str, Dict[DeviceType, DeviceType]]] = None,
-        devices: Optional[List[DeviceType]] = None,
+        devices: Optional[list[DeviceType]] = None,
         _transports: Optional[List] = None,
         _channels: Optional[List] = None,
     ):
@@ -162,7 +162,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
 
         super()._set_device_map(to, full_device_map)
 
-    def set_devices(self, devices: List[DeviceType]):
+    def set_devices(self, devices: list[DeviceType]):
         r"""
         Set local devices used by the TensorPipe RPC agent. When processing
         CUDA RPC requests, the TensorPipe RPC agent will properly synchronize

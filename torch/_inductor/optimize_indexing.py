@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import sympy
 
@@ -41,7 +41,7 @@ def range_expressable_in_32_bits(range: ValueRanges[sympy.Expr]) -> bool:
 def try_to_reduce_precision(
     node: Any,
     bounds: Dict[Any, Any],
-    indirect_vars: List[Any],
+    indirect_vars: list[Any],
     indices: Dict[Any, sympy.Expr],
     replacement_vals: Dict[Any, ValueRanges[sympy.Expr]],
 ) -> None:

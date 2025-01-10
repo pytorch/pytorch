@@ -182,13 +182,13 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`."
             )
 
-        self.child_pointers: List[int] = [
+        self.child_pointers: list[int] = [
             0
         ] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
         self.end_ptr: Optional[int] = None  # The index to stop child
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
         return len(self.main_datapipe)
@@ -468,11 +468,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
-        self.child_buffers: List[Deque[_T_co]] = [deque() for _ in range(num_instances)]
+        self.child_buffers: list[Deque[_T_co]] = [deque() for _ in range(num_instances)]
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def _find_next(self, instance_id: int) -> _T_co:  # type: ignore[type-var]
         while True:

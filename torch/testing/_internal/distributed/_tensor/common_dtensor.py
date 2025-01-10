@@ -12,7 +12,6 @@ from typing import (
     cast,
     Dict,
     Iterator,
-    List,
     Sequence,
     Tuple,
     TypeVar,
@@ -437,9 +436,9 @@ class DTensorConverter:
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
-        self.flatten_args: List[object] = flatten_args
+        self.flatten_args: list[object] = flatten_args
         self.flatten_args_spec: TreeSpec = flatten_args_spec
-        self.flatten_kwargs: List[object] = flatten_kwargs
+        self.flatten_kwargs: list[object] = flatten_kwargs
         self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
 
         choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
@@ -480,7 +479,7 @@ class DTensorConverter:
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
         mesh_size = self.mesh.size()
-        sharding_choices: List[Placement] = [Replicate()]
+        sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
         # for bool tensor we treat it as replicated
         if arg.dtype != torch.bool:
@@ -505,7 +504,7 @@ class DTensorConverter:
             next_sharding_choices = next(self.sharding_combs)
             idx = 0
 
-            new_args: List[object] = []
+            new_args: list[object] = []
             for arg in self.flatten_args:
                 if isinstance(arg, torch.Tensor):
                     new_args.append(
@@ -517,7 +516,7 @@ class DTensorConverter:
                 else:
                     new_args.append(arg)
 
-            new_kwargs: List[object] = []
+            new_kwargs: list[object] = []
             for arg in self.flatten_kwargs:
                 if isinstance(arg, torch.Tensor):
                     new_kwargs.append(
@@ -537,7 +536,7 @@ class DTensorConverter:
             raise StopIteration from e
 
     def to_dist_tensor(
-        self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
+        self, t: torch.Tensor, mesh: DeviceMesh, placements: list[Placement]
     ) -> torch.Tensor:
         if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):

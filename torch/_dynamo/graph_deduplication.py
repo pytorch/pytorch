@@ -1,6 +1,6 @@
 import logging
 import operator
-from typing import Any, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, Set, Tuple
 
 import torch.fx
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
@@ -81,7 +81,7 @@ when they are created in output_graph.
 # be register/unregister slices as pytree nodes
 # but there is no unregister API in the pytorch
 # pytree impl
-def _flatten_args_kwargs(args: Any) -> List[Node]:
+def _flatten_args_kwargs(args: Any) -> list[Node]:
     fully_flattened = []
 
     def flatten(args: Any) -> None:
@@ -105,7 +105,7 @@ def _replace_region_with_subgraph(
     region: Region,
     get_subgraph_node: Node,
     node_ind_arg_ind: Iterable[Tuple[int, int]],
-    inds_with_external_users: List[int],
+    inds_with_external_users: list[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
     output_replacements: Dict[Node, Node],
@@ -163,7 +163,7 @@ def _get_external_inputs(
     return external_node_to_indices
 
 
-def _get_all_output_indices(regions: List[Region]) -> List[int]:
+def _get_all_output_indices(regions: list[Region]) -> list[int]:
     # Scan all regions to get the set of all possible output nodes indices in the region
     # perhaps we can record this information during region creation for more efficiency?
     inds_with_external_users: Set[int] = set()
@@ -209,7 +209,7 @@ def _copy_nodes_and_remap_inputs(
 
 
 def _create_subgraph_outputs(
-    subgraph: torch.fx.Graph, inds_to_output: List[int]
+    subgraph: torch.fx.Graph, inds_to_output: list[int]
 ) -> None:
     node_list = [n for n in subgraph.nodes if n.op not in ("placeholder", "output")]
     out_tup = tuple(node_list[ind] for ind in inds_to_output)
@@ -218,7 +218,7 @@ def _create_subgraph_outputs(
 
 def _create_subgraph(
     region: Region,
-    inds_with_external_users: List[int],
+    inds_with_external_users: list[int],
 ) -> Tuple[torch.fx.Graph, Dict[Tuple[int, int], Any]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
     node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)

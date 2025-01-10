@@ -10,7 +10,7 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, Set, Tuple
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
@@ -56,7 +56,7 @@ class MultiprocessingRequestQueue(RequestQueue):
     def size(self) -> int:
         return self._mp_queue.qsize()
 
-    def get(self, size, timeout: float) -> List[TimerRequest]:
+    def get(self, size, timeout: float) -> list[TimerRequest]:
         requests = []
         wait = timeout
         for _ in range(0, size):
@@ -90,7 +90,7 @@ class LocalTimerServer(TimerServer):
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
         self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
 
-    def register_timers(self, timer_requests: List[TimerRequest]) -> None:
+    def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         for request in timer_requests:
             pid = request.worker_id
             scope_id = request.scope_id
@@ -107,9 +107,9 @@ class LocalTimerServer(TimerServer):
             if pid in worker_ids:
                 self._timers.pop((pid, scope_id))
 
-    def get_expired_timers(self, deadline: float) -> Dict[Any, List[TimerRequest]]:
+    def get_expired_timers(self, deadline: float) -> Dict[Any, list[TimerRequest]]:
         # pid -> [timer_requests...]
-        expired_timers: Dict[Any, List[TimerRequest]] = {}
+        expired_timers: Dict[Any, list[TimerRequest]] = {}
         for request in self._timers.values():
             if request.expiration_time <= deadline:
                 expired_scopes = expired_timers.setdefault(request.worker_id, [])

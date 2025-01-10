@@ -55,14 +55,14 @@ class Component:
 
     # Mapping from get_attr node in original graph to get_attr node in `graph`.
     getattr_maps: Dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
-    constructor_args: List[str] = field(default_factory=list)
+    constructor_args: list[str] = field(default_factory=list)
     gm: Optional[torch.fx.GraphModule] = None
 
 
 @compatibility(is_backward_compatible=False)
 def split_by_tags(
     gm: torch.fx.GraphModule,
-    tags: List[str],
+    tags: list[str],
     return_fqn_mapping: bool = False,
     return_tuple: bool = False,
     GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
@@ -143,7 +143,7 @@ def split_by_tags(
     tag_to_component: Dict[str, Component] = {}
 
     # Stores all components.
-    all_components: List[Component] = []
+    all_components: list[Component] = []
 
     # Stores nodes that will be used in main graph.
     used_in_main: Dict[torch.fx.Node, None] = {}

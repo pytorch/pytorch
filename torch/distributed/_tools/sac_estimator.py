@@ -4,7 +4,7 @@ import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -74,7 +74,7 @@ def _get_untyped_storages(t: torch.Tensor) -> Set[torch.UntypedStorage]:
     return flattened_tensor_storages
 
 
-def _display_stats_tabular(headers: List[str], table_data: List[List[Any]]) -> None:
+def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> None:
     try:
         from tabulate import tabulate
     except ImportError as err:
@@ -125,7 +125,7 @@ class _SACModMetadata:
 
     start_idx: int
     force_store_random: bool
-    sac_metadata: List[_SACMetadata]
+    sac_metadata: list[_SACMetadata]
 
 
 @dataclass
@@ -144,13 +144,13 @@ class SACStats:
         force_store_random (bool): Whether to force store random operator results.
     """
 
-    func_names: List[str]
-    runtimes: List[float]
-    memory: List[int]
-    view_like_ops: List[int]
-    rand_ops: List[int]
-    saved_autograd_ops: List[int]
-    inplace_ops: List[Tuple[int, int]]
+    func_names: list[str]
+    runtimes: list[float]
+    memory: list[int]
+    view_like_ops: list[int]
+    rand_ops: list[int]
+    saved_autograd_ops: list[int]
+    inplace_ops: list[Tuple[int, int]]
     force_store_random: bool
 
 
@@ -189,9 +189,9 @@ class SACTradeOffStats:
     """
 
     n_segments: int
-    slopes: List[float]
-    intercepts: List[float]
-    fit_breaks: List[float]
+    slopes: list[float]
+    intercepts: list[float]
+    fit_breaks: list[float]
     tradeoff_curve: OrderedDict[float, float]
     sac_memory: int
     sac_runtime: float
@@ -214,7 +214,7 @@ class SACGreedyOrderMeta:
     stored_ops: Set[int]
     inplace_op_groups: Dict[int, Set[int]]
     random_ops_group: Dict[int, Set[int]]
-    msps_meta: List[MSPS]
+    msps_meta: list[MSPS]
 
 
 class SACEstimator(TorchDispatchMode):
@@ -255,7 +255,7 @@ class SACEstimator(TorchDispatchMode):
         self.sac_mod_tradeoff_stats: Dict[str, SACTradeOffStats] = {}
         self.sac_mod_greedy_order_meta: Dict[str, SACGreedyOrderMeta] = {}
         self._mod_tracker = ModTracker()
-        self._sac_metadata: List[_SACMetadata] = []
+        self._sac_metadata: list[_SACMetadata] = []
         self._sac_mod_metadata: Dict[str, _SACModMetadata] = {}
         self._leaf_modules: Set[str] = set()
         self._saved_tensor_hook_ctx = torch.autograd.graph.saved_tensors_hooks(
@@ -313,7 +313,7 @@ class SACEstimator(TorchDispatchMode):
         return all(not isinstance(x, torch.Tensor) for x in flat_inputs)
 
     def _get_sac_stats(
-        self, data: List[_SACMetadata], force_store_random: bool
+        self, data: list[_SACMetadata], force_store_random: bool
     ) -> SACStats:
         # 1. Ignore the operations that should be skipped by SAC such as aten.detach.default because autograd
         # inserts those during backward and it breaks the fwd-bwd alignment
@@ -557,7 +557,7 @@ class SACEstimator(TorchDispatchMode):
         )
 
         # We define msps for a recomp candidate as the ratio of memory/runtime aka memory savings per second
-        msps_meta: List[MSPS] = []
+        msps_meta: list[MSPS] = []
         for cand_idx in recompute_candidates:
             op_indices = {cand_idx}
             if cand_idx in inplace_op_groups:
@@ -653,7 +653,7 @@ class SACEstimator(TorchDispatchMode):
 
         # save prediction graph
         def save_prediction_graph(
-            pwlf_: pwlf.PiecewiseLinFit, x: List[float], y: List[float], filename: str
+            pwlf_: pwlf.PiecewiseLinFit, x: list[float], y: list[float], filename: str
         ) -> None:
             try:
                 import matplotlib.pyplot as plt  # type: ignore[import-not-found]

@@ -11,7 +11,6 @@ from typing import (
     Generator,
     Iterable,
     Iterator,
-    List,
     no_type_check,
     Optional,
     Set,
@@ -330,7 +329,7 @@ def _init_ignored_module_states(
 
 
 def _check_ignored_states(
-    ignored_states: List[Any], passed_as_ignored_states: bool
+    ignored_states: list[Any], passed_as_ignored_states: bool
 ) -> None:
     """
     Check that the ignored states are uniformly parameters or uniformly modules.
@@ -486,7 +485,7 @@ def _init_core_state(
     # handles in `state._handle`
     _handle: Optional[FlatParamHandle] = None
     state._handle = _handle
-    params: List[FlatParameter] = []
+    params: list[FlatParameter] = []
     state.params = params
     return state
 
@@ -495,11 +494,11 @@ def _init_core_state(
 def _init_runtime_state(
     state: _FSDPState,
 ) -> _FSDPState:
-    _root_pre_forward_handles: List[RemovableHandle] = []
+    _root_pre_forward_handles: list[RemovableHandle] = []
     state._root_pre_forward_handles = _root_pre_forward_handles
-    _pre_forward_handles: List[RemovableHandle] = []
+    _pre_forward_handles: list[RemovableHandle] = []
     state._pre_forward_handles = _pre_forward_handles
-    _post_forward_handles: List[RemovableHandle] = []
+    _post_forward_handles: list[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
     state._comm_hook = None
@@ -549,7 +548,7 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     return state
 
 
-def _verify_managed_params(module: nn.Module, params: List[nn.Parameter]) -> None:
+def _verify_managed_params(module: nn.Module, params: list[nn.Parameter]) -> None:
     """
     Verify if the parameters are accepted by FSDP. The only restriction now
     is that the parameter cannot be a scalar tensor (param.shape == []).
@@ -640,7 +639,7 @@ def _init_param_handle_from_module(
 @no_type_check
 def _init_param_handle_from_params(
     state: _FSDPState,
-    params: List[nn.Parameter],
+    params: list[nn.Parameter],
     fully_sharded_module: nn.Module,
 ):
     if len(params) == 0:
@@ -935,10 +934,10 @@ def _materialize_meta_module(
 
 def _get_modules_to_materialize(
     root_module: nn.Module, ignored_modules: Set[nn.Module]
-) -> List[nn.Module]:
+) -> list[nn.Module]:
     # Run BFS to collect the modules to materialize via `reset_parameters()`,
     # stopping at any module with FSDP already applied or at ignored modules.
-    modules_to_materialize: List[nn.Module] = []
+    modules_to_materialize: list[nn.Module] = []
     queue = collections.deque([root_module])
     visited_modules: Set[nn.Module] = {root_module}
     while queue:
@@ -979,8 +978,8 @@ def _move_module_to_device(
         # collect the parameters/buffers that have not yet been managed
         queue: Deque[nn.Module] = collections.deque()
         queue.append(module)
-        params: List[nn.Parameter] = []
-        buffers: List[torch.Tensor] = []
+        params: list[nn.Parameter] = []
+        buffers: list[torch.Tensor] = []
         while queue:
             curr_module = queue.popleft()
             # NOTE: We include a check to only move parameters/buffers that are
@@ -1010,8 +1009,8 @@ def _move_module_to_device(
 
 
 def _move_states_to_device(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
+    params: list[nn.Parameter],
+    buffers: list[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
@@ -1089,7 +1088,7 @@ def _get_compute_device(
 # TODO: See how to deprecate!
 def _sync_module_params_and_buffers(
     module: nn.Module,
-    params: List[nn.Parameter],
+    params: list[nn.Parameter],
     process_group: dist.ProcessGroup,
 ) -> None:
     """
@@ -1098,7 +1097,7 @@ def _sync_module_params_and_buffers(
     Precondition: ``sync_module_states == True`` and ``self.process_group`` has
     been set.
     """
-    module_states: List[torch.Tensor] = []
+    module_states: list[torch.Tensor] = []
     for buffer in module.buffers():
         # Avoid re-synchronizing buffers in case of nested wrapping
         if not getattr(buffer, FSDP_SYNCED, False):
@@ -1132,7 +1131,7 @@ def _sync_module_params_and_buffers(
 
 
 def _check_module_states_for_sync_module_states(
-    module_states: List[torch.Tensor],
+    module_states: list[torch.Tensor],
 ) -> None:
     if module_states and any(
         tensor.device == torch.device("cpu") for tensor in module_states

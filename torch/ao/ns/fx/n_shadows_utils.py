@@ -2,7 +2,7 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 import torch
 import torch.fx
@@ -100,7 +100,7 @@ class OutputProp:
         return None
 
 
-def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Node]]:
+def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, list[Node]]:
     # the original matches variable is unique by node, make it unique by subgraph
     # instead
     seen_nodes = set()
@@ -109,7 +109,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[tuple[str, _MatchResult]] = []
+    matches_items_reversed: list[tuple[str, _MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 
@@ -164,7 +164,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
             # TODO(future PR): make this code less confusing,  see discussion
             # in https://github.com/pytorch/pytorch/pull/80521/files#r975918836
 
-            def _order_nodes(node_a, node_b, node_c) -> List[Node]:
+            def _order_nodes(node_a, node_b, node_c) -> list[Node]:
                 nodes = [node_a, node_b, node_c]
                 first_node = None
                 mid_node = None
@@ -449,9 +449,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     first_node: Node,
     last_node: Node,
     fqn: Optional[str],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    list_of_node_name_to_qconfig: list[Dict[str, QConfigAny]],
     example_inputs: Any,
-    last_added_shadow_node_list: List[Optional[Node]],
+    last_added_shadow_node_list: list[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -607,9 +607,9 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     match_name: str,
-    nodes_in_this_subgraph: List[Any],
-    qconfig_mappings: List[QConfigMapping],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    nodes_in_this_subgraph: list[Any],
+    qconfig_mappings: list[QConfigMapping],
+    list_of_node_name_to_qconfig: list[Dict[str, QConfigAny]],
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -688,7 +688,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     # order but the eventual results will be in reverse order.
     # So, we keep track of the last shadow logger we added and
     # always insert after it.
-    last_added_shadow_node_list: List[Optional[Node]] = [None]
+    last_added_shadow_node_list: list[Optional[Node]] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
         create_one_transformed_and_logged_copy_of_subgraph(
             mt,
@@ -707,7 +707,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
 
 def create_add_loggers_graph(
     model: GraphModule,
-    subgraphs_dedup: Dict[str, List[Node]],
+    subgraphs_dedup: Dict[str, list[Node]],
     qconfig_mapping: QConfigMapping,
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:

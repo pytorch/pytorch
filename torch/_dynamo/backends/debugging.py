@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import logging
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -294,15 +294,15 @@ class ExplainOutput:
     There is no reason to create this class directly.
     """
 
-    graphs: List[torch.fx.GraphModule]
+    graphs: list[torch.fx.GraphModule]
     graph_count: int
     graph_break_count: int
-    break_reasons: List[
+    break_reasons: list[
         Any
     ]  # Type is GraphCompileReason but doesn't matter for this purpose
     op_count: int
-    ops_per_graph: Optional[List[torch.fx.Node]] = None
-    out_guards: Optional[List[_guards.Guard]] = None
+    ops_per_graph: Optional[list[torch.fx.Node]] = None
+    out_guards: Optional[list[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
     def __str__(self) -> str:

@@ -1,5 +1,5 @@
 import tokenize
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 
 cache: Dict[str, Dict[int, str]] = {}
@@ -23,7 +23,7 @@ def _add_file(filename: str) -> None:
     # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0
-    significant_indents: List[int] = []
+    significant_indents: list[int] = []
 
     for i, token in enumerate(tokens):
         if token.type == tokenize.INDENT:

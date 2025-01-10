@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Dict, Iterator, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -37,7 +37,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 
 
 def reverse_closure(
-    roots: List[Node], target_nodes: Set[Node], reverse_edges_dict
+    roots: list[Node], target_nodes: Set[Node], reverse_edges_dict
 ) -> Tuple[Set[Node], Set[Node]]:
     """
     This function returns the reverse closure of the given roots,
@@ -67,10 +67,10 @@ def reverse_closure(
     return closure, visited_target_nodes
 
 
-def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
+def construct_reverse_graph(roots: list[Node]) -> Dict[Node, list[Node]]:
     q: Deque[Node] = collections.deque()
     root_seen: Set[Node] = set()
-    reverse_edges_dict: Dict[Node, List[Node]] = collections.defaultdict(list)
+    reverse_edges_dict: Dict[Node, list[Node]] = collections.defaultdict(list)
     for node in roots:
         if node is not None and node not in root_seen:
             q.append(node)
@@ -86,8 +86,8 @@ def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
 
 
 def get_param_groups(
-    inputs: List[Node], params: List[Node], reverse_edges_dict
-) -> List[Dict[str, Any]]:
+    inputs: list[Node], params: list[Node], reverse_edges_dict
+) -> list[Dict[str, Any]]:
     """
     Given a list of inputs and a list of parameters, return a list of parameter
     groups, where each group contains the parameters and the intermediates that
@@ -140,11 +140,11 @@ def get_param_groups(
 
 
 def stage_backward_input(
-    stage_outputs_or_loss: List[torch.Tensor],
-    output_grads: Optional[List[torch.Tensor]],
-    input_values: List[torch.Tensor],
+    stage_outputs_or_loss: list[torch.Tensor],
+    output_grads: Optional[list[torch.Tensor]],
+    input_values: list[torch.Tensor],
     weights: Iterator[Parameter],
-) -> Tuple[Tuple[Optional[torch.Tensor], ...], List[Dict[str, Any]]]:
+) -> Tuple[Tuple[Optional[torch.Tensor], ...], list[Dict[str, Any]]]:
     """
     Compute the gradients for only the stage inputs with
     respect to the stage outputs (if non-last stage) or loss (if last stage)
@@ -155,13 +155,13 @@ def stage_backward_input(
     Detaching the stage_outputs_or_loss at the end of this function is important as
     it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
-    stage_output_grad_fns: List[Node] = list(
+    stage_output_grad_fns: list[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
     )
-    stage_input_grad_fns: List[Node] = list(
+    stage_input_grad_fns: list[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, input_values))
     )
-    weight_grad_fns: List[Node] = list(
+    weight_grad_fns: list[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, weights))
     )
 
@@ -222,11 +222,11 @@ def stage_backward_input(
 
 
 def stage_backward_weight(
-    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
+    weights: Iterator[Parameter], param_groups: list[Dict[str, Any]], retain_graph=False
 ) -> Tuple[Optional[torch.Tensor], ...]:
     # map weights to param_group_weights
     grad_acc_to_weight = {}
-    weight_grads: List[Optional[torch.Tensor]] = []
+    weight_grads: list[Optional[torch.Tensor]] = []
     for index, weight in enumerate(weights):
         grad_acc = _get_grad_fn_or_grad_acc(weight)
         grad_acc_to_weight[grad_acc] = weight, index
@@ -273,7 +273,7 @@ def stage_backward(
     stage_output,
     output_grads,
     input_values,
-    outputs_with_grads_idxs: Optional[List[int]] = None,  # deprecated, not used
+    outputs_with_grads_idxs: Optional[list[int]] = None,  # deprecated, not used
 ) -> Tuple[Optional[torch.Tensor], ...]:
     """
     This is a helper function to:
@@ -293,8 +293,8 @@ def stage_backward(
     try:
         # stage_output may be a composite datatype like dict. Extract all individual
         # tensor values here
-        stage_output_tensors: List[torch.Tensor] = []
-        output_grad_tensors: List[Optional[torch.Tensor]] = []
+        stage_output_tensors: list[torch.Tensor] = []
+        output_grad_tensors: list[Optional[torch.Tensor]] = []
 
         def extract_tensors_with_grads(
             output_val,
@@ -353,7 +353,7 @@ def stage_backward(
         )
 
         # Extract gradients wrt the input values
-        grad_inputs: List[Optional[torch.Tensor]] = []
+        grad_inputs: list[Optional[torch.Tensor]] = []
         for val in input_values:
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)

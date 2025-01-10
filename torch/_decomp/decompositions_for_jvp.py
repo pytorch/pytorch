@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch._decomp
@@ -115,7 +115,7 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 
 
 def recompute_mean_var(
-    input: Tensor, rstd: Tensor, inner_dim_indices: List[int], keepdim: bool
+    input: Tensor, rstd: Tensor, inner_dim_indices: list[int], keepdim: bool
 ):
     # for most norm decompositions, it will be the same as the core version except for here.
     # We recompute the mean and variance so that they track gradients through input
@@ -132,12 +132,12 @@ def recompute_mean_var(
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
-    normalized_shape: List[int],
+    normalized_shape: list[int],
     mean: Tensor,
     rstd: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
-    output_mask: List[bool],
+    output_mask: list[bool],
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_ndim = input.dim()
@@ -205,7 +205,7 @@ def native_layer_norm_backward(
     return (d_input, d_weight, d_bias)
 
 
-def prod(x: List[int]):
+def prod(x: list[int]):
     r = 1
     for i in x:
         r *= i
@@ -223,7 +223,7 @@ def native_batch_norm_backward(
     save_invstd: Optional[Tensor],
     train: bool,
     eps: float,
-    output_mask: List[bool],
+    output_mask: list[bool],
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_rank = input.dim()
@@ -251,7 +251,7 @@ def native_batch_norm_backward(
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
 
-    reduction_axes: List[int] = []
+    reduction_axes: list[int] = []
     for i in range(input_rank):
         if i != axis:
             reduction_axes.append(i)
@@ -305,7 +305,7 @@ def batch_norm_backward(
     save_var: Optional[Tensor],
     update: bool,
     eps: float,
-    output_mask: List[bool],
+    output_mask: list[bool],
     reserve: Tensor,
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     return native_batch_norm_backward(

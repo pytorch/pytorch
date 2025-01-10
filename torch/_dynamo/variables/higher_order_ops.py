@@ -83,8 +83,8 @@ def discard_graph_changes(tx):
 
 
 def check_meta_consistency_vt(
-    vars1: List[VariableTracker],
-    vars2: List[VariableTracker],
+    vars1: list[VariableTracker],
+    vars2: list[VariableTracker],
     lhs_name: str,
     rhs_name: str,
 ) -> None:
@@ -762,7 +762,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
@@ -961,7 +961,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
@@ -1011,7 +1011,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.while_loop import _create_unbacked_symint
@@ -1222,7 +1222,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
@@ -1313,7 +1313,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.scan import (
@@ -1474,7 +1474,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from . import TensorVariable
@@ -1623,7 +1623,7 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
 
 class FunctionalCallVariable(FunctorchHigherOrderVariable):
     def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+        self, tx, args: list[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         if not torch._dynamo.config.inline_inbuilt_nn_modules:
             unimplemented(
@@ -2055,7 +2055,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint

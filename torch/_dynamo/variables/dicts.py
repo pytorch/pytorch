@@ -562,7 +562,7 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         items = dict.fromkeys(items, SetVariable._default_value())
@@ -600,7 +600,7 @@ class SetVariable(ConstDictVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
         # We foward the calls to the dictionary model
@@ -676,7 +676,7 @@ class SetVariable(ConstDictVariable):
 class FrozensetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -712,7 +712,7 @@ class FrozensetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
@@ -723,7 +723,7 @@ class FrozensetVariable(SetVariable):
 class DictKeySetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -752,7 +752,7 @@ class DictKeySetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
@@ -800,7 +800,7 @@ class DictViewVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
+        args: list["VariableTracker"],
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__len__":
@@ -827,7 +827,7 @@ class DictKeysVariable(DictViewVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
+        args: list["VariableTracker"],
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__contains__":

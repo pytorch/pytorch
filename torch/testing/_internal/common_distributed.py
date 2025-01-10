@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
+from typing import Dict, NamedTuple, Optional, Union, Any, Callable, Tuple
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log
@@ -963,7 +963,7 @@ class DistributedTestBase(MultiProcessTestCase):
 
 def run_subtests(
     cls_inst,
-    subtest_config: Dict[str, List[Any]],
+    subtest_config: Dict[str, list[Any]],
     test_fn: Callable,
     *test_args,
     **test_kwargs: Any,
@@ -982,9 +982,9 @@ def run_subtests(
         test_kwargs: Keyword arguments to pass to ``test_fn``.
     """
     # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
-    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    subtest_config_items: list[Tuple[str, list[Any]]] = list(subtest_config.items())
+    subtest_config_keys: list[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))

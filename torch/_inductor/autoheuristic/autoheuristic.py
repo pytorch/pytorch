@@ -1,7 +1,7 @@
 import json
 import os
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -55,11 +55,11 @@ class AutoHeuristic:
     def __init__(
         self,
         fallback: Callable[[], Choice],
-        choices: List[Choice],
+        choices: list[Choice],
         feedback: Optional[LocalFeedback],
         context: AHContext,
         name: str,
-        augment_context: Optional[List[AHOperation]] = None,
+        augment_context: Optional[list[AHOperation]] = None,
         precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
     ) -> None:
         """
@@ -135,8 +135,8 @@ class AutoHeuristic:
         return self.fallback()
 
     def get_top_k_choices(
-        self, top_k: int, always_included: Optional[List[str]] = None
-    ) -> Optional[List[Choice]]:
+        self, top_k: int, always_included: Optional[list[str]] = None
+    ) -> Optional[list[Choice]]:
         if not self.satisfies_precondition():
             return None
         if torch._inductor.config.use_autoheuristic(self.name):
@@ -223,11 +223,11 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
     def __init__(
         self,
         fallback: Callable[[], Optional[ChoiceCaller]],
-        choices: List[ChoiceCaller],
-        input_nodes: List[Any],
+        choices: list[ChoiceCaller],
+        input_nodes: list[Any],
         context: AHContext,
         name: str,
-        augment_context: Optional[List[AHOperation]] = None,
+        augment_context: Optional[list[AHOperation]] = None,
         precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
     ) -> None:
         """
@@ -266,7 +266,7 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             self.register_global_feedback(input_nodes, choices)
 
     def register_global_feedback(
-        self, input_nodes: List[Any], choices: List[ChoiceCaller]
+        self, input_nodes: list[Any], choices: list[ChoiceCaller]
     ) -> None:
         """
         Registers a callback in select_algorithm, which is called with the timing of each choice.
@@ -283,8 +283,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             ah_precompile_key: str,
             timings: Dict[ChoiceCaller, float],
             name: str,
-            input_nodes: List[Any],
-            choices: List[ChoiceCaller],
+            input_nodes: list[Any],
+            choices: list[ChoiceCaller],
         ) -> None:
             current_inputs_key = create_inputs_key(input_nodes)
             if current_inputs_key != ah_inputs_key:
@@ -307,8 +307,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         return self.choicestr2choice.get(choice, None)
 
     def get_top_k_choices_caller(
-        self, top_k: int, always_included: Optional[List[str]] = None
-    ) -> Optional[List[ChoiceCaller]]:
+        self, top_k: int, always_included: Optional[list[str]] = None
+    ) -> Optional[list[ChoiceCaller]]:
         choices = self.get_top_k_choices(top_k, always_included)
         if choices is None:
             return None

@@ -28,10 +28,10 @@ class Attachment(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rectangles: Optional[List[_rectangle.Rectangle]] = dataclasses.field(
+    rectangles: Optional[list[_rectangle.Rectangle]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "rectangles"}
     )
-    regions: Optional[List[_region.Region]] = dataclasses.field(
+    regions: Optional[list[_region.Region]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "regions"}
     )
 

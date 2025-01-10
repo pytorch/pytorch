@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import dataclasses
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Dict, Set, TYPE_CHECKING
 
 from torch.distributed.checkpoint.planner import SavePlan, WriteItem
 
@@ -13,9 +13,9 @@ __all__ = ["dedup_save_plans"]
 
 
 def dedup_save_plans(
-    all_plans: List[SavePlan],
+    all_plans: list[SavePlan],
     save_to_lowest_rank: bool = False,
-) -> List[SavePlan]:
+) -> list[SavePlan]:
     """
     Removes duplicate entries from appearing on multiple SavePlans. For each duplicate across
     a set of SavePlans, only the smallest SavePlan in terms of planned storage keeps the entry.
@@ -30,7 +30,7 @@ def dedup_save_plans(
             write_item_idx_to_write_item[write_item.index] = write_item
 
     # put item in the plan with the smallest size and remove it from the other plan_indices
-    to_remove: List[Set] = [set() for _ in range(len(all_plans))]
+    to_remove: list[Set] = [set() for _ in range(len(all_plans))]
     plan_to_size = [0] * len(all_plans)
     for write_item_idx, plan_indices in write_item_to_plan_indices.items():
         if save_to_lowest_rank:

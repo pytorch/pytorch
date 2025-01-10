@@ -15,7 +15,6 @@ from typing import (
     Dict,
     Generator,
     Iterable,
-    List,
     no_type_check,
     Optional,
     Set,
@@ -150,8 +149,8 @@ class _FSDPState(_State):
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
-        self._all_fsdp_states: List[_FSDPState] = []
-        self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._all_fsdp_states: list[_FSDPState] = []
+        self._all_handles: list[flat_param_file.FlatParamHandle] = []
         self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
@@ -263,7 +262,7 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
 
 def _named_parameters_with_duplicates(
     module: nn.Module, **kwargs: Any
-) -> List[Tuple[str, nn.Parameter]]:
+) -> list[Tuple[str, nn.Parameter]]:
     """
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
@@ -283,7 +282,7 @@ def _named_parameters_with_duplicates(
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
-) -> Dict[nn.Parameter, List[str]]:
+) -> Dict[nn.Parameter, list[str]]:
     """
     Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
     we use canonical to mean the fully-qualified name assigned to the parameter
@@ -353,7 +352,7 @@ def _get_param_to_fqns(
     def return_fn(param_to_fqns):
         return param_to_fqns
 
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, list[str]] = {}
     return _apply_to_modules(
         model,
         module_fn,
@@ -378,7 +377,7 @@ def _log_post_backward_hook(
 @no_type_check
 def _get_handle_fqns_from_root(
     state: _FSDPState, handle: "FlatParamHandle"
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     if handle is None:
         return None
     param_to_fqn = state._exec_order_data.param_to_fqn
@@ -393,7 +392,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
-    filter_fqns: Optional[List[str]] = None,
+    filter_fqns: Optional[list[str]] = None,
     *args,
     **kwargs,
 ):
@@ -444,7 +443,7 @@ def _apply_to_modules(
 @no_type_check
 def _assert_in_training_states(
     state: _FSDPState,
-    training_states: List[TrainingState],
+    training_states: list[TrainingState],
 ) -> None:
     """Asserts that FSDP is in the states ``_training_states``."""
     # Raise a `ValueError` instead of using `assert` to ensure that these

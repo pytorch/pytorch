@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -77,7 +77,7 @@ class FSDPCommContext:
         self.all_gather_state: Optional[AllGatherState] = None
         self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
-        self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
+        self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
@@ -116,7 +116,7 @@ class FSDPParamGroup:
 
     def __init__(
         self,
-        params: List[nn.Parameter],
+        params: list[nn.Parameter],
         modules: Tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
@@ -162,7 +162,7 @@ class FSDPParamGroup:
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
-        self._post_forward_indices: List[int] = []
+        self._post_forward_indices: list[int] = []
         # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
         # Whether to all-reduce gradients for HSDP; only used if
@@ -387,8 +387,8 @@ class FSDPParamGroup:
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: List[FSDPParam] = []
-            unsharded_grads: List[torch.Tensor] = []
+            fsdp_params_with_grad: list[FSDPParam] = []
+            unsharded_grads: list[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
                 # May have an accumulated gradient of the reduce dtype if the
                 # previous backward did not reduce-scatter
@@ -550,8 +550,8 @@ class FSDPParamGroup:
         args_list, args_spec = tree_flatten(args)
         kwargs_list, kwargs_spec = tree_flatten(kwargs)
         args_kwargs_list = list(args_list) + list(kwargs_list)
-        inp_tensor_indices: List[int] = []
-        inp_tensors: List[torch.Tensor] = []
+        inp_tensor_indices: list[int] = []
+        inp_tensors: list[torch.Tensor] = []
         for i, obj in enumerate(args_kwargs_list):
             if torch.is_tensor(obj) and obj.requires_grad:
                 inp_tensor_indices.append(i)
@@ -666,8 +666,8 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
-) -> List[ParamModuleInfo]:
+    params: list[nn.Parameter], modules: Tuple[nn.Module, ...]
+) -> list[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight
     Shared module: mlp.lin1 = mlp.lin2

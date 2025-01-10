@@ -9,7 +9,7 @@
 
 import functools
 import logging
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
+from typing import Any, Callable, Dict, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -18,7 +18,7 @@ from torch.distributed.logging_handlers import _log_handlers
 from torch.monitor import _WaitCounter
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _DEFAULT_DESTINATION = "default"
 

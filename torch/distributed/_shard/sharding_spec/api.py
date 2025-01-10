@@ -3,7 +3,7 @@ import functools
 import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Dict, List, TYPE_CHECKING
+from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
@@ -148,7 +148,7 @@ class EnumerableShardingSpec(ShardingSpec):
             each shard. Note that none of the shards should overlap.
     """
 
-    shards: List[ShardMetadata]
+    shards: list[ShardMetadata]
 
     def __post_init__(self):
         if len(self.shards) == 0:

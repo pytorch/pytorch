@@ -5,7 +5,7 @@ import typing
 from collections import defaultdict
 from pathlib import Path
 from types import CodeType
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, Optional
 
 import torch
 
@@ -106,7 +106,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             qualified_name: str,
             qualname_prefix: Optional[str] = None,
             limit: int = 2000,
-        ) -> List[CallTraceThunk]:
+        ) -> list[CallTraceThunk]:
             return self.trace_records[qualified_name]
 
         def analyze(self, qualified_name: str) -> Dict:

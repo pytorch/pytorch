@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import cast, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -77,7 +77,7 @@ def _create_colwise_spec(
         ]
     return ChunkShardingSpec(
         dim=0,
-        placements=cast(List[Union[_remote_device, str]], placements),
+        placements=cast(list[Union[_remote_device, str]], placements),
     )
 
 

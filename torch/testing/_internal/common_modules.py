@@ -28,11 +28,11 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, skipIfMPSOnMacOS13, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
-from typing import List, Tuple, Type, Set, Dict
+from typing import Tuple, Type, Set, Dict
 import operator
 
 # List of all namespaces containing modules to test.
-MODULE_NAMESPACES: List[ModuleType] = [
+MODULE_NAMESPACES: list[ModuleType] = [
     torch.nn.modules,
     torch.ao.nn.qat.modules,
     torch.ao.nn.quantizable.modules,
@@ -50,7 +50,7 @@ MODULES_TO_SKIP: Set[Type] = {
 }
 
 # List of all module classes to test.
-MODULE_CLASSES: List[Type] = list(chain(*[
+MODULE_CLASSES: list[Type] = list(chain(*[
     [getattr(namespace, module_name) for module_name in namespace.__all__]  # type: ignore[attr-defined]
     for namespace in MODULE_NAMESPACES]))
 MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
@@ -317,7 +317,7 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
 def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_batchmean', {'reduction': 'batchmean'}),
@@ -360,7 +360,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, tr
                            requires_grad=False).log_softmax(dim=1).requires_grad_(requires_grad)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_none', {'reduction': 'none'}),
@@ -425,7 +425,7 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -450,7 +450,7 @@ def module_inputs_torch_nn_PoissonNLLLoss(module_info, device, dtype, requires_g
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -498,7 +498,7 @@ def module_inputs_torch_nn_MSELoss(module_info, device, dtype, requires_grad, tr
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -980,7 +980,7 @@ def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requi
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1419,7 +1419,7 @@ def module_inputs_torch_nn_SmoothL1Loss(module_info, device, dtype, requires_gra
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1455,7 +1455,7 @@ def module_inputs_torch_nn_BCELoss(module_info, device, dtype, requires_grad, tr
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1503,7 +1503,7 @@ def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, require
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1545,8 +1545,8 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    reductions: List[str] = ['mean', 'sum', 'none']
-    cases: List[Tuple[str, dict]] = [
+    reductions: list[str] = ['mean', 'sum', 'none']
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('weights', {'weight': make_weight((3,))}),
         ('ignore_index', {'ignore_index': 1}),
@@ -1633,7 +1633,7 @@ def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, tr
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1799,7 +1799,7 @@ def module_inputs_torch_nn_HingeEmbeddingLoss(module_info, device, dtype, requir
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -1833,7 +1833,7 @@ def module_inputs_torch_nn_HingeEmbeddingLoss(module_info, device, dtype, requir
 def module_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -2245,7 +2245,7 @@ def module_inputs_torch_nn_MarginRankingLoss(module_info, device, dtype, require
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -2273,7 +2273,7 @@ def module_inputs_torch_nn_MultiLabelMarginLoss(module_info, device, dtype, requ
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -2309,7 +2309,7 @@ def module_inputs_torch_nn_MultiMarginLoss(module_info, device, dtype, requires_
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -2340,7 +2340,7 @@ def module_inputs_torch_nn_MultiLabelSoftMarginLoss(module_info, device, dtype, 
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -2378,7 +2378,7 @@ def module_inputs_torch_nn_SoftMarginLoss(module_info, device, dtype, requires_g
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    cases: List[Tuple[str, dict]] = [
+    cases: list[Tuple[str, dict]] = [
         ('', {}),
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
@@ -3362,7 +3362,7 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 
 
 # Database of ModuleInfo entries in alphabetical order.
-module_db: List[ModuleInfo] = [
+module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
                skips=(

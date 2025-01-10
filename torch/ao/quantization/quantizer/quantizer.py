@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, Optional, Union
 
 import torch
 from torch import Tensor
@@ -99,8 +99,8 @@ class SharedQuantizationSpec(QuantizationSpecBase):
 class DerivedQuantizationSpec(QuantizationSpecBase):
     """Quantization spec for the Tensors whose quantization parameters are derived from other Tensors"""
 
-    derived_from: List[EdgeOrNode]
-    derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]]
+    derived_from: list[EdgeOrNode]
+    derive_qparams_fn: Callable[[list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]]
     dtype: torch.dtype
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None

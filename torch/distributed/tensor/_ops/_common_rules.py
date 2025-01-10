@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, Dict, Optional, Tuple
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -20,12 +20,12 @@ def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
 
 def _gen_reshard_suggestions(
     op_schema: OpSchema,
-    input_dims: List[str],
+    input_dims: list[str],
     input_specs: Tuple[DTensorSpec, ...],
     dim_to_sharding: Dict[str, int],
-    pending_sum: List[int],
+    pending_sum: list[int],
 ) -> OutputSharding:
-    suggested_arg_specs: List[DTensorSpec] = []
+    suggested_arg_specs: list[DTensorSpec] = []
     for input_dim, input_spec in zip(input_dims, input_specs):
         dim_map = [dim_to_sharding[dim] for dim in input_dim]
         suggested_arg_specs.append(
@@ -240,7 +240,7 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     input_specs = op_schema.args_spec
     max_dim = max(input.ndim for input in input_specs)
     dimchars = []
-    singleton_counter: List[int] = [0] * max_dim
+    singleton_counter: list[int] = [0] * max_dim
     for input in input_specs:
         start_dim = max_dim - input.ndim
         p = alphabet[start_dim:max_dim]

@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Dict,
     Iterable,
-    List,
     Literal,
     Optional,
     overload,
@@ -332,7 +331,7 @@ class CustomOpDef:
 
         def inner(fn):
             if device_types is None or isinstance(device_types, str):
-                dtypes: List[Union[str, None]] = [device_types]
+                dtypes: list[Union[str, None]] = [device_types]
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:

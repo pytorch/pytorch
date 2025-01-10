@@ -3,7 +3,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 
 def remove_triton_function_declaration(source_code: str) -> str:
@@ -45,7 +45,7 @@ def rename_kernels(source_code: str) -> str:
     return source_code
 
 
-def merge_params(original_params: List[str], new_params: List[str]) -> List[str]:
+def merge_params(original_params: list[str], new_params: list[str]) -> list[str]:
     assert len(new_params) >= len(original_params)
     for idx in range(len(new_params)):
         if new_params[idx] == "T":

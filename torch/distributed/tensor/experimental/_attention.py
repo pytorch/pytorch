@@ -13,7 +13,6 @@ from typing import (
     Callable,
     Dict,
     Generator,
-    List,
     Optional,
     Protocol,
     Set,
@@ -446,7 +445,7 @@ def _templated_ring_attention(
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
     if isinstance(mesh, dist.ProcessGroup):
-        pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
+        pg: Union[dist.ProcessGroup, list[dist.ProcessGroup]] = mesh
     else:
         pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "process group must be single dimension"
@@ -463,7 +462,7 @@ def _templated_ring_attention(
 
     sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=seq_dim)
 
-    rest: List[Any]
+    rest: list[Any]
     out: torch.Tensor
     logsumexp: torch.Tensor
 
@@ -625,7 +624,7 @@ def _templated_ring_attention_backward(
     size = dist.get_world_size(pg)
     next_kv = None
     next_grad_kv = None
-    rest: List[Any]
+    rest: list[Any]
     grad_query_, grad_key_, grad_value_ = None, None, None
 
     accum_dtype = torch.float32 if _cp_options.convert_to_f32 else query.dtype
@@ -1191,9 +1190,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
 
 def _context_parallel_buffers(
     mesh: DeviceMesh,
-    buffers: List[torch.Tensor],
-    buffer_seq_dims: List[int],
-) -> List[torch.Tensor]:
+    buffers: list[torch.Tensor],
+    buffer_seq_dims: list[int],
+) -> list[torch.Tensor]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
     sharder = (
@@ -1212,8 +1211,8 @@ def _context_parallel_buffers(
 def context_parallel(
     mesh: DeviceMesh,
     *,
-    buffers: Optional[List[torch.Tensor]] = None,
-    buffer_seq_dims: Optional[List[int]] = None,
+    buffers: Optional[list[torch.Tensor]] = None,
+    buffer_seq_dims: Optional[list[int]] = None,
     no_restore_buffers: Optional[Set[torch.Tensor]] = None,
 ) -> Generator[None, None, None]:
     """
@@ -1278,9 +1277,9 @@ def context_parallel(
 @torch.no_grad()
 def context_parallel_unshard(
     mesh: DeviceMesh,
-    buffers: List[torch.Tensor],
-    seq_dims: List[int],
-) -> List[torch.Tensor]:
+    buffers: list[torch.Tensor],
+    seq_dims: list[int],
+) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
 

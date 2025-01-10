@@ -12,7 +12,7 @@ import os
 import time
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, Optional, TextIO, TYPE_CHECKING
+from typing import Dict, Optional, TextIO, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ class TailLog:
         self._finished_events: Dict[int, Event] = {
             local_rank: Event() for local_rank in log_files.keys()
         }
-        self._futs: List[Future] = []
+        self._futs: list[Future] = []
         self._interval_sec = interval_sec
         self._stopped = False
 

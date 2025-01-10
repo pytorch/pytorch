@@ -90,7 +90,7 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
-def maybe_realize(args: List[Optional[IRNode]]):
+def maybe_realize(args: list[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
     return tree_map(
         lambda x: (
@@ -109,7 +109,7 @@ def get_float32_precision():
         return "'tf32'"
 
 
-def zeros_and_scatter_lowering(shape: List[int], indices, values):
+def zeros_and_scatter_lowering(shape: list[int], indices, values):
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
     assert isinstance(grad, TensorBox)
@@ -153,10 +153,10 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     return buffer
 
 
-SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
 
 
-def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -870,7 +870,7 @@ def lower_cpu(
             "torch.compile on current platform is not supported for CPU."
         )
 
-    fake_buffers: List[Buffer] = []  # noqa: F821
+    fake_buffers: list[Buffer] = []  # noqa: F821
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -968,7 +968,7 @@ def lower_cpu(
         [B, Hq, seq_len_q, v_head_dim],
         stride=[sympy.sympify(s) for s in out_strides],
     )
-    _choices: List[Any] = []
+    _choices: list[Any] = []
     input_nodes = [query, key, value, kv_num_blocks, kv_indices]
     if not full_kv_num_blocks:
         no_full_kv_block = True
@@ -1207,8 +1207,8 @@ def flex_attention(
         "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
     )
 
-    choices: List[Any] = []
-    configs: List[tuple[int, int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
         configs += [
@@ -2064,9 +2064,9 @@ class JointOutputResult:
     """Results from processing joint outputs."""
 
     grad_input: ComputedBuffer
-    captured_grads_compute: List[ComputedBuffer]
-    captured_grads: List[Optional[TensorBox]]
-    mutated_grads: List[TensorBox]
+    captured_grads_compute: list[ComputedBuffer]
+    captured_grads: list[Optional[TensorBox]]
+    mutated_grads: list[TensorBox]
 
 
 def process_joint_outputs(
@@ -2293,8 +2293,8 @@ def flex_attention_backward(*args, **kwargs):
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
-    choices: List[Any] = []
-    configs: List[tuple[int, int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]

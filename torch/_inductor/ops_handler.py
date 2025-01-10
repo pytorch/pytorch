@@ -5,7 +5,6 @@ from typing import (
     Callable,
     Dict,
     Generic,
-    List,
     Literal,
     NamedTuple,
     Optional,
@@ -961,7 +960,7 @@ def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
 class OpCountResult(NamedTuple):
     num_ops: int
     used_ops: OrderedSet[str]
-    read_buffers: List[str]
+    read_buffers: list[str]
     nontrivial_read_count: int
 
 
@@ -974,7 +973,7 @@ class OpCounterCSE:
         self.op_count = 0
         self.var_names = {}
         self._used_ops = OrderedSet[str]()
-        self._read_names: List[str] = []
+        self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
     def __getattr__(self, name):

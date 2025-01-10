@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
 from torch._vmap_internals import _vmap
@@ -784,7 +784,7 @@ def jacobian(
 
         for i, out in enumerate(outputs):
             # mypy complains that expression and variable have different types due to the empty list
-            jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
+            jac_i: Tuple[list[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
             for j in range(out.nelement()):
                 vj = _autograd_grad(
                     (out.reshape(-1)[j],),

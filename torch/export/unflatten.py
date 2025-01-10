@@ -222,7 +222,7 @@ class InterpreterModuleDispatcher(_SubmoduleBase, torch.nn.Module):
     to the next InterpreterModule, and wraps back around after the last.
     """
 
-    def __init__(self, attrs: Set[str], call_modules: List[InterpreterModule]):
+    def __init__(self, attrs: Set[str], call_modules: list[InterpreterModule]):
         super().__init__()
         assert call_modules
         self._modules = call_modules[0]._modules
@@ -273,8 +273,8 @@ class FlatArgsAdapter(abc.ABC):
         self,
         target_spec: pytree.TreeSpec,
         input_spec: pytree.TreeSpec,
-        input_args: List[Any],
-    ) -> List[Any]:
+        input_args: list[Any],
+    ) -> list[Any]:
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
 
@@ -423,7 +423,7 @@ class UnflattenedModule(torch.nn.Module):
 
         # This is to handle parameters/buffers that point to the same tensor
         # object id -> list of (node_name, target_name)
-        consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
+        consts_map: Dict[int, list[Tuple[str, str]]] = defaultdict(list)
         consts_targets: Set[str] = set()
 
         def add_to_consts_map(obj_id, node_name, target_name):
@@ -476,7 +476,7 @@ class UnflattenedModule(torch.nn.Module):
                 add_to_consts_map(id(tensor), ph_name, fqn)
 
         # node name -> list of possible targets
-        inputs_to_state: Dict[str, List[str]] = {}
+        inputs_to_state: Dict[str, list[str]] = {}
         for node_target in consts_map.values():
             targets = [t[1] for t in node_target]
             for n, _ in node_target:
@@ -908,7 +908,7 @@ class _ModuleFrame:
         seen_attrs,
         created_modules,
         parent,
-        module_stack: List[Tuple[str, Optional[str], int]],
+        module_stack: list[Tuple[str, Optional[str], int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,
@@ -1017,7 +1017,7 @@ class _ModuleFrame:
                         ] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
-                input_nodes: List[Optional[torch.fx.Node]] = []
+                input_nodes: list[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument):
                         input_nodes.append(input.value)  # type: ignore[arg-type]
@@ -1175,7 +1175,7 @@ class _ModuleFrame:
             parent_out: Optional[torch.fx.Node] = _generate_flatten_spec(
                 self.parent.module, self.parent_call_module, signature.out_spec
             )
-            graph_outputs: Union[torch.fx.Node, List[torch.fx.Node]] = tree_out_node
+            graph_outputs: Union[torch.fx.Node, list[torch.fx.Node]] = tree_out_node
         else:
             graph_outputs = []
             # Iterate through nodes we have copied into self.graph.
@@ -1352,7 +1352,7 @@ class _SubmoduleEntry:
 
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
-    seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
+    seen_modules: Dict[int, list[_SubmoduleEntry]] = defaultdict(list)
     seen_attrs: Dict[str, Set[str]] = defaultdict(set)
     created_modules: Dict[str, torch.nn.Module] = {}
     _ModuleFrame(
@@ -1550,8 +1550,8 @@ def _deduplicate_modules(partitions):
 
 def _sink_params(
     module: torch.nn.Module,
-    inputs_to_state: Dict[str, List[str]],
-    scope: List[str],
+    inputs_to_state: Dict[str, list[str]],
+    scope: list[str],
     module_id_to_inputs_removed: Optional[Dict[int, Set[str]]] = None,
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.

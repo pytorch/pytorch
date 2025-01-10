@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
+from typing import Dict, Callable, Tuple, Sequence, Union, Any
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
@@ -3209,7 +3209,7 @@ class NNTestCase(TestCase):
         raise NotImplementedError
 
     @abstractmethod
-    def _get_parameters(self, module: nn.Module) -> Tuple[List[nn.Parameter], List[nn.Parameter]]:
+    def _get_parameters(self, module: nn.Module) -> Tuple[list[nn.Parameter], list[nn.Parameter]]:
         raise NotImplementedError
 
     @abstractmethod

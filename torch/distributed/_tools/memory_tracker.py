@@ -3,7 +3,7 @@ import operator
 import pickle
 from collections import defaultdict
 from itertools import chain
-from typing import Any, Callable, Dict, List, no_type_check, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Dict, no_type_check, Sequence, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -72,7 +72,7 @@ class MemoryTracker:
 
     def __init__(self) -> None:
         torch._C._log_api_usage_once("torch.distributed.memory_tracker")
-        self._hooks: List[RemovableHandle] = []
+        self._hooks: list[RemovableHandle] = []
         self._operator_names: Dict[str, int] = defaultdict(int)
         self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict()
         self.memories_active: Dict[int, Dict[str, float]] = defaultdict()

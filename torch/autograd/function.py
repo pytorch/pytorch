@@ -4,7 +4,7 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 from typing_extensions import deprecated
 
 import torch
@@ -722,7 +722,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: List[Optional[torch.Tensor]] = []
+        res: list[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):

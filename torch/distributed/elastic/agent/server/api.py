@@ -554,7 +554,7 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def _assign_worker_ranks(
         self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
-    ) -> List[Worker]:
+    ) -> list[Worker]:
         """Determine proper ranks for worker processes.
 
         Fast Path: when all workers have the same role and world size. We calculate

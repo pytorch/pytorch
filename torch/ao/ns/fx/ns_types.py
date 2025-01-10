@@ -1,5 +1,5 @@
 import enum
-from typing import Any, Callable, Dict, List, NamedTuple, Union
+from typing import Any, Callable, Dict, NamedTuple, Union
 
 from torch.fx.graph import Node
 
@@ -56,7 +56,7 @@ NSSingleResultType = Dict[str, Any]
 #   },
 # }
 #
-NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
+NSResultsType = Dict[str, Dict[str, Dict[str, list[NSSingleResultType]]]]
 
 # Defines the underlying target type of a node, for example:
 # `F.conv1d` for a `call_function` conv node

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Type
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Type
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -12,14 +12,14 @@ from .graph_module import _is_observed_standalone_module
 from .quantize_handler import QuantizeHandler
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
-_MatchResult = tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
+_MatchResult = tuple[Node, list[Node], Optional[Pattern], QuantizeHandler]
 
 _MatchResultWithQConfig = tuple[
-    Node, List[Node], Optional[Pattern], QuantizeHandler, QConfigAny
+    Node, list[Node], Optional[Pattern], QuantizeHandler, QConfigAny
 ]
 
 
@@ -81,9 +81,9 @@ def _find_matches(
     modules: Dict[str, torch.nn.Module],
     patterns: Dict[Pattern, QuantizeHandler],
     root_node_getter_mapping: Dict[Pattern, Callable],
-    standalone_module_names: Optional[List[str]] = None,
-    standalone_module_classes: Optional[List[Type]] = None,
-    custom_module_classes: Optional[List[Any]] = None,
+    standalone_module_names: Optional[list[str]] = None,
+    standalone_module_classes: Optional[list[Type]] = None,
+    custom_module_classes: Optional[list[Any]] = None,
 ) -> Dict[str, _MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
@@ -142,7 +142,7 @@ def _find_matches(
         if isinstance(pattern, tuple):
             s, *args = pattern
             is_single_arg = len(args) == 1
-            current_node_pattern: List[Node] = []
+            current_node_pattern: list[Node] = []
             record_match(s, node, last_node, matched_node_pattern, match_map)
             if pattern[0] is not getattr:
                 for subpattern, arg in zip(args, node.args):
@@ -169,7 +169,7 @@ def _find_matches(
             for pattern, quantize_handler_cls in patterns.items():
                 root_node_getter = root_node_getter_mapping.get(pattern, None)
                 if _is_match(modules, node, pattern) and node.name not in match_map:
-                    matched_node_pattern: List[Node] = []
+                    matched_node_pattern: list[Node] = []
                     record_match(pattern, node, node, matched_node_pattern, match_map)
                     quantize_handler = quantize_handler_cls(  # type: ignore[operator]
                         matched_node_pattern, modules, root_node_getter

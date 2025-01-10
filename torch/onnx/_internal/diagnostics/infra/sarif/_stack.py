@@ -17,7 +17,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class Stack(object):
     """A call stack that is relevant to a result."""
 
-    frames: List[_stack_frame.StackFrame] = dataclasses.field(
+    frames: list[_stack_frame.StackFrame] = dataclasses.field(
         metadata={"schema_property_name": "frames"}
     )
     message: Optional[_message.Message] = dataclasses.field(

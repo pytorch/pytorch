@@ -22,7 +22,6 @@ from typing import (
     cast,
     Dict,
     IO,
-    List,
     Optional,
     Tuple,
     Type,
@@ -125,7 +124,7 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry: List[
+_package_registry: list[
     Tuple[
         int,
         Callable[[STORAGE], Optional[str]],
@@ -263,14 +262,14 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def get_safe_globals() -> list[Union[Callable, Tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
+def add_safe_globals(safe_globals: list[Union[Callable, Tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
@@ -331,7 +330,7 @@ class safe_globals(_weights_only_unpickler._safe_globals):
     """
 
 
-def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
+def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> list[str]:
     """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
 
     For a given function or class ``f``, the corresponding string will be of the form

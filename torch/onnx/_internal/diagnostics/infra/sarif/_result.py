@@ -35,7 +35,7 @@ class Result(object):
     analysis_target: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
         default=None, metadata={"schema_property_name": "analysisTarget"}
     )
-    attachments: Optional[List[_attachment.Attachment]] = dataclasses.field(
+    attachments: Optional[list[_attachment.Attachment]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "attachments"}
     )
     baseline_state: Optional[Literal["new", "unchanged", "updated", "absent"]] = (
@@ -43,7 +43,7 @@ class Result(object):
             default=None, metadata={"schema_property_name": "baselineState"}
         )
     )
-    code_flows: Optional[List[_code_flow.CodeFlow]] = dataclasses.field(
+    code_flows: Optional[list[_code_flow.CodeFlow]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "codeFlows"}
     )
     correlation_guid: Optional[str] = dataclasses.field(
@@ -52,15 +52,15 @@ class Result(object):
     fingerprints: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "fingerprints"}
     )
-    fixes: Optional[List[_fix.Fix]] = dataclasses.field(
+    fixes: Optional[list[_fix.Fix]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fixes"}
     )
-    graph_traversals: Optional[List[_graph_traversal.GraphTraversal]] = (
+    graph_traversals: Optional[list[_graph_traversal.GraphTraversal]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "graphTraversals"}
         )
     )
-    graphs: Optional[List[_graph.Graph]] = dataclasses.field(
+    graphs: Optional[list[_graph.Graph]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "graphs"}
     )
     guid: Optional[str] = dataclasses.field(
@@ -75,7 +75,7 @@ class Result(object):
     level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    locations: Optional[List[_location.Location]] = dataclasses.field(
+    locations: Optional[list[_location.Location]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
     occurrence_count: Optional[int] = dataclasses.field(
@@ -93,7 +93,7 @@ class Result(object):
     rank: float = dataclasses.field(
         default=-1.0, metadata={"schema_property_name": "rank"}
     )
-    related_locations: Optional[List[_location.Location]] = dataclasses.field(
+    related_locations: Optional[list[_location.Location]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "relatedLocations"}
     )
     rule: Optional[_reporting_descriptor_reference.ReportingDescriptorReference] = (
@@ -105,14 +105,14 @@ class Result(object):
     rule_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "ruleIndex"}
     )
-    stacks: Optional[List[_stack.Stack]] = dataclasses.field(
+    stacks: Optional[list[_stack.Stack]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stacks"}
     )
-    suppressions: Optional[List[_suppression.Suppression]] = dataclasses.field(
+    suppressions: Optional[list[_suppression.Suppression]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "suppressions"}
     )
     taxa: Optional[
-        List[_reporting_descriptor_reference.ReportingDescriptorReference]
+        list[_reporting_descriptor_reference.ReportingDescriptorReference]
     ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
     web_request: Optional[_web_request.WebRequest] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequest"}
@@ -120,7 +120,7 @@ class Result(object):
     web_response: Optional[_web_response.WebResponse] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponse"}
     )
-    work_item_uris: Optional[List[str]] = dataclasses.field(
+    work_item_uris: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "workItemUris"}
     )
 

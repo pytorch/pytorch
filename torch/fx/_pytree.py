@@ -26,7 +26,7 @@ def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
     exact_structural_match=False,
-) -> List[Any]:
+) -> list[Any]:
     if spec.is_leaf():
         return [pytree]
     if spec.type not in SUPPORTED_NODES:
@@ -51,19 +51,19 @@ def tree_flatten_spec(
     return result
 
 
-def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
+def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> list[Any]:
     return [d[k] for k in spec.context]
 
 
-def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
+def _list_flatten_spec(d: list[Any], spec: TreeSpec) -> list[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
-def _tuple_flatten_spec(d: Tuple[Any], spec: TreeSpec) -> List[Any]:
+def _tuple_flatten_spec(d: Tuple[Any], spec: TreeSpec) -> list[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
-def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> List[Any]:
+def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> list[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
@@ -71,7 +71,7 @@ def _dict_flatten_spec_exact_match(d: Dict[Any, Any], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 
-def _list_flatten_spec_exact_match(d: List[Any], spec: TreeSpec) -> bool:
+def _list_flatten_spec_exact_match(d: list[Any], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 

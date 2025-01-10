@@ -4,7 +4,7 @@ import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, Union
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
@@ -66,7 +66,7 @@ class ViewOp:
 
 
 def _inplace_generalized_scatter(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
 ) -> torch.Tensor:
     tmp = inp
     for view in view_ops:
@@ -85,7 +85,7 @@ def _inplace_generalized_scatter(
 
 
 def _generalized_scatter(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
 ) -> torch.Tensor:
     out = inp.clone()
     return _inplace_generalized_scatter(out, src, view_ops)
@@ -95,7 +95,7 @@ def _decompose_scatter_functional_helper(
     graph: torch.fx.Graph,
     inp: torch.Tensor,
     src: torch.Tensor,
-    view_ops: List[ViewOp],
+    view_ops: list[ViewOp],
 ) -> torch.fx.Node:
     view_op, view_ops_tail = view_ops[0], view_ops[1:]
 
@@ -247,7 +247,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
     """
 
     node_to_view_base: Dict[torch.fx.Node, torch.fx.Node] = {}
-    node_to_view_op: Dict[torch.fx.Node, List[ViewOp]] = defaultdict(list)
+    node_to_view_op: Dict[torch.fx.Node, list[ViewOp]] = defaultdict(list)
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
@@ -550,7 +550,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     def reinplace_and_refine_tensors_to_clone(
         old_tensors_to_clone, kwargs, node_name, trigger
     ):
-        tensors_to_clone: List[str] = []
+        tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
@@ -636,7 +636,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             all_bases = kwargs["_all_bases"]
             bases_to_clone = range(len(all_bases))
             base_tensors_dct = dict(enumerate(all_bases))
-            new_bases_to_clone: List[int] = reinplace_and_refine_tensors_to_clone(
+            new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
                 bases_to_clone,
                 base_tensors_dct,
                 node.target,

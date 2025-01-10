@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, Optional, Set, Union
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -20,7 +20,7 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
 
 
 def _find_match(
-    str_list: Union[Dict[str, Any], List[str]],
+    str_list: Union[Dict[str, Any], list[str]],
     key_str: str,
     postfix: str,
 ) -> Optional[str]:
@@ -318,7 +318,7 @@ class Shadow(nn.Module):
         self.logger(output, shadow_output)
         return output
 
-    def cat(self, x: List[torch.Tensor], dim: int = 0) -> torch.Tensor:
+    def cat(self, x: list[torch.Tensor], dim: int = 0) -> torch.Tensor:
         # fmt: off
         """
         """  # blank docblock to make autodoc happy

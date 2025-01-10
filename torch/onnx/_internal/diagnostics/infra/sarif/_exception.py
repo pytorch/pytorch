@@ -17,7 +17,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class Exception(object):
     """Describes a runtime exception encountered during the execution of an analysis tool."""
 
-    inner_exceptions: Optional[List[_exception.Exception]] = dataclasses.field(
+    inner_exceptions: Optional[list[_exception.Exception]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "innerExceptions"}
     )
     kind: Optional[str] = dataclasses.field(

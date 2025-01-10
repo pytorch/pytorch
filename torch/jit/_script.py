@@ -1089,7 +1089,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[Tuple], Dict[Callable, list[Tuple]], None] = None,
 ):
     global type_trace_db
 
@@ -1220,7 +1220,7 @@ def script(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[Tuple], Dict[Callable, list[Tuple]], None] = None,
 ):
     r"""Script the function.
 
@@ -1626,7 +1626,7 @@ class _ScriptProfileColumn:
 
     def materialize(self):
         max_length = len(self.header)
-        rows: List[Tuple[int, str]] = []
+        rows: list[Tuple[int, str]] = []
         for key, value in self.rows.items():
             cell = str(value)
             rows.append((key, cell))
@@ -1643,13 +1643,13 @@ class _ScriptProfileColumn:
 
 
 class _ScriptProfileTable:
-    def __init__(self, cols: List[_ScriptProfileColumn], source_range: List[int]):
+    def __init__(self, cols: list[_ScriptProfileColumn], source_range: list[int]):
         self.cols = cols
         self.source_range = source_range
 
     def dump_string(self):
-        outputs: List[str] = []
-        cells: List[Tuple[str, Dict[int, str]]] = []
+        outputs: list[str] = []
+        cells: list[Tuple[str, Dict[int, str]]] = []
         header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()
@@ -1681,7 +1681,7 @@ class _ScriptProfile:
         self.profile.disable()
 
     def dump_string(self) -> str:
-        outputs: List[str] = []
+        outputs: list[str] = []
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()

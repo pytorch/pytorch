@@ -1,4 +1,4 @@
-from typing import cast, List, Sequence, Tuple
+from typing import cast, Sequence, Tuple
 
 import torch
 import torch.distributed.tensor._api as dtensor
@@ -165,7 +165,7 @@ def compute_local_shape_and_global_offset(
 
 def compute_global_tensor_info(
     tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[list[int], list[int]]:
     """
     Compute the global size and stride of a DTensor from the given local tensor.
     The local size is multiplited by `world_size` per Sharding dim.

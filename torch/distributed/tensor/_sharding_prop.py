@@ -2,7 +2,7 @@
 import threading
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -128,7 +128,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list: List[Optional[TensorMeta]] = []
+            tensor_meta_list: list[Optional[TensorMeta]] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -260,7 +260,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs: List[DTensorSpec] = []
+                expected_input_specs: list[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
@@ -335,8 +335,8 @@ class ShardingPropagator:
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
                 # runtime selected placement strategy for each TupleStrategy input arg
-                selected_strategies: List[PlacementStrategy] = []
-                out_spec_list: List[DTensorSpec] = []
+                selected_strategies: list[PlacementStrategy] = []
+                out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     selected_strategy = self._select_strategy(strategy)
@@ -344,7 +344,7 @@ class ShardingPropagator:
                     out_spec_list.append(selected_strategy.output_spec)
 
                 needs_redistribute = False
-                suggestion_args: List[object] = []
+                suggestion_args: list[object] = []
                 tensor_or_list_tensor_arg_idx = 0
 
                 for arg in op_schema.args_schema:
@@ -353,7 +353,7 @@ class ShardingPropagator:
                         and isinstance(arg, (list, tuple))
                         and isinstance(arg[0], DTensorSpec)
                     ):
-                        expected_input_spec_list: List[DTensorSpec] = []
+                        expected_input_spec_list: list[DTensorSpec] = []
                         for idx, arg_spec in enumerate(arg):
                             expected_input_spec = selected_strategies[idx].input_spec(
                                 tensor_or_list_tensor_arg_idx
@@ -461,7 +461,7 @@ class ShardingPropagator:
             # short cut with only one possible strategy
             return strategy.strategies[0]
 
-        strategy_costs: List[float] = []
+        strategy_costs: list[float] = []
         for strtg in strategy.strategies:
             assert (
                 strtg.redistribute_cost is not None

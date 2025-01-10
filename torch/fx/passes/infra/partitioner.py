@@ -3,7 +3,7 @@ import collections
 import itertools
 import logging
 from copy import copy
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Dict, Iterable, Optional, Sequence, Set
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import _get_qualified_name, Node
@@ -84,7 +84,7 @@ class CapabilityBasedPartitioner:
             dict(self.graph_module.named_modules()), node
         )
 
-    def propose_partitions(self) -> List[Partition]:
+    def propose_partitions(self) -> list[Partition]:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
@@ -266,7 +266,7 @@ class CapabilityBasedPartitioner:
             logger.debug("Filtering out single node partitions...")
             default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
             non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
-            partitions_to_remove: List[int] = []
+            partitions_to_remove: list[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
@@ -295,7 +295,7 @@ class CapabilityBasedPartitioner:
         ]
 
     def fuse_partitions(
-        self, partitions: List[Partition], prefix: str = "fused_"
+        self, partitions: list[Partition], prefix: str = "fused_"
     ) -> GraphModule:
         logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[Dict[Node, None]]: [ {node0 : None}, {node1 : None} ]
@@ -306,7 +306,7 @@ class CapabilityBasedPartitioner:
         )
 
     # remove non-compute-ops that sits at the boundary of a partition.
-    def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
+    def remove_bookend_non_compute_ops(self, partitions: list[Partition]):
         non_compute_ops = set(self.non_compute_ops)
 
         def is_non_compute_node(node: Node):

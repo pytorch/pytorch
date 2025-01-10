@@ -1,9 +1,9 @@
-from typing import Any, Dict, Iterable, List, no_type_check, Type
+from typing import Any, Dict, Iterable, no_type_check, Type
 
 import torch
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 # WeakTensorKeyDictionary to store relevant meta-data for the Tensor/Parameter
 # without changing it's life-time.
@@ -97,7 +97,7 @@ def _apply_optimizer_in_backward(
         _apply_optimizer_in_backward_to_param(param)
 
 
-def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
+def _get_in_backward_optimizers(module: torch.nn.Module) -> list[torch.optim.Optimizer]:
     """
     Return a list of in-backward optimizers applied to ``module``'s parameters. Note that these
     optimizers are not intended to directly have their ``step`` or ``zero_grad`` methods called
@@ -113,7 +113,7 @@ def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Opt
         _apply_optimizer_in_backward(torch.optim.SGD, model.parameters(), {'lr': 0.01})
         optims = _get_optimizers_in_backward(model)
     """
-    optims: List[torch.optim.Optimizer] = []
+    optims: list[torch.optim.Optimizer] = []
     for param in module.parameters():
         optims.extend(getattr(param, "_in_backward_optimizers", []))
 

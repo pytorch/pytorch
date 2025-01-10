@@ -139,7 +139,7 @@ def _insert_copy_for_mutations(
 def _get_codegen(
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
-    forward_arg_names: Optional[List[str]] = None,
+    forward_arg_names: Optional[list[str]] = None,
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
@@ -177,7 +177,7 @@ def _unlift(
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
-    forward_arg_names: Optional[List[str]] = None,
+    forward_arg_names: Optional[list[str]] = None,
 ):
     """
     Args:
@@ -375,7 +375,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
-    lifted_inputs: List[Optional[str]] = [
+    lifted_inputs: list[Optional[str]] = [
         (
             in_spec.target
             if in_spec.kind
@@ -390,7 +390,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         for in_spec in ep.graph_signature.input_specs
     ]
 
-    mutated_outputs: List[Optional[str]] = [
+    mutated_outputs: list[Optional[str]] = [
         (
             out_spec.target
             if out_spec.kind

@@ -18,7 +18,6 @@ from typing import (
     cast,
     DefaultDict,
     Dict,
-    List,
     Optional,
     Sequence,
     Set,
@@ -133,7 +132,7 @@ class PackagingError(Exception):
 
     def __init__(self, dependency_graph: DiGraph, debug=False):
         # Group errors by reason.
-        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
+        broken: Dict[PackagingErrorReason, list[str]] = defaultdict(list)
         for module_name, attrs in dependency_graph.nodes.items():
             error = attrs.get("error")
             if error is None:
@@ -331,7 +330,7 @@ class PackageExporter:
 
     def _get_dependencies(
         self, src: str, module_name: str, is_package: bool
-    ) -> List[str]:
+    ) -> list[str]:
         """Return all modules that this source code depends on.
 
         Dependencies are found by scanning the source code for import-like statements.
@@ -1115,7 +1114,7 @@ class PackageExporter:
 
     def _nodes_with_action_type(
         self, action: Optional[_ModuleProviderAction]
-    ) -> List[str]:
+    ) -> list[str]:
         result = []
         for name, node_dict in self.dependency_graph.nodes.items():
             node_action = node_dict.get("action", None)
@@ -1124,7 +1123,7 @@ class PackageExporter:
         result.sort()
         return result
 
-    def externed_modules(self) -> List[str]:
+    def externed_modules(self) -> list[str]:
         """Return all modules that are currently externed.
 
         Returns:
@@ -1133,7 +1132,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
 
-    def interned_modules(self) -> List[str]:
+    def interned_modules(self) -> list[str]:
         """Return all modules that are currently interned.
 
         Returns:
@@ -1142,7 +1141,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
 
-    def mocked_modules(self) -> List[str]:
+    def mocked_modules(self) -> list[str]:
         """Return all modules that are currently mocked.
 
         Returns:
@@ -1151,7 +1150,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
 
-    def denied_modules(self) -> List[str]:
+    def denied_modules(self) -> list[str]:
         """Return all modules that are currently denied.
 
         Returns:
@@ -1160,7 +1159,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.DENY)
 
-    def get_rdeps(self, module_name: str) -> List[str]:
+    def get_rdeps(self, module_name: str) -> list[str]:
         """Return a list of all modules which depend on the module ``module_name``.
 
         Returns:

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 from torch.utils._pytree import (
     _dict_flatten,
@@ -79,7 +79,7 @@ compatibility(is_backward_compatible=True)(immutable_dict)
 
 
 # Register immutable collections for PyTree operations
-def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
+def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[list[Any], Context]:
     return _dict_flatten(d)
 
 
@@ -90,14 +90,14 @@ def _immutable_dict_unflatten(
     return immutable_dict(_dict_unflatten(values, context))
 
 
-def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
+def _immutable_list_flatten(d: list[Any]) -> Tuple[list[Any], Context]:
     return _list_flatten(d)
 
 
 def _immutable_list_unflatten(
     values: Iterable[Any],
     context: Context,
-) -> List[Any]:
+) -> list[Any]:
     return immutable_list(_list_unflatten(values, context))
 
 

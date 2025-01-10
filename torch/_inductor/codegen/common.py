@@ -17,7 +17,6 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
-    List,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -427,7 +426,7 @@ def init_backend_registration():
             pass
 
 
-def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
+def index_prevent_reordering(index: list[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
 
     # added contiguous index prevents reordering
@@ -1120,7 +1119,7 @@ class BracesBuffer(IndentedBuffer):
 
 class InplacedBuffer(NamedTuple):
     inner_name: str
-    other_names: List[str]
+    other_names: list[str]
 
 
 class KernelArgs:
@@ -1328,10 +1327,10 @@ class KernelArgs:
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
-        arg_defs: List[str] = []
-        call_args: List[str] = []
-        arg_types: List[torch.dtype] = []
-        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+        arg_defs: list[str] = []
+        call_args: list[str] = []
+        arg_types: list[torch.dtype] = []
+        precompile_args: list[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue

@@ -51,10 +51,10 @@ if TYPE_CHECKING:
     _IntLikeT = TypeVar("_IntLikeT", bound=_WorksWithInt)
 
 
-ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
-StrideType: TypeAlias = Union[List[int], Tuple[int, ...]]
-DimsType: TypeAlias = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType: TypeAlias = Union[List[int], Tuple[int, ...]]
+ShapeType: TypeAlias = Union[torch.Size, list[int], Tuple[int, ...]]
+StrideType: TypeAlias = Union[list[int], Tuple[int, ...]]
+DimsType: TypeAlias = Union[int, list[int], Tuple[int, ...]]
+DimsSequenceType: TypeAlias = Union[list[int], Tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
@@ -107,7 +107,7 @@ torch_function_passthrough = {
 
 TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
-TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorSequenceType: TypeAlias = Union[list[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 
 CustomOutParamAnnotation = "__custom_out_param__"
@@ -454,7 +454,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
-) -> List[int]:
+) -> list[int]:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     if not _skip_checks and len(tensors) == 0:
@@ -1669,7 +1669,7 @@ def make_channels_last_1d_strides_for(
     )
 
     multiplier: Union[_IntLikeT, int] = 1
-    strides: List[Union[_IntLikeT, int]] = [0] * 3
+    strides: list[Union[_IntLikeT, int]] = [0] * 3
     for idx in (1, -1, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
@@ -1689,7 +1689,7 @@ def make_channels_last_2d_strides_for(
     )
 
     multiplier: Union[_IntLikeT, int] = 1
-    strides: List[Union[_IntLikeT, int]] = [0] * 4
+    strides: list[Union[_IntLikeT, int]] = [0] * 4
     for idx in (1, -1, -2, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
@@ -1708,7 +1708,7 @@ def make_channels_last_3d_strides_for(
     )
 
     multiplier: Union[_IntLikeT, int] = 1
-    strides: List[Union[_IntLikeT, int]] = [0] * 5
+    strides: list[Union[_IntLikeT, int]] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager

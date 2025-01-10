@@ -10,7 +10,7 @@ import re
 import tempfile
 import threading
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._dynamo
@@ -155,10 +155,10 @@ DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
 
 def generate_opcheck_tests(
     testcase: Any,
-    namespaces: List[str],
+    namespaces: list[str],
     failures_dict_path: Optional[str] = None,
     additional_decorators: Optional[Dict[str, Callable]] = None,
-    test_utils: List[str] = DEFAULT_TEST_UTILS,
+    test_utils: list[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -361,7 +361,7 @@ def validate_failures_dict_formatting(failures_dict_path: str) -> None:
 
 
 def validate_failures_dict_structure(
-    failure_dict: "FailuresDict", test_utils: List[str], testcase: Any
+    failure_dict: "FailuresDict", test_utils: list[str], testcase: Any
 ) -> None:
     """Validates the failures dict.
 
@@ -447,7 +447,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def __init__(
         self,
-        namespaces: List[str],
+        namespaces: list[str],
         test_util_name: str,
         test_util: Callable,
         failures_dict: "FailuresDict",

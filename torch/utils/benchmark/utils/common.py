@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import textwrap
 import time
-from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, Optional, Tuple
 import uuid
 
 import torch
@@ -79,7 +79,7 @@ class Measurement:
     (including a detailed __repr__) for downstream consumers.
     """
     number_per_run: int
-    raw_times: List[float]
+    raw_times: list[float]
     task_spec: TaskSpec
     metadata: Optional[Dict[Any, Any]] = None  # Reserved for user payloads.
 
@@ -107,7 +107,7 @@ class Measurement:
     # selected an appropriate number_per_run then this is a non-issue, and
     # forcing users to handle that division would result in a poor experience.
     @property
-    def times(self) -> List[float]:
+    def times(self) -> list[float]:
         return [t / self.number_per_run for t in self.raw_times]
 
     @property
@@ -227,18 +227,18 @@ class Measurement:
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
     @staticmethod
-    def merge(measurements: Iterable["Measurement"]) -> List["Measurement"]:
+    def merge(measurements: Iterable["Measurement"]) -> list["Measurement"]:
         """Convenience method for merging replicates.
 
         Merge will extrapolate times to `number_per_run=1` and will not
         transfer any metadata. (Since it might differ between replicates)
         """
-        grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
+        grouped_measurements: DefaultDict[TaskSpec, list[Measurement]] = collections.defaultdict(list)
         for m in measurements:
             grouped_measurements[m.task_spec].append(m)
 
-        def merge_group(task_spec: TaskSpec, group: List["Measurement"]) -> "Measurement":
-            times: List[float] = []
+        def merge_group(task_spec: TaskSpec, group: list["Measurement"]) -> "Measurement":
+            times: list[float] = []
             for m in group:
                 # Different measurements could have different `number_per_run`,
                 # so we call `.times` which normalizes the results.
@@ -281,7 +281,7 @@ def trim_sigfig(x: float, n: int) -> float:
     return float(torch.tensor(x / scale).round() * scale)
 
 
-def ordered_unique(elements: Iterable[Any]) -> List[Any]:
+def ordered_unique(elements: Iterable[Any]) -> list[Any]:
     return list(collections.OrderedDict(dict.fromkeys(elements)).keys())
 
 

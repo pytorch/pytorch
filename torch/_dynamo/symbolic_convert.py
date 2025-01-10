@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -184,7 +184,7 @@ class SpeculationLog:
     a graph break.
     """
 
-    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
+    entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
 
     def restart(self):
@@ -256,7 +256,7 @@ class LocalState:
 class DistributedState:
     compile_pg: Any
     local_state: LocalState
-    all_states: Optional[List[LocalState]] = None
+    all_states: Optional[list[LocalState]] = None
 
 
 class TensorifyState:
@@ -721,7 +721,7 @@ def break_graph_if_unsupported(*, push):
         ):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
-            cleanup: List[Instruction] = []
+            cleanup: list[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 # Don't exit any modes we have entered,
@@ -811,19 +811,19 @@ class InstructionTranslatorBase(
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
-    stack: List[VariableTracker]
+    stack: list[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    block_stack: List[BlockStackEntry]
+    block_stack: list[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
-    prefix_insts: List[Instruction]
+    prefix_insts: list[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    dispatch_table: List[Any]
-    exn_vt_stack: List[VariableTracker]
+    dispatch_table: list[Any]
+    exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
@@ -901,7 +901,7 @@ class InstructionTranslatorBase(
     def call_function(
         self,
         fn: VariableTracker,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ):
         assert isinstance(fn, VariableTracker)
@@ -1099,14 +1099,14 @@ class InstructionTranslatorBase(
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
 
-    def push_many(self, vals: List[VariableTracker]):
+    def push_many(self, vals: list[VariableTracker]):
         for val in vals:
             self.push(val)
 
     def pop(self) -> VariableTracker:
         return self.stack.pop()
 
-    def popn(self, n: int) -> List[VariableTracker]:
+    def popn(self, n: int) -> list[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
@@ -2150,8 +2150,8 @@ class InstructionTranslatorBase(
         return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst):
-        format_string_parts: List[str] = []
-        args: List[VariableTracker] = []
+        format_string_parts: list[str] = []
+        args: list[VariableTracker] = []
         kwargs: Dict[str, VariableTracker] = {}
         for part in self.popn(inst.arg):
             if isinstance(part, ConstantVariable):
@@ -2620,7 +2620,7 @@ class InstructionTranslatorBase(
     def __init__(
         self,
         output: OutputGraph,
-        instructions: List[Instruction],
+        instructions: list[Instruction],
         f_locals: Dict[str, Any],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
@@ -2658,7 +2658,7 @@ class InstructionTranslatorBase(
         self.exn_vt_stack = []
 
         # Properties of the input/output code
-        self.instructions: List[Instruction] = instructions
+        self.instructions: list[Instruction] = instructions
         self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
         self.f_locals: Dict[
             str, Any
@@ -2703,7 +2703,7 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: List[Optional[VariableTracker]] = [None] * len(
+        self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
         )
         linecache.lazycache(f_code.co_filename, f_globals)
@@ -2725,7 +2725,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def __init__(
         self,
-        instructions: List[Instruction],
+        instructions: list[Instruction],
         f_code,
         f_locals,
         f_globals,
@@ -2861,7 +2861,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 torch_function_mode_stack
             )
 
-            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
+            self.debug_locals: list[Tuple[VariableTracker, list[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -2984,7 +2984,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         # prologue of the resume function
 
         # sorted list of indices of nulls on the stack
-        null_idxes: List[int] = []
+        null_idxes: list[int] = []
         if sys.version_info >= (3, 11):
             # find indices of NullVariables
             for i, var in enumerate(self.stack):
@@ -3146,7 +3146,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent,
         func: VariableTracker,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs,
         *,
         stop_generator_on_yield: bool = False,
@@ -3405,7 +3405,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
-    generated_items: List[VariableTracker]
+    generated_items: list[VariableTracker]
     # Flag wether or not the InlineGenerator should consume the entire iterator
     stop_generator_on_yield: bool
 

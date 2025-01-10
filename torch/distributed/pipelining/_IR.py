@@ -7,7 +7,7 @@ from collections import defaultdict
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
@@ -564,7 +564,7 @@ class Pipe(torch.nn.Module):
                 params_to_users.setdefault(param, {})
                 params_to_users[param][m_qualname] = p_qualname
 
-        self.replicated_params: List[Dict[str, str]] = [
+        self.replicated_params: list[Dict[str, str]] = [
             use_mapping
             for _, use_mapping in params_to_users.items()
             if len(use_mapping) > 1
@@ -878,7 +878,7 @@ class Pipe(torch.nn.Module):
         # need to move the `get_attr` nodes from the root of the graph to those
         # hierarchies.
         # [aliasing] use id -> fqn mapping to list out all valid FQNs
-        inputs_to_state: Dict[str, List[str]] = {}
+        inputs_to_state: Dict[str, list[str]] = {}
         for attr in attr_nodes:
             _, tensor = _recursive_getattr_with_parent(mod, attr.target)
             fqns = list(id_to_fqns[id(tensor)])
@@ -890,7 +890,7 @@ class Pipe(torch.nn.Module):
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
         # We determine this based on whether or not the FQN attribute parent exists.
         # i.e. if the last submodule exists, assign the attribute.
-        added_attributes: Dict[str, List[str]] = defaultdict(list)
+        added_attributes: Dict[str, list[str]] = defaultdict(list)
         for fqn, tensor in mod.state_dict(keep_vars=True).items():
             for name, submod in split.named_children():
                 if isinstance(submod, fx.GraphModule):

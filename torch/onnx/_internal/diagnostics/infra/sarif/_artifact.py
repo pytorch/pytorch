@@ -52,7 +52,7 @@ class Artifact(object):
         default=None, metadata={"schema_property_name": "properties"}
     )
     roles: Optional[
-        List[
+        list[
             Literal[
                 "analysisTarget",
                 "attachment",

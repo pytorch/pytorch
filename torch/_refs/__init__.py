@@ -410,7 +410,7 @@ def _broadcast_shapes(*_shapes):
         assert isinstance(shape, Sequence)
 
     # Computes common shape
-    common_shape: List[Union[int, torch.SymInt]] = [
+    common_shape: list[Union[int, torch.SymInt]] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
@@ -2310,7 +2310,7 @@ def any(
 @register_decomposition([aten.sum.dim_IntList, aten.sum.IntList_out])
 def sum(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Union[Optional[int], Optional[list[int]]] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -2362,7 +2362,7 @@ def sum_to_size(
 @register_decomposition(aten.prod)
 def prod(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Union[Optional[int], Optional[list[int]]] = None,
     keepdim: bool = False,
     *,
     dtype=None,
@@ -2480,7 +2480,7 @@ def var(
 @out_wrapper()
 def std(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Union[Optional[int], Optional[list[int]]] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -2741,7 +2741,7 @@ def broadcast_shapes(*shapes) -> ShapeType:
 
 @aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
-def broadcast_tensors(*tensors) -> List[TensorLikeType]:
+def broadcast_tensors(*tensors) -> list[TensorLikeType]:
     if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
         tensors = tensors[0]
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
@@ -2899,7 +2899,7 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.constant_pad_nd)
 @out_wrapper()
 def constant_pad_nd(
-    input: TensorLikeType, pad: List[int], value: NumberType = 0
+    input: TensorLikeType, pad: list[int], value: NumberType = 0
 ) -> TensorLikeType:
     torch._check(
         len(pad) % 2 == 0,
@@ -3175,7 +3175,7 @@ def _normalize(
 
 
 # add all specified dimensions
-def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeType:
     for dim in sorted(dimensions):
         x = torch.unsqueeze(x, dim)
     return x
@@ -4162,8 +4162,8 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
 @register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
-    self: Tensor, split_sizes: List[int], dim: int = 0
-) -> List[Tensor]:
+    self: Tensor, split_sizes: list[int], dim: int = 0
+) -> list[Tensor]:
     # NB: Perform the check_is_size tests first so that the
     # sum test does not try to do a replacement
     for i in range(len(split_sizes)):
@@ -4479,7 +4479,7 @@ def diag_embed(
 
 @register_decomposition(aten.block_diag)
 @out_wrapper()
-def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
+def _block_diag_iterable(tensors: list[TensorLikeType]) -> TensorLikeType:
     """
     Reference implementation of torch.block_diag
     """
@@ -4515,7 +4515,7 @@ def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
     return torch.cat(result, dim=0)
 
 
-def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
+def block_diag(*tensors: list[TensorLikeType]) -> TensorLikeType:
     """
     This is used as an input to PythonRefInfo. `torch.block_diag`
     expects arguments splatted, but `aten.block_diag` expects only
@@ -5304,9 +5304,9 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
 
 @register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
-    *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
+    *tensors: Union[TensorLikeType, list[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
-) -> List[TensorLikeType]:
+) -> list[TensorLikeType]:
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
@@ -5345,7 +5345,7 @@ def meshgrid(
             ),
         )
 
-    result_shape: List[int] = []
+    result_shape: list[int] = []
     for t in tensors:
         assert isinstance(t, TensorLike)  # mypy
         torch._check(
@@ -5354,7 +5354,7 @@ def meshgrid(
         )
         result_shape.append(t.numel())
 
-    grids: List[TensorLikeType] = []
+    grids: list[TensorLikeType] = []
     for i, t in enumerate(tensors):
         assert isinstance(t, TensorLike)  # mypy
         if t.ndim == 0:

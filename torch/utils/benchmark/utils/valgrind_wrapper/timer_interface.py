@@ -11,7 +11,7 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
+    cast, Any, Callable, DefaultDict, Dict, Iterator, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
@@ -595,7 +595,7 @@ class _ValgrindWrapper:
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args: List[str], **kwargs: Any) -> Tuple[CompletedProcessType, str]:
+        def run(args: list[str], **kwargs: Any) -> Tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:

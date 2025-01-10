@@ -8,7 +8,7 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -114,7 +114,7 @@ def make_boxed_compiler(compiler):
 
 
 def call_func_at_runtime_with_args(
-    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+    f, args: Union[Tuple[Any], list[Any]], steal_args=False, disable_amp=False
 ):
     if not steal_args:
         args = list(args)
@@ -156,7 +156,7 @@ class PytreeThunk:
         if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x: List[Any]) -> Any:
+    def unflatten(self, x: list[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:

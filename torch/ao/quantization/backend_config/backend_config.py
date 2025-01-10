@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -384,7 +384,7 @@ class BackendConfig:
         return self
 
     def set_backend_pattern_configs(
-        self, configs: List[BackendPatternConfig]
+        self, configs: list[BackendPatternConfig]
     ) -> BackendConfig:
         """
         Set the configs for patterns that can be run on the target backend.
@@ -395,7 +395,7 @@ class BackendConfig:
         return self
 
     @property
-    def configs(self) -> List[BackendPatternConfig]:
+    def configs(self) -> list[BackendPatternConfig]:
         """
         Return a copy of the list of configs set in this `BackendConfig`.
         """
@@ -443,7 +443,7 @@ class BackendPatternConfig:
     def __init__(self, pattern: Optional[Pattern] = None):
         self.pattern: Optional[Pattern] = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        self.dtype_configs: List[DTypeConfig] = []
+        self.dtype_configs: list[DTypeConfig] = []
         self.root_module: Optional[Type[torch.nn.Module]] = None
         self.qat_module: Optional[Type[torch.nn.Module]] = None
         self.reference_quantized_module: Optional[Type[torch.nn.Module]] = None
@@ -518,7 +518,7 @@ class BackendPatternConfig:
         return self
 
     def set_dtype_configs(
-        self, dtype_configs: List[DTypeConfig]
+        self, dtype_configs: list[DTypeConfig]
     ) -> BackendPatternConfig:
         """
         Set the supported data types passed as arguments to quantize ops in the

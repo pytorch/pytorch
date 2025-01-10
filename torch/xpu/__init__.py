@@ -23,8 +23,8 @@ from .streams import Event, Stream
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    Tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
@@ -420,7 +420,7 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def get_arch_list() -> List[str]:
+def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
     if not is_available():
         return []

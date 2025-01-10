@@ -3,7 +3,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -33,7 +33,7 @@ class ViewInfo(ABC):
         self.base_index = base_index
 
     @abstractmethod
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         pass
 
 
@@ -49,7 +49,7 @@ class AsStridedViewInfo(ViewInfo):
         self.stride = stride
         self.storage_offset = storage_offset
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.as_strided(
             bases_list[self.base_index],
             self.size,
@@ -70,7 +70,7 @@ class SliceViewInfo(ViewInfo):
         self.start = start
         self.end = end
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.ops.aten.slice.Tensor(
             bases_list[self.base_index], self.dim, self.start, self.end
         )
@@ -81,7 +81,7 @@ class AliasViewInfo(ViewInfo):
     def __init__(self, base_index):
         super().__init__(base_index)
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.ops.aten.alias.default(bases_list[self.base_index])
 
 
@@ -90,7 +90,7 @@ class NotView(ViewInfo):
     def __init__(self, base_index):
         super().__init__(base_index)
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return bases_list[self.base_index]
 
 
@@ -138,8 +138,8 @@ def try_use_slice(base, tensor):
 
 
 def write_view_information_to_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
     kwargs: Dict[str, Any],
     arg_to_base_index: Dict[str, Any],
 ):
@@ -216,10 +216,10 @@ def write_view_information_to_args(
 
 # Returns a dict of arg_name -> ViewInfo | [ViewInfo]
 def read_view_information_from_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
     kwargs: Dict[str, Any],
-    all_bases: List[Tensor],
+    all_bases: list[Tensor],
 ):
     """
     This reads the view information added by `write_view_information_to_args` from kwargs, pop them,
@@ -412,7 +412,7 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
+def get_mutable_args(op: OpOverload) -> Tuple[list[str], list[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
@@ -742,7 +742,7 @@ def auto_functionalized_v2_dense(
     _only_clone_these_bases: Optional[Tuple[int, ...]] = None,
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
+    all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
     mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases

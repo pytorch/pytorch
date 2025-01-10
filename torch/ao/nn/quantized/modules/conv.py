@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, List, Optional, Type
+from typing import ClassVar, Optional, Type
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -28,8 +28,8 @@ __all__ = [
 _SUPPORTED_PADDING = {"zeros", "reflect"}
 
 
-def _reverse_repeat_padding(padding: List[int]) -> List[int]:
-    _reversed_padding_repeated_twice: List[int] = []
+def _reverse_repeat_padding(padding: list[int]) -> list[int]:
+    _reversed_padding_repeated_twice: list[int] = []
     N = len(padding)
     for idx in range(N):
         _reversed_padding_repeated_twice.extend(padding[N - idx - 1] for _ in range(2))
@@ -783,9 +783,9 @@ class _ConvTransposeNd(_ConvNd):
         )
 
     def _input_padding(
-        self, kernel_size: List[int], dilation: List[int], padding: List[int]
-    ) -> List[int]:
-        res = torch.jit.annotate(List[int], [])
+        self, kernel_size: list[int], dilation: list[int], padding: list[int]
+    ) -> list[int]:
+        res = torch.jit.annotate(list[int], [])
         for kdx in range(len(kernel_size)):
             pad = dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx]
             res.append(pad)

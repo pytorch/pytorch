@@ -32,7 +32,7 @@ class ThreadFlowLocation(object):
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    kinds: Optional[List[str]] = dataclasses.field(
+    kinds: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "kinds"}
     )
     location: Optional[_location.Location] = dataclasses.field(
@@ -54,7 +54,7 @@ class ThreadFlowLocation(object):
         default=None, metadata={"schema_property_name": "state"}
     )
     taxa: Optional[
-        List[_reporting_descriptor_reference.ReportingDescriptorReference]
+        list[_reporting_descriptor_reference.ReportingDescriptorReference]
     ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
     web_request: Optional[_web_request.WebRequest] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequest"}

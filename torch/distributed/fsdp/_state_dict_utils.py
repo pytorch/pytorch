@@ -10,7 +10,6 @@ from typing import (
     Dict,
     Generator,
     Iterator,
-    List,
     no_type_check,
     Tuple,
 )
@@ -855,7 +854,7 @@ def _pre_load_state_dict_hook(
 @torch.no_grad()
 def _post_load_state_dict_hook(
     module: nn.Module,
-    incompatible_keys: Tuple[List[str], List[str]],
+    incompatible_keys: Tuple[list[str], list[str]],
     *args: Any,
 ) -> None:
     fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)

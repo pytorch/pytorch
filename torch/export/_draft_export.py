@@ -2,7 +2,7 @@ import inspect
 import logging
 import os
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._logging._internal
@@ -26,7 +26,7 @@ class FailureType(IntEnum):
         return self.name
 
 
-def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str]) -> str:
+def prettify_stack(stack: list[Dict[str, str]], str_to_filename: Dict[str, str]) -> str:
     res = ""
     for frame in stack:
         if frame["filename"] not in str_to_filename:
@@ -38,8 +38,8 @@ def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str])
 
 
 def filter_stack(
-    stack: List[Dict[str, str]], str_to_filename: Dict[str, str]
-) -> List[Dict[str, str]]:
+    stack: list[Dict[str, str]], str_to_filename: Dict[str, str]
+) -> list[Dict[str, str]]:
     for i, s in enumerate(reversed(stack)):
         s["filename"] = str(s["filename"])
         if s["filename"] not in str_to_filename:
@@ -50,7 +50,7 @@ def filter_stack(
     return stack[-3:]
 
 
-def hash_stack(stack: List[Dict[str, str]]) -> str:
+def hash_stack(stack: list[Dict[str, str]]) -> str:
     return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
@@ -113,8 +113,8 @@ class FailureReport:
 
 
 class DraftExportReport:
-    def __init__(self, failures: List[FailureReport], str_to_filename: Dict[str, str]):
-        self.failures: List[FailureReport] = failures
+    def __init__(self, failures: list[FailureReport], str_to_filename: Dict[str, str]):
+        self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
 
     def successful(self) -> bool:
@@ -156,10 +156,10 @@ Please follow the instructions to fix the errors.
 
 
 class CaptureStructuredTrace(logging.Handler):
-    def __init__(self, specific_log_keys: List[str]):
+    def __init__(self, specific_log_keys: list[str]):
         super().__init__()
         self.specific_log_keys = specific_log_keys
-        self.logs: List[Tuple[str, Dict[str, Any]]] = []
+        self.logs: list[Tuple[str, Dict[str, Any]]] = []
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
 
@@ -188,7 +188,7 @@ def draft_export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], list[Any]]] = None,
     preserve_module_call_signature: Tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = False,
@@ -237,7 +237,7 @@ def draft_export(
         str_to_filename: Dict[str, str] = {
             str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
         }
-        failures: List[FailureReport] = []
+        failures: list[FailureReport] = []
         custom_ops_logs: Dict[
             Any, Tuple[Dict[str, Any], FailureType]
         ] = {}  # Dedup custom ops

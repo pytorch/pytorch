@@ -245,7 +245,7 @@ def _rebuild_tensor_v3(
     return t
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -674,7 +674,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -997,7 +997,7 @@ P = ParamSpec("P")
 class CallbackRegistry(Generic[P]):
     def __init__(self, name: str):
         self.name = name
-        self.callback_list: List[Callable[P, None]] = []
+        self.callback_list: list[Callable[P, None]] = []
 
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)

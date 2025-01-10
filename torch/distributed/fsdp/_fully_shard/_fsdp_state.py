@@ -6,7 +6,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     Sequence,
     Set,
@@ -50,7 +49,7 @@ class FSDPStateContext:
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree
-        self.all_states: List[FSDPState] = []
+        self.all_states: list[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
@@ -83,8 +82,8 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._states_to_forward_prefetch: List[FSDPState] = []
-        self._states_to_backward_prefetch: List[FSDPState] = []
+        self._states_to_forward_prefetch: list[FSDPState] = []
+        self._states_to_backward_prefetch: list[FSDPState] = []
         self._modules_to_run_forward: Set[nn.Module] = set()
 
     # Define a separate init since `__init__` is called in the contract

@@ -7,7 +7,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Sequence,
@@ -488,7 +487,7 @@ class Node(_NodeBase):
         self.__update_args_kwargs(self._args, k)
 
     @property
-    def all_input_nodes(self) -> List["Node"]:
+    def all_input_nodes(self) -> list["Node"]:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
         iterating over ``args`` and ``kwargs`` and only collecting the values that
@@ -634,8 +633,8 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def format_node(
         self,
-        placeholder_names: Optional[List[str]] = None,
-        maybe_return_typename: Optional[List[str]] = None,
+        placeholder_names: Optional[list[str]] = None,
+        maybe_return_typename: Optional[list[str]] = None,
     ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
@@ -704,7 +703,7 @@ class Node(_NodeBase):
         delete_user_cb: Callable[["Node"], bool] = lambda user: True,
         *,
         propagate_meta: bool = False,
-    ) -> List["Node"]:
+    ) -> list["Node"]:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
 
@@ -775,7 +774,7 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            tags: Optional[List[torch.Tag]] = getattr(self.target, "_tags", None)
+            tags: Optional[list[torch.Tag]] = getattr(self.target, "_tags", None)
             if tags is not None and torch.Tag.nondeterministic_seeded in tags:
                 # impure since it mutates RNG state
                 return True

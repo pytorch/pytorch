@@ -4,7 +4,7 @@ import copy
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, NamedTuple, Optional, Sequence, Tuple
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -368,7 +368,7 @@ class _SplitterBase:
         self._node_submodule_map: Dict[str, str] = {}
         self._return_tuple = return_tuple
 
-        self.tags: List[str] = []
+        self.tags: list[str] = []
 
     # ===============================================================
     # Helpers for ctor and initial state
@@ -773,7 +773,7 @@ class _SplitterBase:
                     starter_cpu_nodes.add(user)
         return starter_cpu_nodes, starter_acc_nodes
 
-    def put_nodes_into_subgraphs(self) -> List[Subgraph]:
+    def put_nodes_into_subgraphs(self) -> list[Subgraph]:
         # We start graph traversal from leaf nodes
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
@@ -785,7 +785,7 @@ class _SplitterBase:
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
-        subgraphs: List[Subgraph] = []
+        subgraphs: list[Subgraph] = []
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -839,12 +839,12 @@ class _SplitterBase:
 
         return subgraphs
 
-    def remove_small_acc_subgraphs(self, subgraphs: List[Subgraph]) -> List[Subgraph]:
+    def remove_small_acc_subgraphs(self, subgraphs: list[Subgraph]) -> list[Subgraph]:
         """
         This pass finds ACC submodules with less than specified size and merges
         them with adjacent CPU submodules.
         """
-        result: List[Subgraph] = []
+        result: list[Subgraph] = []
         for subgraph in subgraphs:
             if subgraph.is_acc:
                 if len(subgraph.nodes) >= self.settings.min_acc_module_size:
@@ -866,7 +866,7 @@ class _SplitterBase:
                     result.append(subgraph)
         return result
 
-    def tag(self, subgraphs: List[Subgraph]):
+    def tag(self, subgraphs: list[Subgraph]):
         self.tags = []
         for subgraph in subgraphs:
             tag = (

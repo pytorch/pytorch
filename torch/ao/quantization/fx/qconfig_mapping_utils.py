@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, Dict, Set, Union
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -25,7 +25,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _maybe_adjust_qconfig_for_module_name_object_type_order(
@@ -230,12 +230,12 @@ def _compare_prepare_convert_qconfig_mappings(
     assert qconfig_equals(
         prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig
     ), "Expected global qconfigs to be the same in the prepare and convert quantization configs"
-    prepare_dicts: List[OrderedDict] = [
+    prepare_dicts: list[OrderedDict] = [
         prepare_qconfig_mapping.object_type_qconfigs,
         prepare_qconfig_mapping.module_name_qconfigs,
         prepare_qconfig_mapping.module_name_regex_qconfigs,
     ]
-    convert_dicts: List[OrderedDict] = [
+    convert_dicts: list[OrderedDict] = [
         convert_qconfig_mapping.object_type_qconfigs,
         convert_qconfig_mapping.module_name_qconfigs,
         convert_qconfig_mapping.module_name_regex_qconfigs,
@@ -258,7 +258,7 @@ def _compare_prepare_convert_qconfig_mappings(
 
 
 def _is_qconfig_supported_by_dtype_configs(
-    qconfig: QConfig, dtype_configs: List[DTypeConfig]
+    qconfig: QConfig, dtype_configs: list[DTypeConfig]
 ):
     for dtype_config in dtype_configs:
         is_dynamic = dtype_config.is_dynamic

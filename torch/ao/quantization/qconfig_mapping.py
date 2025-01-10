@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, Union
 
 import torch
 
@@ -189,7 +189,7 @@ def _get_default_qconfig_mapping_with_default_qconfig(
     return qconfig_mapping
 
 
-_QCONFIG_STYLE_ORDER: List[str] = [
+_QCONFIG_STYLE_ORDER: list[str] = [
     "global_qconfig",
     "object_type_qconfigs",
     "module_name_regex_qconfigs",

@@ -4,7 +4,6 @@ from typing import (
     Generic,
     Iterable,
     Iterator,
-    List,
     Optional,
     Sequence,
     Sized,
@@ -291,7 +290,7 @@ class WeightedRandomSampler(Sampler[int]):
         return self.num_samples
 
 
-class BatchSampler(Sampler[List[int]]):
+class BatchSampler(Sampler[list[int]]):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
@@ -332,7 +331,7 @@ class BatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         sampler_iter = iter(self.sampler)
         if self.drop_last:

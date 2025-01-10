@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -138,10 +138,10 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_runtimes: Dict[str, Dict[str, float]] = defaultdict(
             lambda: defaultdict(lambda: 0.0)
         )
-        self.mod_fw_pre_order: List[str] = []
-        self.mod_bw_pre_order: List[str] = []
-        self.mod_fw_post_order: List[str] = []
-        self.mod_bw_post_order: List[str] = []
+        self.mod_fw_pre_order: list[str] = []
+        self.mod_bw_pre_order: list[str] = []
+        self.mod_fw_post_order: list[str] = []
+        self.mod_bw_post_order: list[str] = []
         self.total_runtime: float = 0.0
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950

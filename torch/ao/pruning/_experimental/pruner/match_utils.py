@@ -1,7 +1,7 @@
 """
 Contains utility functions to check if a pattern is in the graph and return the matching nodes
 """
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch import nn
@@ -39,8 +39,8 @@ def apply_match(
     modules: Dict[str, nn.ModuleDict],
     pattern: Union[tuple[Any], Any],
     node: Node,
-    matched_node_pattern: List[Node],
-) -> Optional[List[Node]]:
+    matched_node_pattern: list[Node],
+) -> Optional[list[Node]]:
     r"""
     This function will return the matched nodes if the pattern matches the node given
     If there is no match, it will return None

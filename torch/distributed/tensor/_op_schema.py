@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -24,7 +24,7 @@ except ImportError:
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
 
-PlacementList = List[Optional[Placement]]
+PlacementList = list[Optional[Placement]]
 
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possibilities.
@@ -86,7 +86,7 @@ class PlacementStrategy:
     # we need a nested list to record the cost for each
     # operand of this operator, and for each operand of
     # this operator it might have multiple placement strategies
-    redistribute_cost: Optional[List[List[float]]] = None
+    redistribute_cost: Optional[list[list[float]]] = None
 
     @cached_property
     def output_spec(self) -> DTensorSpec:
@@ -130,9 +130,9 @@ class OpStrategy(StrategyType):
     OpStrategy that consists of a list of placement strategies associated with the op
     """
 
-    def __init__(self, strategies: List[PlacementStrategy]) -> None:
+    def __init__(self, strategies: list[PlacementStrategy]) -> None:
         super().__init__()
-        self.strategies: List[PlacementStrategy] = strategies
+        self.strategies: list[PlacementStrategy] = strategies
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
@@ -203,7 +203,7 @@ class RuntimeSchemaInfo:
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
-    static_kwargkey: Optional[List[str]] = None
+    static_kwargkey: Optional[list[str]] = None
     # each op can decide if it wants to use pytree flatten/unflatten during operator
     # eager execution, by default we don't need to do flatten/unflatten, only if the
     # op indicate it needs to, this is to accelerate eager performance.
@@ -270,7 +270,7 @@ class OpSchema:
         )
 
     def __str__(self) -> str:
-        args_schema: List[str] = []
+        args_schema: list[str] = []
         mesh_shape = None
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
@@ -404,7 +404,7 @@ class OpSchema:
 
     def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
         suggestion_args_spec = self.args_spec
-        new_arg_schema: List[object] = []
+        new_arg_schema: list[object] = []
         idx_of_args_spec = 0
         if (
             origin_schema.schema_info is not None
@@ -448,7 +448,7 @@ class OpInfo:
 
     mesh: DeviceMesh
     schema: OpSchema
-    flat_args_schema: List[object]
+    flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: Dict[str, object]
     args_tree_spec: Optional[TreeSpec] = None

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import operator
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
+from typing import Any, cast, Dict, Optional, Sequence, Tuple
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -105,7 +105,7 @@ class _TensorParallelTransformPass(PassBase):
 
 
 def _generate_parameter_and_buffer_placements(
-    params_and_buffers: List[str],
+    params_and_buffers: list[str],
     parallel_strategies: Dict[str, ParallelStyle],
 ) -> Dict[str, Placement]:
     """
@@ -490,7 +490,7 @@ def _get_input_node_specs(
     """
     Get the input specs of a node.
     """
-    input_specs_list: List[DTensorSpec] = []
+    input_specs_list: list[DTensorSpec] = []
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
             output_spec = placement_strategies[input_arg].output_specs

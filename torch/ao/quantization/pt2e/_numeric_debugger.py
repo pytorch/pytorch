@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, Optional, Sequence
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -137,7 +137,7 @@ class OutputLogger(torch.nn.Module):
         self.node_name = node_name
         self.nn_module_stack = nn_module_stack
         self.debug_handle = debug_handle
-        self.stats: List[object] = []
+        self.stats: list[object] = []
 
     def forward(self, x: object) -> object:
         self.stats.append(_detach(x))
@@ -270,7 +270,7 @@ def _module_stack_to_str(module_stack: object) -> str:
 
 def extract_results_from_loggers(
     model: GraphModule,
-) -> Dict[int, tuple[Optional[str], object, List[object]]]:
+) -> Dict[int, tuple[Optional[str], object, list[object]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
     The reason we have a list of object, instead of Tensor is because the output of node may not be
     a Tensor, it could be (nested) list, tuple or dict as well.
@@ -281,7 +281,7 @@ def extract_results_from_loggers(
 
     """
     # Results maps debug handle to a tensor list for each model being compared.
-    handles: Dict[int, tuple[Optional[str], object, List[object]]] = {}
+    handles: Dict[int, tuple[Optional[str], object, list[object]]] = {}
     for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
             handles[module.debug_handle] = (
@@ -294,8 +294,8 @@ def extract_results_from_loggers(
 
 
 def compare_results(
-    ref_results: Dict[int, tuple[Optional[str], object, List[torch.Tensor]]],
-    actual_results: Dict[int, tuple[Optional[str], object, List[torch.Tensor]]],
+    ref_results: Dict[int, tuple[Optional[str], object, list[torch.Tensor]]],
+    actual_results: Dict[int, tuple[Optional[str], object, list[torch.Tensor]]],
 ) -> Dict[int, NodeAccuracySummary]:
     """Given two dict mapping from `debug_handle_id` (int) to list of tensors
     return a map from `debug_handle_id` to `NodeAccuracySummary` that contains

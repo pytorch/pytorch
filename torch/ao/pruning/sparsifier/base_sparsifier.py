@@ -2,7 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Dict, Optional, Set, Type
 
 import torch
 from torch import nn
@@ -57,7 +57,7 @@ class BaseSparsifier(abc.ABC):
         self.defaults: Dict[str, Any] = defaults or {}
 
         self.state: Dict[str, Dict] = defaultdict(dict)
-        self.groups: List[Dict[str, Any]] = []
+        self.groups: list[Dict[str, Any]] = []
         self.enable_mask_update = True
 
     def __getstate__(self) -> Dict[str, Any]:
@@ -95,7 +95,7 @@ class BaseSparsifier(abc.ABC):
         TODO: Need a clean way of loading the state of the "prepared" module
         """
 
-        groups: List[Dict[str, Any]] = [
+        groups: list[Dict[str, Any]] = [
             dict(
                 filter(
                     lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT,

@@ -3,7 +3,7 @@
 import os
 import sys
 import unittest
-from typing import Dict, List, Type
+from typing import Dict, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
@@ -149,7 +149,7 @@ FAULTY_AGENT_TESTS = [
 def generate_tests(
     prefix: str,
     mixin: Type[RpcAgentTestFixture],
-    tests: List[Type[RpcAgentTestFixture]],
+    tests: list[Type[RpcAgentTestFixture]],
     module_name: str,
 ) -> Dict[str, Type[RpcAgentTestFixture]]:
     """Mix in the classes needed to autogenerate the tests based on the params.

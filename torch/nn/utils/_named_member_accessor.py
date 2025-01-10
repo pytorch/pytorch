@@ -1,7 +1,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, Tuple
 
 import torch
 
@@ -225,7 +225,7 @@ class NamedMemberAccessor:
 
     # Batched operations
 
-    def get_tensors(self, names: Iterable[str]) -> List[torch.Tensor]:
+    def get_tensors(self, names: Iterable[str]) -> list[torch.Tensor]:
         """
         Get the tensors specified by the given paths.
 
@@ -281,7 +281,7 @@ class NamedMemberAccessor:
         names: Iterable[str],
         values: Iterable[torch.Tensor],
         allow_missing: bool = False,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -302,7 +302,7 @@ class NamedMemberAccessor:
 
     def swap_tensors_dict(
         self, named_tensors: Dict[str, torch.Tensor], allow_missing: bool = False
-    ) -> Tuple[Dict[str, torch.Tensor], List[str]]:
+    ) -> Tuple[Dict[str, torch.Tensor], list[str]]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -332,7 +332,7 @@ class NamedMemberAccessor:
             raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         return orig_named_tensors, missing_keys
 
-    def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:
+    def check_keys(self, keys: Iterable[str]) -> Tuple[list[str], list[str]]:
         """Check that the given keys are valid."""
         keys = set(keys)
         valid_keys = {name for name, _ in self.named_tensors(remove_duplicate=False)}

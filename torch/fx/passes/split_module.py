@@ -2,7 +2,7 @@
 import inspect
 import logging
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -20,7 +20,7 @@ class Partition:
     def __init__(self, name: str):
         self.name: str = name
         self.submod_name = f"submod_{name}"
-        self.node_names: List[str] = []
+        self.node_names: list[str] = []
         self.inputs: Dict[str, None] = {}
         self.outputs: Dict[str, None] = {}
         self.dependencies: Dict[str, None] = {}
@@ -379,13 +379,13 @@ def split_module(
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
-    root_partitions: List[str] = []
+    root_partitions: list[str] = []
     for partition_name, partition in partitions.items():
         if not len(partition.dependencies):
             root_partitions.append(partition_name)
 
     # check partitions for circular dependencies and create topological partition ordering
-    sorted_partitions: List[str] = []
+    sorted_partitions: list[str] = []
     while root_partitions:
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
@@ -559,7 +559,7 @@ def split_module(
 
         if keep_original_order:
             # first get the attr nodes required by this partition
-            orig_mod_attr_nodes: List[Node] = [
+            orig_mod_attr_nodes: list[Node] = [
                 orig_mod_env[key]
                 for key in partition.inputs
                 if key not in original_order

@@ -382,7 +382,7 @@ class BackwardHookVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("setup_input_hook", "setup_output_hook"):

@@ -60,7 +60,7 @@ _legal_ops = dict.fromkeys(
 
 # Signature for functions thattransforms the body (`list[str]`) of the
 # generated code
-TransformCodeFunc = Callable[[List[str]], List[str]]
+TransformCodeFunc = Callable[[list[str]], list[str]]
 
 
 class _CustomBuiltin(NamedTuple):
@@ -311,7 +311,7 @@ class _PyTreeInfo(NamedTuple):
     Contains extra info stored when we're using Pytrees
     """
 
-    orig_args: List[str]
+    orig_args: list[str]
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
@@ -359,7 +359,7 @@ class CodeGen:
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
-    def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
+    def gen_fn_def(self, free_vars: list[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
@@ -398,7 +398,7 @@ class CodeGen:
         """
         return outputs
 
-    def additional_globals(self) -> List[Tuple[str, Any]]:
+    def additional_globals(self) -> list[Tuple[str, Any]]:
         """
         If your codegen uses extra global values, add tuples of (identifier,reference to the value) here.
         For example, return ['List', typing.List] if you need ``List`` in the global context.
@@ -416,13 +416,13 @@ class CodeGen:
         include_device: bool = False,
         colored: bool = False,
     ) -> PythonCode:
-        free_vars: List[str] = []
-        body: List[str] = []
+        free_vars: list[str] = []
+        body: list[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
 
         # Wrap string in list to pass by reference
-        maybe_return_annotation: List[str] = [""]
+        maybe_return_annotation: list[str] = [""]
         include_stride = include_stride or (
             os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1"
         )
@@ -566,7 +566,7 @@ class CodeGen:
         # execution order of the program, which we will use to free unused
         # values
         node_to_last_use: Dict[Node, Node] = {}
-        user_to_last_uses: Dict[Node, List[Node]] = {}
+        user_to_last_uses: Dict[Node, list[Node]] = {}
 
         def register_last_uses(n: Node, user: Node):
             if n not in node_to_last_use:
@@ -784,7 +784,7 @@ class CodeGen:
         # remove counter and generate lineno to node index mapping
         lineno_map: Dict[int, Optional[int]] = {}
         prologue_len = prologue.count("\n") + 1
-        new_lines: List[str] = []
+        new_lines: list[str] = []
         cur_idx = None
         for line in "".join(body).split("\n"):
             counter = re.search(r"# COUNTER: (\d+)", line)
@@ -1668,10 +1668,10 @@ class Graph:
         Return a human-readable (not machine-readable) string representation
         of this Graph
         """
-        placeholder_names: List[str] = []
+        placeholder_names: list[str] = []
         # This is a one-element array just so ``format_node`` can modify the closed
         # over value
-        maybe_return_typename: List[str] = [""]
+        maybe_return_typename: list[str] = [""]
 
         node_strs = [node.format_node(placeholder_names) for node in self.nodes]
         param_str = ", ".join(placeholder_names)

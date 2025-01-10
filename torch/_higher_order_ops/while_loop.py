@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, List, Tuple, Union
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -330,15 +330,15 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_meta_consistency(
-    lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    ) -> List[str]:
+        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    ) -> list[str]:
         def diff_meta(
             lhs: Union[torch.Tensor, torch.SymInt, int],
             rhs: Union[torch.Tensor, torch.SymInt, int],

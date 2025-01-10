@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Dict, Optional, Set, Type
 
 import torch.nn
 
@@ -53,7 +53,7 @@ class SideEffects:
 
     id_to_variable: Dict[int, VariableTracker]
     store_attr_mutations: Dict[VariableTracker, Dict[str, VariableTracker]]
-    keepalive: List[Any]
+    keepalive: list[Any]
 
     def __init__(
         self,

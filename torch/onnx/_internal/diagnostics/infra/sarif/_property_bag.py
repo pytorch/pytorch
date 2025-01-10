@@ -11,7 +11,7 @@ from typing import List, Optional
 class PropertyBag(object):
     """Key/value pairs that provide additional information about the object."""
 
-    tags: Optional[List[str]] = dataclasses.field(
+    tags: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "tags"}
     )
 

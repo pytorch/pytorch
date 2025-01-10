@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List
+from typing import Dict
 
 from .glob_group import GlobGroup, GlobPattern
 
@@ -17,7 +17,7 @@ class Directory:
         self.is_dir = is_dir
         self.children: Dict[str, Directory] = {}
 
-    def _get_dir(self, dirs: List[str]) -> "Directory":
+    def _get_dir(self, dirs: list[str]) -> "Directory":
         """Builds path of Directories if not yet built and returns last directory
         in list.
 
@@ -64,13 +64,13 @@ class Directory:
         return False
 
     def __str__(self):
-        str_list: List[str] = []
+        str_list: list[str] = []
         self._stringify_tree(str_list)
         return "".join(str_list)
 
     def _stringify_tree(
         self,
-        str_list: List[str],
+        str_list: list[str],
         preamble: str = "",
         dir_ptr: str = "\u2500\u2500\u2500 ",
     ):
@@ -89,8 +89,8 @@ class Directory:
         else:
             preamble = preamble + space
 
-        file_keys: List[str] = []
-        dir_keys: List[str] = []
+        file_keys: list[str] = []
+        dir_keys: list[str] = []
         for key, val in self.children.items():
             if val.is_dir:
                 dir_keys.append(key)
@@ -109,7 +109,7 @@ class Directory:
 
 def _create_directory_from_file_list(
     filename: str,
-    file_list: List[str],
+    file_list: list[str],
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ) -> Directory:

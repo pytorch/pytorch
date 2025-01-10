@@ -185,7 +185,7 @@ class GraphCompileReason:
     """Stores why a given output graph was compiled; i.e. what caused the graph break."""
 
     reason: str
-    user_stack: List[traceback.FrameSummary]
+    user_stack: list[traceback.FrameSummary]
 
     # Indicates if this was a graph compile reason due to graph break.
     graph_break: bool = True
@@ -218,7 +218,7 @@ class WrapperBackend:
     def __init__(self, backend: CompilerFn):
         self.backend: CompilerFn = backend
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
@@ -286,7 +286,7 @@ class OutputGraph:
         self.frame_state = frame_state
         # Map from graph input's `Source` to sizes / strides metadata
         self.input_source_to_sizes_strides: Dict[Source, Dict[str, Any]] = {}
-        self.cleanup_hooks: List[Callable[[], Any]] = []
+        self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
@@ -307,7 +307,7 @@ class OutputGraph:
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
-        self.tracked_fakes: List[TrackedFake] = []
+        self.tracked_fakes: list[TrackedFake] = []
 
         shape_env = ShapeEnv(
             # Reference Cycle!
@@ -348,7 +348,7 @@ class OutputGraph:
         # specifically equality constraints, which have shared tensor ids in them.
         # This map should also be generally useful, e.g., for (de)serialization.
         self.tracked_fakes_id_to_source: Dict[
-            int, List[Source]
+            int, list[Source]
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = {}
@@ -358,13 +358,13 @@ class OutputGraph:
         self.variable_tracker_cache = VariableTrackerCache()
         self.unique_var_id = itertools.count()
         self.code_options = dict(code_options)
-        self.output_instructions: List[Instruction] = []
+        self.output_instructions: list[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
 
         # A list of register_finalizer_fns to apply to the output graph module
-        self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
+        self.register_finalizer_fns: list[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
@@ -382,10 +382,10 @@ class OutputGraph:
         # Feel free to populate this more frequently if other use-cases arise,
         # but be aware that we have to generate full stacks for each
         # recording!
-        self.source_to_user_stacks: Dict[Source, List[traceback.StackSummary]] = {}
+        self.source_to_user_stacks: Dict[Source, list[traceback.StackSummary]] = {}
 
-        self._current_tx: List[InstructionTranslatorBase] = []
-        self.cleanups: List[CleanupHook] = []
+        self._current_tx: list[InstructionTranslatorBase] = []
+        self.cleanups: list[CleanupHook] = []
         self.should_exit = False
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
@@ -426,13 +426,13 @@ class OutputGraph:
         # functions that returns a tuple of random values for each original call.
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
-        self.random_calls: List[
+        self.random_calls: list[
             Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
         ] = []
         self.random_values_var = None
 
         # Bytecode to insert right before we call the graph
-        self.pregraph_bytecode: List[Instruction] = []
+        self.pregraph_bytecode: list[Instruction] = []
 
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
@@ -883,7 +883,7 @@ class OutputGraph:
             return [], {}
 
         alias_insts = []
-        needs_alias: Dict[str, List[VariableTracker]] = {}
+        needs_alias: Dict[str, list[VariableTracker]] = {}
 
         queue = [
             *tx.stack,
@@ -981,7 +981,7 @@ class OutputGraph:
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
-        prefix_insts: List[Instruction] = []
+        prefix_insts: list[Instruction] = []
         if sys.version_info >= (3, 11):
             # prefix instructions (Python 3.11+)
             for inst in tx.prefix_insts:
@@ -1033,8 +1033,8 @@ class OutputGraph:
         }
         root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
-        restore_vars: List[str] = []
-        val_to_names: Dict[VariableTracker, List[str]] = {}
+        restore_vars: list[str] = []
+        val_to_names: Dict[VariableTracker, list[str]] = {}
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1424,11 +1424,11 @@ class OutputGraph:
             return cg.get_instructions()
 
     @property
-    def placeholders(self) -> List[fx.Node]:
+    def placeholders(self) -> list[fx.Node]:
         return self.graph.find_nodes(op="placeholder")
 
     @property
-    def graphargs(self) -> List[GraphArg]:
+    def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
@@ -1531,7 +1531,7 @@ class OutputGraph:
         self.register_attr_or_module(sub_gm, next_name, source=None)
         return next_name
 
-    def example_inputs(self) -> List[torch.Tensor]:
+    def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
         return result
 
@@ -1718,7 +1718,7 @@ class OutputGraph:
                     self.remove_node(u)
                 self.remove_node(node)
 
-    def add_output_instructions(self, prefix: List[Instruction]) -> None:
+    def add_output_instructions(self, prefix: list[Instruction]) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
@@ -2131,7 +2131,7 @@ class SubgraphTracer(fx.Tracer):
                     ]
 
         if "stack_trace" not in rv.node.meta:
-            frame_summaries: List[traceback.FrameSummary] = []
+            frame_summaries: list[traceback.FrameSummary] = []
             while tx:
                 # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
                 # the user code.
@@ -2175,7 +2175,7 @@ class SubgraphTracer(fx.Tracer):
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         if len(node.users) > 0:
-            user_graph_nodes: List[torch.fx.Node] = []
+            user_graph_nodes: list[torch.fx.Node] = []
             for user in node.users.keys():
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.
@@ -2593,7 +2593,7 @@ class SubgraphTracer(fx.Tracer):
 
     # Lookup the proxy in current tracer for each symbol in expressions of s,
     # See Note [Auto lift basic free symbols when create_graph_input]
-    def lookup_unbound_symbols(self, s: torch.SymInt) -> List[sympy.Symbol]:
+    def lookup_unbound_symbols(self, s: torch.SymInt) -> list[sympy.Symbol]:
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
             return []

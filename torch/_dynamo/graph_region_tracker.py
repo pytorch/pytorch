@@ -10,7 +10,6 @@ from typing import (
     Callable,
     Deque,
     Dict,
-    List,
     Optional,
     Set,
     Tuple,
@@ -32,8 +31,8 @@ if TYPE_CHECKING:
 
 
 Node = torch.fx.Node
-Region = List[Node]
-IdenticalNodes = List[Node]
+Region = list[Node]
+IdenticalNodes = list[Node]
 GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
@@ -231,7 +230,7 @@ class GraphRegionTracker:
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
-    def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
+    def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
         **Note**: This function assumes the nodes that have been tracked with track_node are in the provided graph argument.
@@ -288,7 +287,7 @@ class GraphRegionTracker:
 
 
 def fully_expand_region_group(
-    regions: List[Region],
+    regions: list[Region],
     seen_nodes: Set[Node],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
@@ -302,7 +301,7 @@ def fully_expand_region_group(
         (origin,) = region  # Only works for 1 element sets
         region_iters.append(BackwardBfsArgIter.create(origin))
 
-    nodes_to_add: List[Node] = []
+    nodes_to_add: list[Node] = []
 
     # we already have the origin node in each region
     for region_it in region_iters:

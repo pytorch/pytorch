@@ -23,7 +23,7 @@ class ReportingDescriptorRelationship(object):
     description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    kinds: List[str] = dataclasses.field(
+    kinds: list[str] = dataclasses.field(
         default_factory=lambda: ["relevant"], metadata={"schema_property_name": "kinds"}
     )
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(

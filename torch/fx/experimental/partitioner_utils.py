@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Dict, List, NamedTuple, Set
+from typing import Dict, NamedTuple, Set
 
 from torch.fx.node import map_arg, Node
 
@@ -17,7 +17,7 @@ class Partition:
         self.children: Set[Partition] = set()
         self.bfs_level: int = -1
         self.used_mem_bytes: int = 0
-        self.logical_device_ids: List[int] = []
+        self.logical_device_ids: list[int] = []
 
     def __str__(self):
         return str(self.partition_id)
@@ -88,12 +88,12 @@ class PartitionMode(Enum):
 
 
 class PartitionerConfig(NamedTuple):
-    devices: List[Device]
+    devices: list[Device]
     mode: PartitionMode = PartitionMode.size_based
     transfer_rate_bytes_per_sec: float = 0.0
     node_to_latency_mapping: Dict[Node, NodeLatency] = {}
     node_to_partition_mapping: Dict[Node, int] = {}
-    partition_to_logical_device_mapping: Dict[int, List[int]] = {}
+    partition_to_logical_device_mapping: Dict[int, list[int]] = {}
     # Saturate host by replicating partitions to the remaining idle devices.
     saturate_host: bool = False
 
@@ -131,9 +131,9 @@ def get_latency_of_one_partition(
 ) -> PartitionLatency:
     """Given a partition and its nodes' latency, return a PartitionLatency for this partition"""
 
-    def get_top_nodes(partition: Partition) -> List[Node]:
+    def get_top_nodes(partition: Partition) -> list[Node]:
         """Given a partition, return a list of nodes on the top bfs level"""
-        top_nodes: List[Node] = []
+        top_nodes: list[Node] = []
         for node in partition.nodes:
             # Skip placeholder and get_attr nodes
             if node.op in {"placeholder", "get_attr"}:
@@ -216,7 +216,7 @@ def get_latency_of_one_partition(
 
 
 def get_partition_to_latency_mapping(
-    partitions: List[Partition], node_to_latency_mapping: Dict[Node, NodeLatency]
+    partitions: list[Partition], node_to_latency_mapping: Dict[Node, NodeLatency]
 ) -> Dict[Partition, PartitionLatency]:
     """Given all the partitions and node_to_latency_mapping dictionary,
     return a mapping dictionary of each partition to its overall latency
@@ -268,7 +268,7 @@ def get_comm_latency_between(
 
 
 def get_latency_of_partitioned_graph(
-    partitions: List[Partition],
+    partitions: list[Partition],
     partition_to_latency_mapping: Dict[Partition, PartitionLatency],
     transfer_rate_bytes_per_sec: float,
 ):
@@ -298,7 +298,7 @@ def get_latency_of_partitioned_graph(
             return max_latency_sec
         return latency_so_far_sec
 
-    def get_top_partitions(partitions: List[Partition]) -> List[Partition]:
+    def get_top_partitions(partitions: list[Partition]) -> list[Partition]:
         """This function is to return all the partitions without parents
         as the starting points of all the paths
         """

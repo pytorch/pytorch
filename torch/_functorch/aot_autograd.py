@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Dict,
     KeysView,
-    List,
     NewType,
     Optional,
     Protocol,
@@ -447,7 +446,7 @@ AOT_COUNTER = itertools.count()
 
 aot_autograd_decompositions = {}
 
-FakifiedFlatArgs = NewType("FakifiedFlatArgs", List[Any])
+FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 
 
 TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
@@ -492,7 +491,7 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
 
 
 def process_inputs(
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
@@ -560,7 +559,7 @@ def process_inputs(
 
 
 def construct_fake_mode(
-    flat_args: List[Any], aot_config: AOTConfig
+    flat_args: list[Any], aot_config: AOTConfig
 ) -> Tuple[FakeTensorMode, Optional[ShapeEnv]]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
@@ -1008,7 +1007,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def _try_get_metadata_from_dynamo(
     mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
-) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
+) -> Tuple[Optional[list[torch._guards.Source]], list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -1186,7 +1185,7 @@ def aot_module_simplified(
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
-        def boxed_forward(runtime_args: List[Any]):
+        def boxed_forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)

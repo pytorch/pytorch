@@ -5,7 +5,7 @@ import inspect
 import os
 import warnings
 from io import IOBase
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Union
 
 from torch.utils._import_utils import dill_available
 
@@ -161,7 +161,7 @@ def _check_unpickable_fn(fn: Callable):
         return
 
 
-def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
+def match_masks(name: str, masks: Union[str, list[str]]) -> bool:
     # empty mask matches any input name
     if not masks:
         return True
@@ -177,7 +177,7 @@ def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
 
 def get_file_pathnames_from_root(
     root: str,
-    masks: Union[str, List[str]],
+    masks: Union[str, list[str]],
     recursive: bool = False,
     abspath: bool = False,
     non_deterministic: bool = False,

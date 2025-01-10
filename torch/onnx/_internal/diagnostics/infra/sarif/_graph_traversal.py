@@ -20,7 +20,7 @@ class GraphTraversal(object):
     description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    edge_traversals: Optional[List[_edge_traversal.EdgeTraversal]] = dataclasses.field(
+    edge_traversals: Optional[list[_edge_traversal.EdgeTraversal]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "edgeTraversals"}
     )
     immutable_state: Any = dataclasses.field(

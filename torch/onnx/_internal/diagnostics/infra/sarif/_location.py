@@ -20,11 +20,11 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 class Location(object):
     """A location within a programming artifact."""
 
-    annotations: Optional[List[_region.Region]] = dataclasses.field(
+    annotations: Optional[list[_region.Region]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "annotations"}
     )
     id: int = dataclasses.field(default=-1, metadata={"schema_property_name": "id"})
-    logical_locations: Optional[List[_logical_location.LogicalLocation]] = (
+    logical_locations: Optional[list[_logical_location.LogicalLocation]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "logicalLocations"}
         )
@@ -40,7 +40,7 @@ class Location(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    relationships: Optional[List[_location_relationship.LocationRelationship]] = (
+    relationships: Optional[list[_location_relationship.LocationRelationship]] = (
         dataclasses.field(
             default=None, metadata={"schema_property_name": "relationships"}
         )

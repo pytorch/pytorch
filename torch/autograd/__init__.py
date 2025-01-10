@@ -90,7 +90,7 @@ def _make_grads(
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
 ) -> Tuple[_OptionalTensor, ...]:
-    new_grads: List[_OptionalTensor] = []
+    new_grads: list[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None

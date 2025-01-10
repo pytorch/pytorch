@@ -133,7 +133,7 @@ class _MinimizerBase:
         self.results: Dict[Any, Any] = {}
 
         # Stores the report for the runs
-        self.reports: List[List[str]] = []
+        self.reports: list[list[str]] = []
 
         # Current iteration
         self.iteration: int = 0
@@ -412,7 +412,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
 
-        report: List[str] = []
+        report: list[str] = []
         if self.exclusion_fn is not None:
             self.exclusion_fn(nodes, start_idx, end_idx)
             if len(nodes) == 0:
@@ -484,7 +484,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
 
         for node in nodes:
-            report: List[str] = []
+            report: list[str] = []
             self.reports.append(report)
             self.iteration += 1
             report.append(f"Sequential traverse iteration {self.iteration}.")
@@ -534,7 +534,7 @@ class _MinimizerBase:
         find_last_node: If True, search for the last node which result in numerics difference
         if False: find first node in sorted node list
         """
-        report: List[str] = []
+        report: list[str] = []
 
         mid = (start_idx + end_idx) // 2
         cur_nodes_list: NodeList = nodes[: mid + 1] if find_last_node else nodes[mid:]
@@ -726,7 +726,7 @@ class _MinimizerBase:
             return culprits
 
         for node in nodes:
-            report: List[str] = []
+            report: list[str] = []
             self.reports.append(report)
             self.iteration += 1
             report.append(f"Accumulate traverse iteration {self.iteration}.")
@@ -770,7 +770,7 @@ class _MinimizerBase:
             for node in nodes:
                 if node in self.fusions:
                     cur_nodes.update(self.fusions[node])
-        report: List[str] = []
+        report: list[str] = []
         self.reports.append(report)
         self.iteration += 1
         report.append(f" Nodes block {self.iteration}.")
@@ -874,7 +874,7 @@ class _MinimizerBase:
         ) as e:
             print(e)
 
-    def print_report(self, report: List[str]):
+    def print_report(self, report: list[str]):
         for i in range(len(report)):
             if i > 0:
                 print(" . " + report[i])

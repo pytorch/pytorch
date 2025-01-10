@@ -16,7 +16,6 @@ from typing import (
     cast,
     Dict,
     Iterable,
-    List,
     Optional,
     TYPE_CHECKING,
     Union,
@@ -646,7 +645,7 @@ class PackageImporter(Importer):
             return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(
-        self, atoms: List[str]
+        self, atoms: list[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
         for i, atom in enumerate(atoms):

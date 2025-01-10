@@ -2,7 +2,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -144,7 +144,7 @@ class Benchmarker:
         - The median runtime of `_callable`, in milliseconds.
         """
 
-        def run_for(ms: int) -> List[float]:
+        def run_for(ms: int) -> list[float]:
             timings = []
             run_start_t = time.perf_counter()
             while True:

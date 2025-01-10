@@ -9,7 +9,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -140,7 +140,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: List[Any]
+    entrypoint: Union[Callable, str, None], args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -183,7 +183,7 @@ def _get_addr_and_port(
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
-    args: List[Any],
+    args: list[Any],
 ) -> Dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)

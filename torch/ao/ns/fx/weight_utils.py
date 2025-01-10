@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -31,7 +31,7 @@ def mod_weight_bias_0(mod: nn.Module) -> torch.Tensor:
     return mod._weight_bias()[0]  # type: ignore[operator]
 
 
-def get_lstm_weight(mod: nn.Module) -> List[torch.Tensor]:
+def get_lstm_weight(mod: nn.Module) -> list[torch.Tensor]:
     res = []
     for idx, param_name in enumerate(mod._flat_weights_names):  # type: ignore[arg-type]
         if "weight_ih_l" in param_name or "weight_hh_l" in param_name:
@@ -40,7 +40,7 @@ def get_lstm_weight(mod: nn.Module) -> List[torch.Tensor]:
     return res
 
 
-def get_qlstm_weight(mod: nn.Module) -> List[torch.Tensor]:
+def get_qlstm_weight(mod: nn.Module) -> list[torch.Tensor]:
     res = []
     for weight_value in mod._all_weight_values:  # type: ignore[union-attr]
         res.append(weight_value.param.__getstate__()[0][4][0].__getstate__()[0][0])
@@ -66,7 +66,7 @@ def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
         return mod._weight_bias()[0]  # type: ignore[operator]
 
 
-def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
+def get_lstm_mod_weights(mod: nn.Module) -> list[torch.Tensor]:
     # TODO(future PR): make more generic, handle everything
     if isinstance(mod, nn.LSTM):
         res = []

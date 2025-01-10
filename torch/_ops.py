@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     Set,
     Type,
@@ -930,7 +929,7 @@ class OpOverload(OperatorBase):
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload):
-    def _fallthrough_keys(self) -> List[DispatchKey]:
+    def _fallthrough_keys(self) -> list[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
         _DEFAULT_FALLTHROUGH_KEYS = [

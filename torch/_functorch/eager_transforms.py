@@ -8,7 +8,7 @@
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -911,7 +911,7 @@ def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
         )
 
 
-def assert_non_empty_tensor_output(output: List[Any], api: str) -> None:
+def assert_non_empty_tensor_output(output: list[Any], api: str) -> None:
     if (len(output) == 1 and output[0] is None) or len(output) < 1:
         raise RuntimeError(
             f"{api}: Expected f to be a function that has non-empty output (got output = {output})"
@@ -946,7 +946,7 @@ def assert_output_is_tensor_or_tensors(output: Any, api: str) -> None:
 
 
 def assert_non_empty_list_of_tensors(
-    output: List[torch.Tensor], api: str, argname: str
+    output: list[torch.Tensor], api: str, argname: str
 ) -> None:
     if len(output) == 0:
         raise RuntimeError(f"{api}: Expected {argname} to contain at least one Tensor.")

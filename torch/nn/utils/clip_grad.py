@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import cast, Dict, Iterable, List, Optional, Tuple, Union
+from typing import cast, Dict, Iterable, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
@@ -74,12 +74,12 @@ def _get_total_norm(
         return torch.tensor(0.0)
     first_device = tensors[0].device
     grouped_tensors: Dict[
-        Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
+        Tuple[torch.device, torch.dtype], Tuple[list[list[Tensor]], list[int]]
     ] = _group_tensors_by_device_and_dtype(
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 
-    norms: List[Tensor] = []
+    norms: list[Tensor] = []
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
@@ -147,7 +147,7 @@ def _clip_grads_with_norm_(
     if len(grads) == 0:
         return
     grouped_grads: Dict[
-        Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
+        Tuple[torch.device, torch.dtype], Tuple[list[list[Tensor]], list[int]]
     ] = _group_tensors_by_device_and_dtype(
         [grads]
     )  # type: ignore[assignment]
@@ -269,10 +269,10 @@ def clip_grad_value_(
     for (device, _), ([grads], _) in grouped_grads.items():
         if (
             foreach is None
-            and _has_foreach_support(cast(List[Tensor], grads), device=device)
+            and _has_foreach_support(cast(list[Tensor], grads), device=device)
         ) or (foreach and _device_has_foreach_support(device)):
-            torch._foreach_clamp_min_(cast(List[Tensor], grads), -clip_value)
-            torch._foreach_clamp_max_(cast(List[Tensor], grads), clip_value)
+            torch._foreach_clamp_min_(cast(list[Tensor], grads), -clip_value)
+            torch._foreach_clamp_max_(cast(list[Tensor], grads), clip_value)
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"

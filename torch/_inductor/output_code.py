@@ -32,7 +32,6 @@ from typing import (
     Callable,
     Counter,
     Dict,
-    List,
     Optional,
     Sequence,
     TYPE_CHECKING,
@@ -108,13 +107,13 @@ def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
 # for expanded dimensions (a dimension which used to have size 1 -> ?)
 # we can select one element from that dimension and write to it
 # to achieve writing to all values of that dimension of the input tensor
-def get_expanded_dims(t: torch.Tensor) -> List[int]:
+def get_expanded_dims(t: torch.Tensor) -> list[int]:
     if not isinstance(t, torch.Tensor):
         return None
     return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
 
 
-def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tensor:
+def index_expanded_dims(t: torch.Tensor, expanded_dims: list[int]) -> torch.Tensor:
     for expanded_dim in expanded_dims:
         t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
     return t
@@ -213,7 +212,7 @@ def cudagraph_post_compile(
             # should already exist from forward
             assert manager is not None
 
-            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
+            def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
                 manager.set_to_running_backward()  # type: ignore[union-attr]
                 return compiled_graph_callable(new_inputs)
 
@@ -308,7 +307,7 @@ class CompiledFxGraph(OutputCode):
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[tuple[int, str]]]
+    cache_linemap: Optional[list[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -323,7 +322,7 @@ class CompiledFxGraph(OutputCode):
     allocated_constant_name: Optional[Dict[str, str]]
     constants: Optional[Dict[str, torch.Tensor]]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
+    output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     counter_deltas: Counter[str]
@@ -340,14 +339,14 @@ class CompiledFxGraph(OutputCode):
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
     _boxed_call: Optional[bool] = None
-    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
+    _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
         gm: torch.fx.GraphModule,
-        output_strides: List[Optional[tuple[_StrideExprStr, ...]]],
+        output_strides: list[Optional[tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
@@ -583,7 +582,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, List[str]]
+    filename: Union[str, list[str]]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

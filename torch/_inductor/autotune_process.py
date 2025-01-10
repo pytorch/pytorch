@@ -17,7 +17,6 @@ from typing import (
     Callable,
     Dict,
     Iterable,
-    List,
     Optional,
     Sequence,
     TYPE_CHECKING,
@@ -396,7 +395,7 @@ class TuningProcessPool:
 
     def benchmark(
         self,
-        choices: List[TritonTemplateCaller],
+        choices: list[TritonTemplateCaller],
     ) -> Dict[TritonTemplateCaller, float]:
         """
         Benchmark each choice in a separate process.
@@ -432,9 +431,9 @@ class TensorMeta:
     @classmethod
     def from_irnodes(
         cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
-    ) -> Union[TensorMeta, List[TensorMeta]]:
+    ) -> Union[TensorMeta, list[TensorMeta]]:
         if isinstance(irnodes, Sequence):
-            result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
+            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
 
@@ -488,8 +487,8 @@ class BenchmarkRequest:
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
     ) -> None:
         # the kernel name defined in the module
@@ -634,12 +633,12 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
-        grid: List[int],
+        grid: list[int],
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
@@ -764,8 +763,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
@@ -883,8 +882,8 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
@@ -940,7 +939,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
 
 
 def benchmark_in_sub_process(
-    choices: List[TritonTemplateCaller],
+    choices: list[TritonTemplateCaller],
 ) -> Dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).

@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -106,7 +106,7 @@ class AutotuneCache:
     # Read the best config options from the most local cache and figure out
     # which `configs` represents that option.
     def read_best(
-        self, inductor_meta: _InductorMetaTy, configs: List[Config]
+        self, inductor_meta: _InductorMetaTy, configs: list[Config]
     ) -> Optional[Config]:
         if best := self._read():
             return _load_cached_autotuning(
@@ -409,7 +409,7 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 def _load_cached_autotuning(
     best_config: Dict[str, JsonDataTy],
     configs_hash: str,
-    configs: List[Config],
+    configs: list[Config],
     inductor_meta: _InductorMetaTy,
 ) -> Optional[Config]:
     if best_config is None:

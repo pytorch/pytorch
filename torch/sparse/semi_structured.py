@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -161,7 +161,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     def __tensor_flatten__(
         self,
-    ) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
+    ) -> Tuple[list[str], Tuple[torch.Size, bool, int, bool]]:
         inner_tensors = list(
             filter(lambda x: getattr(self, x) is not None, self.__slots__)
         )

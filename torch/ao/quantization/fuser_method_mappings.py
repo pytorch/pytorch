@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
 import torch.ao.nn.intrinsic as nni
 import torch.nn as nn
@@ -264,7 +264,7 @@ def _get_valid_patterns(op_pattern):
      (MatchAllNode, (MatchAllNode, MatchAllNode)),
     ]
     """
-    result: List[Any]
+    result: list[Any]
     if isinstance(op_pattern, (tuple, list)):
         sub_combs = [_get_valid_patterns(sub_pattern) for sub_pattern in op_pattern]
         result = list(itertools.product(*sub_combs))

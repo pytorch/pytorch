@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Union
+from typing import Annotated, Any, Dict, ForwardRef, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -25,9 +25,9 @@ def _staged_schema():
     defs = {}
     cpp_enum_defs: Dict[str, str] = {}
     cpp_class_defs: Dict[str, str] = {}
-    cpp_type_decls: List[str] = []
-    cpp_json_defs: List[str] = []
-    thrift_enum_defs: List[str] = []
+    cpp_type_decls: list[str] = []
+    cpp_json_defs: list[str] = []
+    thrift_enum_defs: list[str] = []
     thrift_type_defs: Dict[str, str] = {}
 
     def _handle_aggregate(ty) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:

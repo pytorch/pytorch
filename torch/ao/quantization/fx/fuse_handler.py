@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, Union
 
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
@@ -39,7 +39,7 @@ class FuseHandler(ABC):
         named_modules: Dict[str, torch.nn.Module],
         fused_graph: Graph,
         root_node: Node,
-        extra_inputs: List[Any],
+        extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
         fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
@@ -58,7 +58,7 @@ class DefaultFuseHandler(FuseHandler):
         named_modules: Dict[str, torch.nn.Module],
         fused_graph: Graph,
         root_node: Node,
-        extra_inputs: List[Any],
+        extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
         fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
@@ -76,7 +76,7 @@ class DefaultFuseHandler(FuseHandler):
             """
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
-                modules: List[torch.nn.Module] = []
+                modules: list[torch.nn.Module] = []
                 modules.append(get_modules(n))
                 modules.extend(get_modules(a) for a in args)
                 return tuple(modules)

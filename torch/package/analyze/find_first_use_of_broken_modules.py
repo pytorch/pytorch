@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict
 
 from torch.package.package_exporter import PackagingError
 
@@ -6,7 +6,7 @@ from torch.package.package_exporter import PackagingError
 __all__ = ["find_first_use_of_broken_modules"]
 
 
-def find_first_use_of_broken_modules(exc: PackagingError) -> Dict[str, List[str]]:
+def find_first_use_of_broken_modules(exc: PackagingError) -> Dict[str, list[str]]:
     """
     Find all broken modules in a PackagingError, and for each one, return the
     dependency path in which the module was first encountered.

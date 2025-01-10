@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple, Union
+from typing import Tuple, Union
 
 import torch
 from torch import Tensor
@@ -69,11 +69,11 @@ class SparseAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            exp_avgs: List[Tensor] = []
-            exp_avg_sqs: List[Tensor] = []
-            state_steps: List[int] = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            exp_avgs: list[Tensor] = []
+            exp_avg_sqs: list[Tensor] = []
+            state_steps: list[int] = []
             beta1, beta2 = group["betas"]
             maximize = group.get("maximize", False)
 

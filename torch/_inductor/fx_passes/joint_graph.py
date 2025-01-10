@@ -4,7 +4,7 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 import torch
 import torch._guards
@@ -209,7 +209,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
-        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
+        self.node_replacements_shapes: Dict[torch.fx.Node, list[int]] = {}
 
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors

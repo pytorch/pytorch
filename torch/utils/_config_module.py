@@ -17,7 +17,6 @@ from typing import (
     Callable,
     Dict,
     Generic,
-    List,
     NoReturn,
     Optional,
     Set,
@@ -432,8 +431,8 @@ class ConfigModule(ModuleType):
 
     def _get_dict(
         self,
-        ignored_keys: Optional[List[str]] = None,
-        ignored_prefixes: Optional[List[str]] = None,
+        ignored_keys: Optional[list[str]] = None,
+        ignored_prefixes: Optional[list[str]] = None,
         skip_default: bool = False,
     ) -> Dict[str, Any]:
         """Export a dictionary of current configuration keys and values.

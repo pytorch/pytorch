@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, Union
 
 import sympy
 
@@ -60,7 +60,7 @@ try:
     def z3str(e: z3.ExprRef) -> str:
         assert z3.is_expr(e), f"unsupported expression type: {e}"
 
-        def get_args_str(e: z3.ExprRef) -> List[str]:
+        def get_args_str(e: z3.ExprRef) -> list[str]:
             return [z3str(e.arg(i)) for i in range(e.num_args())]
 
         # First, we simplify the given expression.
@@ -769,7 +769,7 @@ def bisect(shape_env):
 
     # Checks whether the given shape_env fails when produce_guards is called.
     def check_shapeenv_fails(
-        shape_env: ShapeEnv, tracked_fakes: Optional[List[Any]]
+        shape_env: ShapeEnv, tracked_fakes: Optional[list[Any]]
     ) -> Optional[ValidationException]:
         assert tracked_fakes is not None
         try:

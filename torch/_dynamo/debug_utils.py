@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -738,7 +738,7 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]],
+    func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
     sym_shapes: Optional[Dict[str, int]] = None,
     default_sym_shape: Optional[int] = None,

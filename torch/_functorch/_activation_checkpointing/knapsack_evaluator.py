@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, Set, Tuple
 
 import networkx as nx
 import numpy as np
@@ -28,7 +28,7 @@ class KnapsackEvaluator:
         node_memories: Dict[str, float],
         saved_nodes_set: Set[str],
         peak_memory_after_forward_pass: float,
-    ) -> List[Tuple[float, str]]:
+    ) -> list[Tuple[float, str]]:
         """
         Simulates the backward pass and keeps track of the peak memory usage.
 
@@ -108,7 +108,7 @@ class KnapsackEvaluator:
         return current_memory
 
     def _validate_all_indexes_accounted_for_in_provided_output(
-        self, saved_nodes_idxs: List[int], recomputable_node_idxs: List[int]
+        self, saved_nodes_idxs: list[int], recomputable_node_idxs: list[int]
     ) -> None:
         """
         Validate that all indexes are accounted for in the provided output.
@@ -132,8 +132,8 @@ class KnapsackEvaluator:
 
     def evaluate_knapsack_output(
         self,
-        saved_nodes_idxs: List[int],
-        recomputable_node_idxs: List[int],
+        saved_nodes_idxs: list[int],
+        recomputable_node_idxs: list[int],
         account_for_backward_pass: bool = False,
     ) -> Dict[str, float]:
         """
@@ -188,10 +188,10 @@ class KnapsackEvaluator:
     def evaluate_distribution_of_results_for_knapsack_algo(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [list[float], list[float], float], Tuple[float, list[int], list[int]]
         ],
-        memory_budget_values: List[float],
-    ) -> List[Dict[str, float]]:
+        memory_budget_values: list[float],
+    ) -> list[Dict[str, float]]:
         """
         Evaluates the distribution of results for a given knapsack algorithm.
         Args:
@@ -216,7 +216,7 @@ class KnapsackEvaluator:
     def get_knee_point_memory_budget(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [list[float], list[float], float], Tuple[float, list[int], list[int]]
         ],
         max_mem_budget: float = 0.1,
         min_mem_budget: float = 0.001,

@@ -21,7 +21,7 @@ import sys
 import textwrap
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
+from typing import Any, Dict, Iterator, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
@@ -74,7 +74,7 @@ class Access:
     seq_num: SeqNum
     stream: StreamId
     operator: str
-    aliases: List[str]
+    aliases: list[str]
     is_output: bool
     stack_trace: traceback.StackSummary
 
@@ -141,7 +141,7 @@ class UnsynchronizedAccessError(SynchronizationError):
 class CUDASanitizerErrors(Exception):
     """Wrapper class for errors reported by CUDA Sanitizer."""
 
-    def __init__(self, errors: List[SynchronizationError]):
+    def __init__(self, errors: list[SynchronizationError]):
         self.errors = errors
 
     def __str__(self):
@@ -161,7 +161,7 @@ class TensorInfo:
     """
 
     allocation_stack_trace: Optional[traceback.StackSummary]
-    reads: List[Access] = field(default_factory=list)
+    reads: list[Access] = field(default_factory=list)
     write: Optional[Access] = None
 
 
@@ -209,7 +209,7 @@ class _TensorsAccessed:
     def get_write(self, data_ptr: DataPtr) -> Optional[Access]:
         return self.accesses[data_ptr].write
 
-    def get_reads(self, data_ptr: DataPtr) -> List[Access]:
+    def get_reads(self, data_ptr: DataPtr) -> list[Access]:
         return self.accesses[data_ptr].reads
 
     def add_read(self, data_ptr: DataPtr, access: Access) -> None:
@@ -353,8 +353,8 @@ class EventHandler:
         read_write: Set[DataPtr],
         outputs: Set[DataPtr],
         operator: str,
-        tensor_aliases: Dict[int, List[str]],
-    ) -> List[SynchronizationError]:
+        tensor_aliases: Dict[int, list[str]],
+    ) -> list[SynchronizationError]:
         def check_conflict(
             data_ptr: DataPtr, current_access: Access, previous_access: Optional[Access]
         ) -> None:
@@ -372,7 +372,7 @@ class EventHandler:
                     )
                 )
 
-        error_list: List[SynchronizationError] = []
+        error_list: list[SynchronizationError] = []
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
         stack_trace = traceback.StackSummary.extract(
@@ -484,7 +484,7 @@ class ArgumentHandler:
     def __init__(self) -> None:
         self.dataptrs_read: Set[DataPtr] = set()
         self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
+        self.tensor_aliases: Dict[DataPtr, list[str]] = {}
         self.outputs: Set[DataPtr] = set()
 
     def _handle_argument(

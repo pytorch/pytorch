@@ -6,7 +6,6 @@ import sys
 from typing import (
     Callable,
     Iterable,
-    List,
     Optional,
     SupportsFloat,
     Tuple,
@@ -141,7 +140,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     """
 
     def integer_coefficient(x: sympy.Basic) -> int:
-        integer_coefficients: List[int] = [
+        integer_coefficients: list[int] = [
             abs(int(arg))
             for arg in sympy.Mul.make_args(x)
             if isinstance(arg, (int, sympy.Integer))
@@ -157,7 +156,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
     p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
-    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+    base_splits: list[Tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
     )
     divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
@@ -333,7 +332,7 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms: List[sympy.Integer] = []
+            new_terms: list[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:

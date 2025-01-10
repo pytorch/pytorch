@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, Sequence, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -374,7 +374,7 @@ class ReadWrites:
     reads: OrderedSet[Dep]
     writes: OrderedSet[Dep]
     index_exprs: OrderedSet[IndexExprDep]
-    range_vars: Optional[List[sympy.Expr]] = None
+    range_vars: Optional[list[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
@@ -405,7 +405,7 @@ class ReadWrites:
         return ReadWrites(reads - writes, writes, index_exprs)
 
     @staticmethod
-    def merge_list(read_writes: List["ReadWrites"]):
+    def merge_list(read_writes: list["ReadWrites"]):
         all_writes = OrderedSet.union(*[rw.writes for rw in read_writes])
         all_reads = OrderedSet.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = OrderedSet.union(*[rw.index_exprs for rw in read_writes])
@@ -564,7 +564,7 @@ def var_builder(prefix: str) -> tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
+    args: list[list[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
 
 
@@ -572,8 +572,8 @@ def index_vars_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str = "d"):
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Expr]] = []
-    new_sizes: List[List[sympy.Expr]] = []
+    args: list[list[sympy.Expr]] = []
+    new_sizes: list[list[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -653,7 +653,7 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
 
 def extract_input_node_reduction_ranges(
     input_node: "torch._inductor.ir.IRNode",
-) -> tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
+) -> tuple[Optional[list[sympy.Expr]], Optional[list[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
     It's possible that a node has multiple inputs, some are Reduction nodes and others are Pointwise nodes.
@@ -663,8 +663,8 @@ def extract_input_node_reduction_ranges(
 
     from .ir import ComputedBuffer, ExternKernel, Loops
 
-    size: Optional[List[sympy.Expr]]
-    reduction_size: Optional[List[sympy.Expr]]
+    size: Optional[list[sympy.Expr]]
+    reduction_size: Optional[list[sympy.Expr]]
 
     if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
@@ -683,11 +683,11 @@ def extract_input_node_reduction_ranges(
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
-    reduction_size: Optional[List[sympy.Expr]] = None
-    size: Optional[List[sympy.Expr]] = None
+    reduction_size: Optional[list[sympy.Expr]] = None
+    size: Optional[list[sympy.Expr]] = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads: List[Dep] = []
+        new_reads: list[Dep] = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue

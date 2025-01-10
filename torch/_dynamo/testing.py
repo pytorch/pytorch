@@ -12,7 +12,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     overload,
     Sequence,
@@ -84,7 +83,7 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
 def collect_results(
     model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any
-) -> List[Any]:
+) -> list[Any]:
     results = []
     results.append(prediction)
     results.append(loss)
@@ -141,7 +140,7 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
+    out: Union[list[Any], Tuple[Any, ...], Dict[Any, Any]]
 ) -> float:
     ...
 
@@ -187,7 +186,7 @@ def debug_insert_nops(
 ) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
-    def insert_nops(instructions: List[Any], code_options: Any) -> None:
+    def insert_nops(instructions: list[Any], code_options: Any) -> None:
         instructions.insert(0, create_instruction("NOP"))
         instructions.insert(0, create_instruction("NOP"))
 
@@ -223,7 +222,7 @@ class CompileCounter:
         self.op_count = 0
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -241,10 +240,10 @@ class CompileCounterWithBackend:
         self.frame_count = 0
         self.op_count = 0
         self.backend = backend
-        self.graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         from .backends.registry import lookup_backend
 
@@ -265,10 +264,10 @@ class CompileCounterWithBackend:
 # we can assert on
 class EagerAndRecordGraphs:
     def __init__(self) -> None:
-        self.graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
@@ -276,23 +275,23 @@ class EagerAndRecordGraphs:
 
 class AotEagerAndRecordGraphs:
     def __init__(self) -> None:
-        self.graphs: List[torch.fx.GraphModule] = []
-        self.fw_graphs: List[torch.fx.GraphModule] = []
-        self.bw_graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
+        self.fw_graphs: list[torch.fx.GraphModule] = []
+        self.bw_graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
 
         def fw_compiler(
-            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable[..., Any]:
             self.fw_graphs.append(gm)
             return gm.forward
 
         def bw_compiler(
-            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable[..., Any]:
             self.bw_graphs.append(gm)
             return gm.forward
@@ -361,7 +360,7 @@ def standard_test(
 
 
 def dummy_fx_compile(
-    gm: fx.GraphModule, example_inputs: List[torch.Tensor]
+    gm: fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> Callable[..., Any]:
     return gm.forward
 

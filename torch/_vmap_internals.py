@@ -14,7 +14,7 @@ out_dims_t = Union[int, Tuple[int, ...]]
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: List[Optional[int]],
+    flat_in_dims: list[Optional[int]],
     flat_args: List,
 ) -> int:
     batch_sizes = [

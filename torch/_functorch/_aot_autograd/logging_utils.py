@@ -13,7 +13,7 @@ import torch.fx.traceback as fx_traceback
 
 
 # This is a list since looking forward, we can have this arbitrarily nested.
-graph_being_compiled: List[str] = []
+graph_being_compiled: list[str] = []
 # TODO: It would be nice to reset the numbering every time aot_id goes
 # up, but this is annoying to do right now (because we don't know if
 # an aot_id will come back from the dead), so right now this also happens
@@ -28,7 +28,7 @@ def set_model_name(name):
     model_name = name
 
 
-def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+def get_aot_compilation_context() -> Tuple[list[str], str, int]:
     return list(graph_being_compiled), model_name, nth_graph
 
 

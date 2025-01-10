@@ -4,7 +4,7 @@ import functools
 import logging
 import sys
 from importlib.metadata import EntryPoint
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import Callable, Dict, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
@@ -18,7 +18,7 @@ class CompiledFn(Protocol):
         ...
 
 
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
 _BACKENDS: Dict[str, Optional[EntryPoint]] = {}
 _COMPILER_FNS: Dict[str, CompilerFn] = {}
@@ -76,7 +76,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to:
 

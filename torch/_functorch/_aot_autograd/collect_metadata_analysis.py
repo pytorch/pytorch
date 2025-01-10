@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional, Set
+from typing import Callable, DefaultDict, Dict, Optional, Set
 
 import torch
 import torch.utils._pytree as pytree
@@ -150,7 +150,7 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[List[int]] = None,
+    static_input_indices: Optional[list[int]] = None,
     pre_dispatch: bool = False,
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
@@ -173,8 +173,8 @@ def run_functionalized_fw_and_collect_metadata(
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
-        input_info: List[InputAliasInfo] = []
-        output_info: List[OutputAliasInfo] = []
+        input_info: list[InputAliasInfo] = []
+        output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -383,7 +383,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
-        intermediate_bases: List[torch.Tensor] = []
+        intermediate_bases: list[torch.Tensor] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #

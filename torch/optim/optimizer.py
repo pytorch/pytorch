@@ -13,7 +13,6 @@ from typing import (
     Dict,
     Hashable,
     Iterable,
-    List,
     Optional,
     overload,
     Sequence,
@@ -173,7 +172,7 @@ def _disable_dynamo_if_unsupported(
 # torch.jit.script nor differentiable, so we fall back to the single tensor
 # implementation in those cases.
 def _default_to_fused_or_foreach(
-    params: List[torch.Tensor], differentiable: bool, use_fused: bool = False
+    params: list[torch.Tensor], differentiable: bool, use_fused: bool = False
 ) -> Tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
@@ -229,7 +228,7 @@ def _get_scalar_dtype(is_fused=None):
     )
 
 
-def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
+def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     r"""Return the device type list that supports capturable optimizer."""
     capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
@@ -372,7 +371,7 @@ class Optimizer:
             )
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
-        self.param_groups: List[Dict[str, Any]] = []
+        self.param_groups: list[Dict[str, Any]] = []
 
         param_groups = list(params)
         if len(param_groups) == 0:
@@ -745,7 +744,7 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: List[Dict[Any, Any]],
+        param_groups: list[Dict[Any, Any]],
         key: Hashable = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
@@ -967,7 +966,7 @@ class Optimizer:
             self._patch_step_function()
 
         per_device_and_dtype_grads: Optional[
-            DefaultDict[torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]]
+            DefaultDict[torch.device, DefaultDict[torch.dtype, list[torch.Tensor]]]
         ]
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))

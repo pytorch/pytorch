@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Tuple, Type
+from typing import Any, Callable, Dict, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -23,7 +23,7 @@ def default_matching(name: str, target_version: int) -> str:
 # This dict maps the nn.Module class name to the attribute name list that we want to fetch for lowering.
 # The first integer in the tuple is the version number of the nn.Module class when we create the parameter list.
 # If there's a version mismatch then it means the parameter names in the book might be mismatched with nn.Module.
-module_fetch_book: Dict[Type, Tuple[int, List[str], Callable[[str, int], str]]] = {
+module_fetch_book: Dict[Type, Tuple[int, list[str], Callable[[str, int], str]]] = {
     torch.nn.modules.linear.Linear: (1, ["weight", "bias"], default_matching),
     torch.nn.modules.conv.Conv2d: (
         1,

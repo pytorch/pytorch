@@ -17,7 +17,6 @@ from typing import (
     Dict,
     Iterable,
     Iterator,
-    List,
     NoReturn,
     Optional,
     Sequence,
@@ -282,7 +281,7 @@ def mark_nodes_dislike_padding(
 
 
 class GraphLowering(torch.fx.Interpreter):
-    graph_outputs: List[ir.IRNode]
+    graph_outputs: list[ir.IRNode]
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
@@ -323,7 +322,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def static_sizes_strides(
         self, ex: torch.Tensor
-    ) -> tuple[List[sympy.Expr], List[sympy.Expr]]:
+    ) -> tuple[list[sympy.Expr], list[sympy.Expr]]:
         """
         Primarily used to weights
         """
@@ -341,7 +340,7 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode: bool = False,
         layout_opt: Optional[bool] = None,
         extern_node_serializer: Optional[
-            Callable[[List[ir.ExternKernelNode]], Any]
+            Callable[[list[ir.ExternKernelNode]], Any]
         ] = None,
         is_inference: bool = False,
         is_backward: bool = False,
@@ -380,11 +379,11 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: Dict[
-            Optional[sympy.Symbol], List[RuntimeAssert]
+            Optional[sympy.Symbol], list[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
-        self.graph_input_names: List[str] = []
+        self.graph_input_names: list[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
@@ -395,8 +394,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
-        self.buffers: List[ir.Buffer] = []
-        self.operations: List[ir.Operation] = []
+        self.buffers: list[ir.Buffer] = []
+        self.operations: list[ir.Operation] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -420,22 +419,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
-        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_kernel_nodes: list[ir.ExternKernelNode] = []
 
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
-        self.extern_node_serializer: Callable[[List[ir.ExternKernelNode]], Any] = (
+        self.extern_node_serializer: Callable[[list[ir.ExternKernelNode]], Any] = (
             extern_node_serializer
             if config.is_fbcode() and extern_node_serializer
             else extern_node_json_serializer
         )
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
-        self.lists: Dict[str, List[str]] = {}
+        self.lists: Dict[str, list[str]] = {}
         self.mutated_inputs = OrderedSet[str]()
-        self.mutated_input_idxs: List[int] = []
+        self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
-        self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
+        self.name_to_users: DefaultDict[str, list[ir.IRNode]] = defaultdict(list)
         self.name_to_op: Dict[str, ir.Operation] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
@@ -464,7 +463,7 @@ class GraphLowering(torch.fx.Interpreter):
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
-        self.cache_linemap: List[
+        self.cache_linemap: list[
             tuple[int, str]
         ] = (
             []
@@ -702,7 +701,7 @@ class GraphLowering(torch.fx.Interpreter):
     def make_subgraph(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
+        example_inputs: list[torch.Tensor],
         subgraph_name: str,
     ) -> "SubgraphLowering":
         """
@@ -886,7 +885,7 @@ class GraphLowering(torch.fx.Interpreter):
             buffer.name = name
         return name
 
-    def register_operation_list(self, operation_names: List[str]) -> str:
+    def register_operation_list(self, operation_names: list[str]) -> str:
         name = self.qualify_name("list_" + "_".join(operation_names))
         self.lists[name] = operation_names
         return name
@@ -1803,7 +1802,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.const_module.wrapper_code.src_to_kernel
             )
 
-    def codegen_with_cpp_wrapper(self) -> tuple[str, List[tuple[int, Node]]]:
+    def codegen_with_cpp_wrapper(self) -> tuple[str, list[tuple[int, Node]]]:
         """
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
@@ -1902,7 +1901,7 @@ class GraphLowering(torch.fx.Interpreter):
             # cpu
             return self.codegen()
 
-    def codegen(self) -> tuple[str, List[tuple[int, Node]]]:
+    def codegen(self) -> tuple[str, list[tuple[int, Node]]]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             from .scheduler import Scheduler
 
@@ -1949,7 +1948,7 @@ class GraphLowering(torch.fx.Interpreter):
     def count_bytes(
         self,
     ) -> tuple[
-        int, List[tuple[BaseSchedulerNode, int]], List[tuple[BaseSchedulerNode, float]]
+        int, list[tuple[BaseSchedulerNode, int]], list[tuple[BaseSchedulerNode, float]]
     ]:
         total_bytes = 0
         node_counts = []
@@ -2041,7 +2040,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
-    def get_output_names(self) -> List[str]:
+    def get_output_names(self) -> list[str]:
         names = []
         shape_counter = itertools.count(0)
         none_counter = itertools.count(0)

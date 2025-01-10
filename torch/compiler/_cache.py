@@ -3,7 +3,7 @@ import logging
 import os
 import pickle
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -41,10 +41,10 @@ class CacheInfo:
     instrumentation
     """
 
-    inductor_artifacts: List[str] = dataclasses.field(default_factory=list)
-    autotune_artifacts: List[str] = dataclasses.field(default_factory=list)
-    aot_autograd_artifacts: List[str] = dataclasses.field(default_factory=list)
-    pgo_artifacts: List[str] = dataclasses.field(default_factory=list)
+    inductor_artifacts: list[str] = dataclasses.field(default_factory=list)
+    autotune_artifacts: list[str] = dataclasses.field(default_factory=list)
+    aot_autograd_artifacts: list[str] = dataclasses.field(default_factory=list)
+    pgo_artifacts: list[str] = dataclasses.field(default_factory=list)
 
     def add(self, artifact: CacheArtifact) -> None:
         if artifact.type == CacheArtifactType.INDUCTOR:
@@ -77,7 +77,7 @@ class CacheArtifactManager:
     """
 
     # Protected by the compile_lock
-    _cache_artifacts: List[CacheArtifact] = []
+    _cache_artifacts: list[CacheArtifact] = []
 
     @classmethod
     def clear(cls) -> None:

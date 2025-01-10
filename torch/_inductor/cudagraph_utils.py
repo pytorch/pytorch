@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -17,8 +17,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[List[InputType]], OutputType]
+OutputType = list[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,7 +38,7 @@ class PlaceholderInfo:
     name: str
     stack_trace: Optional[str]
     # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
+    users: list[PlaceholderInfo]
     mutating_use_stack_trace: Optional[str]
 
 
@@ -92,7 +92,7 @@ def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
     return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
 
 
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
+def get_placeholder_info(graph: torch.fx.Graph) -> list[PlaceholderInfo]:
     return [
         to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
     ]
@@ -123,7 +123,7 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[InputType],
+    inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -262,7 +262,7 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
-    inputs: List[InputType],
+    inputs: list[InputType],
     recorded_data_ptr: Sequence[Optional[int]],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
@@ -327,5 +327,5 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: List[Optional[str]]
-    cudagraph_fail_reasons: List[str]
+    stack_traces: list[Optional[str]]
+    cudagraph_fail_reasons: list[str]

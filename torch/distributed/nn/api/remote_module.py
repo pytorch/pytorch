@@ -9,7 +9,6 @@ from typing import (
     Callable,
     Dict,
     Iterator,
-    List,
     Mapping,
     Optional,
     Set,
@@ -109,8 +108,8 @@ def _create_module_with_interface(
     return rpc.RRef(module, module_interface_cls)
 
 
-def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
-    ret: List[rpc.RRef[Parameter]] = [
+def _param_rrefs(module_rref, recurse) -> list[rpc.RRef[Parameter]]:
+    ret: list[rpc.RRef[Parameter]] = [
         rpc.RRef(param) for param in module_rref.local_value().parameters(recurse)
     ]
     return ret
@@ -282,7 +281,7 @@ class _RemoteModule(nn.Module):
         self._install_generated_methods()
         self._check_attribute_picklability()
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
+    def remote_parameters(self, recurse: bool = True) -> list[rpc.RRef[Parameter]]:
         """
         Return a list of :class:`~torch.distributed.rpc.RRef` pointing to the remote module's parameters.
 

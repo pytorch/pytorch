@@ -28,7 +28,7 @@ import functools
 import types
 import warnings
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Type
 
 import torch
 from torch._C import (
@@ -1591,7 +1591,7 @@ def wrap_torch_function(dispatcher: Callable):
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
     get_type_fn: Optional[Callable[[Any], Type]] = None,
-) -> List[Any]:
+) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1633,7 +1633,7 @@ def _get_overloaded_args(
         return []
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
-    overloaded_args: List[Any] = []
+    overloaded_args: list[Any] = []
     for arg in relevant_args:
         arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
@@ -1805,7 +1805,7 @@ has_torch_function_variadic = _add_docstr(
 
 @functools.lru_cache(None)
 def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
+    Tuple[Dict[Any, list[Callable]], Dict[Callable, str]]
 ):
     overridable_funcs = collections.defaultdict(list)
     index = {}
@@ -1891,7 +1891,7 @@ def _get_overridable_functions() -> (
 
 
 @_disable_user_warnings
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
+def get_overridable_functions() -> Dict[Any, list[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns

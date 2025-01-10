@@ -2,7 +2,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing import Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -91,9 +91,9 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
 
 
 def conv_flop_count(
-    x_shape: List[int],
-    w_shape: List[int],
-    out_shape: List[int],
+    x_shape: list[int],
+    w_shape: list[int],
+    out_shape: list[int],
     transposed: bool = False,
 ) -> int:
     """Count flops for convolution.
@@ -616,7 +616,7 @@ class FlopCounterMode:
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
+            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
             custom_mapping: Optional[Dict[Any, Any]] = None):

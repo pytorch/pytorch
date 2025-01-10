@@ -74,7 +74,7 @@ def found_inf_reduce_handler(
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(List[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
+        cast(list[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
     )
     local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -185,7 +185,7 @@ class OpDispatcher:
 
             local_tensor_args = (
                 pytree.tree_unflatten(
-                    cast(List[object], op_info.local_args), op_info.args_tree_spec
+                    cast(list[object], op_info.local_args), op_info.args_tree_spec
                 )
                 if op_info.args_tree_spec
                 else op_info.local_args
@@ -309,7 +309,7 @@ class OpDispatcher:
         else:
             flatten_args_schema_to_reshard = suggested_input_schema.args_schema
 
-        new_local_args: List[object] = []
+        new_local_args: list[object] = []
         for i, arg_spec in enumerate(op_info.flat_args_schema):
             reshard_arg_spec = flatten_args_schema_to_reshard[i]
             if isinstance(arg_spec, DTensorSpec):
@@ -344,9 +344,9 @@ class OpDispatcher:
         else:
             args_list, args_spec = args, None
 
-        args_schema: List[object] = []
+        args_schema: list[object] = []
         kwargs_schema: Dict[str, object] = {}
-        local_args: List[object] = []
+        local_args: list[object] = []
         local_kwargs: Dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 

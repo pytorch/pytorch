@@ -13,7 +13,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, Optional, Set, Tuple
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 from torch.distributed.elastic.timer.debug_info_logging import (
@@ -354,12 +354,12 @@ class FileTimerServer:
 
         self.clear_timers(reaped_worker_pids)
 
-    def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
+    def _get_scopes(self, timer_requests: list[FileTimerRequest]) -> list[str]:
         return [r.scope_id for r in timer_requests]
 
     def _get_requests(
         self, fd: io.TextIOWrapper, max_interval: float
-    ) -> List[FileTimerRequest]:
+    ) -> list[FileTimerRequest]:
         start = time.time()
         requests = []
         while not self._stop_signaled or self._run_once:
@@ -394,7 +394,7 @@ class FileTimerServer:
                 break
         return requests
 
-    def register_timers(self, timer_requests: List[FileTimerRequest]) -> None:
+    def register_timers(self, timer_requests: list[FileTimerRequest]) -> None:
         for request in timer_requests:
             pid = request.worker_pid
             scope_id = request.scope_id
@@ -414,9 +414,9 @@ class FileTimerServer:
             if pid in worker_pids or not FileTimerServer.is_process_running(pid):
                 del self._timers[(pid, scope_id)]
 
-    def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:
+    def get_expired_timers(self, deadline: float) -> Dict[int, list[FileTimerRequest]]:
         # pid -> [timer_requests...]
-        expired_timers: Dict[int, List[FileTimerRequest]] = {}
+        expired_timers: Dict[int, list[FileTimerRequest]] = {}
         for request in self._timers.values():
             if request.expiration_time <= deadline:
                 expired_scopes = expired_timers.setdefault(request.worker_pid, [])

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import deque
-from typing import Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Deque, Dict, NamedTuple, Set, Tuple
 
 import torch
 from torch.fx.experimental.partitioner_utils import (
@@ -28,15 +28,15 @@ class DAGNode:
     def __init__(
         self,
         submodule_node: Node,
-        input_nodes: List[Node],
-        output_nodes: List[Node],
-        logical_device_ids: List[int],
+        input_nodes: list[Node],
+        output_nodes: list[Node],
+        logical_device_ids: list[int],
         size_bytes: int,
     ) -> None:
         self.submodule_node: Node = submodule_node
-        self.input_nodes: List[Node] = input_nodes
-        self.output_nodes: List[Node] = output_nodes
-        self.logical_device_ids: List[int] = logical_device_ids
+        self.input_nodes: list[Node] = input_nodes
+        self.output_nodes: list[Node] = output_nodes
+        self.logical_device_ids: list[int] = logical_device_ids
         self.size_bytes = size_bytes
 
     def __str__(self) -> str:
@@ -47,14 +47,14 @@ class DAG:
     """DAG class contains all the DAG nodes"""
 
     def __init__(self) -> None:
-        self.nodes: List[DAGNode] = []
+        self.nodes: list[DAGNode] = []
 
     def create_node(
         self,
         submodule_node: Node,
-        input_nodes: List[Node],
-        output_nodes: List[Node],
-        logical_devices: List[int],
+        input_nodes: list[Node],
+        output_nodes: list[Node],
+        logical_devices: list[int],
         size_bytes: int,
     ) -> None:
         node = DAGNode(
@@ -79,7 +79,7 @@ def reset_partition_device(partitions):
 
 
 def combine_two_partitions(
-    partition_0: Partition, partition_1: Partition, partitions: List[Partition]
+    partition_0: Partition, partition_1: Partition, partitions: list[Partition]
 ) -> None:
     """Given a list of partitions and its two partitions,
     combine these two partitions into a new one appending to the partitions
@@ -95,7 +95,7 @@ def combine_two_partitions(
     return
 
 
-def set_parents_and_children(partitions: List[Partition]) -> None:
+def set_parents_and_children(partitions: list[Partition]) -> None:
     """Given a list of partitions, mark parents and children for each partition"""
     # Go through all nodes in a partition.
     # If a node's user is in other partition,
@@ -119,7 +119,7 @@ def set_parents_and_children(partitions: List[Partition]) -> None:
     return
 
 
-def reorganize_partitions(partitions: List[Partition]) -> None:
+def reorganize_partitions(partitions: list[Partition]) -> None:
     """Given a list of partitions, reorganize partition id,
     its parents and its children for each partition
     """
@@ -130,7 +130,7 @@ def reorganize_partitions(partitions: List[Partition]) -> None:
     return
 
 
-def get_bfs_level_partition(partitions: List[Partition]) -> None:
+def get_bfs_level_partition(partitions: list[Partition]) -> None:
     """Given a list of partitions,
     mark the bfs level for each partition
     """
@@ -158,7 +158,7 @@ def get_bfs_level_partition(partitions: List[Partition]) -> None:
     return
 
 
-def get_node_to_partition_mapping(partitions: List[Partition]) -> Dict[Node, int]:
+def get_node_to_partition_mapping(partitions: list[Partition]) -> Dict[Node, int]:
     """Given a list of partitions,return node to partition mapping"""
     node_to_partition: Dict[Node, int] = {}
     for partition in partitions:
@@ -167,7 +167,7 @@ def get_node_to_partition_mapping(partitions: List[Partition]) -> Dict[Node, int
     return node_to_partition
 
 
-def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
+def get_logical_id_to_device(devices: list[Device]) -> Dict[int, Device]:
     """Get a mapping from device logical ID to Device object."""
     logical_id_to_device: Dict[int, Device] = {}
     for d in devices:
@@ -176,8 +176,8 @@ def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
 
 
 def get_device_partition_stats(
-    partitions: List[Partition], devices: List[Device]
-) -> Tuple[Dict[Device, List[Partition]], Dict[Device, int], List[Partition]]:
+    partitions: list[Partition], devices: list[Device]
+) -> Tuple[Dict[Device, list[Partition]], Dict[Device, int], list[Partition]]:
     """Given a list of partitions and a list of devices, returns:
     1. A mapping from device to partitions on it;
     2. A mapping from device to its remaining memory size;
@@ -186,7 +186,7 @@ def get_device_partition_stats(
     # logical id to device
     logical_id_to_device = get_logical_id_to_device(devices)
     # Track partitions on device
-    device_to_partitions: Dict[Device, List[Partition]] = {}
+    device_to_partitions: Dict[Device, list[Partition]] = {}
     # Track device's left mem size
     device_to_left_mem_bytes: Dict[Device, int] = {}
     for d in devices:
@@ -213,14 +213,14 @@ def get_device_partition_stats(
 
 
 def get_device_to_partitions_mapping(
-    partitions: List[Partition], devices: List[Device]
+    partitions: list[Partition], devices: list[Device]
 ):
     """Given a list of partitions and a list of devices,
     map each partition into a device.
     """
 
     def calculate_extra_mem_bytes_needed_for(
-        partition: Partition, partitions: List[Partition]
+        partition: Partition, partitions: list[Partition]
     ):
         all_nodes: Set[Node] = set()
         for p in partitions:
@@ -298,9 +298,9 @@ class Partitioner:
     """
 
     def __init__(self) -> None:
-        self.partitions: List[Partition] = []
+        self.partitions: list[Partition] = []
         self.node_to_partition: Dict[Node, int] = {}
-        self.devices: List[Device] = []
+        self.devices: list[Device] = []
 
     def partition_graph(
         self,
@@ -437,7 +437,7 @@ class Partitioner:
         # Track partition and its left mem size
         partition_to_left_mem_bytes: Dict[Partition, int] = {}
         # Track all the devices that have been used
-        occupied_devices: List[Device] = []
+        occupied_devices: list[Device] = []
         partition = self.create_partition()
         for node in self.graph_module.graph.nodes:
             if node.op in {"call_module", "call_method", "call_function"}:
@@ -634,7 +634,7 @@ class Partitioner:
         """
 
         def combine_partitions_based_on_size(
-            partitions: List[Partition], available_mem_bytes: int
+            partitions: list[Partition], available_mem_bytes: int
         ) -> None:
             """Combining small partitions together to keep as less partitions as possible.
             Here is an example of the algorithm to do this:
@@ -672,10 +672,10 @@ class Partitioner:
             return mem_bytes_needed
 
         def find_partition_to_combine_based_on_size(
-            sorted_partitions: List[Partition],
+            sorted_partitions: list[Partition],
             available_mem_bytes: int,
-            partitions: List[Partition],
-        ) -> Tuple[bool, List[Partition]]:
+            partitions: list[Partition],
+        ) -> Tuple[bool, list[Partition]]:
             """step 1 in combine_partition_based_on_size()"""
             find_combination = False
             smallest_partition = sorted_partitions.pop(0)
@@ -721,8 +721,8 @@ class Partitioner:
             return False
 
         # Track embedding partitions and non-embedding partitions separately
-        embedding_partitions: List[Partition] = []
-        non_embedding_partitions: List[Partition] = []
+        embedding_partitions: list[Partition] = []
+        non_embedding_partitions: list[Partition] = []
         # A Flag to check the boundary
         in_embedding_region: bool = False
         partition = self.create_partition()
@@ -872,7 +872,7 @@ class Partitioner:
             )
             if len(self.partitions) == 1:
                 return False
-            partition_pair: List[int] = []
+            partition_pair: list[int] = []
             for i in range(len(self.partitions) - 1):
                 for j in range(i + 1, len(self.partitions)):
                     # Try to combine the partition pair
@@ -987,7 +987,7 @@ class Partitioner:
             """
             p1_nodes = list(p1.nodes) + [None]
             min_cost = float("inf")
-            node_pair: List[Node] = []
+            node_pair: list[Node] = []
             for n1 in p1_nodes:
                 # Ignore the node if it is not a op node
                 if n1 is not None and n1.op in {"placeholder", "get_attr"}:
@@ -1011,9 +1011,9 @@ class Partitioner:
             self.partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
         # Keep tracking the node pair that shows the better cost
-        node_pair: List[Node] = []
+        node_pair: list[Node] = []
         # Keep tracking the partition pair of node pair
-        partition_pair: List[Partition] = []
+        partition_pair: list[Partition] = []
         # Collect all the op nodes from the graph
         op_nodes = [
             n

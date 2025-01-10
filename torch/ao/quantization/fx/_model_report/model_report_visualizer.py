@@ -180,7 +180,7 @@ class ModelReportVisualizer:
     def _generate_tensor_table(
         self,
         filtered_data: OrderedDict[str, Dict[str, Any]],
-        tensor_features: List[str],
+        tensor_features: list[str],
     ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
@@ -199,8 +199,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the tensor information table
-        tensor_table: List[List[Any]] = []
-        tensor_headers: List[str] = []
+        tensor_table: list[list[Any]] = []
+        tensor_headers: list[str] = []
 
         # append the table row to the table only if we have features
         if len(tensor_features) > 0:
@@ -236,7 +236,7 @@ class ModelReportVisualizer:
     def _generate_channels_table(
         self,
         filtered_data: OrderedDict[str, Any],
-        channel_features: List[str],
+        channel_features: list[str],
         num_channels: int,
     ) -> tuple[List, List]:
         r"""
@@ -257,8 +257,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the table for the channel information table
-        channel_table: List[List[Any]] = []
-        channel_headers: List[str] = []
+        channel_table: list[list[Any]] = []
+        channel_headers: list[str] = []
 
         # counter to keep track of number of entries in
         channel_table_entry_counter: int = 0
@@ -372,8 +372,8 @@ class ModelReportVisualizer:
                     tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
-        tensor_features_list: List[str] = sorted(tensor_features)
-        channel_features_list: List[str] = sorted(channel_features)
+        tensor_features_list: list[str] = sorted(tensor_features)
+        channel_features_list: list[str] = sorted(channel_features)
 
         # get the tensor info
         tensor_headers, tensor_table = self._generate_tensor_table(
@@ -467,7 +467,7 @@ class ModelReportVisualizer:
 
     def _get_plottable_data(
         self, feature_filter: str, module_fqn_filter: str
-    ) -> tuple[List, List[List], bool]:
+    ) -> tuple[List, list[List], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 
@@ -511,7 +511,7 @@ class ModelReportVisualizer:
             table = channel_table
 
         x_data: List = []
-        y_data: List[List] = []
+        y_data: list[List] = []
         # the feature will either be a tensor feature or channel feature
         if is_valid_per_tensor_plot:
             for table_row_num, row in enumerate(table):

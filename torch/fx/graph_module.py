@@ -8,7 +8,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -271,7 +271,7 @@ def _get_attr(model: torch.nn.Module, attr_name: str):
     return _get_attr_via_attr_list(model, attr_name.split("."))
 
 
-def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: List[str]):
+def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: list[str]):
     if len(attr_list) == 0:
         return model
     *prefix, field = attr_list
@@ -528,11 +528,11 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
-        self._replace_hooks: List[Callable] = []
-        self._create_node_hooks: List[Callable] = []
-        self._erase_node_hooks: List[Callable] = []
+        self._replace_hooks: list[Callable] = []
+        self._create_node_hooks: list[Callable] = []
+        self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
-        self._deepcopy_hooks: List[Callable] = []
+        self._deepcopy_hooks: list[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -739,7 +739,7 @@ class {module_name}(torch.nn.Module):
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
         """
-        used: List[str] = []
+        used: list[str] = []
 
         for node in self.graph.nodes:
             if node.op == "call_module" or node.op == "get_attr":

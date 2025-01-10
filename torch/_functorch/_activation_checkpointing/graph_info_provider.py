@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import networkx as nx
 
@@ -20,13 +20,13 @@ class GraphInfoProvider:
 
     def __init__(
         self,
-        graph_nodes_in_order: List[str],
-        graph_edges: List[Tuple[str, str]],
-        all_recomputable_banned_nodes: List[str],
+        graph_nodes_in_order: list[str],
+        graph_edges: list[Tuple[str, str]],
+        all_recomputable_banned_nodes: list[str],
         all_node_runtimes: Optional[Dict[str, float]] = None,
         all_node_memories: Optional[Dict[str, float]] = None,
-        recorded_knapsack_input_memories: Optional[List[float]] = None,
-        recorded_knapsack_input_runtimes: Optional[List[float]] = None,
+        recorded_knapsack_input_memories: Optional[list[float]] = None,
+        recorded_knapsack_input_runtimes: Optional[list[float]] = None,
         joint_graph: Optional[Graph] = None,
     ):
         self.graph_nodes_in_order = graph_nodes_in_order
@@ -70,9 +70,9 @@ class GraphInfoProvider:
     def inialize_from_graph(
         cls,
         joint_graph: Graph,
-        all_recomputable_banned_nodes: List[Node],
-        recorded_knapsack_input_memories: List[float],
-        recorded_knapsack_input_runtimes: List[float],
+        all_recomputable_banned_nodes: list[Node],
+        recorded_knapsack_input_memories: list[float],
+        recorded_knapsack_input_runtimes: list[float],
     ) -> "GraphInfoProvider":
         """
         Enables initialization from a joint graph.
@@ -144,7 +144,7 @@ class GraphInfoProvider:
             for node_name in self.all_recomputable_banned_nodes_set
         )
 
-    def get_knapsack_memory_input(self) -> List[float]:
+    def get_knapsack_memory_input(self) -> list[float]:
         return (
             self.recorded_knapsack_input_memories
             if self.recorded_knapsack_input_memories
@@ -154,7 +154,7 @@ class GraphInfoProvider:
             ]
         )
 
-    def get_knapsack_runtime_input(self) -> List[float]:
+    def get_knapsack_runtime_input(self) -> list[float]:
         return (
             self.recorded_knapsack_input_runtimes
             if self.recorded_knapsack_input_runtimes
@@ -224,7 +224,7 @@ class GraphInfoProvider:
 
     def _recreate_psuedo_joint_graph(self) -> Graph:
         # Create a dictionary to store the dependencies of each node
-        node_dependencies: Dict[str, List[str]] = {
+        node_dependencies: Dict[str, list[str]] = {
             node: [] for node in self.graph_nodes_in_order
         }
         for a, b in self.graph_edges:

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -305,7 +305,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:
@@ -385,7 +385,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:
@@ -466,7 +466,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:

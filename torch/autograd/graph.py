@@ -13,7 +13,6 @@ from typing import (
     Generator,
     Iterable,
     Iterator,
-    List,
     Literal,
     MutableMapping,
     NamedTuple,
@@ -81,7 +80,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def _input_metadata(self) -> List[Any]:
+    def _input_metadata(self) -> list[Any]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -504,7 +503,7 @@ def register_multi_grad_hook(
     if mode == "all":
         count: Dict[int, int] = {}
         nb_calls = None
-        buffer: Dict[int, List[Optional[torch.Tensor]]] = {}
+        buffer: Dict[int, list[Optional[torch.Tensor]]] = {}
 
         grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
         len_tensors = len(tensors)
@@ -768,7 +767,7 @@ def _register_logging_hooks_on_whole_graph(
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
-    def iter_graph(roots: List[Node]) -> Iterator[Node]:
+    def iter_graph(roots: list[Node]) -> Iterator[Node]:
         if not roots:
             return
         seen: Set[Node] = set()

@@ -3,7 +3,7 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
-from typing import Dict, List, Optional, Set, Type, Union
+from typing import Dict, Optional, Set, Type, Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -22,7 +22,7 @@ def _stub_unpickler():
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
 def _list_connected_datapipes(
     scan_obj: DataPipe, only_datapipe: bool, cache: Set[int]
-) -> List[DataPipe]:
+) -> list[DataPipe]:
     f = io.BytesIO()
     p = pickle.Pickler(
         f

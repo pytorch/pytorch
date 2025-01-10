@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 
-from typing import List
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -415,7 +414,7 @@ def scaled_dot_product_efficient_attention_strategy(
     has_attn_bias = op_schema.args_schema[3] is not None
     compute_log_sumexp = op_schema.args_schema[4]
 
-    single_mesh_dim_strategies: List[PlacementList] = []
+    single_mesh_dim_strategies: list[PlacementList] = []
 
     # placement list stores placements of [outputs, inputs]
     # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs

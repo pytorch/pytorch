@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, overload, Sequence, Tuple, TypeVar, Union
+from typing import Any, Dict, Optional, overload, Sequence, Tuple, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
@@ -43,7 +43,7 @@ def scatter(
     inputs: T,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> List[T]:
+) -> list[T]:
     ...
 
 

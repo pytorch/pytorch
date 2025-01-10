@@ -13,7 +13,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import _property_bag
 class Message(object):
     """Encapsulates a message intended to be read by the end user."""
 
-    arguments: Optional[List[str]] = dataclasses.field(
+    arguments: Optional[list[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "arguments"}
     )
     id: Optional[str] = dataclasses.field(

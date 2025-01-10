@@ -2,7 +2,7 @@
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Union
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -113,7 +113,7 @@ class TensorProperties:
 class TensorStorageMetadata:
     properties: TensorProperties
     size: torch.Size
-    chunks: List[ChunkStorageMetadata]
+    chunks: list[ChunkStorageMetadata]
 
 
 @dataclass

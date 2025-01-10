@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -257,7 +257,7 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 def log_chromium_event_internal(
     event: Dict[str, Any],
-    stack: List[str],
+    stack: list[str],
     logger_uuid: str,
     start_time_ns: int,
 ):

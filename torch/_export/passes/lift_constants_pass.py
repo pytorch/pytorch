@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import warnings
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -30,7 +30,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: Dict[
-            Union[int, torch.Tensor, FakeScriptObject], List[Any]
+            Union[int, torch.Tensor, FakeScriptObject], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the

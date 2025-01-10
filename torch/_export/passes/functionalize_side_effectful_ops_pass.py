@@ -1,5 +1,5 @@
 import copy
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 import torch
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, PassResult, Argument
@@ -88,7 +88,7 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
 
         return self._dep_token
 
-    def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
+    def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
         assert self._dep_token is not None
 
         return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

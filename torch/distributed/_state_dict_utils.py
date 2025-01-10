@@ -8,7 +8,6 @@ from typing import (
     Callable,
     cast,
     Dict,
-    List,
     Mapping,
     MutableMapping,
     NamedTuple,
@@ -499,7 +498,7 @@ class _TensorInfo(NamedTuple):
 def _broadcast_tensors(
     full_state_dict: Dict[str, Any],
     local_state_dict: Dict[str, Any],
-    keys: List[str],
+    keys: list[str],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
@@ -538,7 +537,7 @@ def _broadcast_tensors(
 
 def _distribute_tensors(
     local_state_dict: Dict[str, Any],
-    keys: List[str],
+    keys: list[str],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
@@ -732,14 +731,14 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     """Set ``value`` in ``root_dict`` along the ``path`` object path."""
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
-    def extend_list(lst: List[Any], idx: int) -> None:
+    def extend_list(lst: list[Any], idx: int) -> None:
         while len(lst) <= idx:
             lst.append(None)
 
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, List[Any]] = {} if type(key) == str else []
+        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) == str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
@@ -753,7 +752,7 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
 
     key = path[-1]
     if type(key) == int:
-        extend_list(cast(List[Any], cur_container), key)
+        extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value
 

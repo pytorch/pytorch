@@ -3,7 +3,7 @@ Utilities for converting data types into structured JSON for dumping.
 """
 
 import traceback
-from typing import Any, Dict, List, Sequence, Set
+from typing import Any, Dict, Sequence, Set
 
 import torch._logging._internal
 
@@ -42,7 +42,7 @@ def dump_file(filename: str) -> None:
     )
 
 
-def from_traceback(tb: Sequence[traceback.FrameSummary]) -> List[Dict[str, Any]]:
+def from_traceback(tb: Sequence[traceback.FrameSummary]) -> list[Dict[str, Any]]:
     # dict naming convention here coincides with
     # python/combined_traceback.cpp
     r = [

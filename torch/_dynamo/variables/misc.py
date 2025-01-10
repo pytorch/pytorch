@@ -787,7 +787,7 @@ class AutogradFunctionVariable(VariableTracker):
 
 @dataclasses.dataclass
 class SavedTensorBox:
-    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+    tensors: list[VariableTracker] = dataclasses.field(default_factory=list)
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -1021,7 +1021,7 @@ class GetAttrVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
@@ -1498,7 +1498,7 @@ class ConstantLikeVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
@@ -1679,7 +1679,7 @@ class RandomVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":

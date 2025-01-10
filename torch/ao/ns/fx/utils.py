@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, Optional, Set, Union
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -293,7 +293,7 @@ def get_number_of_non_param_args(
     return 1
 
 
-def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
+def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
     """
     Returns the indices of args of the node which we should attach
     loggers to, if input logging is enabled.

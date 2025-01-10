@@ -17,7 +17,6 @@ from typing import (
     Callable,
     cast,
     Dict,
-    List,
     no_type_check,
     Optional,
     Tuple,
@@ -918,7 +917,7 @@ class MLP(nn.Module):
 
 class MLPStack(nn.Sequential):
     def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
-        modules: List[nn.Module] = [
+        modules: list[nn.Module] = [
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),

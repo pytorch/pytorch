@@ -267,7 +267,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         mesh = spec.mesh
         # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
         # case. Replace the custom logic with dim_map once we support it.
-        dim_map: List[Union[int, List[int]]] = [-1] * spec.ndim
+        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
         for i, placement in enumerate(spec.placements):
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
@@ -356,7 +356,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         self.set_offset("parallel-rng", old_offset + numel)
 
     def _calc_shard_linear_idx(
-        self, shard_coord: List[int], shard_size: List[int]
+        self, shard_coord: list[int], shard_size: list[int]
     ) -> int:
         # compute shard linear index
         shard_linear_idx = 0

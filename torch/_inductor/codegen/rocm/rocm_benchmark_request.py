@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable, Iterable, List, Optional, Union
+from typing import Any, Callable, Iterable, Optional, Union
 
 import torch
 from torch._inductor import config
@@ -26,8 +26,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
