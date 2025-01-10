@@ -280,7 +280,10 @@ class ProcessGroupVariable(DistributedVariable):
             return variables.ConstantVariable.create(self.value.size())
         if name == "_get_backend_name":
             return variables.ConstantVariable.create(self.value._get_backend_name())
-
+        if name == "__eq__":
+            if not isinstance(args[0].value, ProcessGroupVariable):
+                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable.create(self.value == args[0].value)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
