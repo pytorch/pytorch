@@ -667,7 +667,9 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
         >>> # xdoctest: +SKIP("stub local path")
         >>> path = "/some/local/path/pytorch/vision"
         >>> model = _load_local(
-        ...     path, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1"
+        ...     path,
+        ...     "resnet50",
+        ...     weights="ResNet50_Weights.IMAGENET1K_V1",
         ... )
     """
     with _add_to_sys_path(hubconf_dir):

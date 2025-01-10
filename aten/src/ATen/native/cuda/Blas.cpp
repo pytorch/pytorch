@@ -964,7 +964,7 @@ ScalingType get_scaling_type(
 } // namespace
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
-// Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
+// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
