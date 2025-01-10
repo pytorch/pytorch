@@ -642,7 +642,6 @@ class _PipelineStageBase(ABC):
                     )
                 )
                 result = perform_backward(backward_type)()
-                perform_pp_grad_scaling()
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
@@ -663,23 +662,19 @@ class _PipelineStageBase(ABC):
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
+                    # it would be much better if pipelining backward invoked .bacward so autograd hooks
+                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
+                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
+                    fsdp_state._root_post_backward_final_callback()
+
                 run_post_backward(self.submod)
 
-                # TODO this sync should not be needed. It seems to fix the numerical issues in test_composability.
-                # (note: doing pp_grad_scaling before run_post_backward also passes the test, see comment below.)
-                torch.cuda.synchronize()
-
-                # TODO(whc) logically it should be OK to perform scaling in either order (PP then DP or vice-versa)
-                # however there are two confounding issues
-                # 1) when mixed-precision is enabled in FSDP, pp scaling of param.grad itself is not working since
-                #    fsdp maintains a separate grad accumulator internally.  We'd have to scale that instead to make this work
-                # 2) when performing pp scaling after fsdp scaling, test_pp_dp unit test is showing numeric issues.
-                perform_pp_grad_scaling()
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
-            if last_backward:
-                perform_pp_grad_scaling()
+
+        if last_backward:
+            perform_pp_grad_scaling()
 
         grads, param_groups = result
         return grads, param_groups

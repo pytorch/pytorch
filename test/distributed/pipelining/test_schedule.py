@@ -696,6 +696,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
+            scale_grads=False,
         )
         schedule._load_actions(
             {

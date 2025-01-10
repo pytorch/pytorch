@@ -107,7 +107,7 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP"])
+    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
         [
@@ -121,12 +121,12 @@ class ComposabilityTest(MultiProcContinousTest):
     @parametrize("use_new_runtime", [False, True])
     def test_pp_dp(self, dp_type, ScheduleClass, use_new_runtime):
         if dp_type == "DDP" and ScheduleClass == ScheduleInterleavedZeroBubble:
-            # DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
-            # TODO: fix this or at least add an error msg when using them together
+            # TODO: DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
+            # https://github.com/pytorch/pytorch/issues/144530
             return
-
-        # TODO(whc) test FSDP with mixed-precision
-
+        if dp_type == "FSDP_MP":
+            # TODO: finish implementing the mixed precision test. it's not correct (notably, the reference model)
+            return
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
@@ -141,20 +141,28 @@ class ComposabilityTest(MultiProcContinousTest):
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
 
+        # fsdp_mixed-precision dtype
+        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+
         # Prepare inputs
         num_microbatches = 8
-        inputs = [
-            torch.rand((num_microbatches, dim), device=self.device)
-            for _ in range(dp_mesh.size())
+
+        def build_rand(num_microbatches, dim, dtype=torch.float32):
+            full = [
+                torch.rand((num_microbatches, dim), device=self.device, dtype=dtype)
+                for _ in range(dp_mesh.size())
+            ]
+            local = full[dp_mesh.get_local_rank()]
+            local_mb = [[local[i].reshape((1, dim))] for i in range(num_microbatches)]
+            return full, local, local_mb
+
+        inputs, _, input_mb = build_rand(num_microbatches, dim, dtype=mp_dtype)
+        # TODO dtype bf16 too?
+        targets, targets_local, target_mb = build_rand(num_microbatches, dim)
+        # WHY do we have to format the targets list differently than the inputs list???
+        target_mb = [
+            targets_local[i].reshape((1, dim)) for i in range(num_microbatches)
         ]
-        input = inputs[dp_mesh.get_local_rank()]
-        input_mb = [[input[i].reshape((1, dim))] for i in range(num_microbatches)]
-        targets = [
-            torch.rand((num_microbatches, dim), device=self.device)
-            for _ in range(dp_mesh.size())
-        ]
-        target = targets[dp_mesh.get_local_rank()]
-        target_mb = [target[i].reshape((1, dim)) for i in range(num_microbatches)]
 
         def loss_fn(y, target):
             return torch.nn.functional.cross_entropy(y, target)
@@ -174,13 +182,10 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Apply DP to stage module
         def apply_dp(partial_model, dp_type):
-            if dp_type == "FSDP":
+            if dp_type in ("FSDP", "FSDP_MP"):
                 # apply FSDP
                 mp_policy = MixedPrecisionPolicy(
-                    # TODO(whc) need to fix PP + FSDP-mixed-precision
-                    # tracer for PP assumes f32 and is caught off guard when runtime FSDP interacts using bf16 inputs
-                    # param_dtype=torch.bfloat16, reduce_dtype=torch.float32
-                    param_dtype=torch.float32,
+                    param_dtype=mp_dtype,
                     reduce_dtype=torch.float32,
                 )
                 fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
@@ -237,9 +242,8 @@ class ComposabilityTest(MultiProcContinousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
-        # Run
-        # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
-        # why are we passing inputs/targets on every rank?
+
+        # Run the pipeline
         if pp_group.rank() == 0:
             pipeline_schedule._step_microbatches(
                 arg_mbs=input_mb, target_mbs=[[] for _ in target_mb]
@@ -248,6 +252,13 @@ class ComposabilityTest(MultiProcContinousTest):
             pipeline_schedule._step_microbatches(
                 arg_mbs=[[] for _ in input_mb], target_mbs=target_mb
             )
+        for m in partial_models:
+            for p in m.parameters():
+                assert p.grad is not None
+                # introduce a race condition for FSDP's reduce-scatter which could corrupt gradients if pipelining
+                # does not properly synchronize with FSDP
+                p.grad.div_(2.0)
+                p.grad.mul_(2.0)
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
@@ -259,26 +270,35 @@ class ComposabilityTest(MultiProcContinousTest):
         for p in ref_model.parameters():
             p.grad /= dp_mesh.size()
 
+        # for sim_dp_rank in range(dp_mesh.size()):
+        #     for sim_pp_mb in range(num_microbatches):
+        #         # simulate the accumulation of gradients as in PP where loss fn does less scaling (no scaling in this case)
+        #         # due to smaller local microbatch size
+        #         loss_fn(ref_model(inputs[sim_dp_rank][sim_pp_mb]), targets[sim_dp_rank][sim_pp_mb]).backward()
+
+        # # simulate the built-in averaging done by FSDP
+        # for p in ref_model.parameters():
+        #     p.grad /= dp_mesh.size()
+        #     p.grad /= num_microbatches
+
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
         ref_parameters = dict(ref_model.named_parameters())
-        if dp_type == "FSDP":
-            for partial_model, offset in zip(partial_models, offsets):
-                for name, p in partial_model.named_parameters():
-                    parts = name.split(".")
-                    parts[0] = str(int(parts[0]) + offset)
-                    name = ".".join(parts)
-                    ref_p = ref_parameters[name]
+        for partial_model, offset in zip(partial_models, offsets):
+            for name, p in partial_model.named_parameters():
+                parts = name.split(".")
+                if dp_type == "DDP":
+                    parts = parts[
+                        1:
+                    ]  # remove the DDP module. prefix (FSDP2 doesn't have one)
+                parts[0] = str(int(parts[0]) + offset)
+                name = ".".join(parts)
+                ref_p = ref_parameters[name]
+                if dp_type == "FSDP":
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    torch.testing.assert_close(ref_p.grad, p.grad.full_tensor())
-        elif dp_type == "DDP":
-            for partial_model, offset in zip(partial_models, offsets):
-                for name, p in partial_model.named_parameters():
-                    parts = name.split(".")[1:]  # remove the "module." prefix
-                    parts[0] = str(int(parts[0]) + offset)
-                    name = ".".join(parts)
-                    ref_p = ref_parameters[name]
-                    torch.testing.assert_close(ref_p.grad, p.grad)
+                    torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
+                else:
+                    torch.testing.assert_close(p.grad, ref_p.grad)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
