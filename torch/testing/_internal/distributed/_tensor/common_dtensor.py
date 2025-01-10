@@ -332,7 +332,11 @@ class DTensorTestBase(MultiProcessTestCase):
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self, eager_init) -> None:
+        DEVICE_COUNT = _get_device_module(DEVICE_TYPE).device_count()
         if "nccl" in self.backend and DEVICE_COUNT < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        if "hccl" in self.backend and DEVICE_COUNT < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
@@ -394,8 +398,9 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
         def wrapper(
             self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
         ) -> None:
+            DEVICE_COUNT = _get_device_module(DEVICE_TYPE).device_count()
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not TEST_CUDA or DEVICE_COUNT < self.world_size:
+            if not TEST_CUDA or not TEST_HPU or DEVICE_COUNT < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE
