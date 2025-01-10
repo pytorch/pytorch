@@ -1131,9 +1131,7 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split(
-            "\n"
-        ):
+utils_device.CURRENT_DEVICE == None""".split("\n"):
             self.assertIn(
                 line,
                 guard_code_str,
@@ -2753,7 +2751,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8
+            np.uint8,
             # np.dtype('int')       # XXX: as above
         ]
 
@@ -5356,9 +5354,9 @@ utils_device.CURRENT_DEVICE == None""".split(
 
             def forward(self, idx, targets=None):
                 b, t = idx.size()
-                assert (
-                    t <= self.block_size
-                ), "Cannot forward, model block size is exhausted."
+                assert t <= self.block_size, (
+                    "Cannot forward, model block size is exhausted."
+                )
 
                 # forward the GPT model
                 token_embeddings = self.tok_emb(
@@ -7817,9 +7815,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0]),
+            (torch.set_grad_enabled(state[0]),)
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2]),
+            (torch._C._set_cublas_allow_tf32(state[2]),)
 
         @torch.compile(backend=my_compiler)
         def fn(x):
@@ -7933,8 +7931,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
-            def forward(self):
-                ...
+            def forward(self): ...
 
             def training_step(self):
                 self()
