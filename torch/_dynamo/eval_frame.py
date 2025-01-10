@@ -1708,8 +1708,8 @@ def export(
             for node in graph.graph.find_nodes(op="get_attr"):
                 if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target),
-                        static_shapes=True,  # type: ignore[arg-type]
+                        getattr(graph, node.target),  # type: ignore[arg-type]
+                        static_shapes=True,
                     )
 
         if same_signature:
