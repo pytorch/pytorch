@@ -431,7 +431,11 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device="cuda", dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
