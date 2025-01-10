@@ -119,10 +119,10 @@ def parse_backend_yaml(
     # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     yaml_values.pop("ir_gen", {})
 
-    assert (
-        len(yaml_values.keys()) == 0
-    ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
-Only the following keys are supported: {", ".join(valid_keys)}'
+    assert len(yaml_values.keys()) == 0, (
+        f"{backend_yaml_path} contains unexpected keys: {', '.join(yaml_values.keys())}. "
+        f"Only the following keys are supported: {', '.join(valid_keys)}"
+    )
 
     def create_backend_index(
         backend_ops: list[str],
@@ -499,6 +499,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
+            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
             "dispatch_definitions": fm.substitute_with_template(
                 "RegisterDispatchDefinitions.ini",
                 lambda: {
@@ -506,7 +507,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "ns_epilogue": ns_helper.epilogue,
                     "static_init_dispatch_registrations": static_init_dispatch_registrations,
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
                     "dispatch_anonymous_definitions": list(
