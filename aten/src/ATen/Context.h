@@ -579,28 +579,38 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
+  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
-    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
 
-  const auto opt_device_type = at::getAccelerator();
-  if (!opt_device_type.has_value()) {
-    return;
-  }
-  const auto num_gpus = globalContext()
-                            .getAcceleratorHooksInterface(opt_device_type)
-                            .deviceCount();
-  for (const auto i : c10::irange(num_gpus)) {
-    auto gen = globalContext().defaultGenerator(
-        Device(opt_device_type.value(), static_cast<c10::DeviceIndex>(i)));
+  for (const auto i : c10::irange(detail::getCUDAHooks().deviceCount())) {
+    auto cuda_gen = globalContext().defaultGenerator(
+        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
     {
       // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen.mutex());
-      gen.set_current_seed(seed);
+      std::lock_guard<std::mutex> lock(cuda_gen.mutex());
+      cuda_gen.set_current_seed(seed);
     }
+  }
+
+  for (const auto i : c10::irange(detail::getXPUHooks().deviceCount())) {
+    auto xpu_gen = globalContext().defaultGenerator(
+        Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(xpu_gen.mutex());
+      xpu_gen.set_current_seed(seed);
+    }
+  }
+
+  if (hasMPS()) {
+    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(mps_gen.mutex());
+    mps_gen.set_current_seed(seed);
   }
 }
 
