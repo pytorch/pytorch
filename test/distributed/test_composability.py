@@ -42,6 +42,16 @@ class MLPModule(torch.nn.Module):
         self.net1 = torch.nn.Linear(d_hid, d_hid)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(d_hid, d_hid)
+        self.init_weights()
+
+    def init_weights(self):
+        # ensure a proper init otherwise gradient tests will be more likely to get zero grad values
+        torch.nn.init.kaiming_uniform_(
+            self.net1.weight, mode="fan_in", nonlinearity="relu"
+        )
+        torch.nn.init.kaiming_uniform_(
+            self.net2.weight, mode="fan_in", nonlinearity="relu"
+        )
 
     def forward(self, x):
         x = self.net1(x)
@@ -56,6 +66,18 @@ class MLPModuleEven(torch.nn.Module):
         self.net1 = nn.Linear(d_hid, d_hid)
         self.net2 = nn.Linear(d_hid, d_hid)
         self.net3 = nn.Linear(d_hid, d_hid * 2)
+        self.init_weights()
+
+    def init_weights(self):
+        torch.nn.init.kaiming_uniform_(
+            self.net1.weight, mode="fan_in", nonlinearity="relu"
+        )
+        torch.nn.init.kaiming_uniform_(
+            self.net2.weight, mode="fan_in", nonlinearity="relu"
+        )
+        torch.nn.init.kaiming_uniform_(
+            self.net3.weight, mode="fan_in", nonlinearity="relu"
+        )
 
     def forward(self, x):
         x = F.relu(self.net1(x))
@@ -98,6 +120,11 @@ class ComposabilityTest(MultiProcContinousTest):
     )
     @parametrize("use_new_runtime", [False, True])
     def test_pp_dp(self, dp_type, ScheduleClass, use_new_runtime):
+        if dp_type == "DDP" and ScheduleClass == ScheduleInterleavedZeroBubble:
+            # TODO: DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
+            # https://github.com/pytorch/pytorch/issues/144530
+            return
+
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
@@ -114,12 +141,18 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Prepare inputs
         num_microbatches = 8
-        inputs = [
-            torch.rand((num_microbatches, dim), device=self.device)
-            for _ in range(dp_mesh.size())
-        ]
-        input = inputs[dp_mesh.get_local_rank()]
-        input_mb = [[input[i].reshape((1, dim))] for i in range(num_microbatches)]
+
+        def build_rand(num_microbatches, dim):
+            full = [
+                torch.rand((num_microbatches, dim), device=self.device)
+                for _ in range(dp_mesh.size())
+            ]
+            local = full[dp_mesh.get_local_rank()]
+            local_mb = [[local[i].reshape((1, dim))] for i in range(num_microbatches)]
+            return full, local, local_mb
+
+        inputs, _, input_mb = build_rand(num_microbatches, dim)
+        targets, _, target_mb = build_rand(num_microbatches, dim)
 
         # dummy loss needed just to force backwards to run in schedule step
         def loss_fn(y, target):
@@ -204,21 +237,21 @@ class ComposabilityTest(MultiProcContinousTest):
                 loss_fn=loss_fn,
             )
 
-        # Run
-        # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
-        # why are we passing inputs/targets on every rank?
+        # Run the pipeline
         if pp_group.rank() == 0:
-            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+            pipeline_schedule._step_microbatches(
+                arg_mbs=input_mb, target_mbs=[[] for _ in target_mb]
+            )
         else:
             pipeline_schedule._step_microbatches(
-                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+                arg_mbs=[[] for _ in input_mb], target_mbs=target_mb
             )
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
         # (in fsdp case, we use one of these inputs on each DP rank)
-        (ref_model(inputs[0]).sum()).backward()
-        (ref_model(inputs[1]).sum()).backward()
+        for sim_dp_rank in range(dp_mesh.size()):
+            loss_fn(ref_model(inputs[sim_dp_rank]), targets[sim_dp_rank]).backward()
 
         # simulate the built-in averaging done by FSDP
         for p in ref_model.parameters():
@@ -227,25 +260,21 @@ class ComposabilityTest(MultiProcContinousTest):
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
         ref_parameters = dict(ref_model.named_parameters())
-        if dp_type == "FSDP":
-            for partial_model, offset in zip(partial_models, offsets):
-                for name, p in partial_model.named_parameters():
-                    parts = name.split(".")
-                    parts[0] = str(int(parts[0]) + offset)
-                    name = ".".join(parts)
-                    ref_p = ref_parameters[name]
+        for partial_model, offset in zip(partial_models, offsets):
+            for name, p in partial_model.named_parameters():
+                parts = name.split(".")
+                if dp_type == "DDP":
+                    parts = parts[
+                        1:
+                    ]  # remove the DDP module. prefix (FSDP2 doesn't have one)
+                parts[0] = str(int(parts[0]) + offset)
+                name = ".".join(parts)
+                ref_p = ref_parameters[name]
+                if dp_type == "FSDP":
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    torch.testing.assert_close(
-                        ref_p.grad, p.grad.full_tensor(), rtol=1e-5, atol=5e-5
-                    )
-        elif dp_type == "DDP":
-            for partial_model, offset in zip(partial_models, offsets):
-                for name, p in partial_model.named_parameters():
-                    parts = name.split(".")[1:]  # remove the "module." prefix
-                    parts[0] = str(int(parts[0]) + offset)
-                    name = ".".join(parts)
-                    ref_p = ref_parameters[name]
-                    torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
+                    torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
+                else:
+                    torch.testing.assert_close(p.grad, ref_p.grad)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
