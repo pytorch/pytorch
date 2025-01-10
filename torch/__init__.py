@@ -289,6 +289,7 @@ def _preload_pypi_cuda_deps() -> None:
         "curand": "libcurand.so.*[0-9]",
         "nvjitlink": "libnvJitLink.so.*[0-9]",
         "cusparse": "libcusparse.so.*[0-9]",
+        "cusparselt": "libcusparseLt.so.*[0-9]",
         "cusolver": "libcusolver.so.*[0-9]",
         "nccl": "libnccl.so.*[0-9]",
         "nvtx": "libnvToolsExt.so.*[0-9]",
@@ -300,7 +301,10 @@ def _preload_pypi_cuda_deps() -> None:
 
         for lib, lib_name in cuda_libs.items():
             current_lib = lib
-            lib_pkg = importlib.import_module("." + lib, package="nvidia")
+            if lib == 'cusparselt':
+                lib_pkg = importlib.import_module('cusparselt')
+            else:
+                lib_pkg = importlib.import_module("." + lib, package="nvidia")
             candidate_lib_paths = glob.glob(
                 os.path.join(lib_pkg.__path__[0], "lib", lib_name)
             )
@@ -309,6 +313,8 @@ def _preload_pypi_cuda_deps() -> None:
                 current_lib = None
             else:
                 break
+    except ModuleNotFoundError:
+        pass
     finally:
         # if importing failed during iteration
         if current_lib is not None:
@@ -2490,11 +2496,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
-        raise RuntimeError("Dynamo is not supported on Python 3.14+")
-    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
-        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:
