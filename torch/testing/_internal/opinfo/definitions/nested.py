@@ -831,7 +831,7 @@ def batchwise_reference_chunk(op, sample):
         start += chunk_size
 
     # rejoin into NJT outputs
-    return [torch.nested.nested_tensor(lst, layout=torch.jagged) for lst in chunks]
+    return [torch.nested.as_nested_tensor(lst, layout=torch.jagged) for lst in chunks]
 
 
 def batchwise_reference_narrow(op, sample):

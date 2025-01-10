@@ -8343,14 +8343,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_backward",
     ),
-    # chunk(): backward doesn't work for the batch dim yet
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Nested Tensor doesn't support chunk backward on dim=0 yet",
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_backward",
-    ),
     # amin() / amax(): broken in a host of ways I don't think it's a good use of time
     # to try to sift through
     SkipRule(
