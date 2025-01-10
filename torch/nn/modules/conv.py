@@ -66,10 +66,9 @@ class _ConvNd(Module):
     ]
     __annotations__ = {"bias": Optional[torch.Tensor]}
 
-    def _conv_forward(
+    def _conv_forward(  # type: ignore[empty-body]
         self, input: Tensor, weight: Tensor, bias: Optional[Tensor]
-    ) -> Tensor:  # type: ignore[empty-body]
-        ...
+    ) -> Tensor: ...
 
     in_channels: int
     _reversed_padding_repeated_twice: List[int]
