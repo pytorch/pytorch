@@ -63,6 +63,7 @@ __all__ = [
     "FromDumpableContextFn",
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -857,6 +858,9 @@ class TreeSpec:
             start = end
 
         return unflatten_fn(child_pytrees, self.context)
+
+
+PyTreeSpec: TypeAlias = TreeSpec
 
 
 class LeafSpec(TreeSpec):
