@@ -767,12 +767,14 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
 
         # return the minimum of estimated_timing and benchmarked_timing, since
         # we just want the minimum timing overall we might check both
-        return [
-            min(estimated_timing, benchmarked_timing)
-            for estimated_timing, benchmarked_timing in zip(
-                estimated_timings, benchmarked_timings
-            )
-        ]
+        callable_to_timing.update(
+            {
+                _callable: min(callable_to_timing[_callable], benchmarked_timing)
+                for _callable, benchmarked_timing in zip(callables_to_benchmark, benchmarked_timings)
+            }
+        )
+
+        return [callable_to_timing[_callable] for _callable in callables]
 
 
 class LazyInductorBenchmarker(GroupedInductorBenchmarker):
