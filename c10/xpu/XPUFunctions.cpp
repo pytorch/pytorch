@@ -19,6 +19,20 @@ namespace {
  * determined at runtime. There's currently a SYCL device pool that is lazily
  * created and only initialized once, ensuring thread-local safety. Each device
  * within the device pool shares the same default context.
+ *
+ * In certain scenarios, GPU devices may reside on separate SYCL platforms. For
+ * instance, on Windows, an integrated GPU (iGPU) and a discrete GPU (dGPU) may
+ * exist on different platforms. Since sycl::context cannot span across multiple
+ * platforms, creating a single default context that includes both becomes
+ * infeasible.
+ *
+ * To address this limitation, we prioritize the enumeration of dGPU. The device
+ * enumeration logic is as follows:
+ * 1. Identify the first Level Zero (L0) platform that contains at least one
+ *    dGPU and enumerate all dGPUs on that platform.
+ * 2. If no dGPU is found, identify the first L0 platform containing at least
+ *    one iGPU and enumerate all iGPUs on that platform.
+ * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
  */
 c10::once_flag init_flag;
 thread_local DeviceIndex curDeviceIndex = 0;
@@ -80,6 +94,8 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
       }
     }
   }
+
+  // Case 3: No GPUs found (neither dGPU nor iGPU).
 }
 
 inline void initGlobalDevicePoolState() {
