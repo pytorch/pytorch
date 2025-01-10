@@ -495,9 +495,12 @@ class CKGemmTemplate(CKTemplate):
             operation_name=operation_name
         )
 
-    def render(
-        self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs
-    ) -> str:  # type: ignore[override]
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGemmOperation",
+        **kwargs,
+    ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
         """
