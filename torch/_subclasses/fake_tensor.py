@@ -2577,9 +2577,9 @@ class FakeTensorMode(TorchDispatchMode):
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(  # type: ignore[misc]
                 func,
-                args=args,
-                kwargs=kwargs,
-                normalize_to_only_use_kwargs=True,  # type: ignore[arg-type]
+                args=args,  # type: ignore[arg-type]
+                kwargs=kwargs,  # type: ignore[arg-type]
+                normalize_to_only_use_kwargs=True,
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"

@@ -43,8 +43,8 @@ def autocast_decorator(autocast_instance, func):
         with autocast_instance:
             return func(*args, **kwargs)
 
-    decorate_autocast.__script_unsupported = (
-        "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
+    decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
+        "@autocast() decorator is not supported in script mode"
     )
     return decorate_autocast
 

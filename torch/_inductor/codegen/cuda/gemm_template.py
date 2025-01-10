@@ -912,10 +912,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             input_reorder = None
         kernel_call_signature = kernel.def_kernel(
-            inputs=inputs,
+            inputs=inputs,  # type: ignore[arg-type]
             outputs=[Y],
             names_str=names_str,
-            input_reorder=input_reorder,  # type: ignore[arg-type]
+            input_reorder=input_reorder,
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout

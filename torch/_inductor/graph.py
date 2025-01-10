@@ -996,9 +996,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(
         self,
-        target: str,
-        args: tuple[object],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        target: str,  # type: ignore[override]
+        args: tuple[object],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> Union[Expr, TensorBox, None]:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
@@ -1159,9 +1159,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_attr(
         self,
-        target: str,
-        args: tuple[()],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        target: str,  # type: ignore[override]
+        args: tuple[()],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1210,9 +1210,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(
         self,
-        target: str,
-        args: tuple[object],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        target: str,  # type: ignore[override]
+        args: tuple[object],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
@@ -1413,7 +1413,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args,
+                    *args,  # type: ignore[possibly-undefined]
                     **kwargs,  # type: ignore[possibly-undefined]
                 )
             elif (
