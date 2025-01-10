@@ -79,11 +79,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
         devices.push_back(std::make_unique<sycl::device>(device));
       }
     }
-    return; // Exit early since we already found a platform with iGPU.
   }
-
-  // Case 3: No GPUs found (neither dGPU nor iGPU).
-  return;
 }
 
 inline void initGlobalDevicePoolState() {
