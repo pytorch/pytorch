@@ -13,7 +13,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
 )
@@ -1095,7 +1094,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def get_value(self, val: Any) -> Any:
         return val.value
 
-    def check_grid(self, grid) -> Tuple[torch.fx.proxy.Proxy, ...]:
+    def check_grid(self, grid) -> tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
         if isinstance(grid, BaseListVariable):
