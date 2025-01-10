@@ -912,6 +912,8 @@ def is_wrapper_or_member_descriptor(value):
             types.MemberDescriptorType,
             # wrapper over C functions
             types.MethodWrapperType,
+            # bulitins are in C
+            types.BuiltinMethodType,
         ),
     )
 

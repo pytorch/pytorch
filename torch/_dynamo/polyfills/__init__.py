@@ -9,8 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, Sequence, TYPE_CHECKING
-from typing import MutableMapping
+from typing import Any, Callable, List, MutableMapping, Sequence, TYPE_CHECKING
 
 import torch
 
@@ -152,21 +151,23 @@ def construct_dict(cls, /, *args, **kwargs):
     dst = cls.__new__(cls)
     if not kwargs:
         if not args:
-            args = ({}, )
-        
+            args = ({},)
         src = args[0]
+
+        # Ensure that the overridden __iter__ method is invoked
         if isinstance(src, (dict, MutableMapping)):
             for key in src:
                 # This will inline the __getitem__ of the src object
                 dst[key] = src[key]
         else:
-            for (key, value) in src:
+            # likely a sequence like tuple of pairs
+            for key, value in src:
                 dst[key] = value
         return dst
     elif kwargs:
-        breakpoint()
-        assert False
-        
+        for key in kwargs:
+            dst[key] = kwargs[key]
+        return dst
 
 
 def foreach_map_fn(*args):
