@@ -1732,9 +1732,10 @@ def init_process_group(
         )
         _update_default_pg(default_pg)
 
-    _world.pg_group_ranks[GroupMember.WORLD] = {
-        i: i for i in range(GroupMember.WORLD.size())
-    }  # type: ignore[attr-defined, index]
+    _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
+        i: i
+        for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]
+    }
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
 

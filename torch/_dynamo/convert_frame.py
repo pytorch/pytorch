@@ -870,9 +870,9 @@ def _compile(
         annotation_str = "Torch-Compiled Region: " + compile_id_str
         guarded_code = GuardedCode(
             out_code,
-            check_fn.guard_manager,
+            check_fn.guard_manager,  # type: ignore[arg-type]
             compile_id,
-            annotation_str,  # type: ignore[arg-type]
+            annotation_str,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:

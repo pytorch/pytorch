@@ -345,8 +345,9 @@ class Optimizer:
     """
 
     OptimizerPreHook: TypeAlias = Callable[
-        [Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]
-    ]  # type: ignore[misc]
+        [Self, Args, Kwargs],  # type: ignore[misc]
+        Optional[Tuple[Args, Kwargs]],
+    ]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
