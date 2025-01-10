@@ -3240,7 +3240,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             def fwd_bwd(x: torch.Tensor):
                 flex_attention(x, x, x).sum().backward()
 
-            for a, b in zip([12, 24, 48], [64, 128, 256]):
+            for a, b in zip([12, 24, 12], [64, 128, 64]):
                 v = torch.zeros(
                     1,
                     1,
@@ -3253,9 +3253,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fwd_bwd(v)
                 yield v.grad
 
-        # TODO: Dynamo graph breaks on torch.ops.higher_order.flex_attention_backward
         self.check_output_and_recompiles(
-            fn, count=3, compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
         )
 
     @unittest.expectedFailure
