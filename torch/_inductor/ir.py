@@ -3759,9 +3759,9 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
-    def freeze_layout_with_exact_strides(
+    def freeze_layout_with_exact_strides(  # type: ignore[no-untyped-def]
         self, exact_strides, allow_padding=False
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_exact_strides(
             exact_strides, allow_padding=allow_padding
@@ -5810,9 +5810,9 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self, *, kernel_idx, grid, tma_descriptor_metadata, kernel_args
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         inputs = []
         kwargs = {}
         constant_args = []
@@ -6826,9 +6826,9 @@ class MultiOutput(ExternKernel):
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self, layout: OutputSpec, input, indices: List[tuple[Any, ...]]
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)

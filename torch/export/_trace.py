@@ -1225,8 +1225,8 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
             ).module()
 
         elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
-            traced_callable.owner(),
-            (torch._C.ScriptModule, torch.nn.Module),  # type: ignore[operator]
+            traced_callable.owner(),  # type: ignore[operator]
+            (torch._C.ScriptModule, torch.nn.Module),
         ):
             with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
                 return _export(
