@@ -115,7 +115,6 @@ def get_artifacts_urls(results, suites):
             and "runner-determinator" not in r["jobName"]
         ):
             *_, test_str = parse_job_name(r["jobName"])
-            print(test_str)
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]
