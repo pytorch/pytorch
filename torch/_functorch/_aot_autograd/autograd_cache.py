@@ -14,7 +14,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import CompileEventLogger, counters

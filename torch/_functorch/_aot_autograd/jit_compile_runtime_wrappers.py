@@ -14,7 +14,7 @@ import logging
 import time
 import traceback
 from contextlib import nullcontext
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence
 
 import torch
 import torch.utils.dlpack
