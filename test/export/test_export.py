@@ -6175,6 +6175,7 @@ def forward(self, b_a_buffer, x):
         ep = export(m, ())
         self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
 
+    @testing.expectedFailureRetraceability  # T186979579
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         torch.export.register_dataclass(
             Inp3,
@@ -6204,7 +6205,6 @@ def forward(self, b_a_buffer, x):
                     else:
                         self.assertIsInstance(s, int)
 
-    @testing.expectedFailureRetraceability  # T186979579
     def test_multiple_definitions_same_name_dim(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
