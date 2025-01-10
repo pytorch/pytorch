@@ -969,8 +969,9 @@ def _nested_mod_func_adapter(
     else:
         # cross attention case
         kv_seq_idx = _build_seq_idx(
-            kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1]
-        )  # type: ignore[attr-defined]
+            kv_offsets,
+            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        )
 
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
