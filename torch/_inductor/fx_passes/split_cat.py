@@ -915,9 +915,9 @@ class SplitCatSimplifier:
                 )
                 if is_node_meta_valid(split_input):  # type: ignore[arg-type, union-attr]
                     new_split.meta["example_value"] = torch.split(
-                        split_input.meta["example_value"],
+                        split_input.meta["example_value"],  # type: ignore[union-attr]
                         [r[1] - r[0] for r in split_ranges],
-                        dim=split_dim,  # type: ignore[union-attr]
+                        dim=split_dim,
                     )
                 counters["inductor"]["scmerge_split_added"] += 1
             split_items = []
@@ -1009,9 +1009,10 @@ class SplitCatSimplifier:
                         stacked_input = graph.call_function(
                             torch.stack, args=(to_stack,), kwargs={"dim": stack_dim}
                         )
-                        stacked_input.meta["example_value"] = torch.stack(
-                            to_stack_meta, dim=stack_dim
-                        )  # type: ignore[arg-type, union-attr]
+                        stacked_input.meta["example_value"] = torch.stack(  # type: ignore[arg-type]
+                            to_stack_meta,
+                            dim=stack_dim,  # type: ignore[arg-type]
+                        )
                         to_stack, to_stack_meta = [], []
                         stack_dim = None
                         user_inputs_new_transformed.append(stacked_input)
@@ -1029,25 +1030,28 @@ class SplitCatSimplifier:
                         user_input_new = graph.call_function(
                             torch.unflatten, args=(user_input_new, *unflatten_params)
                         )
-                        user_input_new.meta["example_value"] = torch.unflatten(
-                            user_input_new_meta, *unflatten_params
-                        )  # type: ignore[arg-type, possibly-undefined, union-attr]
+                        user_input_new.meta["example_value"] = torch.unflatten(  # type: ignore[arg-type]
+                            user_input_new_meta,  # type: ignore[arg-type]
+                            *unflatten_params,  # type: ignore[arg-type]
+                        )
                     if movedim_params:
                         user_input_new_meta = user_input_new.meta["example_value"]
                         user_input_new = graph.call_function(
                             torch.movedim, args=(user_input_new, *movedim_params)
                         )
-                        user_input_new.meta["example_value"] = torch.movedim(
-                            user_input_new_meta, *movedim_params
-                        )  # type: ignore[arg-type, possibly-undefined, union-attr]
+                        user_input_new.meta["example_value"] = torch.movedim(  # type: ignore[arg-type]
+                            user_input_new_meta,  # type: ignore[arg-type]
+                            *movedim_params,  # type: ignore[arg-type]
+                        )
                     if flatten_params:
                         user_input_new_meta = user_input_new.meta["example_value"]
                         user_input_new = graph.call_function(
                             torch.flatten, args=(user_input_new, *flatten_params)
                         )
-                        user_input_new.meta["example_value"] = torch.flatten(
-                            user_input_new_meta, *flatten_params
-                        )  # type: ignore[arg-type, possibly-undefined, union-attr]
+                        user_input_new.meta["example_value"] = torch.flatten(  # type: ignore[arg-type]
+                            user_input_new_meta,
+                            *flatten_params,  # type: ignore[arg-type]
+                        )
                     user_inputs_new_transformed.append(user_input_new)
                     user_inputs_new_transformed_meta.append(
                         user_input_new.meta["example_value"]
@@ -1056,9 +1060,10 @@ class SplitCatSimplifier:
                     stacked_input = graph.call_function(
                         torch.stack, args=(to_stack,), kwargs={"dim": stack_dim}
                     )
-                    stacked_input.meta["example_value"] = torch.stack(
-                        to_stack_meta, dim=stack_dim
-                    )  # type: ignore[arg-type, union-attr]
+                    stacked_input.meta["example_value"] = torch.stack(  # type: ignore[arg-type]
+                        to_stack_meta,
+                        dim=stack_dim,  # type: ignore[arg-type]
+                    )
                     user_inputs_new_transformed.append(stacked_input)
                     user_inputs_new_transformed_meta.append(
                         stacked_input.meta["example_value"]
@@ -1072,7 +1077,8 @@ class SplitCatSimplifier:
                         kwargs={"dim": cat_dim},
                     )
                     new_cat_node.meta["example_value"] = torch.cat(
-                        user_inputs_new_transformed_meta, dim=cat_dim
+                        user_inputs_new_transformed_meta,
+                        dim=cat_dim,
                     )
                     counters["inductor"]["scmerge_cat_added"] += 1
                 else:
@@ -1092,8 +1098,10 @@ class SplitCatSimplifier:
                         torch.flatten, args=(new_cat_node, cat_dim, cat_dim + 1)
                     )
                     new_cat_node.meta["example_value"] = torch.flatten(
-                        new_cat_node_meta, cat_dim, cat_dim + 1
-                    )  # type: ignore[possibly-undefined, union-attr]
+                        new_cat_node_meta,
+                        cat_dim,
+                        cat_dim + 1,
+                    )
             user_node.replace_all_uses_with(new_cat_node)
             new_cats.append(new_cat_node)
 

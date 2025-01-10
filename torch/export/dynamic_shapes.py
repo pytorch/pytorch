@@ -889,8 +889,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value),
-                    warn_only=False,  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         else:
@@ -900,8 +900,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.min, upper=dim.max),
-                    warn_only=False,  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.min, upper=dim.max),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         return constraint
