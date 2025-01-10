@@ -4,7 +4,7 @@ import contextlib
 import torch
 
 
-__all__ = ["start", "stop", "profile"]
+__all__ = ["start", "stop", "profile", "metal_capture"]
 
 
 def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
@@ -59,3 +59,27 @@ def profile(mode: str = "interval", wait_until_completed: bool = False):
         yield
     finally:
         stop()
+
+
+def is_metal_capture_enabled() -> bool:
+    """ Checks if `metal_capture` context manager is usable
+    To enable metal capture, set MTL_CAPTURE_ENABLED envvar
+    """
+    return torch._C._mps_isCaptureEnabled()
+
+
+def is_capturing_metal() -> bool:
+    """ Cheks if metal capture is in progress
+    """
+    return torch._C._mps_isCapturing()
+
+@contextlib.contextmanager
+def metal_capture(fname: str):
+    """ Conext manager that enables capturing of Metal calls into gputrace
+    """
+    try:
+        torch._C._mps_startCapture(fname)
+        yield
+    finally:
+        torch.mps.synchronize()
+        torch._C._mps_stopCapture()
