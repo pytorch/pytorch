@@ -1194,8 +1194,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(
-            id(self), tuple(w.pid for w in self._workers)
-        )  # type: ignore[misc]
+            id(self),
+            tuple(w.pid for w in self._workers),  # type: ignore[misc]
+        )
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
