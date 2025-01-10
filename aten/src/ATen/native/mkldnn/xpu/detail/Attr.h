@@ -177,7 +177,7 @@ class Attr {
       float sum_q_scale = 1.f,
       int64_t zp = 0) {
     ops_params_.push_back(
-        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, kind_t::sum));
+        PostOpParam(/*scale_sum*/ sum_scale * sum_q_scale, zp, kind_t::sum));
     return *this;
   }
 
@@ -261,10 +261,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(
-      const at::Tensor& dst,
-      bool is_quantized = false,
-      bool int8_output = false) {
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -303,11 +300,6 @@ class Attr {
       }
     }
 
-    // if output is quantized, then append the eltwise linear to adjust the
-    // output scale/zero_point
-    if (is_quantized && int8_output) {
-      dnnl_post_ops_.append_eltwise(kind_with_linear, q_scale_, q_zero_point_);
-    }
     return dnnl_post_ops_;
   }
 
@@ -431,9 +423,9 @@ static inline void construct_attr_by_post_op(
         unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
   } else if (binary_post_op == "sum") {
     if (unary_post_op == "none") {
-      attr = attr.append_post_sum(input1_scale, input1_zero_point);
+      attr = attr.append_post_sum(1, input1_scale, input1_zero_point);
     } else if (unary_post_op == "relu") {
-      attr = attr.append_post_sum(input1_scale, input1_zero_point);
+      attr = attr.append_post_sum(1, input1_scale, input1_zero_point);
       attr = attr.append_post_eltwise(
           /* eltwise_scale */ 1.f,
           /* alpha */ 0.f,

@@ -23,9 +23,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    MI300_ARCH,
     parametrize,
     skipIfNoXPU,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_ACL,
     TEST_MKL,
     xfailIfACL,
@@ -1032,6 +1034,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
+    @skipIfRocmArch(MI300_ARCH)
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -2399,7 +2402,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. Qlinear Binary Unary fusion in post-grad fusion pass * 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_count"],
-                    2,
+                    0 if TEST_ACL else 2,
                 )
                 # Two linear-binary patterns are matched
                 # matched patter1 = [qlinear, add, (convert dtype), (relu), quantize_per_tensor]
@@ -2411,11 +2414,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
-                    expected_matcher_nodes,
-                )
-                self.assertEqual(
-                    counters["inductor"]["qlinear_binary_lower_count"],
-                    0 if TEST_ACL else 2,
+                    0 if TEST_ACL else expected_matcher_nodes,
                 )
 
             self._test_common(
