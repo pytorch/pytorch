@@ -630,7 +630,7 @@ def _compile_fx_inner(
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
-        set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", use_cache)
+        set_feature_use("fx_cache", use_cache)
 
         # TODO: This is a hack purely to get some info to extract_tensor_metadata_for_cache_key,
         # figure out how to not have to modify example inputs
@@ -931,6 +931,18 @@ class _InProcessFxCompile(FxCompile):
                         print_output=False, include_stride=True, include_device=True
                     ),
                 )
+                if config.trace.enabled:
+                    provenance_tracking_json = (
+                        torch.fx.traceback.get_graph_provenance_json(gm.graph)
+                    )
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "inductor_post_to_pre_grad_nodes",
+                            "encoding": "json",
+                        },
+                        payload_fn=lambda: provenance_tracking_json,
+                    )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
                         extra_logging={"pt2_configs": str(get_patched_config_dict())}
@@ -1521,7 +1533,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
-        for arg in output_node(gm).args[0]
+        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
@@ -1636,7 +1648,9 @@ def compile_fx(
 
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
-    ), enable_python_dispatcher():
+    ), enable_python_dispatcher(), torch.fx.traceback.preserve_node_meta(
+        config.trace.enabled
+    ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
         # where a user directly passes a plain Module with the intention of

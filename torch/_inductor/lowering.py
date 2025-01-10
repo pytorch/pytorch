@@ -9,7 +9,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -82,7 +82,7 @@ _P = ParamSpec("_P")
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = OrderedSet[str](
+FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
         "aten::index_add",
@@ -3737,7 +3737,7 @@ def scatter_fallback(
         op_overload,
         reduce,
         self.get_dtype(),
-        src.get_dtype() if src_is_tensor else cast(torch.dtype, type(src)),
+        src.get_dtype() if src_is_tensor else type(src),  # type: ignore[arg-type]
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -4154,13 +4154,6 @@ def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
 def max_pool2d_checks(
     x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
-    if padding == 0:
-        padding = [0, 0]
-    if dilation == 1:
-        dilation = [1, 1]
-    if not stride:
-        stride = kernel_size
-
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)

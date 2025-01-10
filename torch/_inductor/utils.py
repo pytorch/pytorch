@@ -64,10 +64,9 @@ if TYPE_CHECKING:
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
-    from .codegen.memory_planning import ClearCacheOnAllocateMixin
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import IRNode, Layout, TensorBox
+    from .ir import ExternKernel, IRNode, Layout, Operation
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -288,13 +287,11 @@ def ceildiv(numer: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Exp
     return runtime_ceildiv(numer, denom)
 
 
-def _type_of(key: str | None) -> str:
+def _type_of(key: torch.dtype) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
     # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
-    if key is None:
-        return "*i8"
     dtype_str = str(key).split(".")[-1]
     tys = {
         "bool": "i1",
@@ -435,11 +432,12 @@ def cmp(a: int, b: int) -> int:
     return int(a > b) - int(a < b)
 
 
-def pad_listlike(x: Sequence[T], size: int) -> Sequence[T]:
+def pad_listlike(x: int | Sequence[int], size: int) -> Sequence[int]:
+    if isinstance(x, int):
+        return [x] * size
     if len(x) == 1:
         return type(x)([x[0]]) * size  # type: ignore[call-arg, operator, return-value]
-    else:
-        return x
+    return x
 
 
 # Used to ensure that iterating over a set is deterministic
@@ -458,7 +456,7 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(cache: ClearCacheOnAllocateMixin) -> None:
+    def clear_cache(cache: Any) -> None:
         ...
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
@@ -486,7 +484,7 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     )
     wrapper = functools.wraps(fn)(ctx[f"{name}_cache_on_self"])
 
-    def clear_cache(self: ClearCacheOnAllocateMixin) -> None:
+    def clear_cache(self: Any) -> None:
         if hasattr(self, key):
             delattr(self, key)
 
@@ -494,7 +492,9 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def _aggregate_origins(node_schedule: Sequence[BaseSchedulerNode]) -> OrderedSet[Node]:
+def _aggregate_origins(
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+) -> OrderedSet[Node]:
     from . import ir
 
     if isinstance(node_schedule, list):
@@ -549,7 +549,8 @@ def get_fused_kernel_name(
 
 
 def get_kernel_metadata(
-    node_schedule: Sequence[BaseSchedulerNode], wrapper: PythonWrapperCodegen
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+    wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
     all_origins = _aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
@@ -786,7 +787,7 @@ def get_first_incompatible_cudagraph_node(
     return None
 
 
-def output_node(gm: torch.fx.GraphModule) -> TensorBox:
+def output_node(gm: torch.fx.GraphModule) -> Node:
     """Get the output node from an FX graph"""
     last_node = next(iter(reversed(gm.graph.nodes)))
     assert last_node.op == "output"
@@ -864,11 +865,11 @@ def fresh_inductor_cache(
         clear_inductor_caches()
 
 
-def argsort(seq: Sequence[int]) -> list[int]:
+def argsort(seq: Sequence[Any]) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return sorted(a_r, key=getter)  # noqa: C413
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 def argsort_sym(
@@ -903,7 +904,8 @@ def argsort_sym(
         for idx, s in enumerate(seq)
     ]
     exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
-    return [idx for idx, _ in exprs]
+    result = [idx for idx, _ in exprs]
+    return result
 
 
 @functools.lru_cache(8)
@@ -1604,7 +1606,7 @@ def developer_warning(msg: str) -> None:
         log.info(msg)
 
 
-def get_benchmark_name() -> str:
+def get_benchmark_name() -> str | None:
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -1634,7 +1636,7 @@ def get_benchmark_name() -> str:
         if arg.startswith("--only="):
             return arg[len("--only=") :]
 
-    raise ValueError("No benchmark name found")
+    return None
 
 
 def is_ones(items: Sequence[Any]) -> bool:
@@ -1816,9 +1818,12 @@ def pass_execution_and_save(
 
 
 def is_collective(
-    node: IRNode,
+    node: Node | Operation | None,
     op: torch._ops.OpOverload | torch._ops.HigherOrderOperator | None = None,
 ) -> bool:
+    if node is None:
+        return False
+
     from . import ir
 
     return (
@@ -1848,7 +1853,7 @@ def is_collective(
     )
 
 
-def is_wait(node: IRNode) -> bool:
+def is_wait(node: None | IRNode | Operation) -> bool:
     from . import ir
 
     return type(node) == ir._WaitKernel
@@ -1857,27 +1862,24 @@ def is_wait(node: IRNode) -> bool:
 def contains_collective(snode: BaseSchedulerNode) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
-    from .ir import IRNode
-
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(cast(IRNode, snode.node))
+    return is_collective(snode.node)
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
-    from .ir import IRNode
-
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_wait(x) for x in snode.snodes)
     else:
-        return is_wait(cast(IRNode, snode.node))
+        return is_wait(snode.node)
 
 
 def is_fallback_op(
-    node: Node, op: torch._ops.OpOverload | Collection[torch._ops.OpOverload]
+    node: Operation | None,
+    op: torch._ops.OpOverload | Collection[torch._ops.OpOverload],
 ) -> bool:
     from . import ir
 
