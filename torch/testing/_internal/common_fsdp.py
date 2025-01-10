@@ -12,18 +12,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, no_type_check, Optional, Type, Union
 from unittest import mock
 
 import torch

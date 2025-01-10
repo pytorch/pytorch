@@ -4,7 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
