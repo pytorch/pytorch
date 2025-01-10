@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -2634,7 +2634,7 @@ class InstructionTranslatorBase(
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        closure: Optional[Tuple[types.CellType]] = None,
+        closure: Optional[tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2678,7 +2678,7 @@ class InstructionTranslatorBase(
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
-        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
+        self.nn_module_stack: Dict[str, tuple[str, Type[Any]]] = {}
         self.num_calls: Dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
@@ -2861,7 +2861,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 torch_function_mode_stack
             )
 
-            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
+            self.debug_locals: List[tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
