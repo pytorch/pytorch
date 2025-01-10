@@ -14,8 +14,8 @@ Usage:
 
 from __future__ import annotations
 
-import copy
 import argparse
+import copy
 import dataclasses
 import datetime
 import json
@@ -101,7 +101,10 @@ def parse_args() -> argparse.Namespace:
 
 class SharedResource:
     """
-    thread-safe utils for shared resources used in both worker processor and main processor during UsageLogger
+    thread-safe utils for shared resources used in both worker processor
+    and main processor during UsageLogger.
+    It collects the usage data or errors from the worker processor, and
+    output the aggregated data or errors to the main processor for logging.
     """
 
     def __init__(self, is_debug_mode: bool = False) -> None:
@@ -129,6 +132,7 @@ class SharedResource:
     def add_error(self, error: Exception) -> None:
         with self._lock:
             self._data_errors.append(str(error))
+
 
 class UsageLogger:
     """
@@ -433,7 +437,7 @@ class UsageLogger:
                 proc = psutil.Process(pid)
                 cmdline = proc.cmdline()
                 info.update({"cmd": " ".join(cmdline)})
-            except Exception as e:
+            except Exception:
                 pass
             finally:
                 per_process_info.append(info)
@@ -458,7 +462,7 @@ class UsageLogger:
                 proc = psutil.Process(proc_info["pid"])
                 cmdline = proc.cmdline()
                 info.update({"cmd": " ".join(cmdline)})
-            except Exception as e:
+            except Exception:
                 pass
             finally:
                 per_process_info.append(info)
@@ -474,7 +478,7 @@ class UsageLogger:
                     pid = process.pid
                     if "python" in processName and cmd.startswith("python"):
                         python_test_processes.append({"pid": pid, "cmd": cmd})
-                except Exception as e:
+                except Exception:
                     pass
             return python_test_processes
 
