@@ -32,6 +32,7 @@ class RequestImpl : public Request {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const httplib::Request& req_;
 };
 
@@ -49,6 +50,7 @@ class ResponseImpl : public Response {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   httplib::Response& res_;
 };
 
