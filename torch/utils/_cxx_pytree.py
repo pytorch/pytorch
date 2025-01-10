@@ -70,6 +70,7 @@ __all__ = [
     "FromDumpableContextFn",
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
