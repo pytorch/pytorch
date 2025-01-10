@@ -48,7 +48,8 @@ class ConvReLU1d(_FusedModule):
             type_before_parametrizations(conv) == Conv1d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(conv, relu)
 
@@ -62,7 +63,8 @@ class ConvReLU2d(_FusedModule):
             type_before_parametrizations(conv) == Conv2d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(conv, relu)
 
@@ -76,7 +78,8 @@ class ConvReLU3d(_FusedModule):
             type_before_parametrizations(conv) == Conv3d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(conv, relu)
 
@@ -90,7 +93,8 @@ class LinearReLU(_FusedModule):
             type_before_parametrizations(linear) == Linear
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(linear)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(linear)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(linear, relu)
 
@@ -104,7 +108,8 @@ class ConvBn1d(_FusedModule):
             type_before_parametrizations(conv) == Conv1d
             and type_before_parametrizations(bn) == BatchNorm1d
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
         )
         super().__init__(conv, bn)
 
@@ -118,7 +123,8 @@ class ConvBn2d(_FusedModule):
             type_before_parametrizations(conv) == Conv2d
             and type_before_parametrizations(bn) == BatchNorm2d
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
         )
         super().__init__(conv, bn)
 
@@ -133,8 +139,10 @@ class ConvBnReLU1d(_FusedModule):
             and type_before_parametrizations(bn) == BatchNorm1d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}"
-        )  # noqa: B950
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
+            f"{type_before_parametrizations(relu)}"
+        )
         super().__init__(conv, bn, relu)
 
 
@@ -148,8 +156,10 @@ class ConvBnReLU2d(_FusedModule):
             and type_before_parametrizations(bn) == BatchNorm2d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}"
-        )  # noqa: B950
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
+            f"{type_before_parametrizations(relu)}"
+        )
         super().__init__(conv, bn, relu)
 
 
@@ -162,7 +172,8 @@ class ConvBn3d(_FusedModule):
             type_before_parametrizations(conv) == Conv3d
             and type_before_parametrizations(bn) == BatchNorm3d
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}"
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
         )
         super().__init__(conv, bn)
 
@@ -177,8 +188,10 @@ class ConvBnReLU3d(_FusedModule):
             and type_before_parametrizations(bn) == BatchNorm3d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}"
-        )  # noqa: B950
+            f"Incorrect types for input modules{type_before_parametrizations(conv)}"
+            f"{type_before_parametrizations(bn)}"
+            f"{type_before_parametrizations(relu)}"
+        )
         super().__init__(conv, bn, relu)
 
 
@@ -191,7 +204,8 @@ class BNReLU2d(_FusedModule):
             type_before_parametrizations(batch_norm) == BatchNorm2d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(batch_norm)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(batch_norm)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(batch_norm, relu)
 
@@ -205,7 +219,8 @@ class BNReLU3d(_FusedModule):
             type_before_parametrizations(batch_norm) == BatchNorm3d
             and type_before_parametrizations(relu) == ReLU
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(batch_norm)}{type_before_parametrizations(relu)}"
+            f"Incorrect types for input modules{type_before_parametrizations(batch_norm)}"
+            f"{type_before_parametrizations(relu)}"
         )
         super().__init__(batch_norm, relu)
 
@@ -219,7 +234,8 @@ class LinearBn1d(_FusedModule):
             type_before_parametrizations(linear) == Linear
             and type_before_parametrizations(bn) == BatchNorm1d
         ), (
-            f"Incorrect types for input modules{type_before_parametrizations(linear)}{type_before_parametrizations(bn)}"
+            f"Incorrect types for input modules{type_before_parametrizations(linear)}"
+            f"{type_before_parametrizations(bn)}"
         )
         super().__init__(linear, bn)
 

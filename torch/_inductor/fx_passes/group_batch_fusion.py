@@ -998,10 +998,10 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             # we batch the ops with same parent to enable followup split cat
             parent = node.args[0]
             parent = (
-                parent.target
+                parent.target  # type: ignore[union-attr]
                 if self.graph_search_options.get("fuse_nodes_with_same_parent", False)
                 else ""
-            )  # type: ignore[union-attr]
+            )
             group_key = (
                 "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["val"].shape),

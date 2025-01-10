@@ -642,9 +642,14 @@ def _create_aot_dispatcher_function(
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+    with (
+        torch.autograd.set_multithreading_enabled(False),
+        preserve_rng_state(),
+        fake_mode,
+        python_dispatcher_mode,
+        PhiloxStateTracker(),
+        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+    ):
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,

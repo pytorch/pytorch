@@ -553,12 +553,20 @@ def _convert_to_export_graph_signature(
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
     grad_params = (
-        graph_signature.backward_signature.gradients_to_parameter if is_joint else {}
-    )  # type: ignore[union-attr]
+        graph_signature.backward_signature.gradients_to_parameter  # type: ignore[union-attr]
+        if is_joint
+        else {}
+    )
     grad_user_inputs = (
-        graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {}
-    )  # type: ignore[union-attr]
-    loss_output = graph_signature.backward_signature.loss_output if is_joint else None  # type: ignore[union-attr]
+        graph_signature.backward_signature.gradients_to_user_inputs  # type: ignore[union-attr]
+        if is_joint
+        else {}
+    )
+    loss_output = (
+        graph_signature.backward_signature.loss_output  # type: ignore[union-attr]
+        if is_joint
+        else None
+    )
     input_tokens = graph_signature.input_tokens
     output_tokens = graph_signature.output_tokens
 
