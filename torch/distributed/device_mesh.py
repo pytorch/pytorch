@@ -767,9 +767,9 @@ else:
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][
-                    :2
-                ]  # type: ignore[index]
+                dim_group_infos = root_to_flatten_mapping[
+                    mesh_dim  # type: ignore[index]
+                ]._dim_group_infos[0][:2]
                 return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
             else:
                 mesh_dim = (
