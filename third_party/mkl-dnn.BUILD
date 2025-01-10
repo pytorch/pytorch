@@ -5,17 +5,20 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_OMP",
     "#cmakedefine DNNL_CPU_RUNTIME DNNL_RUNTIME_${DNNL_CPU_RUNTIME}": "#define DNNL_CPU_RUNTIME DNNL_RUNTIME_OMP",
     "#cmakedefine DNNL_GPU_RUNTIME DNNL_RUNTIME_${DNNL_GPU_RUNTIME}": "#define DNNL_GPU_RUNTIME DNNL_RUNTIME_NONE",
+    "#cmakedefine DNNL_GPU_VENDOR DNNL_VENDOR_${DNNL_GPU_VENDOR}": "/* undef DNNL_GPU_VENDOR */",
     "#cmakedefine DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE": "/* undef DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE */",
     "#cmakedefine DNNL_WITH_SYCL": "/* #undef DNNL_WITH_SYCL */",
     "#cmakedefine DNNL_WITH_LEVEL_ZERO": "/* #undef DNNL_WITH_LEVEL_ZERO */",
     "#cmakedefine DNNL_SYCL_CUDA": "/* #undef DNNL_SYCL_CUDA */",
     "#cmakedefine DNNL_SYCL_HIP": "/* #undef DNNL_SYCL_HIP */",
+    "#cmakedefine DNNL_SYCL_GENERIC": "/* #undef DNNL_SYCL_GENERIC */",
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
     "#cmakedefine DNNL_EXPERIMENTAL_UKERNEL": "/* undef DNNL_EXPERIMENTAL_UKERNEL */",
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine DNNL_EXPERIMENTAL_SPARSE": "#undef DNNL_EXPERIMENTAL_SPARSE",
     "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
     "#cmakedefine DNNL_EXPERIMENTAL_PROFILING": "#undef DNNL_EXPERIMENTAL_PROFILING",
+    "#cmakedefine DNNL_DISABLE_GPU_REF_KERNELS": "#undef DNNL_DISABLE_GPU_REF_KERNELS",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
     "#cmakedefine01 BUILD_INFERENCE": "#define BUILD_INFERENCE 0",
     "#cmakedefine01 BUILD_PRIMITIVE_ALL": "#define BUILD_PRIMITIVE_ALL 1",
@@ -36,6 +39,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_REORDER": "#define BUILD_REORDER 0",
     "#cmakedefine01 BUILD_RESAMPLING": "#define BUILD_RESAMPLING 0",
     "#cmakedefine01 BUILD_RNN": "#define BUILD_RNN 0",
+    "#cmakedefine01 BUILD_SDPA": "#define BUILD_SDPA 0",
     "#cmakedefine01 BUILD_SHUFFLE": "#define BUILD_SHUFFLE 0",
     "#cmakedefine01 BUILD_SOFTMAX": "#define BUILD_SOFTMAX 0",
     "#cmakedefine01 BUILD_SUM": "#define BUILD_SUM 0",
@@ -52,6 +56,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_XEHPC": "#define BUILD_XEHPC 0",
     "#cmakedefine01 BUILD_XEHP": "#define BUILD_XEHP 0",
     "#cmakedefine01 BUILD_XE2": "#define BUILD_XE2 0",
+    "#cmakedefine01 BUILD_XE3": "#define BUILD_XE3 0",
     "#cmakedefine01 BUILD_GEMM_KERNELS_ALL": "#define BUILD_GEMM_KERNELS_ALL 0",
     "#cmakedefine01 BUILD_GEMM_KERNELS_NONE": "#define BUILD_GEMM_KERNELS_NONE 0",
     "#cmakedefine01 BUILD_GEMM_SSE41": "#define BUILD_GEMM_SSE41 0",
@@ -65,9 +70,8 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "5",
-        "@DNNL_VERSION_PATCH@": "3",
-        "@DNNL_VERSION_HASH@": "66f0cb9eb66affd2da3bf5f8d897376f04aae6af",
+        "@DNNL_VERSION_MINOR@": "7",
+        "@DNNL_VERSION_PATCH@": "0",
     },
 )
 
@@ -78,14 +82,23 @@ template_rule(
     substitutions = _DNNL_RUNTIME_OMP,
 )
 
+template_rule(
+    name = "include_dnnl_version_hash",
+    src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
+    out = "include/oneapi/dnnl/dnnl_version_hash.h",
+    substitutions = {"@DNNL_VERSION_HASH@": "1361b666c41dc446014671054ed782462f0b5372",}
+)
+
 cc_library(
     name = "mkl-dnn",
     srcs = glob([
         "src/common/*.cpp",
         "src/cpu/**/*.cpp",
+        "src/cpu/**/**/*.cpp",
     ], exclude=[
         "src/cpu/aarch64/**/*.cpp",
         "src/cpu/rv64/**/*.cpp",
+        "src/cpu/sycl/**/*.cpp",
     ]),
     hdrs = glob([
         "include/oneapi/dnnl/*.h",
@@ -94,16 +107,20 @@ cc_library(
         "include/*.hpp",
         "src/cpu/**/*.hpp",
         "src/cpu/**/*.h",
+        "src/cpu/**/**/*.h",
         "src/common/*.hpp",
+        "src/common/**/**/*.h",
         "src/common/ittnotify/jitprofiling.h",
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
         "src/cpu/aarch64/**/*.h",
         "src/cpu/rv64/**/*.hpp",
         "src/cpu/rv64/**/*.h",
+        "src/cpu/sycl/**/*.hpp",
     ]) + [
         "include/oneapi/dnnl/dnnl_config.h",
         "include/oneapi/dnnl/dnnl_version.h",
+        "include/oneapi/dnnl/dnnl_version_hash.h",
     ],
     copts = [
         "-DDNNL_DLL",

@@ -124,6 +124,8 @@ inductor_fallback_ops = {
     "aten._scaled_dot_product_cudnn_attention.default",
     "aten._scaled_dot_product_flash_attention_for_cpu_backward.default",
     "aten._scaled_dot_product_flash_attention_for_cpu.default",
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default",
+    "aten._scaled_dot_product_fused_attention_overrideable.default",
     "aten._scaled_mm.default",
     "aten._scaled_mm.out",
     "aten.scatter_reduce.two_out",
