@@ -5,7 +5,7 @@ import logging
 import sys
 from collections import defaultdict
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace

@@ -2,7 +2,7 @@
 import copy
 import warnings
 from itertools import chain
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import torch
 import torch.utils._pytree as pytree

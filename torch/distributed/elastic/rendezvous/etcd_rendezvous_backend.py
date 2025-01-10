@@ -7,7 +7,7 @@
 
 import binascii
 from base64 import b64decode, b64encode
-from typing import cast, Optional, Tuple
+from typing import cast, Optional
 
 import urllib3.exceptions  # type: ignore[import]
 from etcd import (  # type: ignore[import]

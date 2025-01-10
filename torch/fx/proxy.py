@@ -9,7 +9,7 @@ import logging
 import operator
 import sys
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable, Dict, Iterator, Optional, OrderedDict, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, OrderedDict
 
 import torch
 import torch.fx.traceback as fx_traceback

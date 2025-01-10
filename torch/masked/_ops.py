@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

@@ -18,7 +18,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
+from typing import Any, Callable, Collection, Mapping, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt

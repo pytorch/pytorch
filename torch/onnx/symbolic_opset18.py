@@ -20,7 +20,7 @@ New operators:
 """
 
 import functools
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 import torch
 from torch import _C

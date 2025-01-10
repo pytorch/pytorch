@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor

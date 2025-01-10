@@ -7,7 +7,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index

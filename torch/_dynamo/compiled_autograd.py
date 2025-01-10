@@ -5,7 +5,7 @@ import itertools
 import operator
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (

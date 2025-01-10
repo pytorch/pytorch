@@ -1,5 +1,5 @@
 # mypy: allow-untyped-decorators
-from typing import cast, List, NamedTuple, Optional, Tuple, Union
+from typing import cast, List, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist

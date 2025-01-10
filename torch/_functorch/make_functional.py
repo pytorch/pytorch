@@ -14,7 +14,6 @@ from typing import (
     List,
     NoReturn,
     Sequence,
-    Tuple,
     Type,
     Union,
 )

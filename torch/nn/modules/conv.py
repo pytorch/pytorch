@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 from typing_extensions import deprecated
 
 import torch

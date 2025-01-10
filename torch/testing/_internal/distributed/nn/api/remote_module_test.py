@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 
 import enum
-from typing import Tuple
 
 import torch
 import torch.distributed.rpc as rpc

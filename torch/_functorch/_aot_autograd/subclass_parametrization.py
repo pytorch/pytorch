@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass

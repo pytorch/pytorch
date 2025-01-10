@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional
 
 import torch
 import torch.fx

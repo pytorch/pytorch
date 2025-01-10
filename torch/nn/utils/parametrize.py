@@ -4,7 +4,7 @@ import collections
 import copyreg
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Dict, Optional, Sequence, Union
 
 import torch
 from torch import Tensor

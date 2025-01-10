@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 from torch import Size, Tensor

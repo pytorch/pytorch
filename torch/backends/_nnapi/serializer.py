@@ -6,7 +6,7 @@ import logging
 import operator
 import struct
 import sys
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional
 
 import torch
 

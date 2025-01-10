@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import ast
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from ._importlib import _resolve_name
 

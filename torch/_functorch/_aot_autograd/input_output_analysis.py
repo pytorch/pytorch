@@ -12,7 +12,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

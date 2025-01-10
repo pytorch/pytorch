@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import torch
 import torch.fx

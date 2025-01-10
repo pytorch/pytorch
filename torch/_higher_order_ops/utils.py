@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, List, Union
 
 import torch
 import torch.fx.traceback as fx_traceback

@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 
 
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import operator
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
+from typing import Any, cast, Dict, List, Optional, Sequence
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor

@@ -20,7 +20,6 @@ from typing import (
     Optional,
     Protocol,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
     TypeVar,

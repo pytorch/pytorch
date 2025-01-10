@@ -4,7 +4,7 @@ import functools
 import inspect
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Set, Type, Union
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (

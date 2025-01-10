@@ -10,7 +10,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Tuple,
     Type,
     TypeVar,
 )

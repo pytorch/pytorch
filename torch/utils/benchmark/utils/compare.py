@@ -3,7 +3,7 @@
 import collections
 import enum
 import itertools as it
-from typing import DefaultDict, List, Optional, Tuple
+from typing import DefaultDict, List, Optional
 
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor

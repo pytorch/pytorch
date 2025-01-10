@@ -9,7 +9,7 @@
 
 import itertools
 import re
-from typing import Any, Callable, NamedTuple, Optional, SupportsInt, Tuple, Union
+from typing import Any, Callable, NamedTuple, Optional, SupportsInt, Union
 
 from ._structures import Infinity, InfinityType, NegativeInfinity, NegativeInfinityType
 

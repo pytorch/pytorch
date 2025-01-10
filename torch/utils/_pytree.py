@@ -45,7 +45,6 @@ from typing import (
     overload,
     Protocol,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     Union,

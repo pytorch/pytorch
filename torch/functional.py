@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, List, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch
 import torch.nn.functional as F

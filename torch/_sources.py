@@ -3,7 +3,7 @@ import ast
 import functools
 import inspect
 from textwrap import dedent
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, List, NamedTuple, Optional
 
 from torch._C import ErrorReport
 from torch._C._jit_tree_views import SourceRangeFactory

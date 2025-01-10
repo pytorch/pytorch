@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Sequence, overload, Deque, Type
 from typing_extensions import TypeIs
 from collections import deque
 

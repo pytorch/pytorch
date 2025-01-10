@@ -4,7 +4,7 @@ import functools
 import logging
 import operator
 import warnings
-from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import cast, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist

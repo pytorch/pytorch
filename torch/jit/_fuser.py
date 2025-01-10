@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import List, Tuple
+from typing import List
 
 import torch
 

@@ -42,7 +42,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,

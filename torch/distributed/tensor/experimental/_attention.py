@@ -17,7 +17,6 @@ from typing import (
     Optional,
     Protocol,
     Set,
-    Tuple,
     Union,
 )
 

@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from torch.fx import Graph, GraphModule, Node
 from torch.fx._compatibility import compatibility

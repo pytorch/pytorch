@@ -10,7 +10,6 @@ from typing import (
     Protocol,
     runtime_checkable,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )

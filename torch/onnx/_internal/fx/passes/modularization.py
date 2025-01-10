@@ -5,7 +5,7 @@ import abc
 import collections
 import copy
 import operator
-from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
+from typing import Any, Dict, Final, Generator, Iterator, Sequence
 
 import torch
 import torch.fx

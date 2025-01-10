@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import sympy
 

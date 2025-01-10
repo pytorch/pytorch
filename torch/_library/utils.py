@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Union
 
 import torch
 import torch.utils._pytree as pytree

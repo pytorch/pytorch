@@ -10,7 +10,7 @@ import time
 import types
 import warnings
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch._dynamo

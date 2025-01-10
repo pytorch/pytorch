@@ -1,5 +1,5 @@
 import re
-from typing import Any, DefaultDict, Dict, List, Tuple, Union
+from typing import Any, DefaultDict, Dict, List, Union
 
 import numpy as np
 import sympy as sp

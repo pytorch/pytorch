@@ -3,7 +3,7 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import torch
 from torch import _linalg_utils as _utils, Tensor

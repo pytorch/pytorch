@@ -22,7 +22,6 @@ from typing import (
     List,
     Optional,
     overload,
-    Tuple,
     Type,
     TypeVar,
     Union,

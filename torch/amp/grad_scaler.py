@@ -5,7 +5,7 @@ import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, overload, Tuple, Union
+from typing import Any, cast, Dict, Iterable, List, Optional, overload, Union
 
 import torch
 

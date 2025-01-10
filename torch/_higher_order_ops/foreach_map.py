@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict
 
 from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
 

@@ -5,7 +5,7 @@ import operator
 import time
 from collections import defaultdict
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, cast, Dict, Iterable, List, Optional, Type
 
 import torch
 import torch.fx as fx

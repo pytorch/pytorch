@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch

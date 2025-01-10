@@ -18,7 +18,6 @@ from typing import (
     overload,
     Sequence,
     Set,
-    Tuple,
     TypeVar,
     Union,
 )

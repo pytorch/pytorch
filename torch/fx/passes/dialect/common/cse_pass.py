@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 import torch
 from torch.fx import Graph, GraphModule, Node

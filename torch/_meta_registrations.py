@@ -2,7 +2,7 @@
 import math
 from enum import Enum
 from functools import wraps
-from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

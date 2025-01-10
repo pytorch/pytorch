@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, NamedTuple, Tuple
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as pytree

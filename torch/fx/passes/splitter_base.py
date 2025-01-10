@@ -4,7 +4,7 @@ import copy
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence
 
 import torch
 from torch.fx._compatibility import compatibility

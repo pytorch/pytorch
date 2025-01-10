@@ -12,7 +12,7 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Sequence, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`

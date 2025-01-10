@@ -23,7 +23,6 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,

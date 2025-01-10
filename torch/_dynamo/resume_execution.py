@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,

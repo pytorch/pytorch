@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 import traceback
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils

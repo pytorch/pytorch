@@ -21,7 +21,7 @@ import sys
 import textwrap
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
+from typing import Any, Dict, Iterator, List, Optional, Set, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace

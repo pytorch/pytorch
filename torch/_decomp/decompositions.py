@@ -8,7 +8,7 @@ import sys
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Iterable, List, Optional, Union
 
 import torch
 import torch._meta_registrations

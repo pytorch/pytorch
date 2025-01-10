@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn

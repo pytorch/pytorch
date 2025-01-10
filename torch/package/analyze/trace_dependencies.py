@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Any, Callable, Iterable, List, Tuple
+from typing import Any, Callable, Iterable, List
 
 
 __all__ = ["trace_dependencies"]

@@ -2,7 +2,7 @@
 import collections
 import operator
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Set, Union
 
 import torch
 import torch.fx

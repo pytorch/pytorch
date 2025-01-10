@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import logging
-from typing import Any, Dict, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, Optional, Protocol, Union
 
 import torch
 from torch._library.utils import parse_namespace

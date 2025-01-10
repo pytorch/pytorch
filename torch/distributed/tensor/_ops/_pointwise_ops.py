@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Sequence, Tuple
+from typing import List, Sequence
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh

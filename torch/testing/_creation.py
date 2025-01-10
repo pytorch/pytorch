@@ -6,7 +6,7 @@ import collections.abc
 import functools
 import math
 import warnings
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, List, Optional, Union
 
 import torch
 

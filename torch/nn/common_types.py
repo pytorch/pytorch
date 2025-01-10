@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypeVar, Union
+from typing import Optional, TypeVar, Union
 
 from torch import Tensor
 

@@ -3,7 +3,7 @@ import inspect
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, List, Optional, Sequence
 
 import torch
 import torch.nn as nn

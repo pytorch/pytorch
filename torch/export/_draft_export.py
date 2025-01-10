@@ -2,7 +2,7 @@ import inspect
 import logging
 import os
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch._logging._internal

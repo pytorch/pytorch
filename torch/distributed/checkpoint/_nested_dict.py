@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Tuple
+from typing import Dict
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 

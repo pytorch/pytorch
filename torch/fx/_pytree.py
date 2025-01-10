@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type
 
 import torch.return_types
 from torch.utils._pytree import PyTree, TreeSpec

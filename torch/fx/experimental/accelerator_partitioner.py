@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import deque
-from typing import Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Deque, Dict, List, NamedTuple, Set
 
 import torch
 from torch.fx.experimental.partitioner_utils import (

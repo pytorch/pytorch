@@ -2,7 +2,7 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import torch
 import torch.fx._pytree as fx_pytree

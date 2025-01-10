@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import partial
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard

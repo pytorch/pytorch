@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.fx

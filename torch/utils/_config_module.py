@@ -21,7 +21,6 @@ from typing import (
     NoReturn,
     Optional,
     Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,

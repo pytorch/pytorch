@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 from torch import Tensor
 

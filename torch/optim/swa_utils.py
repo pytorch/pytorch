@@ -4,7 +4,7 @@ import itertools
 import math
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Literal, Optional, Union
 
 import torch
 from torch import Tensor

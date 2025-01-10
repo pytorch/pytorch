@@ -28,7 +28,7 @@ import functools
 import types
 import warnings
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Type
 
 import torch
 from torch._C import (

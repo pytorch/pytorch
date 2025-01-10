@@ -3,7 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from typing import Any, Callable, cast, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional, Sequence
 from typing_extensions import deprecated
 
 import torch

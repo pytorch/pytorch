@@ -4,7 +4,6 @@ import re
 import sys
 import time
 from functools import partial, wraps
-from typing import Tuple
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc

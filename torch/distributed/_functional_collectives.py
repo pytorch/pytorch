@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist

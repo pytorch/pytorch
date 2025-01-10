@@ -23,7 +23,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext

@@ -6,7 +6,7 @@ import re
 import sys
 import traceback
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 from typing_extensions import deprecated
 
 import torch

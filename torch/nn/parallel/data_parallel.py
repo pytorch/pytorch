@@ -2,7 +2,7 @@
 import operator
 import warnings
 from itertools import chain
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 import torch
 from torch._utils import (

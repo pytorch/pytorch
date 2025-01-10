@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 import torch.distributed.autograd as dist_autograd

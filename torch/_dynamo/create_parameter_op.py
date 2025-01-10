@@ -1,6 +1,6 @@
 import threading
 from contextlib import contextmanager
-from typing import Any, Generator, Tuple
+from typing import Any, Generator
 
 import torch
 

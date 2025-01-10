@@ -18,7 +18,6 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     Type,
     Union,
 )

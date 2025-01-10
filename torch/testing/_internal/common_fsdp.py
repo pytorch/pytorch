@@ -20,7 +20,6 @@ from typing import (
     List,
     no_type_check,
     Optional,
-    Tuple,
     Type,
     Union,
 )

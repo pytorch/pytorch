@@ -4,7 +4,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

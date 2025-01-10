@@ -2,7 +2,7 @@
 
 __all__ = ["svd_lowrank", "pca_lowrank"]
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import _linalg_utils as _utils, Tensor

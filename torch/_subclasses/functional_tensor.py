@@ -3,7 +3,7 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

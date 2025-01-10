@@ -118,7 +118,7 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 

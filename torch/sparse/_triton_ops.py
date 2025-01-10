@@ -4,7 +4,7 @@ import math
 import os
 import weakref
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once

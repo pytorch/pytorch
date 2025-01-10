@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
-from typing import Any, List, Tuple, cast
+from typing import Any, List, cast
 import random
 import torch
 import time

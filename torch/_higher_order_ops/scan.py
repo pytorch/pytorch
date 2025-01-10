@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List
 
 import torch
 import torch._prims_common as utils

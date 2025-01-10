@@ -9,7 +9,6 @@ from typing import (
     List,
     Optional,
     SupportsFloat,
-    Tuple,
     TypeVar,
     Union,
 )

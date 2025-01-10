@@ -30,7 +30,6 @@ from typing import (
     overload,
     Protocol,
     Sequence,
-    Tuple,
     Type,
     TYPE_CHECKING,
     TypeVar,

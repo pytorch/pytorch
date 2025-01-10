@@ -12,7 +12,7 @@ import sys
 import textwrap
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
-    Optional, Tuple, Union, TYPE_CHECKING)
+    Optional, Union, TYPE_CHECKING)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit

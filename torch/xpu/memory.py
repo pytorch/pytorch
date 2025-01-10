@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Union
 
 import torch
 from torch.types import Device

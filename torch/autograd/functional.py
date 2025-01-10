@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
+from typing import List
 
 import torch
 from torch._vmap_internals import _vmap

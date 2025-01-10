@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
+from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log

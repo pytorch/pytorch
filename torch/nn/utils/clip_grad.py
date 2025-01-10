@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import cast, Dict, Iterable, List, Optional, Tuple, Union
+from typing import cast, Dict, Iterable, List, Optional, Union
 from typing_extensions import deprecated
 
 import torch

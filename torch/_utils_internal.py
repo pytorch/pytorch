@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

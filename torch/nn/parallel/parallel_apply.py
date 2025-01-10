@@ -1,5 +1,5 @@
 import threading
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._utils import ExceptionWrapper

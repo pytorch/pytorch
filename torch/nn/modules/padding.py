@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Sequence, Tuple
+from typing import Sequence
 
 import torch.nn.functional as F
 from torch import Tensor
