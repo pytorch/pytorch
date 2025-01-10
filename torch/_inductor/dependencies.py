@@ -637,8 +637,8 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
         inner.store(
             entry.buffer_name,
             name_to_index[entry.index_name],
-            None,
-            entry.mode,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+            entry.mode,
         )
     for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
         inner.store_reduction(
@@ -655,7 +655,7 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
             None,
             (entry.buffer_name, None, None, None),
             None,
-            None,
+            None,  # type: ignore[arg-type]
             None,  # type: ignore[arg-type]
         )
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped

@@ -147,9 +147,9 @@ if try_import_cutlass():
                 "element_d": DataTypeTag[operation.D.element],  # type: ignore[name-defined]
                 "layout_d": LayoutTag[instance_layout_D],  # type: ignore[name-defined]
                 "element_accumulator": DataTypeTag[operation.accumulator_type()],  # type: ignore[name-defined]
-                "opcode_class": OpcodeClassTag[
+                "opcode_class": OpcodeClassTag[  # type: ignore[name-defined]
                     operation.tile_description.math_instruction.opcode_class
-                ],  # type: ignore[name-defined] # noqa: B950
+                ],
                 "arch": f"cutlass::arch::Sm{operation.arch:d}",
                 "tile_shape_m": str(operation.tile_description.tile_shape[0]),
                 "tile_shape_n": str(operation.tile_description.tile_shape[1]),
@@ -171,8 +171,8 @@ if try_import_cutlass():
                 ),
                 "kernel_schedule": str(KernelScheduleTag[operation.kernel_schedule]),  # type: ignore[name-defined]
                 "epilogue_schedule": str(
-                    EpilogueScheduleTag[operation.epilogue_schedule]
-                ),  # type: ignore[name-defined]
+                    EpilogueScheduleTag[operation.epilogue_schedule]  # type: ignore[name-defined]
+                ),
                 "epilogue_functor": epilogue_functor,
                 "stages": stage_count_string,
                 "align_a": str(operation.A.alignment),

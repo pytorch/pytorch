@@ -702,8 +702,8 @@ def _lower_static_weighted_ref_module(
             n,
             modules,
             qconfig_map,
-            matching_modules,
-            dequantize_node_arg_indices=[0],  # type: ignore[arg-type]
+            matching_modules,  # type: ignore[arg-type]
+            dequantize_node_arg_indices=[0],
         )
         if q_node is None:
             continue
