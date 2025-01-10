@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -132,6 +133,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.convert_element_type.no_fuse,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
@@ -141,7 +143,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
         last_non_output_use = collections.defaultdict(list)
-        seen_uses = set()
+        seen_uses = OrderedSet[torch.fx.Node]()
         output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
         for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]

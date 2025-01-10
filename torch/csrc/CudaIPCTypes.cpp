@@ -36,6 +36,10 @@ struct CudaIPCGlobalEntities {
   CudaIPCGlobalEntities() {
     alive = true;
   }
+  CudaIPCGlobalEntities(const CudaIPCGlobalEntities&) = delete;
+  CudaIPCGlobalEntities(CudaIPCGlobalEntities&&) = delete;
+  CudaIPCGlobalEntities& operator=(const CudaIPCGlobalEntities&) = delete;
+  CudaIPCGlobalEntities& operator=(CudaIPCGlobalEntities&&) = delete;
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
@@ -146,7 +150,6 @@ CudaIPCSentData::CudaIPCSentData(
     : handle_(std::move(handle)),
       offset_(offset),
       counter_ptr_(counter_ptr),
-      original_ptr_(),
       device_(device) {
 #if !defined(USE_ROCM)
   // CUDA have the unofficial limit on the number of recorded blocking
@@ -202,6 +205,7 @@ CudaIPCSentData::~CudaIPCSentData() {
       }
       cuda_ipc_global_entities.sync_events_used_--;
     }
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
 #endif
@@ -261,6 +265,6 @@ bool CudaIPCCollect() {
 
 namespace c10 {
 namespace {
-REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
+REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback)
 }
 } // namespace c10

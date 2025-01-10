@@ -235,7 +235,7 @@ at::Tensor fused_moving_avg_obs_fake_quant(
   if (self.sym_numel() == 0) {
     return self.clone();
   }
-  const auto res = at::_fused_moving_avg_obs_fq_helper(
+  auto res = at::_fused_moving_avg_obs_fq_helper(
       self,
       observer_on,
       fake_quant_on,
@@ -249,6 +249,6 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       ch_axis,
       per_row_fake_quant,
       symmetric_quant);
-  return std::get<0>(res);
+  return std::get<0>(std::move(res));
 }
 } // namespace at::native

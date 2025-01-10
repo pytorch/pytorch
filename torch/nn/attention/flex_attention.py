@@ -173,13 +173,13 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     return out
 
 
-def _dense_to_ordered(dense_mask) -> Tuple:
+def _dense_to_ordered(dense_mask) -> Tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
-        num_blocks_in_row.to(torch.int32).contiguous(),
-        col_indices.to(torch.int32).contiguous(),
+        num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
+        col_indices.to(torch.int32, memory_format=torch.contiguous_format),
     )
 
 
@@ -758,7 +758,9 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm = _dense_to_ordered(full_blocks)
+        full_bm: Tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+            full_blocks
+        )
     else:
         full_bm = (None, None)
 
@@ -969,12 +971,13 @@ def _nested_mod_func_adapter(
     if is_score_mod:
 
         def nt_score_mod(score, b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             return torch.where(
                 is_same_sequence,
-                orig_mod_func(score, b, h, q_nested, kv_nested),  # type: ignore[call-arg]
+                orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
                 # don't allow inter-sequence attention
                 float("-inf"),
             )
@@ -983,11 +986,12 @@ def _nested_mod_func_adapter(
     else:
 
         def nt_mask_mod(b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             # don't allow inter-sequence attention
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
+            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
 
         return nt_mask_mod
 
@@ -1083,6 +1087,8 @@ def _apply_kernel_options(
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
+    kernel_options.setdefault("WRITE_DQ", True)
 
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
@@ -1092,6 +1098,15 @@ def _apply_kernel_options(
         # we always write unless in no_grad
         output_logsumexp = torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+        any_inputs_on_cpu_device = (
+            query.device.type == "cpu"
+            or key.device.type == "cpu"
+            or value.device.type == "cpu"
+        )
+        if any_inputs_on_cpu_device:
+            # CPU with torch.compile now supports infernece, and will not return lse
+            # TODO: support CPU for training and return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     return kernel_options
 
@@ -1114,12 +1129,12 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
 
 
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
-    """TODO: Remove once non cuda device support is added
+    """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if query.device.type != "cuda":
+    if query.device.type != "cuda" and query.device.type != "cpu":
         raise ValueError(
-            "FlexAttention is only supported on CUDA devices. "
+            "FlexAttention is only supported on CUDA or CPU devices. "
             f"Found input tensors on {query.device.type} device."
         )
 

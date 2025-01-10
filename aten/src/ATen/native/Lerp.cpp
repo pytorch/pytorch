@@ -19,6 +19,7 @@ TORCH_META_FUNC(lerp_Tensor)(
   TORCH_CHECK(self.dtype() == weight.dtype(), "expected dtype ", self.dtype(),
               " for `weight` but got dtype ", weight.dtype());
   build(at::TensorIteratorConfig()
+        .allow_cpu_scalars(true)
         .add_output(maybe_get_output())
         .add_const_input(self)
         .add_const_input(end)

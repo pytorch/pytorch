@@ -1815,7 +1815,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
         self, is_impure_node: Optional[Callable[[Node], bool]] = None
-    ):
+    ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be

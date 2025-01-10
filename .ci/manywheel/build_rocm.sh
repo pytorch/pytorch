@@ -118,7 +118,7 @@ if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     fi
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBSUITESPARSE_CONFIG_PATH="/lib64/libsuitesparseconfig.so.4"
         if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
@@ -151,7 +151,7 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     fi
     LIBDRM_PATH="/usr/lib/x86_64-linux-gnu/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBCHOLMOD_PATH="/lib/x86_64-linux-gnu/libcholmod.so.3"
         # Below libs are direct dependencies of libcholmod
@@ -185,15 +185,6 @@ do
     file_name="${lib##*/}" # Substring removal of path to get filename
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
-
-# FIXME: Temporary until https://github.com/pytorch/pytorch/pull/137443 lands
-# Install AOTriton
-if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
-    cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
-    bash ${PYTORCH_ROOT}/.ci/docker/common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
-    export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
-    ROCM_SO_FILES+=("libaotriton_v2.so")
-fi
 
 # rocBLAS library files
 ROCBLAS_LIB_SRC=$ROCM_HOME/lib/rocblas/library

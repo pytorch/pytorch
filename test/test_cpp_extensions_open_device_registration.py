@@ -173,23 +173,16 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # check generator registered before using
         with self.assertRaisesRegex(
             RuntimeError,
-            "Please register a generator to the PrivateUse1 dispatch key",
+            "Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first",
         ):
             torch.Generator(device=device)
 
-        self.module.register_generator_first()
+        if self.module.is_register_hook() is False:
+            self.module.register_hook()
+
         gen = torch.Generator(device=device)
         self.assertTrue(gen.device == device)
 
-        # generator can be registered only once
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Only can register a generator to the PrivateUse1 dispatch key once",
-        ):
-            self.module.register_generator_second()
-
-        if self.module.is_register_hook() is False:
-            self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
@@ -276,7 +269,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertTrue(z.is_foo)
 
     def test_open_device_packed_sequence(self):
-        device = self.module.custom_device()
+        device = self.module.custom_device()  # noqa: F841
         a = torch.rand(5, 3)
         b = torch.tensor([1, 1, 1, 1, 1])
         input = torch.nn.utils.rnn.PackedSequence(a, b)
@@ -452,7 +445,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         with torch._subclasses.fake_tensor.FakeTensorMode.push():
             a = torch.empty(1, device="foo")
             b = torch.empty(1, device="foo:0")
-            result = a + b
+            result = a + b  # noqa: F841
 
     def test_open_device_named_tensor(self):
         torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
@@ -539,17 +532,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
     )
-    @unittest.skipIf(
-        np.__version__ >= "2.1",
-        "weights_only failure on numpy >= 2.1",
-    )
     def test_open_device_numpy_serialization(self):
         """
         This tests the legacy _rebuild_device_tensor_from_numpy serialization path
         """
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
-        default_protocol = torch.serialization.DEFAULT_PROTOCOL
 
         # Legacy data saved with _rebuild_device_tensor_from_numpy on f80ed0b8 via
 
@@ -601,7 +589,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         with safe_globals(
             [
-                np.core.multiarray._reconstruct,
+                (np.core.multiarray._reconstruct, "numpy.core.multiarray._reconstruct")
+                if np.__version__ >= "2.1"
+                else np.core.multiarray._reconstruct,
                 np.ndarray,
                 np.dtype,
                 _codecs.encode,

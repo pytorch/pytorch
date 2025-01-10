@@ -973,6 +973,11 @@ def _is_make_fx_tracing():
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
+
     Method described in the paper:
     `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
 

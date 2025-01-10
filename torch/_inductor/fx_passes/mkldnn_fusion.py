@@ -2,11 +2,12 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -390,17 +391,13 @@ if torch._C._has_mkldnn:
             assert computation_node.target == computation_op
             computation_node_size = get_meta_value(computation_node).size()
             if computation_op is mkldnn._linear_pointwise.default:
+                broadcast_sizes = []
                 if len(computation_node_size) >= 2:
                     broadcast_sizes = [
                         torch.Size(
                             [1 for _ in range(len(computation_node_size) - 1)]
                             + [computation_node_size[-1]]
                         ),
-                        torch.Size([1 for _ in range(len(computation_node_size))]),
-                    ]
-                else:
-                    broadcast_sizes = [
-                        torch.Size([1 for _ in range(len(computation_node_size))]),
                     ]
             else:
                 assert len(computation_node_size) > 2
@@ -466,7 +463,7 @@ if torch._C._has_mkldnn:
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
-            _visited_nodes = set()
+            _visited_nodes = OrderedSet[torch.fx.Node]()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
                 if _current_node not in _visited_nodes:
@@ -557,13 +554,10 @@ if torch._C._has_mkldnn:
         return fn
 
     def _can_be_inplace(_other):
-        if isinstance(_other.data, ir.View):
-            return _can_be_inplace(_other.data)
-        else:
-            return not (
-                isinstance(_other.data, ir.ReinterpretView)
-                or len(_other.data.get_inputs_that_alias_output()) > 0
-            )
+        return not (
+            isinstance(_other.data, ir.BaseView)
+            or len(_other.get_inputs_that_alias_output()) > 0
+        )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
@@ -1162,7 +1156,6 @@ if torch._C._has_mkldnn:
 
             graph = match.graph
             lstm_node = match.output_node()
-            input = args[0]
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
             packed_lstm_op = aten.mkldnn_rnn_layer.default
@@ -1277,7 +1270,7 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
+                packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
