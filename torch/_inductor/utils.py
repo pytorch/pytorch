@@ -391,26 +391,30 @@ def synchronize(device: str = "cuda") -> None:
         device_interface.synchronize()
 
 
+def timed(
+    model: Callable[..., Any], example_inputs: Sequence[Any], times: int = 1, device: str = "cuda"
+) -> float:
+    synchronize(device)
+    torch.manual_seed(1337)
+    t0 = time.perf_counter()
+    for _ in range(times):
+        result = model(*example_inputs)
+        synchronize(device)
+    t1 = time.perf_counter()
+    # GC the result after timing
+    assert result is not None  # type: ignore[possibly-undefined]
+    return t1 - t0
+
+
 def print_performance(
     model: Callable[..., Any],
+    example_inputs: Sequence[Any],
     times: int = 10,
     repeat: int = 10,
     baseline: float = 1.0,
     device: str = "cuda",
 ) -> float:
-    def timed() -> float:
-        synchronize(device)
-        torch.manual_seed(1337)
-        t0 = time.perf_counter()
-        for _ in range(times):
-            result = model()
-            synchronize(device)
-        t1 = time.perf_counter()
-        # GC the result after timing
-        assert result is not None  # type: ignore[possibly-undefined]
-        return t1 - t0
-
-    timings = torch.tensor([timed() for _ in range(repeat)])
+    timings = torch.tensor([timed(model, example_inputs, times, device) for _ in range(repeat)])
     took = torch.median(timings) / times
     print(f"{took / baseline:.6f}")
     return took.item()
