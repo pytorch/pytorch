@@ -13,7 +13,7 @@ import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 
 __all__ = ["parse_rendezvous_endpoint"]

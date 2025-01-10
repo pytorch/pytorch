@@ -4,7 +4,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed.checkpoint.metadata import (

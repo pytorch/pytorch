@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional, Set, Tuple
 
 import torch.nn as nn
 from torch.distributed.tensor.parallel._data_parallel_utils import (

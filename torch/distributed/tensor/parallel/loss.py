@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-from typing import cast, Dict, Optional
+from typing import cast, Dict, Optional, Tuple
 
 import torch
 import torch._prims_common as utils

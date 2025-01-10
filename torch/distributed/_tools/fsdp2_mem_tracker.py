@@ -1,7 +1,18 @@
 from copy import deepcopy
 from datetime import timedelta
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch

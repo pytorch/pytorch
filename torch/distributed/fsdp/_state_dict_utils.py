@@ -3,7 +3,17 @@ import contextlib
 import logging
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Generator, Iterator, List, no_type_check
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    Iterator,
+    List,
+    no_type_check,
+    Tuple,
+)
 
 import torch
 import torch.distributed as dist

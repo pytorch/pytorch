@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, List, Optional, Sequence, Union
+from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh

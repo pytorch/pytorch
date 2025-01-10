@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol

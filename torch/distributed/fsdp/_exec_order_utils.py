@@ -2,7 +2,7 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist

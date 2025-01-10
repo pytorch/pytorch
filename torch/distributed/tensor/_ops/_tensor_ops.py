@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Sized
+from typing import cast, List, Optional, Sequence, Sized, Tuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -63,6 +63,7 @@ register_op_strategy(
         aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
+        aten.view.dtype,
         aten.zero_.default,
     ]
 )(default_strategy)

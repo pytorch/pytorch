@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, overload, Union
+from typing import Any, Dict, Iterable, List, Optional, overload, Tuple, Union
 
 import torch
 import torch.distributed as dist

@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import torch
 from torch import fx

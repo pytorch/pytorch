@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import operator
-from typing import Any, cast, Dict, List, Optional, Sequence
+from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -229,7 +229,7 @@ def _mark_sharding(
                         op_schema,
                     )
                 else:
-                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(
+                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(  # type: ignore[assignment]
                         op_schema,
                     )
                 placement_strategies[node] = PlacementStrategy(

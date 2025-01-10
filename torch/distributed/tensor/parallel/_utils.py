@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Union
+from typing import Tuple, Union
 
 from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.tensor import DeviceMesh

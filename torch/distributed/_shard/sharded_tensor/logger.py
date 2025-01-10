@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import List
+from typing import List, Tuple
 
 from torch.distributed._shard.sharded_tensor.logging_handlers import _log_handlers
 

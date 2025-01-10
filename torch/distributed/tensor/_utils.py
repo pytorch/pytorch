@@ -1,4 +1,4 @@
-from typing import cast, List, Sequence
+from typing import cast, List, Sequence, Tuple
 
 import torch
 import torch.distributed.tensor._api as dtensor

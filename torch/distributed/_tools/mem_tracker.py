@@ -5,7 +5,18 @@ import warnings
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from typing_extensions import Self
 
 import torch

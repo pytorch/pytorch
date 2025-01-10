@@ -4,7 +4,7 @@ import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 from typing_extensions import Self
 
 import torch

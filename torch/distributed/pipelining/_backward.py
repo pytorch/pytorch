@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Union
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node

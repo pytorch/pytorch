@@ -10,7 +10,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Callable, Dict, Iterator, Optional
+from typing import Callable, Dict, Iterator, Optional, Tuple
 
 from torch.distributed import FileStore, Store, TCPStore
 

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import no_type_check, Optional
+from typing import no_type_check, Optional, Tuple
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor

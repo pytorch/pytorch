@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from functools import lru_cache
-from typing import cast, List, NamedTuple
+from typing import cast, List, NamedTuple, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol

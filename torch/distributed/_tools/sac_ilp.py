@@ -1,7 +1,7 @@
 import logging
 import math
 from enum import IntEnum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from torch.distributed._tools.ilp_utils import Graph, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats

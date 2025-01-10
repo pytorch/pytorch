@@ -10,7 +10,7 @@ Each should also handle single rank scenario.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Generic, List, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Generic, List, Optional, Tuple, TypeVar, Union
 
 import torch.distributed as dist
 

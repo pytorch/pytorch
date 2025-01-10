@@ -2,7 +2,17 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.nn as nn

@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from typing import cast, Dict, List, Optional, Sequence, Union
+from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist

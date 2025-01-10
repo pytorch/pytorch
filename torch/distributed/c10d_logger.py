@@ -9,7 +9,7 @@
 
 import functools
 import logging
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, Dict, List, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

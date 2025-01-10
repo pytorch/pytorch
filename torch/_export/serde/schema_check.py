@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -30,8 +30,8 @@ def _staged_schema():
     thrift_enum_defs: List[str] = []
     thrift_type_defs: Dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t, level: int) -> Tuple[str, str, str]:
+    def _handle_aggregate(ty) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        def dump_type(t, level: int) -> tuple[str, str, str]:
             CPP_TYPE_MAP = {
                 str: "std::string",
                 int: "int64_t",
@@ -125,7 +125,7 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[Dict[str, Any], str, Optional[str], str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None

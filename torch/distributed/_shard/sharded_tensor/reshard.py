@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.distributed as dist

@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, List, Optional, Type, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -435,6 +435,12 @@ def reduce_scatter_tensor_coalesced(
 # Today, this maps 1:1 with "aten ops that are views".
 def _is_view_op(tgt):
     assert isinstance(tgt, torch._ops.OpOverload)
+    # Don't apply the view optimization to any `CompositeImplicitAutograd` ops.
+    # See issue: https://github.com/pytorch/pytorch/issues/133421
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+        tgt.name(), torch.DispatchKey.CompositeImplicitAutograd
+    ):
+        return False
     schema = tgt._schema
     if len(schema.arguments) > 0:
         first_arg = schema.arguments[0]

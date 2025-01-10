@@ -422,7 +422,7 @@ std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || at::vec::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);

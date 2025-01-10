@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import partial
-from typing import Callable, List, Sequence, Union
+from typing import Callable, List, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
