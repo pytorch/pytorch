@@ -123,6 +123,7 @@ MetaType = Union[
     FakeTensor, int, torch.SymInt, float, torch.SymFloat, bool, torch.SymBool, ep.CustomObjArgument
 ]
 
+DEFAULT_PICKLE_PROTOCOL = 2
 
 ST_DELIMITER = ";"
 
@@ -326,7 +327,7 @@ def _reconstruct_fake_tensor(
     return fake_tensor
 
 
-def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
+def serialize_torch_artifact(artifact: Optional[Any], pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL) -> bytes:
     if artifact is None:
         return b""
 
@@ -342,7 +343,7 @@ def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
         # on the designated device.
         # For now, we simply move the tensor to cpu before saving.
         # TODO: this should be fixed by deserialization instead.
-        torch.save(artifact, buffer)
+        torch.save(artifact, buffer, pickle_protocol=pickle_protocol)
         return buffer.getvalue()
     finally:
         del copyreg.dispatch_table[FakeTensor]
@@ -479,24 +480,22 @@ class GraphModuleSerializer(metaclass=Final):
 
     def handle_placeholder(self, node: torch.fx.Node):
         assert node.op == "placeholder"
-        if isinstance(node.meta["val"], torch.Tensor):
-            graph_input = Argument.create(as_tensor=TensorArgument(name=node.name))
-            self.graph_state.tensor_values[node.name] = serialize_tensor_meta(
-                node.meta["val"]
-            )
-        elif isinstance(node.meta["val"], torch.SymInt):
-            raise AssertionError("SymInt graph input is not implemented yet.")
-        elif isinstance(node.meta["val"], torch.SymFloat):
+        val = node.meta["val"]
+        if isinstance(val, torch.Tensor):
+            graph_input = Argument.create(as_tensor=self.serialize_tensor_output(node.name, val))
+        elif isinstance(val, torch.SymInt):
+            graph_input = Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, val))
+        elif isinstance(val, torch.SymFloat):
             raise AssertionError("SymFloat graph input is not implemented yet.")
-        elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
-            graph_input = self.serialize_input(node.meta["val"])
-        elif isinstance(node.meta["val"], ep.CustomObjArgument):
-            class_fqn = node.meta["val"].class_fqn
+        elif isinstance(val, (int, bool, str, float, type(None))):
+            graph_input = self.serialize_input(val)
+        elif isinstance(val, ep.CustomObjArgument):
+            class_fqn = val.class_fqn
             graph_input = Argument.create(
                 as_custom_obj=CustomObjArgument(name=node.name, class_fqn=class_fqn)
             )
             self.graph_state.custom_obj_values[node.name] = (
-                self.serialize_script_obj_meta(node.meta["val"])
+                self.serialize_script_obj_meta(val)
             )
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
@@ -1425,12 +1424,14 @@ class GraphModuleSerializer(metaclass=Final):
 
 @final
 class ExportedProgramSerializer(metaclass=Final):
-    def __init__(self, opset_version: Optional[Dict[str, int]] = None):
+    def __init__(self, opset_version: Optional[Dict[str, int]] = None, pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
             self.opset_version.update(opset_version)
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
+
+        self.pickle_protocol = pickle_protocol
 
     def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
         """
@@ -1478,9 +1479,9 @@ class ExportedProgramSerializer(metaclass=Final):
         )
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(new_state_dict),
-            serialize_torch_artifact(constants),
-            serialize_torch_artifact(exported_program.example_inputs),
+            serialize_torch_artifact(new_state_dict, self.pickle_protocol),
+            serialize_torch_artifact(constants, self.pickle_protocol),
+            serialize_torch_artifact(exported_program.example_inputs, self.pickle_protocol),
         )
 
 
@@ -1703,13 +1704,23 @@ class GraphModuleDeserializer(metaclass=Final):
 
         # Inputs: convert to placeholder nodes in FX.
         for i, input_ in enumerate(serialized_graph.inputs):
-            if input_.type in ("as_tensor", "as_sym_int", "as_sym_float", "as_custom_obj"):
+            if input_.type in ("as_tensor", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
                 # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
                 # we will overwrite it
                 placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
+            elif input_.type == "as_sym_int":
+                if input_.value.type == "as_name":
+                    node_name = input_.value.as_name
+                    placeholder_node = self.graph.placeholder(node_name)
+                    # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                    # we will overwrite it
+                    placeholder_node.name = node_name
+                    self.sync_fx_node(node_name, placeholder_node)
+                else:
+                    raise SerializeError(f"Deserializing a constant symint {input_.value} as an input")
             elif input_.type in (
                 "as_int",
                 "as_float",
@@ -2490,8 +2501,9 @@ def _dataclass_to_dict(obj):
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> SerializedArtifact:
-    serialized_program = ExportedProgramSerializer(opset_version).serialize(
+    serialized_program = ExportedProgramSerializer(opset_version, pickle_protocol).serialize(
         exported_program
     )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
