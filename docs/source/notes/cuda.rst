@@ -216,6 +216,9 @@ Full FP16 Accmumulation in FP16 GEMMs
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
 in FP16, at the cost of numerical precision and greater likelihood of overflow.
+Note that this setting only has an effect on GPUs of compute-capability 7.0 (Volta)
+or newer.
+
 This behavior can be enabled via:
 
 .. code:: python

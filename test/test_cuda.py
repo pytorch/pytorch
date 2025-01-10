@@ -674,13 +674,9 @@ class TestCuda(TestCase):
 
     def test_cublas_allow_fp16_accumulation_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_accumulation
-        self.assertEqual(
-            torch._C._get_cublas_allow_fp16_accumulation(), orig
-        )
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
         torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
-        self.assertEqual(
-            torch._C._get_cublas_allow_fp16_accumulation(), not orig
-        )
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):

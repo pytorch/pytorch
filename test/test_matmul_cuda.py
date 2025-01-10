@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_WITH_ROCM,
-    skipIfRocm,
     TestCase,
 )
 
@@ -172,7 +171,7 @@ class TestMatmulCuda(TestCase):
         out = torch.baddbmm(a, b, c)
         out_cpu = torch.baddbmm(a.cpu(), b.cpu(), c.cpu())
         self.assertEqual(out, out_cpu, atol=1e-3, rtol=3e-3)
-        torch.backends.cuda.allow_fp16_accumulation = orig_fp16_accumulate
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
     @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})

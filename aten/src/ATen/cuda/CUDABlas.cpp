@@ -355,7 +355,8 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
     scaleType = CUDA_C_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
-    if (at::globalContext().allowFP16AccumulationCuBLAS()) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       halpha = alpha;
       hbeta = beta;
@@ -550,13 +551,6 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   void * alpha_ptr = &falpha;
   void * beta_ptr = &fbeta;
   auto compute_type = CUDA_R_32F;
-  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
-    halpha = alpha;
-    hbeta = beta;
-    compute_type = CUDA_R_16F;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
@@ -573,6 +567,13 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
                                    0, flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    halpha = alpha;
+    hbeta = beta;
+    compute_type = CUDA_R_16F;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
   if (prop->major >= 5){
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
       handle, opa, opb, m, n, k,
@@ -901,13 +902,6 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
   auto compute_type = CUDA_R_32F;
-  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
-    compute_type = CUDA_R_16F;
-    halpha = alpha;
-    hbeta = beta;
-    alpha_ptr = &halpha;
-    beta_ptr = &hbeta;
-  }
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
@@ -940,6 +934,13 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       flag)));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
+    compute_type = CUDA_R_16F;
+    halpha = alpha;
+    hbeta = beta;
+    alpha_ptr = &halpha;
+    beta_ptr = &hbeta;
+  }
   if (prop->major >= 5) {
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
     if (!at::globalContext().allowFP16ReductionCuBLAS()) {
@@ -1284,7 +1285,8 @@ void gemm_and_bias(
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
-    if (at::globalContext().allowFP16AccumulationCuBLAS()) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
       scaleType = CUDA_R_16F;
       halpha_val = alpha_val;
