@@ -48,7 +48,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
             print(
                 f"Train Epoch: {epoch} "
                 f"[{batch_idx * len(data)}/{len(train_loader.dataset)} "
-                f"({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}"
+                f"({100.0 * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}"
             )
             if args.dry_run:
                 break
@@ -75,7 +75,7 @@ def test(model, device, test_loader):
     print(
         f"\nTest set: Average loss: {test_loss:.4f}, "
         f"Accuracy: {correct}/{len(test_loader.dataset)} "
-        f"({100. * correct / len(test_loader.dataset):.0f}%)\n"
+        f"({100.0 * correct / len(test_loader.dataset):.0f}%)\n"
     )
 
 
