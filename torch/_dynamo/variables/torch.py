@@ -1215,7 +1215,7 @@ class TorchDispatchKeySetVariable(BaseTorchVariable):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
     def is_constant_fold_method(self, name):
