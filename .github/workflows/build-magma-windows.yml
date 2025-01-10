@@ -37,18 +37,8 @@ jobs:
       - name: Build MAGMA and push to S3
         run: .github/scripts/windows/build_magma.bat
       - name: Save as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: magma_*_cuda*_*.7z
-          name: artifact_${{ matrix.cuda_version }}_${{ matrix.config }}
-  push-windows-magma:
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-22.04
-    permissions:
-      id-token: write
-    needs: build-windows-magma
-    steps:
-      - name: Checkout PyTorch
+
+
         uses: actions/checkout@v4
       - name: Download all artifacts
         uses: actions/download-artifact@v4
