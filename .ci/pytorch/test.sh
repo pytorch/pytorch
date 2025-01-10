@@ -329,7 +329,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
-  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
@@ -534,7 +534,7 @@ test_perf_for_dashboard() {
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
