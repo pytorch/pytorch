@@ -8,7 +8,7 @@ import itertools
 import logging
 import types
 import warnings
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -615,7 +615,7 @@ def speculate_subgraph(
                 # The following code re-order the placeholders to
                 # O1, O2, O3, O4, O5, X1, X2, X3
                 def move_lifted_freevars_phs_to_end(
-                    graph: torch.fx.Graph, lifted_freevars: Tuple[torch.fx.Node]
+                    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
                 ):
                     lifted_ph_set = {
                         child_p.node for child_p in lifted_freevars.values()

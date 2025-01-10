@@ -1993,7 +1993,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(
             choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
-        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], Union[LazyBenchmark, float]]:
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
             timings = {}
             for choice in choices:
@@ -2038,7 +2038,15 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 timings[choice] = timing
 
-            return timings
+            # we want to convert all benchmark results into floats at this point,
+            # this will cause any lazy benchmarks to finalize (i.e. by executing
+            # a grouped benchmark).
+            finalized_timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = {
+                choice: float(timing)
+                for choice, timing in timings.items()
+            }
+
+            return finalized_timings
 
         def benchmark_in_sub_process(
             choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
@@ -2054,23 +2062,11 @@ class AlgorithmSelectorCache(PersistentCache):
             timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
 
-        def benchmark(
-            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
-        ) -> Dict[
-            Union[ExternKernelCaller, TritonTemplateCaller], float
-        ]:
-            if config.autotune_in_subproc:
-                maybe_lazy_benchmarks = benchmark_in_sub_process(choices)
-            else:
-                maybe_lazy_benchmarks = benchmark_in_current_process(choices)
-            # we want to convert all benchmark results into floats at this point,
-            # this will cause any lazy benchmarks to finalize (i.e. by executing
-            # a grouped benchmark).
-            timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = {
-                choice: float(timing)
-                for choice, timing in maybe_lazy_benchmarks.items()
-            }
-            return timings
+        benchmark = (
+            benchmark_in_sub_process
+            if config.autotune_in_subproc
+            else benchmark_in_current_process
+        )
 
         return benchmark
 
