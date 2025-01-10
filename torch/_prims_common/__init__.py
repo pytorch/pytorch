@@ -51,10 +51,10 @@ if TYPE_CHECKING:
     _IntLikeT = TypeVar("_IntLikeT", bound=_WorksWithInt)
 
 
-ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
-StrideType: TypeAlias = Union[List[int], Tuple[int, ...]]
-DimsType: TypeAlias = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType: TypeAlias = Union[List[int], Tuple[int, ...]]
+ShapeType: TypeAlias = Union[torch.Size, List[int], tuple[int, ...]]
+StrideType: TypeAlias = Union[List[int], tuple[int, ...]]
+DimsType: TypeAlias = Union[int, List[int], tuple[int, ...]]
+DimsSequenceType: TypeAlias = Union[List[int], tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
@@ -107,7 +107,7 @@ torch_function_passthrough = {
 
 TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
-TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorSequenceType: TypeAlias = Union[List[TensorLikeType], tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 
 CustomOutParamAnnotation = "__custom_out_param__"
@@ -224,7 +224,7 @@ def _check_strides_helper(
     only_cuda=True,
     significant_only=True,
     allow_rhs_unbacked=False,
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
@@ -245,7 +245,7 @@ def _check_strides_helper(
 
 def check_significant_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, allow_rhs_unbacked=False
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, Optional[int]]:
     return _check_strides_helper(
         a,
         b,
@@ -257,7 +257,7 @@ def check_significant_strides(
 
 def check_all_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, Optional[int]]:
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
@@ -549,7 +549,7 @@ def compute_elementwise_output_logical_to_physical_perm(
     return list(reversed(perm))
 
 
-def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     """
     Computes the output strides for elementwise operations.
     """
@@ -708,7 +708,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 @overload
 def canonicalize_dims(
     rank: int, indices: Sequence[int], wrap_scalar: bool = True
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     pass
 
 
@@ -854,20 +854,20 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 # Extracts dimensions that might be passed either as a list/tuple or as varargs.
 # A typical case is Tensor.permute .
 def extract_dims_from_varargs(
-    dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]
+    dims: Union[DimsSequenceType, tuple[DimsSequenceType, ...]]
 ) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
-        dims = cast(Tuple[DimsSequenceType], dims)
+        dims = cast(tuple[DimsSequenceType], dims)
         return dims[0]
     else:
         return cast(DimsSequenceType, dims)
 
 
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]],
+    shape: Union[ShapeType, tuple[ShapeType]],
     validate=True,
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     """
     Returns a shape from varargs.
 
@@ -895,7 +895,7 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
-def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
+def infer_size_shapes(a: ShapeType, b: ShapeType) -> tuple[int, ...]:
     ndim = max(len(a), len(b))
     expandedSizes = [0] * ndim
 
@@ -920,7 +920,7 @@ def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
     return tuple(expandedSizes)
 
 
-def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
+def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
     """
     Infers the size of a dim with size -1, if it exists.
     Also checks that new shape is compatible with the number of elements.
@@ -1417,7 +1417,7 @@ def expr_type(x: sympy.Basic) -> Type:
 def elementwise_dtypes(
     *_args,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-) -> Tuple[torch.dtype, torch.dtype]:
+) -> tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
     on the given arguments and with the given elementwise type promotion kind.
@@ -1601,7 +1601,7 @@ def reduction_dtypes(
     arg,
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
     dtype: Optional[torch.dtype] = None,
-) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+) -> tuple[torch.dtype, Optional[torch.dtype]]:
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -1628,7 +1628,7 @@ def reduction_dtypes(
 # batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> tuple[Union[_IntLikeT, int], ...]:
     """
     Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
@@ -1662,7 +1662,7 @@ def make_contiguous_strides_for(
 
 def make_channels_last_1d_strides_for(
     shape: Sequence[_IntLikeT],
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> tuple[Union[_IntLikeT, int], ...]:
     torch._check(
         len(shape) == 3,
         lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
@@ -1681,7 +1681,7 @@ def make_channels_last_1d_strides_for(
 
 def make_channels_last_2d_strides_for(
     shape: Sequence[_IntLikeT],
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> tuple[Union[_IntLikeT, int], ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
     torch._check(
         len(shape) == 4,
@@ -1701,7 +1701,7 @@ def make_channels_last_2d_strides_for(
 
 def make_channels_last_3d_strides_for(
     shape: Sequence[_IntLikeT],
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> tuple[Union[_IntLikeT, int], ...]:
     torch._check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
@@ -1720,7 +1720,7 @@ def make_channels_last_3d_strides_for(
 
 def make_channels_last_strides_for(
     shape: Sequence[_IntLikeT],
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> tuple[Union[_IntLikeT, int], ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
     if ndim == 3:
         return make_channels_last_1d_strides_for(shape)
@@ -1736,7 +1736,7 @@ def make_channels_last_strides_for(
 
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     for idx in dimensions:
         validate_idx(len(shape), idx)
 
@@ -1755,7 +1755,7 @@ def validate_no_repeating_dims(dims: Sequence):
         raise RuntimeError("duplicate value in the list of dims")
 
 
-def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
+def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)

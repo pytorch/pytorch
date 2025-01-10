@@ -173,7 +173,7 @@ def _construct_inputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
     node_name_map: Dict[str, torch.fx.Node],
-) -> Tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
+) -> tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
     tree_unflatten_args: List[Optional[torch.fx.Node]] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
@@ -230,7 +230,7 @@ def _deconstruct_outputs(
     signature: ModuleCallSignature,
     module_node: torch.fx.Node,
     node_name_map: Dict[str, torch.fx.Node],
-    orig_outputs: Tuple[torch.fx.Node, ...],
+    orig_outputs: tuple[torch.fx.Node, ...],
 ) -> None:
     from .unflatten import _generate_flatten_spec
 

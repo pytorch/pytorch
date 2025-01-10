@@ -82,7 +82,7 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
-DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
+DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
 def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:

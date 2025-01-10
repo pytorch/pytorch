@@ -21,7 +21,7 @@ def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
 def _gen_reshard_suggestions(
     op_schema: OpSchema,
     input_dims: List[str],
-    input_specs: Tuple[DTensorSpec, ...],
+    input_specs: tuple[DTensorSpec, ...],
     dim_to_sharding: Dict[str, int],
     pending_sum: List[int],
 ) -> OutputSharding:

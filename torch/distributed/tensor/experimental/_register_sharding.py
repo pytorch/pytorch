@@ -68,7 +68,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
 
     def custom_strategy(
         custom_sharding_fn: Callable[
-            ..., Sequence[Tuple[PlacementList, PlacementList]]
+            ..., Sequence[tuple[PlacementList, PlacementList]]
         ],
         mesh: DeviceMesh,
         op_schema: OpSchema,

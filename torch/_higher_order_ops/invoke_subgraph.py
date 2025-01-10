@@ -44,7 +44,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         identifier: Optional[str],
         operands: Union[
             List[Union[torch.Tensor, int, torch.SymInt]],
-            Tuple[Union[torch.Tensor, int, torch.SymInt]],
+            tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(

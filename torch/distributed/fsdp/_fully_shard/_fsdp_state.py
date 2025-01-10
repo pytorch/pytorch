@@ -90,7 +90,7 @@ class FSDPState(_State):
     # Define a separate init since `__init__` is called in the contract
     def init(
         self,
-        modules: Tuple[nn.Module, ...],
+        modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
     ) -> None:
@@ -118,8 +118,8 @@ class FSDPState(_State):
             self._post_forward_hook_handle = hook_handle
 
     def _root_pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
@@ -221,8 +221,8 @@ class FSDPState(_State):
 
     @disable_if_config_true
     def _pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:

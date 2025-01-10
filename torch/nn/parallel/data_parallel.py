@@ -200,7 +200,7 @@ class DataParallel(Module, Generic[T]):
 
     def scatter(
         self,
-        inputs: Tuple[Any, ...],
+        inputs: tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]],
         device_ids: Sequence[Union[int, torch.device]],
     ) -> Any:

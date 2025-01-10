@@ -50,7 +50,7 @@ def format_return_values_in_markdown(
 
 
 ModifierCallableType = Callable[
-    [infra.Diagnostic, Callable, Tuple[Any, ...], Dict[str, Any], Any], None
+    [infra.Diagnostic, Callable, tuple[Any, ...], Dict[str, Any], Any], None
 ]
 
 

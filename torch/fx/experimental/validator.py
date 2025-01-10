@@ -350,13 +350,13 @@ try:
             super().__init__(module, garbage_collect_values=True)
 
         def placeholder(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
         ) -> Any:
             symbol = fx_traceback.get_current_meta()["symbol"]
             return self.validator.z3var(symbol)
 
         def call_function(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
         ) -> Any:
             if target != torch._assert:
                 # Lift and runs the node target function

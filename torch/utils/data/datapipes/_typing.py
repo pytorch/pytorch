@@ -474,7 +474,7 @@ def reinforce_type(self, expected_type):
     hint to restrict the type requirement of DataPipe instance.
     """
     if isinstance(expected_type, tuple):
-        expected_type = Tuple[expected_type]
+        expected_type = tuple[expected_type]
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):

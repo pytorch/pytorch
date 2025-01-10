@@ -210,7 +210,7 @@ class Operand(NamedTuple):
     # This is always the PyTorch shape, which is NCHW for feature maps.
     # The actual NNAPI operand might have a transposed shape.
     # we use 0 for load time dynamic shapes & -1 for runtime dynamic shapes
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
 
     # Specifies how the shape of the operand that we define in NNAPI
     # relates to the shape we track above.

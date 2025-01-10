@@ -18,7 +18,7 @@ __all__ = [
     "legalize_graph",
 ]
 
-Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
+Tensors = Union[tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
 NodeList = List[torch.fx.Node]
 NodeSet = Set[torch.fx.Node]

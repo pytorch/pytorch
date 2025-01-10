@@ -11,7 +11,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     """
 
     @classmethod
-    def run(cls, src: str, package: str) -> List[Tuple[str, Optional[str]]]:
+    def run(cls, src: str, package: str) -> List[tuple[str, Optional[str]]]:
         visitor = cls(package)
         tree = ast.parse(src)
         visitor.visit(tree)

@@ -39,7 +39,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
 
     @staticmethod
     def __new__(
-        cls, local_shards: List[torch.Tensor], local_offsets: List[Tuple[int, ...]]
+        cls, local_shards: List[torch.Tensor], local_offsets: List[tuple[int, ...]]
     ) -> "LocalShardsWrapper":
         assert len(local_shards) > 0
         assert len(local_shards) == len(local_offsets)

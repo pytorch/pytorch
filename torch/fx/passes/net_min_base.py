@@ -106,7 +106,7 @@ class _MinimizerBase:
         module: torch.fx.GraphModule,
         sample_input: Tensors,
         compare_fn: Callable[
-            [TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]
+            [TensorOrTensors, TensorOrTensors, Names], tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
         module_exporter: Optional[
@@ -205,7 +205,7 @@ class _MinimizerBase:
 
     def _get_submod_inputs(
         self, main_module: torch.fx.GraphModule, submod_path: str
-    ) -> Tuple[Tensors, Tensors]:
+    ) -> tuple[Tensors, Tensors]:
         """
         Try get submodule inputs from stored outputs. If not found then use
         torch_glow.get_submod_inputs to get the inputs.
@@ -280,7 +280,7 @@ class _MinimizerBase:
             else:
                 node.tag = "main_0"
 
-    def _build_submodule(self, nodes: NodeSet) -> Tuple[torch.fx.GraphModule, str]:
+    def _build_submodule(self, nodes: NodeSet) -> tuple[torch.fx.GraphModule, str]:
         """
         Split self.module so that one submodule consists of `nodes` and only `nodes`.
 

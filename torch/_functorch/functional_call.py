@@ -157,7 +157,7 @@ def functional_call(
 @exposed_in("torch.func")
 def stack_module_state(
     models: Union[Sequence[nn.Module], nn.ModuleList],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -238,7 +238,7 @@ def stack_module_state(
 
 
 def construct_stacked_leaf(
-    tensors: Union[Tuple[Tensor, ...], List[Tensor]], name: str
+    tensors: Union[tuple[Tensor, ...], List[Tensor]], name: str
 ) -> Tensor:
     all_requires_grad = all(t.requires_grad for t in tensors)
     none_requires_grad = all(not t.requires_grad for t in tensors)

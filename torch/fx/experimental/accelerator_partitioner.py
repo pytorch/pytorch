@@ -177,7 +177,7 @@ def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
 
 def get_device_partition_stats(
     partitions: List[Partition], devices: List[Device]
-) -> Tuple[Dict[Device, List[Partition]], Dict[Device, int], List[Partition]]:
+) -> tuple[Dict[Device, List[Partition]], Dict[Device, int], List[Partition]]:
     """Given a list of partitions and a list of devices, returns:
     1. A mapping from device to partitions on it;
     2. A mapping from device to its remaining memory size;
@@ -675,7 +675,7 @@ class Partitioner:
             sorted_partitions: List[Partition],
             available_mem_bytes: int,
             partitions: List[Partition],
-        ) -> Tuple[bool, List[Partition]]:
+        ) -> tuple[bool, List[Partition]]:
             """step 1 in combine_partition_based_on_size()"""
             find_combination = False
             smallest_partition = sorted_partitions.pop(0)

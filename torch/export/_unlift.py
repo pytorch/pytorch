@@ -56,7 +56,7 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
     lifted_inputs: Sequence[Optional[str]],
-) -> Tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
+) -> tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
     graph

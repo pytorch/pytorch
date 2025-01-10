@@ -48,7 +48,7 @@ def _composable(module: nn.Module) -> bool:
 # `FlatParameter` registration, which is not needed for `use_orig_params=True`.
 def _get_fsdp_states_with_modules(
     module: nn.Module,
-) -> Tuple[List[_FSDPState], List[nn.Module]]:
+) -> tuple[List[_FSDPState], List[nn.Module]]:
     """
     Returns a tuple containing:
     1. A list of the ``_FSDPState`` instances in the module tree rooted at

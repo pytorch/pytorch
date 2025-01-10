@@ -231,7 +231,7 @@ def max_clock_rate():
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+def get_mast_job_name_version() -> Optional[tuple[str, int]]:
     return None
 
 

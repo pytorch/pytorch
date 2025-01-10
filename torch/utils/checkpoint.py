@@ -62,7 +62,7 @@ def set_checkpoint_debug_enabled(enabled: Optional[bool]):
         _checkpoint_debug_enabled = prev
 
 
-def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
+def detach_variable(inputs: tuple[Any, ...]) -> tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
         out = []
         for inp in inputs:
@@ -162,7 +162,7 @@ def _infer_device_type(*args):
 # the device of all Tensor args.
 #
 # To consider:  maybe get_device_states and set_device_states should reside in torch/random.py?
-def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
+def get_device_states(*args) -> tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
     fwd_device_ids = []
@@ -344,7 +344,7 @@ def checkpoint(
     function,
     *args,
     use_reentrant: Optional[bool] = None,
-    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    context_fn: Callable[[], tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     **kwargs
@@ -780,7 +780,7 @@ class _NoopSaveInputs(torch.autograd.Function):
         return torch.empty((0,))
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         # Only tensors can be saved with ctx.save_for_backward, everything else
         # is captured by get_args, which is saved directly on ctx
         tensor_indices, tensors = zip(
@@ -970,7 +970,7 @@ class CheckpointError(RuntimeError):
     pass
 
 
-def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[CheckpointError], None]]:
+def _get_debug_context_and_cb() -> tuple[Callable[[], Any], Callable[[CheckpointError], None]]:
     # This function returns the context_fn and error_cb to be used by the
     # checkpointing mechanism. error_cb is invoked when an error is detected
     # during unpack.
@@ -1421,7 +1421,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 def _checkpoint_without_reentrant_generator(
     fn,
     preserve_rng_state=True,
-    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    context_fn: Callable[[], tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     *args,

@@ -228,7 +228,7 @@ def _packed_sequence_init_args(
     batch_sizes: Optional[Tensor] = None,
     sorted_indices: Optional[Tensor] = None,
     unsorted_indices: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -347,7 +347,7 @@ def pad_packed_sequence(
     batch_first: bool = False,
     padding_value: float = 0.0,
     total_length: Optional[int] = None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     r"""Pad a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.

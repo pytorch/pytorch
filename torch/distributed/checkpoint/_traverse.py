@@ -19,7 +19,7 @@ from torch.distributed.tensor import DTensor
 
 
 PATH_ITEM = Union[str, int]
-OBJ_PATH = Tuple[PATH_ITEM, ...]
+OBJ_PATH = tuple[PATH_ITEM, ...]
 T = TypeVar("T")
 
 STATE_DICT_ITEM = object

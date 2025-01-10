@@ -182,8 +182,8 @@ class FuzzedTensor:
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
-        steps: Optional[Tuple[Union[str, int], ...]] = None,
+        size: tuple[Union[str, int], ...],
+        steps: Optional[tuple[Union[str, int], ...]] = None,
         probability_contiguous: float = 0.5,
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,

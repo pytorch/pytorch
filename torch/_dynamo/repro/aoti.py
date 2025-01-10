@@ -89,7 +89,7 @@ def save_graph_repro_ep(
     *,
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
-    args: Optional[Tuple[Any]] = None,
+    args: Optional[tuple[Any]] = None,
     config_patches: Optional[Dict[str, str]] = None,
     stable_output=False,
     save_dir=None,

@@ -810,7 +810,7 @@ def clone_inputs(args):
 
 def get_traced_sample_variant_pairs(device, dtype, op):
     # tuples of (variant, sample)
-    outputs: List[Tuple[Any, Any]] = []
+    outputs: List[tuple[Any, Any]] = []
 
     samples = op.sample_inputs(device, dtype)
 

@@ -126,7 +126,7 @@ def mkdtemp():
 
 
 _package_registry: List[
-    Tuple[
+    tuple[
         int,
         Callable[[STORAGE], Optional[str]],
         Callable[[STORAGE, str], Optional[STORAGE]],
@@ -263,14 +263,14 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def get_safe_globals() -> List[Union[Callable, tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
+def add_safe_globals(safe_globals: List[Union[Callable, tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
@@ -958,7 +958,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
+    serialized_storages: Dict[str, tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -1025,7 +1025,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 else:
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
-            view_metadata: Optional[Tuple[str, int, int]]
+            view_metadata: Optional[tuple[str, int, int]]
 
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)

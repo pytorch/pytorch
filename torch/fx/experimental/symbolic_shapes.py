@@ -235,8 +235,8 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: Tuple[Union[SymInt, int], int]
-) -> Tuple[int, Union[SymInt, int], int]:
+    tup: tuple[Union[SymInt, int], int]
+) -> tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
         # 1 here to order nested ints after non-nested-ints.
@@ -468,7 +468,7 @@ def resolve_unbacked_bindings(
     return {shape_env.unbacked_renamings.get(k, k): v for k, v in bindings.items()}
 
 
-Result: TypeAlias = Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+Result: TypeAlias = Union[torch.Tensor, tuple[torch.Tensor, ...]]
 
 
 def rebind_unbacked(
@@ -556,7 +556,7 @@ def rebind_unbacked(
                 and len(raw_u1.args) == 2
                 and (
                     raw_u1_args0 := cast(
-                        Tuple[sympy.Basic, sympy.Basic], raw_u1.args[0]
+                        tuple[sympy.Basic, sympy.Basic], raw_u1.args[0]
                     )
                 )
                 and raw_u1_args0[0] == 1
@@ -564,7 +564,7 @@ def rebind_unbacked(
                 and isinstance(new_raw_u1 := eq.lhs, sympy.Symbol)
                 and shape_env.var_to_range[new_raw_u1].issubset(ValueRanges(0, 1))
                 and eq.rhs == 1
-                and cast(Tuple[sympy.Basic, sympy.Basic], raw_u1.args[1]) == (0, True)
+                and cast(tuple[sympy.Basic, sympy.Basic], raw_u1.args[1]) == (0, True)
             ):
                 # This is what the pattern match above is testing
                 repacked = _sympy_cast_symbool_to_symint_guardless(
@@ -1605,9 +1605,9 @@ class EqualityConstraint(Constraint):
     form and so the problem reduces to symbolic expression equality.)
     """
 
-    source_pairs: List[Tuple[Source, Source]]
+    source_pairs: List[tuple[Source, Source]]
     derived_equalities: List[
-        Tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]
+        tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]
     ]
     phantom_symbols: List[sympy.Symbol]
     relaxed_sources: Set[Source]
@@ -1863,7 +1863,7 @@ def is_symbolic(
 IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 
-def _expandsums(args: List[sympy.Expr]) -> Tuple[sympy.Expr, bool]:
+def _expandsums(args: List[sympy.Expr]) -> tuple[sympy.Expr, bool]:
     adds, other = [], []
     for arg in args:
         if arg.is_Add:
@@ -1940,7 +1940,7 @@ def safe_expand(r: _SympyT) -> _SympyT:
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: _SympyT,
-    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
+    symbol_info: tuple[tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
     unbacked_only: bool,
     size_oblivious: bool,
 ) -> Optional[_SympyT]:
@@ -2291,7 +2291,7 @@ class DimConstraints:
         self._multivariate_inequalities: Set[SympyBoolean] = set()
 
         # We park external equalities between free variables here.
-        self._symbolic_equivalences: List[Tuple[Source, sympy.Expr]] = []
+        self._symbolic_equivalences: List[tuple[Source, sympy.Expr]] = []
 
         # Solutions come in two forms:
         # - (static) specializations
@@ -2836,7 +2836,7 @@ class DimConstraints:
     def prettify_results(
         self,
         original_signature: inspect.Signature,
-        dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+        dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any]],
         constraint_violation_error: object,
         forced_specializations: Dict[str, str],
     ) -> str:
@@ -3263,7 +3263,7 @@ class ShapeEnv:
         #   2. list of arguments
         # This drastically reduces the size of the FX graph, avoiding
         # duplicated nodes.
-        self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
+        self.fx_node_cache: Dict[tuple[Callable, tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
         # Suppose you want to replace an unbacked symbol with another
@@ -3614,7 +3614,7 @@ class ShapeEnv:
         self,
         op: Callable,
         args: Tuple,
-    ) -> Tuple[Optional[torch.fx.Node], bool]:
+    ) -> tuple[Optional[torch.fx.Node], bool]:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
         # Flags whether the returned node was cached or not.
@@ -3704,7 +3704,7 @@ class ShapeEnv:
         """Context manager to ignore all guards generated inside"""
         return _suppress_guards(self)
 
-    def _get_key(self) -> Tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -3778,9 +3778,9 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> Tuple[
-        Tuple[Union[int, SymInt], ...],
-        Tuple[Union[int, SymInt], ...],
+    ) -> tuple[
+        tuple[Union[int, SymInt], ...],
+        tuple[Union[int, SymInt], ...],
         Union[int, SymInt],
     ]:
         """
@@ -3865,9 +3865,9 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> Tuple[
-        Tuple[Union[int, SymInt], ...],
-        Tuple[Union[int, SymInt], ...],
+    ) -> tuple[
+        tuple[Union[int, SymInt], ...],
+        tuple[Union[int, SymInt], ...],
         Union[int, SymInt],
     ]:
         dim = len(ex_size)
@@ -4573,7 +4573,7 @@ class ShapeEnv:
         _simplified: bool = False,
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
-    ) -> Tuple[List[str], List[str]]:  # python, verbose
+    ) -> tuple[List[str], List[str]]:  # python, verbose
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -4708,7 +4708,7 @@ class ShapeEnv:
         symbol_to_constraints: DefaultDict[
             sympy.Symbol, Set[Constraint]
         ] = collections.defaultdict(set)
-        constraint_violations: List[Tuple[bool, str, Callable[[], str]]] = []
+        constraint_violations: List[tuple[bool, str, Callable[[], str]]] = []
 
         py_printer = ShapeGuardPythonPrinter(
             symbol_to_source, source_ref, self.var_to_sources
@@ -4918,7 +4918,7 @@ class ShapeEnv:
                 # For subclasses, we need to track symints on BOTH the outer
                 # and inner tensors.
                 # TODO: type this better
-                sources_tensors_constraints: List[Tuple[Source, Any, Any, Any]] = [
+                sources_tensors_constraints: List[tuple[Source, Any, Any, Any]] = [
                     (source, t, context.constraint_sizes, context.constraint_strides)
                 ]
                 attrs, _ = t.__tensor_flatten__()
@@ -5450,9 +5450,9 @@ class ShapeEnv:
     @_lru_cache
     def get_axioms(
         self,
-        symbols: Optional[Tuple[sympy.Symbol]] = None,
+        symbols: Optional[tuple[sympy.Symbol]] = None,
         compute_hint: bool = False,
-    ) -> Tuple[SympyBoolean, ...]:
+    ) -> tuple[SympyBoolean, ...]:
         """
         Given the symbols in an expression, it returns all the runtime asserts that have those symbols
         concatenated with all the guards.
@@ -5480,7 +5480,7 @@ class ShapeEnv:
     @lru_cache(None)
     def get_implications(
         self, e: SympyBoolean
-    ) -> Tuple[Tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
+    ) -> tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
         """Given a expression, it returns a list of predicates that follow from it"""
         equiv: Dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
@@ -5526,8 +5526,8 @@ class ShapeEnv:
         unbacked_only: bool = False,
         compute_hint: bool = False,
         size_oblivious: bool = False,
-        axioms: Optional[Tuple[SympyBoolean]] = None,
-        var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None,
+        axioms: Optional[tuple[SympyBoolean]] = None,
+        var_to_range: Optional[tuple[tuple[sympy.Symbol, ValueRanges]]] = None,
     ) -> Optional[sympy.Basic]:
         """
         Tries to evaluate expr without introducing guards
@@ -6070,7 +6070,7 @@ class ShapeEnv:
         # Prefer to simplify out lexicographically higher symbols (i.e. simplify out s4 over s3).
         #   (NB: this unfortunately isn't strictly equivalent to simplifying out newer symbols)
         # Prefer to simplify out symbols with ephemeral sources.
-        def _smart_symbol_sort(x: sympy.Symbol) -> Tuple[int, int, str]:
+        def _smart_symbol_sort(x: sympy.Symbol) -> tuple[int, int, str]:
             has_only_ephemeral_sources = x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
@@ -6238,7 +6238,7 @@ class ShapeEnv:
 
     def _get_stack_summary(
         self, is_debug: bool = False, framework_loc: Optional[str] = None
-    ) -> Tuple[SLoc, str]:
+    ) -> tuple[SLoc, str]:
         floc: Optional[Union[str, traceback.FrameSummary]] = framework_loc
         if floc is None:
             frame = inspect.currentframe()

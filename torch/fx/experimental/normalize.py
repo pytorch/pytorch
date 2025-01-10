@@ -66,9 +66,9 @@ class NormalizeArgs(Transformer):
     def call_function(
         self,
         target: Target,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Any],
-        arg_types: Optional[Tuple[Any, ...]] = None,
+        arg_types: Optional[tuple[Any, ...]] = None,
         kwarg_types: Optional[Dict[str, Any]] = None,
     ):
         assert callable(target)
@@ -89,7 +89,7 @@ class NormalizeArgs(Transformer):
             return super().call_function(target, args, kwargs)
 
     def call_module(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ):
         assert isinstance(target, str)
         new_args_and_kwargs = normalize_module(
@@ -142,7 +142,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
     }
 
     def call_function(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ):
         # Normalize operators according to the magic methods implemented on tensors here:
         # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950

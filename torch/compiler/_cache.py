@@ -102,7 +102,7 @@ class CacheArtifactManager:
         cls._cache_artifacts.append(CacheArtifact(artifact_type, key, content))
 
     @classmethod
-    def serialize(cls) -> Optional[Tuple[bytes, CacheInfo]]:
+    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
         """
         Converts the "mega" list into portable format
         """

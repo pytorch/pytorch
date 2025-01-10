@@ -24,12 +24,12 @@ _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+    tuple[Callable[[], None], List[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:

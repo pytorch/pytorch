@@ -34,7 +34,7 @@ def scatter(
     inputs: torch.Tensor,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     ...
 
 
@@ -79,11 +79,11 @@ def scatter(inputs, target_gpus, dim=0):
 
 
 def scatter_kwargs(
-    inputs: Tuple[Any, ...],
+    inputs: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]],
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
-) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
+) -> tuple[tuple[Any, ...], tuple[Dict[str, Any], ...]]:
     r"""Scatter with support for kwargs dictionary."""
     scattered_inputs = scatter(inputs, target_gpus, dim) if inputs else []
     scattered_kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []

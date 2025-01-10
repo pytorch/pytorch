@@ -15,7 +15,7 @@ except Exception:
         return False
 
 
-LayoutsType = Union[Placement, Tuple[Placement, ...]]
+LayoutsType = Union[Placement, tuple[Placement, ...]]
 
 
 def _deprecate_warnings(func_name: str, extra_msg: str) -> None:

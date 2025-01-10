@@ -9,7 +9,7 @@ from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_un
 
 
 in_dims_t = Union[int, Tuple]
-out_dims_t = Union[int, Tuple[int, ...]]
+out_dims_t = Union[int, tuple[int, ...]]
 
 
 # Checks that all args-to-be-batched have the same batch dim size
@@ -30,7 +30,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -57,7 +57,7 @@ def _create_batched_inputs(
     args: Tuple,
     vmap_level: int,
     func: Callable,
-) -> Tuple[Tuple, int]:
+) -> tuple[Tuple, int]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -114,7 +114,7 @@ def _create_batched_inputs(
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
+    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,

@@ -39,7 +39,7 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Union[Optional[Sequence[Tuple[Any, ...]]], Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
+        inputs: Union[Optional[Sequence[tuple[Any, ...]]], Dict[Callable, Optional[Sequence[tuple[Any, ...]]]]],
         info: Optional[Union[List[str], Dict[Callable, List[str]]]] = None,
         *,
         _receive_inflate_expr: Optional[List[str]] = None,
@@ -127,7 +127,7 @@ def bundle_inputs(
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
+        inputs: Optional[Sequence[tuple[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
         skip_size_check=False,
@@ -181,7 +181,7 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
+        inputs: Dict[Callable, Optional[Sequence[tuple[Any, ...]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
         skip_size_check=False,
@@ -363,7 +363,7 @@ def augment_many_model_functions_with_bundled_inputs(
 
 def _inflate_expr(
     arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False
-) -> Tuple[Union[T, torch.Tensor], str, Optional[str]]:
+) -> tuple[Union[T, torch.Tensor], str, Optional[str]]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
     # Or just use "{}" as the format string to ignore size limits.
@@ -409,7 +409,7 @@ def _inflate_expr(
     else:
         return arg, ref, None
 
-def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str], List[str]]:
+def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> tuple[List[str], List[str]]:
     methods: List[str] = []
     attributes: List[str] = []
 

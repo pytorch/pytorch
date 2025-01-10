@@ -24,7 +24,7 @@ class TensorMetadata(NamedTuple):
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     memory_format: Optional[torch.memory_format]
 
     # Quantization metadata

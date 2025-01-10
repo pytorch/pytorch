@@ -23,7 +23,7 @@ class AdamW(Adam):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,

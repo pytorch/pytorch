@@ -159,7 +159,7 @@ class CaptureStructuredTrace(logging.Handler):
     def __init__(self, specific_log_keys: List[str]):
         super().__init__()
         self.specific_log_keys = specific_log_keys
-        self.logs: List[Tuple[str, Dict[str, Any]]] = []
+        self.logs: List[tuple[str, Dict[str, Any]]] = []
         self.logger = logging.getLogger("torch.__trace")
         self.prev_get_dtrace = False
 
@@ -185,14 +185,14 @@ class CaptureStructuredTrace(logging.Handler):
 
 def draft_export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = False,
-) -> Tuple[ExportedProgram, DraftExportReport]:
+) -> tuple[ExportedProgram, DraftExportReport]:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 
@@ -239,7 +239,7 @@ def draft_export(
         }
         failures: List[FailureReport] = []
         custom_ops_logs: Dict[
-            Any, Tuple[Dict[str, Any], FailureType]
+            Any, tuple[Dict[str, Any], FailureType]
         ] = {}  # Dedup custom ops
         data_dependent_logs: Dict[
             str, Dict[str, Any]

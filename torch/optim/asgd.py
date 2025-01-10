@@ -340,7 +340,7 @@ def _multi_tensor_asgd(
             torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
-        intermediate: Union[Tuple[Tensor, ...], List[Tensor]]
+        intermediate: Union[tuple[Tensor, ...], List[Tensor]]
         if weight_decay != 0:
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
@@ -375,8 +375,8 @@ def _multi_tensor_asgd(
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
         del intermediate
 
-        new_etas: Union[Tuple[Tensor, ...], List[Tensor]]
-        new_mus: Union[Tuple[Tensor, ...], List[Tensor]]
+        new_etas: Union[tuple[Tensor, ...], List[Tensor]]
+        new_mus: Union[tuple[Tensor, ...], List[Tensor]]
         if capturable:
             # update grouped_mus
             new_mus = torch._foreach_sub(grouped_state_steps, t0)

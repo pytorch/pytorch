@@ -49,7 +49,7 @@ def _is_float_or_complex_tensor(obj):
 
 def _allocate_jacobians_with_inputs(
     input_tensors: Tuple, numel_output
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from inputs. If `numel_output` is not None, for
     # each tensor in `input_tensors`, returns a new zero-filled tensor with height
     # of `t.numel` and width of `numel_output`. Otherwise, for each tensor, returns
@@ -65,7 +65,7 @@ def _allocate_jacobians_with_inputs(
 
 def _allocate_jacobians_with_outputs(
     output_tensors: Tuple, numel_input, dtype=None, device=None
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from outputs. If `dim` is not None, for each tensor
     # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
     # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
@@ -258,7 +258,7 @@ def _iter_tensor(x_tensor):
 
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
-) -> List[Tuple[torch.Tensor, ...]]:
+) -> List[tuple[torch.Tensor, ...]]:
     """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`.
 
     If not specified, targets are the input. Returns M * N Jacobians where N is the
@@ -281,7 +281,7 @@ def _get_numerical_jacobian(
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    jacobians: List[Tuple[torch.Tensor, ...]] = []
+    jacobians: List[tuple[torch.Tensor, ...]] = []
     if outputs is None:
         outputs = _as_tuple(fn(*_as_tuple(inputs)))
     if not is_forward_ad and any(o.is_complex() for o in outputs):
@@ -413,7 +413,7 @@ def _compute_numerical_jvps_wrt_specific_input(
 
 def _combine_jacobian_cols(
     jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input, numel
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # jacobian_cols maps column_idx -> output_idx -> single column of jacobian Tensor
     # we return a list that maps output_idx -> full jacobian Tensor
     jacobians = _allocate_jacobians_with_outputs(
@@ -467,7 +467,7 @@ def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None
 
 def get_numerical_jacobian_wrt_specific_input(
     fn, input_idx, inputs, outputs, eps, input=None, is_forward_ad=False
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. We use a dictionary for
     # jacobian_cols because indices aren't necessarily consecutive for sparse inputs
@@ -493,7 +493,7 @@ def get_numerical_jacobian_wrt_specific_input(
 
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
-) -> Tuple[Tuple[torch.Tensor, ...], ...]:
+) -> tuple[tuple[torch.Tensor, ...], ...]:
     """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
 
     Return N * M Jacobians where N is the number of tensors in target that require grad and
@@ -712,7 +712,7 @@ def _check_jacobians_equal(j1, j2, atol):
 
 def _stack_and_check_tensors(
     list_of_list_of_tensors, inputs, numel_outputs
-) -> Tuple[Tuple[torch.Tensor, ...], bool, bool]:
+) -> tuple[tuple[torch.Tensor, ...], bool, bool]:
     # For the ith tensor in the inner list checks whether it has the same size and
     # dtype as the ith differentiable input.
     out_jacobians = _allocate_jacobians_with_inputs(inputs, numel_outputs)
@@ -757,7 +757,7 @@ If the test
 
 def _check_analytical_jacobian_attributes(
     inputs, output, nondet_tol, check_grad_dtypes, fast_mode=False, v=None
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     # This is used by both fast and slow mode:
     #  - For slow mode, vjps[i][j] is the jth row of the Jacobian wrt the ith
     #    input.

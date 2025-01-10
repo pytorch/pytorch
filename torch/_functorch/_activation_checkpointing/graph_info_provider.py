@@ -21,7 +21,7 @@ class GraphInfoProvider:
     def __init__(
         self,
         graph_nodes_in_order: List[str],
-        graph_edges: List[Tuple[str, str]],
+        graph_edges: List[tuple[str, str]],
         all_recomputable_banned_nodes: List[str],
         all_node_runtimes: Optional[Dict[str, float]] = None,
         all_node_memories: Optional[Dict[str, float]] = None,

@@ -42,7 +42,7 @@ __all__ = [
     "Module",
 ]
 
-_grad_t = Union[Tuple[Tensor, ...], Tensor]
+_grad_t = Union[tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -1580,10 +1580,10 @@ class Module:
     def register_forward_pre_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, tuple[Any, ...]], Optional[Any]],
             Callable[
-                [T, Tuple[Any, ...], Dict[str, Any]],
-                Optional[Tuple[Any, Dict[str, Any]]],
+                [T, tuple[Any, ...], Dict[str, Any]],
+                Optional[tuple[Any, Dict[str, Any]]],
             ],
         ],
         *,
@@ -1646,8 +1646,8 @@ class Module:
     def register_forward_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
         ],
         *,
         prepend: bool = False,
@@ -2632,7 +2632,7 @@ class Module:
 
     def named_parameters(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Parameter]]:
+    ) -> Iterator[tuple[str, Parameter]]:
         r"""Return an iterator over module parameters, yielding both the name of the parameter as well as the parameter itself.
 
         Args:
@@ -2687,7 +2687,7 @@ class Module:
 
     def named_buffers(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[tuple[str, Tensor]]:
         r"""Return an iterator over module buffers, yielding both the name of the buffer as well as the buffer itself.
 
         Args:
@@ -2725,7 +2725,7 @@ class Module:
         for _name, module in self.named_children():
             yield module
 
-    def named_children(self) -> Iterator[Tuple[str, "Module"]]:
+    def named_children(self) -> Iterator[tuple[str, "Module"]]:
         r"""Return an iterator over immediate children modules, yielding both the name of the module as well as the module itself.
 
         Yields:

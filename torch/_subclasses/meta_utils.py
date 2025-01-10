@@ -579,7 +579,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     # throw an error, but we don't currently have any subclasses that do this
     # except C++ nested tensor but we're going to have nested int to make this
     # defined on NJT
-    size: Tuple[int, ...]
+    size: tuple[int, ...]
     dynamo_dynamic_indices: List[int]
 
     layout: torch.layout = torch.strided
@@ -603,7 +603,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_conj: bool = False
     is_neg: bool = False
     is_parameter: bool = False
-    stride: Optional[Tuple[int, ...]] = None
+    stride: Optional[tuple[int, ...]] = None
     storage_offset: int = 0
     # NB: We have a choice whether or not to store the id or a direct pointer
     # to the data structure.  For ease of use, we store the data structure,
@@ -706,7 +706,7 @@ class MetaTensorDesc(Generic[_TensorT]):
         return r
 
     @property
-    def shape(self) -> Tuple[int, ...]:
+    def shape(self) -> tuple[int, ...]:
         return self.size
 
 
@@ -893,7 +893,7 @@ class MetaConverter(Generic[_TensorT]):
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
-        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
+        ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
             assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
@@ -948,8 +948,8 @@ class MetaConverter(Generic[_TensorT]):
         # symbolic context.
         def empty_create_subclass(
             t: MetaTensorDesc,
-            outer_size: Tuple[int, ...],
-            outer_stride: Tuple[int, ...],
+            outer_size: tuple[int, ...],
+            outer_stride: tuple[int, ...],
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
@@ -981,8 +981,8 @@ class MetaConverter(Generic[_TensorT]):
 
             def _empty_create_subclass(
                 t: MetaTensorDesc,
-                outer_size: Optional[Tuple[int, ...]],
-                outer_stride: Optional[Tuple[int, ...]],
+                outer_size: Optional[tuple[int, ...]],
+                outer_stride: Optional[tuple[int, ...]],
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],

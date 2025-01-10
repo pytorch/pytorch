@@ -100,7 +100,7 @@ def fuse_as_graphmodule(
     partition_lookup_table: _Optional[Dict[Node, None]] = None,
     *,
     always_return_tuple: bool = False,
-) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
+) -> tuple[GraphModule, tuple[Node, ...], tuple[Node, ...]]:
     """
     Fuse nodes in graph_module into a GraphModule.
 
@@ -202,10 +202,10 @@ def fuse_as_graphmodule(
     )
 
     # sub_gm's input nodes in the original module
-    original_inputs: Tuple[Node, ...] = tuple(node_to_placeholder.keys())
+    original_inputs: tuple[Node, ...] = tuple(node_to_placeholder.keys())
 
     # sub_gm's outputs node in the original module
-    original_outputs: Tuple[Node, ...] = tuple(output_mapping.keys())
+    original_outputs: tuple[Node, ...] = tuple(output_mapping.keys())
 
     return fused_gm, original_inputs, original_outputs
 
@@ -214,8 +214,8 @@ def fuse_as_graphmodule(
 def insert_subgm(
     gm: GraphModule,
     sub_gm: GraphModule,
-    orig_inputs: Tuple[Node, ...],
-    orig_outputs: Tuple[Node, ...],
+    orig_inputs: tuple[Node, ...],
+    orig_outputs: tuple[Node, ...],
 ):
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__

@@ -51,7 +51,7 @@ from torch.futures import Future
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
 
-BuiltinUnionType: Union[Type, Tuple[Type, ...]]
+BuiltinUnionType: Union[Type, tuple[Type, ...]]
 if sys.version_info >= (3, 10):
     # NOTE: IS_PY310_PLUS doesn't work with mypy.
     # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
@@ -225,7 +225,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
-    def parseNestedExpr(expr, module) -> Tuple[Any, int]:
+    def parseNestedExpr(expr, module) -> tuple[Any, int]:
         i = 0
         while i < len(expr) and expr[i] not in (",", "[", "]"):
             i += 1
@@ -1042,7 +1042,7 @@ def _clear_fn_overloads(qual_name) -> None:
     del _overloaded_fns[qual_name]
 
 
-def get_class_name_lineno(method) -> Tuple[str, int]:
+def get_class_name_lineno(method) -> tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
@@ -1072,7 +1072,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
+_overloaded_method_class_fileno: Dict[tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -1325,7 +1325,7 @@ def _create_named_tuple(
     t,
     unqual_name: str,
     field_names: List[str],
-    defaults: Tuple[Any, ...],
+    defaults: tuple[Any, ...],
 ):
     TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)

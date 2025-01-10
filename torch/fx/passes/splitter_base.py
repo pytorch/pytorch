@@ -757,7 +757,7 @@ class _SplitterBase:
     # Helpers for split() method
     # ===============================================================
 
-    def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
+    def starter_nodes(self) -> tuple[NodeSet, NodeSet]:
         """
         Finds nodes that consume module inputs or get_attr nodes.
         """

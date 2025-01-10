@@ -47,7 +47,7 @@ class ExtraOpData:
     # Returns: tuple of (single dim argname if available, dim list argname if available)
     # If the op doesn't support dim-related args at all OR this op only has overloads
     # with multiple dim args (e.g. transpose()), then this returns (None, None).
-    def get_dim_argnames(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_dim_argnames(self) -> tuple[Optional[str], Optional[str]]:
         if self.dim_args is None:
             return (None, None)
 

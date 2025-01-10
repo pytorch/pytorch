@@ -85,7 +85,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[Tuple[int, ...]],
+        stride: Optional[tuple[int, ...]],
         device: _device,
         dtype: _dtype,
     ):
@@ -102,7 +102,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[Tuple[int, ...]],
+        stride: Optional[tuple[int, ...]],
         device: _device,
         dtype: _dtype,
     ):

@@ -1626,7 +1626,7 @@ class _ScriptProfileColumn:
 
     def materialize(self):
         max_length = len(self.header)
-        rows: List[Tuple[int, str]] = []
+        rows: List[tuple[int, str]] = []
         for key, value in self.rows.items():
             cell = str(value)
             rows.append((key, cell))
@@ -1649,7 +1649,7 @@ class _ScriptProfileTable:
 
     def dump_string(self):
         outputs: List[str] = []
-        cells: List[Tuple[str, Dict[int, str]]] = []
+        cells: List[tuple[str, Dict[int, str]]] = []
         header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()

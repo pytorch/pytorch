@@ -71,7 +71,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]:
+    def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -367,7 +367,7 @@ class save_on_cpu(saved_tensors_hooks):
     def __init__(self, pin_memory: bool = False, device_type: str = "cuda") -> None:
         device_module = getattr(torch, device_type, torch.cuda)
 
-        def pack_to_cpu(tensor: torch.Tensor) -> Tuple[torch.device, torch.Tensor]:
+        def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
             packed = torch.empty(
@@ -379,7 +379,7 @@ class save_on_cpu(saved_tensors_hooks):
             packed.copy_(tensor)
             return (tensor.device, packed)
 
-        def unpack_from_cpu(packed: Tuple[torch.device, torch.Tensor]) -> torch.Tensor:
+        def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:
             device, tensor = packed
             return tensor.to(device, non_blocking=pin_memory)
 
@@ -423,19 +423,19 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
 
 class _MultiHandle(RemovableHandle):
-    handles: Tuple[RemovableHandle, ...]
+    handles: tuple[RemovableHandle, ...]
 
-    def __init__(self, handles: Tuple[RemovableHandle, ...]) -> None:
+    def __init__(self, handles: tuple[RemovableHandle, ...]) -> None:
         self.handles = handles
 
     def remove(self) -> None:
         for handle in self.handles:
             handle.remove()
 
-    def __getstate__(self) -> Tuple[RemovableHandle, ...]:
+    def __getstate__(self) -> tuple[RemovableHandle, ...]:
         return self.handles
 
-    def __setstate__(self, state: Tuple[RemovableHandle, ...]) -> None:
+    def __setstate__(self, state: tuple[RemovableHandle, ...]) -> None:
         self.handles = state
 
 
@@ -582,8 +582,8 @@ def register_multi_grad_hook(
 _allow_mutation_on_saved_tensors_enabled: bool = False
 
 
-_TID: TypeAlias = Tuple[int, int, int]
-_SID: TypeAlias = Tuple[int, int]
+_TID: TypeAlias = tuple[int, int, int]
+_SID: TypeAlias = tuple[int, int]
 
 
 def _get_tid(tensor: torch.Tensor) -> _TID:
@@ -665,7 +665,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         self,
         func: "OpOverload",
         types: Iterable[type],
-        args: Tuple[Any, ...] = (),
+        args: tuple[Any, ...] = (),
         kwargs: Optional[Dict[Any, Any]] = None,
     ) -> Any:
         kwargs = kwargs or {}
@@ -815,7 +815,7 @@ def _engine_run_backward(
     t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)

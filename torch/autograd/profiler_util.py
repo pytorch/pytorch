@@ -310,9 +310,9 @@ class EventList(list):
             An EventList containing FunctionEventAvg objects.
         """
         assert self._tree_built
-        stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
+        stats: Dict[tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
+        def get_key(event, group_by_input_shapes, group_by_stack_n) -> tuple[str, ...]:
             key = [
                 str(event.key),
                 str(event.node_id),
@@ -480,7 +480,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.count: int = 1
         self.cpu_children: List[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
-        self.input_shapes: Tuple[int, ...] = input_shapes
+        self.input_shapes: tuple[int, ...] = input_shapes
         self.concrete_inputs: List[Any] = concrete_inputs
         self.kwinputs: Dict[str, Any] = kwinputs
         self.stack: List = stack

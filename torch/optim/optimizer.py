@@ -39,15 +39,15 @@ from torch.utils.hooks import RemovableHandle
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-Args: TypeAlias = Tuple[Any, ...]
+Args: TypeAlias = tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict = Dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
+DeviceDtypeDict = Dict[Optional[tuple[torch.device, torch.dtype]], torch.Tensor]
 
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
-    ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
+    ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
@@ -174,7 +174,7 @@ def _disable_dynamo_if_unsupported(
 # implementation in those cases.
 def _default_to_fused_or_foreach(
     params: List[torch.Tensor], differentiable: bool, use_fused: bool = False
-) -> Tuple[bool, bool]:
+) -> tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
 
@@ -321,7 +321,7 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
 
 
 ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[tuple[str, torch.Tensor]]
 ]
 
 R = TypeVar("R")
@@ -343,7 +343,7 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[tuple[Args, Kwargs]]]  # type: ignore[misc]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
@@ -516,8 +516,8 @@ class Optimizer:
         tensorlistlist: TensorListList,
         with_indices: bool = False,
     ) -> Union[
-        Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
-        Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
+        Dict[tuple[None, None], tuple[TensorListList, Indices]],
+        Dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]],
     ]:
         """Group a list of lists of tensors by device and dtype.
 

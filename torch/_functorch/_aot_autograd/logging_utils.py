@@ -28,7 +28,7 @@ def set_model_name(name):
     model_name = name
 
 
-def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+def get_aot_compilation_context() -> tuple[List[str], str, int]:
     return list(graph_being_compiled), model_name, nth_graph
 
 

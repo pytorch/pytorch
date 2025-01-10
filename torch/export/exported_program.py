@@ -301,7 +301,7 @@ def _override_decomp_aten_to_variants():
 
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
-) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
+) -> tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
 
@@ -694,7 +694,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
 def _remove_unneccessary_copy_op_pass(
     gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
-) -> Tuple[torch.fx.GraphModule, ExportGraphSignature]:
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
@@ -844,7 +844,7 @@ class ExportedProgram:
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
-        example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
+        example_inputs: Optional[tuple[tuple[Any, ...], Dict[str, Any]]] = None,
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
@@ -924,7 +924,7 @@ class ExportedProgram:
             yield param
 
     @compatibility(is_backward_compatible=False)
-    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+    def named_parameters(self) -> Iterator[tuple[str, torch.nn.Parameter]]:
         """
         Returns an iterator over original module parameters, yielding
         both the name of the parameter as well as the parameter itself.
@@ -941,7 +941,7 @@ class ExportedProgram:
             yield buf
 
     @compatibility(is_backward_compatible=False)
-    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
+    def named_buffers(self) -> Iterator[tuple[str, torch.Tensor]]:
         """
         Returns an iterator over original module buffers, yielding
         both the name of the buffer as well as the buffer itself.

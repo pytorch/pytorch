@@ -119,7 +119,7 @@ class ShardedGradScaler(GradScaler):
         ...
 
     @overload
-    def scale(self, outputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
+    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
         ...
 
     @overload

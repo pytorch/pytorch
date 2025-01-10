@@ -157,10 +157,10 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
     p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
-    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+    base_splits: List[tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
     )
-    divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
+    divisor_split: tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
             gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
@@ -194,7 +194,7 @@ class FloorDiv(sympy.Function):
     NB: This is Python-style floor division, round to -Inf
     """
 
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True
 
@@ -302,7 +302,7 @@ class ModularIndexing(sympy.Function):
     ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     is_integer: bool = True
     precedence: int = 35  # lower precedence than add
 
@@ -373,7 +373,7 @@ class Where(sympy.Function):
     Good ol' ternary operator
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     precedence: int = 35  # lower precedence than add
 
     def _eval_is_integer(self) -> Optional[bool]:
@@ -402,7 +402,7 @@ class Where(sympy.Function):
 
 # Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
 
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True

@@ -232,7 +232,7 @@ class Interpreter:
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
     def placeholder(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
@@ -268,7 +268,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def get_attr(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
@@ -289,7 +289,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def call_function(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_function`` node and return the result.
@@ -311,7 +311,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def call_method(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_method`` node and return the result.
@@ -335,7 +335,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def call_module(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_module`` node and return the result.
@@ -360,7 +360,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def output(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
@@ -401,7 +401,7 @@ class Interpreter:
         return attr_itr
 
     @compatibility(is_backward_compatible=True)
-    def fetch_args_kwargs_from_env(self, n: Node) -> Tuple[Tuple, Dict]:
+    def fetch_args_kwargs_from_env(self, n: Node) -> tuple[Tuple, Dict]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
         from the current execution environment.
@@ -507,7 +507,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def placeholder(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
@@ -529,7 +529,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def get_attr(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
@@ -548,7 +548,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def call_module(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.
         assert isinstance(target, str)
@@ -557,7 +557,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def call_function(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ) -> Any:
         # Override so that functions that were wrapped are still wrapped.
         return self.tracer.create_proxy("call_function", target, args, kwargs)

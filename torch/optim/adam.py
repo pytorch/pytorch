@@ -35,7 +35,7 @@ class Adam(Optimizer):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         amsgrad: bool = False,
@@ -690,9 +690,9 @@ def _multi_tensor_adam(
         del device_grads
         del scaled_device_grads
 
-        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
-        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
-        bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction1: Union[tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[tuple[Tensor, ...], List[Tensor]]
+        bias_correction2_sqrt: Union[tuple[Tensor, ...], List[Tensor]]
 
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]

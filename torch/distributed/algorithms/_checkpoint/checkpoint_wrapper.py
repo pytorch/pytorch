@@ -57,7 +57,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
         self,
         *args,
         **kwargs,
-    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+    ) -> Iterator[tuple[str, torch.nn.Parameter]]:
         """
         Override :meth:`named_parameters()` to intercept parameter names.
 

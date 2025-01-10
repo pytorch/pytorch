@@ -57,7 +57,7 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple["Argument", ...],
+        tuple["Argument", ...],
         Sequence["Argument"],
         Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
@@ -227,7 +227,7 @@ class Node(_NodeBase):
       in the Graph printout.
     """
 
-    _args: Tuple["Argument", ...]
+    _args: tuple["Argument", ...]
     _kwargs: Dict[str, "Argument"]
     graph: "Graph"
     name: str
@@ -247,7 +247,7 @@ class Node(_NodeBase):
         name: str,
         op: str,
         target: "Target",
-        args: Tuple["Argument", ...],
+        args: tuple["Argument", ...],
         kwargs: Dict[str, "Argument"],
         return_type: Optional[Any] = None,
     ) -> None:
@@ -442,7 +442,7 @@ class Node(_NodeBase):
         p._next, n._prev = n, p
 
     @property
-    def args(self) -> Tuple[Argument, ...]:
+    def args(self) -> tuple[Argument, ...]:
         """
         The tuple of arguments to this ``Node``. The interpretation of arguments
         depends on the node's opcode. See the :class:`Node` docstring for more
@@ -454,7 +454,7 @@ class Node(_NodeBase):
         return self._args
 
     @args.setter
-    def args(self, a: Tuple[Argument, ...]) -> None:
+    def args(self, a: tuple[Argument, ...]) -> None:
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -574,7 +574,7 @@ class Node(_NodeBase):
         self.meta["stack_trace"] = trace
 
     def __update_args_kwargs(
-        self, new_args: Tuple["Argument", ...], new_kwargs: Dict[str, "Argument"]
+        self, new_args: tuple["Argument", ...], new_kwargs: Dict[str, "Argument"]
     ) -> None:
         """
         This API is internal. Do *not* call it directly.
@@ -799,7 +799,7 @@ class Node(_NodeBase):
     def normalized_arguments(
         self,
         root: torch.nn.Module,
-        arg_types: Optional[Tuple[Any]] = None,
+        arg_types: Optional[tuple[Any]] = None,
         kwarg_types: Optional[Dict[str, Any]] = None,
         normalize_to_only_use_kwargs: bool = False,
     ) -> Optional[ArgsKwargsPair]:

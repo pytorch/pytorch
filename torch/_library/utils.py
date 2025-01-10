@@ -55,7 +55,7 @@ def get_source(stacklevel: int) -> str:
     return source
 
 
-def parse_namespace(qualname: str) -> Tuple[str, str]:
+def parse_namespace(qualname: str) -> tuple[str, str]:
     splits = qualname.split("::")
     if len(splits) != 2:
         raise ValueError(
@@ -189,8 +189,8 @@ def fill_defaults(schema, args, kwargs):
 
 
 def zip_schema(
-    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> Iterable[Tuple[_C.Argument, Any]]:
+    schema: _C.FunctionSchema, args: tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterable[tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
@@ -332,7 +332,7 @@ def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
 
 
 def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
+    args: tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
 ) -> Iterator[torch.Tensor]:
     def check(arg):
         if isinstance(arg, torch.Tensor):
@@ -465,7 +465,7 @@ def has_fake_kernel(op: torch._ops.OpOverload) -> bool:
     return False
 
 
-def mutated_args_kwargs(schema: _C.FunctionSchema) -> Tuple[List[int], List[str]]:
+def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[List[int], List[str]]:
     idxs = []
     keys = []
     for i, info in enumerate(schema.arguments):

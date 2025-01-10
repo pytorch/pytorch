@@ -11,7 +11,7 @@ from torch.fx.passes.tools_common import legalize_graph
 
 def split_result_tensors(
     result: torch.Tensor, inputs: List[torch.Tensor]
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     """
     A free function for use in the merge_matmul graph transformation below that
     splits the output from a merged matmul into the individual results for each

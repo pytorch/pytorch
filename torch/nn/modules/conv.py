@@ -72,12 +72,12 @@ class _ConvNd(Module):
     in_channels: int
     _reversed_padding_repeated_twice: List[int]
     out_channels: int
-    kernel_size: Tuple[int, ...]
-    stride: Tuple[int, ...]
-    padding: Union[str, Tuple[int, ...]]
-    dilation: Tuple[int, ...]
+    kernel_size: tuple[int, ...]
+    stride: tuple[int, ...]
+    padding: Union[str, tuple[int, ...]]
+    dilation: tuple[int, ...]
     transposed: bool
-    output_padding: Tuple[int, ...]
+    output_padding: tuple[int, ...]
     groups: int
     padding_mode: str
     weight: Tensor
@@ -87,12 +87,12 @@ class _ConvNd(Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Union[str, Tuple[int, ...]],
-        dilation: Tuple[int, ...],
+        kernel_size: tuple[int, ...],
+        stride: tuple[int, ...],
+        padding: Union[str, tuple[int, ...]],
+        dilation: tuple[int, ...],
         transposed: bool,
-        output_padding: Tuple[int, ...],
+        output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
         padding_mode: str,
@@ -1391,7 +1391,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     transposed: bool
     in_channels: int
     out_channels: int
-    kernel_size: Tuple[int, ...]
+    kernel_size: tuple[int, ...]
     weight: UninitializedParameter
     bias: UninitializedParameter
 

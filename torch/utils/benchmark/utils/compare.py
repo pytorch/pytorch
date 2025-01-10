@@ -29,7 +29,7 @@ class Colorize(enum.Enum):
 class _Column:
     def __init__(
         self,
-        grouped_results: List[Tuple[Optional[common.Measurement], ...]],
+        grouped_results: List[tuple[Optional[common.Measurement], ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
@@ -88,10 +88,10 @@ class _Row:
         self._row_name_str_len = row_name_str_len
         self._time_scale = time_scale
         self._colorize = colorize
-        self._columns: Tuple[_Column, ...] = ()
+        self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: Tuple[_Column, ...]):
+    def register_columns(self, columns: tuple[_Column, ...]):
         self._columns = columns
 
     def as_column_strings(self):
@@ -174,14 +174,14 @@ class Table:
         self.rows, self.columns = self.populate_rows_and_columns()
 
     @staticmethod
-    def row_fn(m: common.Measurement) -> Tuple[int, Optional[str], str]:
+    def row_fn(m: common.Measurement) -> tuple[int, Optional[str], str]:
         return m.num_threads, m.env, m.as_row_name
 
     @staticmethod
     def col_fn(m: common.Measurement) -> Optional[str]:
         return m.description
 
-    def populate_rows_and_columns(self) -> Tuple[Tuple[_Row, ...], Tuple[_Column, ...]]:
+    def populate_rows_and_columns(self) -> tuple[tuple[_Row, ...], tuple[_Column, ...]]:
         rows: List[_Row] = []
         columns: List[_Column] = []
         ordered_results: List[List[Optional[common.Measurement]]] = [

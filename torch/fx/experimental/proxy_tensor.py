@@ -378,7 +378,7 @@ _ExtractValType = Optional[
         _AnyScriptObjectType,
         BackwardState,
         List["_ExtractValType"],
-        Tuple["_ExtractValType", ...],
+        tuple["_ExtractValType", ...],
         Dict[str, "_ExtractValType"],
         Tensor,
         int,
@@ -767,7 +767,7 @@ def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
     pre_dispatch: bool,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     unrecognized_types: List[Type] = []
@@ -1043,7 +1043,7 @@ class PythonKeyTracer(Tracer):
         self,
         m: Module,
         forward: Callable[..., Any],
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> Any:
         return forward(*args, **kwargs)
@@ -1137,7 +1137,7 @@ def _make_temp_remove_mode_context_manager(
 def dispatch_trace(
     root: Union[Module, Callable],
     tracer: Tracer,
-    concrete_args: Optional[Tuple[Any, ...]] = None,
+    concrete_args: Optional[tuple[Any, ...]] = None,
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)  # type: ignore[arg-type]
 
@@ -1235,8 +1235,8 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         kwargs = kwargs or {}
@@ -1264,8 +1264,8 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(
         self,
         func: Union[OpOverload, Callable],
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         kwargs = kwargs or {}
@@ -1334,8 +1334,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         with set_original_aten_op(func):
@@ -1372,10 +1372,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         return True
 
     def _compute_proxy(
-        self, func: OpOverload, args: Tuple[object, ...], out: PySymType
+        self, func: OpOverload, args: tuple[object, ...], out: PySymType
     ) -> Proxy:
         # Handle torch.sym_sum
-        n_args: Tuple[object, ...]
+        n_args: tuple[object, ...]
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             n_args = (
                 tuple(
@@ -1403,8 +1403,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def __sym_dispatch__(
         self,
         func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...],
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> object:
         # Peephole optimize multiply by one
@@ -1476,7 +1476,7 @@ class DecompositionInterpreter(fx.Interpreter):
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
     def placeholder(
-        self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> object:
         out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
@@ -1485,7 +1485,7 @@ class DecompositionInterpreter(fx.Interpreter):
         return out
 
     def get_attr(
-        self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> object:
         out = super().get_attr(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.get_attr(target), self.tracer)
@@ -1495,7 +1495,7 @@ class DecompositionInterpreter(fx.Interpreter):
     # call_function, call_method, call_module get traced automatically by the outer mode.
 
     def output(
-        self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object, ...], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> object:
         out = super().output(target, args, kwargs)  # type: ignore[arg-type]
 
@@ -1516,8 +1516,8 @@ class DecompositionInterpreter(fx.Interpreter):
 
 
 def wrapper_and_args_for_make_fx(
-    func: Callable[..., R], args: Tuple[object, ...], kwargs: Dict[str, object]
-) -> Tuple[Callable[[List[object]], R], List[object]]:
+    func: Callable[..., R], args: tuple[object, ...], kwargs: Dict[str, object]
+) -> tuple[Callable[[List[object]], R], List[object]]:
     # make_fx doesn't support kwargs, so we need to do this flattening
     # and then unflatten the args before calling func
     flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -1702,7 +1702,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # to the tracer while tracing, the proxy object gets registered
         # first. So we need to replace the proxy modules with the real ones
         # This can happen during HOO tracing
-        proxy_module_names_to_be_replaced: List[Tuple[str, _AttrProxy]] = []
+        proxy_module_names_to_be_replaced: List[tuple[str, _AttrProxy]] = []
         for name, module in self.root.named_modules():
             if module in self.proxy_modules:
                 proxy_module_names_to_be_replaced.append((name, module))
@@ -1746,7 +1746,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         self,
         m: Module,
         forward: Callable,
-        args: Tuple[object, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> None:
         """PythonKeyTracer overrides call_module to avoid the scope handling,
@@ -1913,7 +1913,7 @@ class _MakefxTracer:
 
     @contextmanager
     def _init_modes_from_inputs(
-        self, f: Callable, args: Tuple[object, ...]
+        self, f: Callable, args: tuple[object, ...]
     ) -> Generator[None, None, None]:
         prev_modes = self._checkpoint_modes()
         try:
@@ -2252,7 +2252,7 @@ def disable_proxy_modes_tracing() -> Generator[ProxyTorchDispatchMode, None, Non
 def maybe_handle_decomp(
     proxy_mode: ProxyTorchDispatchMode,
     op: OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     from torch._inductor.compiler_bisector import CompilerBisector
@@ -2274,7 +2274,7 @@ def maybe_handle_decomp(
 
 def get_isolated_graphmodule(
     func: Callable,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
     tracing_mode: str = "real",
     decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,

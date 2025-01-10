@@ -322,7 +322,7 @@ class AutoFunctionalized(HigherOrderOperator):
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -351,7 +351,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -412,7 +412,7 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
+def get_mutable_args(op: OpOverload) -> tuple[List[str], List[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
@@ -433,7 +433,7 @@ def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
 
 def do_auto_functionalize(
     op: OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
@@ -477,7 +477,7 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
+    unwrapped_actual_out: Union[Any, tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
@@ -522,7 +522,7 @@ def do_auto_functionalize(
 
 def do_auto_functionalize_v2(
     op: OpOverload,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
@@ -614,7 +614,7 @@ def do_auto_functionalize_v2(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = (
+    unwrapped_actual_out: Union[Any, tuple[Any]] = (
         unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
@@ -662,9 +662,9 @@ def do_auto_functionalize_v2(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
+    _only_clone_these_tensors: Optional[tuple[str, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
 
@@ -699,7 +699,7 @@ def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(
             _mutable_op, _only_clone_these_tensors=None, **kwargs
@@ -712,7 +712,7 @@ def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 
@@ -739,9 +739,9 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_bases: Optional[Tuple[int, ...]] = None,
+    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
     mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
     args_view_info = read_view_information_from_args(
@@ -796,7 +796,7 @@ def auto_functionalized_v2_fake(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_v2_dense(
             _mutable_op, _only_clone_these_bases=None, **kwargs
@@ -809,7 +809,7 @@ def auto_functionalized_v2_proxy(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 

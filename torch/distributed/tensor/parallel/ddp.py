@@ -23,7 +23,7 @@ def _get_submodule_n_params(module: nn.Module, path: str):
     return module, path
 
 
-def _update_module_param(param_list: List[Tuple[nn.Module, str, nn.Parameter]]):
+def _update_module_param(param_list: List[tuple[nn.Module, str, nn.Parameter]]):
     """
     Update parameters within the module
     """

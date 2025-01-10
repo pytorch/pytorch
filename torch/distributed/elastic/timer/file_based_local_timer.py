@@ -201,7 +201,7 @@ class FileTimerServer:
         self._run_id = run_id
         self._max_interval = max_interval
         self._daemon = daemon
-        self._timers: Dict[Tuple[int, str], FileTimerRequest] = {}
+        self._timers: Dict[tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
         self._watchdog_thread: Optional[threading.Thread] = None
 

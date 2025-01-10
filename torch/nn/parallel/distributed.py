@@ -853,7 +853,7 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
-        self._comm_hooks: List[Tuple[Callable, object]] = []
+        self._comm_hooks: List[tuple[Callable, object]] = []
 
         if self.mixed_precision is not None:
             _setup_mixed_precision_params(self.mixed_precision, self.module)

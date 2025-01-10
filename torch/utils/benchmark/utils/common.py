@@ -84,8 +84,8 @@ class Measurement:
     metadata: Optional[Dict[Any, Any]] = None  # Reserved for user payloads.
 
     def __post_init__(self) -> None:
-        self._sorted_times: Tuple[float, ...] = ()
-        self._warnings: Tuple[str, ...] = ()
+        self._sorted_times: tuple[float, ...] = ()
+        self._warnings: tuple[str, ...] = ()
         self._median: float = -1.0
         self._mean: float = -1.0
         self._p25: float = -1.0
@@ -144,7 +144,7 @@ class Measurement:
         n_total = len(self._sorted_times)
         lower_bound = int(n_total // 4)
         upper_bound = int(torch.tensor(3 * n_total / 4).ceil())
-        interquartile_points: Tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
+        interquartile_points: tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
         std = torch.tensor(interquartile_points).std(unbiased=False).item()
         sqrt_n = torch.tensor(len(interquartile_points)).sqrt().item()
 
@@ -254,7 +254,7 @@ class Measurement:
         return [merge_group(t, g) for t, g in grouped_measurements.items()]
 
 
-def select_unit(t: float) -> Tuple[str, float]:
+def select_unit(t: float) -> tuple[str, float]:
     """Determine how to scale times for O(1) magnitude.
 
     This utility is used to format numbers for human consumption.

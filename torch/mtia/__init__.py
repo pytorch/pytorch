@@ -23,7 +23,7 @@ Stream = torch.Stream
 
 _initialized = False
 _queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+    tuple[Callable[[], None], List[str]]
 ] = []  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
@@ -176,7 +176,7 @@ def snapshot() -> Dict[str, Any]:
     return torch._C._mtia_memorySnapshot()
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:

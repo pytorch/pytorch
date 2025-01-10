@@ -61,7 +61,7 @@ def _compress_hook(
     world_size = group_to_use.size()
 
     buffer = (
-        cast(Tuple[torch.Tensor, ...], bucket)[0]
+        cast(tuple[torch.Tensor, ...], bucket)[0]
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )

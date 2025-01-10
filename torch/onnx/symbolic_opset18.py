@@ -119,7 +119,7 @@ def _native_layer_norm(
     weight: _C.Value,
     bias: _C.Value,
     eps: float,
-) -> Tuple[_C.Value, _C.Value, _C.Value]:
+) -> tuple[_C.Value, _C.Value, _C.Value]:
     return opset9.native_layer_norm(g, input, normalized_shape, weight, bias, eps)
 
 

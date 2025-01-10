@@ -337,11 +337,11 @@ class MetadataKey:
     This should be equal whenever has_same_metadata would return True
     """
 
-    size: Tuple[SymIntEqByExpr, ...]
+    size: tuple[SymIntEqByExpr, ...]
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[Tuple[SymIntEqByExpr, ...]]
+    stride: Optional[tuple[SymIntEqByExpr, ...]]
     storage_offset: Optional[SymIntEqByExpr]
     is_conj: bool
     is_neg: bool

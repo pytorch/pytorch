@@ -616,7 +616,7 @@ def list_pointwise_strategy(
         OpStrategy: generated strategy
     """
 
-    def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
+    def args_tuple_strategies(args_schema: tuple[object, ...]) -> List[TupleStrategy]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.childs)

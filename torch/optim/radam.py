@@ -31,7 +31,7 @@ class RAdam(Optimizer):  # noqa: D101
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         decoupled_weight_decay: bool = False,
@@ -143,7 +143,7 @@ class RAdam(Optimizer):  # noqa: D101
             exp_avgs: List[Tensor] = []
             exp_avg_sqs: List[Tensor] = []
             state_steps: List[Tensor] = []
-            beta1, beta2 = cast(Tuple[float, float], group["betas"])
+            beta1, beta2 = cast(tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps
@@ -422,9 +422,9 @@ def _multi_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
-        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
-        rho_t_list: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction1: Union[tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[tuple[Tensor, ...], List[Tensor]]
+        rho_t_list: Union[tuple[Tensor, ...], List[Tensor]]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
             torch._foreach_neg_(bias_correction1)

@@ -42,7 +42,7 @@ class AnnotateTypesWithSchema(Transformer):
         self.annotate_get_attrs = annotate_get_attrs
 
     def call_function(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ):
         python_ret_type = None
         if self.annotate_functionals and target.__module__ == "torch.nn.functional":
@@ -73,7 +73,7 @@ class AnnotateTypesWithSchema(Transformer):
         return return_proxy
 
     def call_module(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
     ):
         python_ret_type = None
         assert isinstance(target, str)
@@ -91,7 +91,7 @@ class AnnotateTypesWithSchema(Transformer):
     def get_attr(
         self,
         target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Any],
     ):
         attr_proxy = super().get_attr(target, args, kwargs)

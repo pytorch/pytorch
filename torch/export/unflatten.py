@@ -348,7 +348,7 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: Set[str] = set()  # tracking unused buffers
-        id_to_buffer: Dict[int, Tuple[torch.nn.Parameter, bool]] = {}
+        id_to_buffer: Dict[int, tuple[torch.nn.Parameter, bool]] = {}
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -423,7 +423,7 @@ class UnflattenedModule(torch.nn.Module):
 
         # This is to handle parameters/buffers that point to the same tensor
         # object id -> list of (node_name, target_name)
-        consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
+        consts_map: Dict[int, List[tuple[str, str]]] = defaultdict(list)
         consts_targets: Set[str] = set()
 
         def add_to_consts_map(obj_id, node_name, target_name):
@@ -902,13 +902,13 @@ class _ModuleFrame:
     def __init__(
         self,
         flat_graph: torch.fx.Graph,
-        nodes: Tuple[torch.fx.Node, ...],
+        nodes: tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         seen_attrs,
         created_modules,
         parent,
-        module_stack: List[Tuple[str, Optional[str], int]],
+        module_stack: List[tuple[str, Optional[str], int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,

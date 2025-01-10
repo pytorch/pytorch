@@ -51,14 +51,14 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
 
 def scan(
     combine_fn: Callable[
-        [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
+        [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
     ],
     init: pytree.PyTree,
     xs: pytree.PyTree,
     *,
     dim: int = 0,
     reverse: bool = False,
-) -> Tuple[pytree.PyTree, pytree.PyTree]:
+) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
 

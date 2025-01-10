@@ -262,8 +262,8 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        autowrap_modules: Tuple[ModuleType] = (math,),
-        autowrap_functions: Tuple[Callable, ...] = (),
+        autowrap_modules: tuple[ModuleType] = (math,),
+        autowrap_functions: tuple[Callable, ...] = (),
         param_shapes_constant: bool = False,
     ) -> None:
         # This method's signature is overridden by the first line of this class'
@@ -316,7 +316,7 @@ class Tracer(TracerBase):
         self.module_stack = collections.OrderedDict()
         self.num_calls: Dict[str, int] = {}
         # Mapping of node name to module scope
-        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+        self.node_name_to_scope: Dict[str, tuple[str, type]] = {}
 
     _qualname_counter: Dict[str, int] = collections.defaultdict(int)
 
@@ -492,7 +492,7 @@ class Tracer(TracerBase):
         self,
         m: torch.nn.Module,
         forward: Callable[..., Any],
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> Any:
         """
@@ -872,7 +872,7 @@ class Tracer(TracerBase):
                 nonlocal cnt
                 cnt += 1
                 param = sig.parameters[name]
-                default: Tuple[Any, ...] = (
+                default: tuple[Any, ...] = (
                     () if param.default is inspect.Parameter.empty else (param.default,)
                 )
                 out = self.create_proxy(
@@ -913,7 +913,7 @@ class Tracer(TracerBase):
 
             return pytree.tree_map(replace_ph, concrete_args[name])
         if name[0] == "*":
-            default: Tuple[Any, ...] = ()
+            default: tuple[Any, ...] = ()
         else:
             param = sig.parameters[name]
             default = (  # type: ignore[assignment]
@@ -932,11 +932,11 @@ class Tracer(TracerBase):
 # the purposes of the wrap() API.
 # We key by the globals dict id and function name to ensure we're wrapping a given
 # function only once.
-_wrapped_fns_to_patch: Dict[Tuple[int, str], dict] = {}
+_wrapped_fns_to_patch: Dict[tuple[int, str], dict] = {}
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
-_wrapped_methods_to_patch: List[Tuple[type, str]] = []
+_wrapped_methods_to_patch: List[tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
     # This change is needed to trace models like PositionalEmbedding from BERT:

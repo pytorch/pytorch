@@ -98,7 +98,7 @@ RANK_TYPES = Union[
     List[List[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist.tensor.DeviceMesh", int],
+    tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 
@@ -677,7 +677,7 @@ Utils and infrastructure for tracing support
 """
 
 
-def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
+def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, List[int], int]:
     """
     _expand_group desugars the different RANK_TYPES types into a canonical format that is traceable.
 

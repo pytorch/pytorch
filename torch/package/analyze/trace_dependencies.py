@@ -7,7 +7,7 @@ __all__ = ["trace_dependencies"]
 
 
 def trace_dependencies(
-    callable: Callable[[Any], Any], inputs: Iterable[Tuple[Any, ...]]
+    callable: Callable[[Any], Any], inputs: Iterable[tuple[Any, ...]]
 ) -> List[str]:
     """Trace the execution of a callable in order to determine which modules it uses.
 

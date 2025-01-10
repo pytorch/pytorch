@@ -398,7 +398,7 @@ class CodeGen:
         """
         return outputs
 
-    def additional_globals(self) -> List[Tuple[str, Any]]:
+    def additional_globals(self) -> List[tuple[str, Any]]:
         """
         If your codegen uses extra global values, add tuples of (identifier,reference to the value) here.
         For example, return ['List', typing.List] if you need ``List`` in the global context.
@@ -553,7 +553,7 @@ class CodeGen:
                 return blue(repr(arg))
 
         def _format_args(
-            args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            args: tuple[Argument, ...], kwargs: Dict[str, Argument]
         ) -> str:
             args_s = ", ".join(_get_repr(a) for a in args)
             kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
@@ -904,11 +904,11 @@ class _FindNodesLookupTable:
     """
 
     def __init__(self):
-        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(
+        self.table: Dict[tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(
             dict
         )
 
-    def _key(self, node) -> Tuple[str, Optional[Target]]:
+    def _key(self, node) -> tuple[str, Optional[Target]]:
         return (node.op, node.target if node.op == "call_function" else None)
 
     def __contains__(self, node) -> bool:
@@ -1113,7 +1113,7 @@ class Graph:
         self,
         op: str,
         target: "Target",
-        args: Optional[Tuple["Argument", ...]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[Dict[str, "Argument"]] = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
@@ -1373,7 +1373,7 @@ class Graph:
     def call_module(
         self,
         module_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[Dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -1423,7 +1423,7 @@ class Graph:
     def call_method(
         self,
         method_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[Dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -1462,7 +1462,7 @@ class Graph:
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[Tuple["Argument", ...]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[Dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:

@@ -9,7 +9,7 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
+        size: tuple[Union[str, int], ...],
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
         dim_parameter: Optional[str] = None,

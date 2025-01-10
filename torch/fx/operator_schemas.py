@@ -44,7 +44,7 @@ class ArgsKwargsPair(NamedTuple):
     Simple named tuple for wrapping args/kwargs pairs.
     """
 
-    args: Tuple[Any, ...]
+    args: tuple[Any, ...]
     kwargs: Dict[str, Any]
 
 
@@ -154,7 +154,7 @@ def _torchscript_schema_to_signature_impl(
     return inspect.Signature(parameters, return_annotation=return_type)
 
 
-_SCHEMA_TO_SIGNATURE_CACHE: Dict[Tuple[str, str], inspect.Signature] = {}
+_SCHEMA_TO_SIGNATURE_CACHE: Dict[tuple[str, str], inspect.Signature] = {}
 
 
 def _torchscript_schema_to_signature(
@@ -173,7 +173,7 @@ def _torchscript_schema_to_signature(
 
 @compatibility(is_backward_compatible=False)
 def check_for_mutable_operation(
-    target: Callable, args: Tuple["Argument", ...], kwargs: Dict[str, "Argument"]
+    target: Callable, args: tuple["Argument", ...], kwargs: Dict[str, "Argument"]
 ):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
@@ -270,7 +270,7 @@ def create_type_hint(x):
             else:
 
                 def ret_type(x):
-                    return Tuple[x, ...]
+                    return tuple[x, ...]
 
             if len(x) == 0:
                 return ret_type(Any)
@@ -344,9 +344,9 @@ def type_matches(signature_type: Any, argument_type: Any):
 @compatibility(is_backward_compatible=False)
 def normalize_function(
     target: Callable,
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
-    arg_types: Optional[Tuple[Any]] = None,
+    arg_types: Optional[tuple[Any]] = None,
     kwarg_types: Optional[Dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
@@ -424,7 +424,7 @@ def normalize_function(
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
-                    arg_types = arg_types if arg_types else cast(Tuple[Any], ())
+                    arg_types = arg_types if arg_types else cast(tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
                     for candidate_signature in torch_op_schemas:
                         sig_matches = True
@@ -468,7 +468,7 @@ def normalize_function(
 def normalize_module(
     root: torch.nn.Module,
     target: str,
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
@@ -513,7 +513,7 @@ def normalize_module(
 
 def _args_kwargs_to_normalized_args_kwargs(
     sig: inspect.Signature,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
     normalize_to_only_use_kwargs: bool,
 ) -> Optional[ArgsKwargsPair]:

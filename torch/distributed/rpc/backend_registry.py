@@ -164,7 +164,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
     gathered: List[
-        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]]
+        tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]]
     ] = [("", 0, {}, []) for _ in range(group.size())]
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group

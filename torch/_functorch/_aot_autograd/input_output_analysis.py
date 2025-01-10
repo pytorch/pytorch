@@ -104,10 +104,10 @@ def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
-    synthetic_base_info: List[Union[int, Tuple[int, torch.Tensor]]],
+    synthetic_base_info: List[Union[int, tuple[int, torch.Tensor]]],
     outer_args: List[Any],
     inner_args: List[Any],
-) -> Tuple[ViewAndMutationMeta, List[int]]:
+) -> tuple[ViewAndMutationMeta, List[int]]:
     # maps inner arg indices to outer arg indices
     synthetic_base_to_indices: Dict[int, List[int]] = {}
     for inner_idx in range(len(inner_args)):

@@ -302,7 +302,7 @@ class NamedMemberAccessor:
 
     def swap_tensors_dict(
         self, named_tensors: Dict[str, torch.Tensor], allow_missing: bool = False
-    ) -> Tuple[Dict[str, torch.Tensor], List[str]]:
+    ) -> tuple[Dict[str, torch.Tensor], List[str]]:
         """
         Swap the attributes specified by the given paths to values.
 
@@ -332,7 +332,7 @@ class NamedMemberAccessor:
             raise RuntimeError(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         return orig_named_tensors, missing_keys
 
-    def check_keys(self, keys: Iterable[str]) -> Tuple[List[str], List[str]]:
+    def check_keys(self, keys: Iterable[str]) -> tuple[List[str], List[str]]:
         """Check that the given keys are valid."""
         keys = set(keys)
         valid_keys = {name for name, _ in self.named_tensors(remove_duplicate=False)}
@@ -345,21 +345,21 @@ class NamedMemberAccessor:
     def named_parameters(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the parameters in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
 
     def named_buffers(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the buffers in the module."""
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
 
     def named_tensors(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         """Iterate over all the tensors in the module."""
         yield from self.module.named_parameters(remove_duplicate=remove_duplicate)
         yield from self.module.named_buffers(remove_duplicate=remove_duplicate)
@@ -367,6 +367,6 @@ class NamedMemberAccessor:
     def named_modules(
         self,
         remove_duplicate: bool = True,
-    ) -> Iterable[Tuple[str, "torch.nn.Module"]]:
+    ) -> Iterable[tuple[str, "torch.nn.Module"]]:
         """Iterate over all the modules in the module."""
         yield from self.module.named_modules(remove_duplicate=remove_duplicate)

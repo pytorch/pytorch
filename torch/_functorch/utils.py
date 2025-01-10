@@ -37,4 +37,4 @@ def unwrap_dead_wrappers(args):
     return result
 
 
-argnums_t = Union[int, Tuple[int, ...]]
+argnums_t = Union[int, tuple[int, ...]]

@@ -428,7 +428,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, Tuple[int]] = 0,
+    argnums: Union[int, tuple[int]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
@@ -1676,7 +1676,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
 
 
 @exposed_in("torch.func")
-def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
+def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     """
     Returns the value of ``func`` at ``primals`` and linear approximation
     at ``primals``.

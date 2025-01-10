@@ -128,7 +128,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         return last_executed_optimized_graph()
 
 
-def set_fusion_strategy(strategy: List[Tuple[str, int]]):
+def set_fusion_strategy(strategy: List[tuple[str, int]]):
     """Set the type and number of specializations that can occur during fusion.
 
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"

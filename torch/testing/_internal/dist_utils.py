@@ -136,7 +136,7 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
             )
 
 
-def get_num_owners_and_forks() -> Tuple[str, str]:
+def get_num_owners_and_forks() -> tuple[str, str]:
     """
     Retrieves number of OwnerRRefs and forks on this node from
     _rref_context_get_debug_info.

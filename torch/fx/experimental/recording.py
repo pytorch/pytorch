@@ -344,15 +344,15 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: Tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: Tuple[Union[int, torch.SymInt], ...]
+    tensor_size: tuple[Union[int, torch.SymInt], ...]
+    tensor_stride: tuple[Union[int, torch.SymInt], ...]
     tensor_storage_offset: Union[int, torch.SymInt]
     is_nested: bool
 
-    def size(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_size
 
-    def stride(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_stride
 
     def storage_offset(self) -> Union[int, torch.SymInt]:
@@ -445,7 +445,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # compare the two values.
     def compare_vars(
         map_value: Callable[[str, Any], Any]
-    ) -> List[Tuple[str, str, str]]:
+    ) -> List[tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 
         # First, compare the set of keys in each vars dictionary.
@@ -489,7 +489,7 @@ class NotEqualError(Exception):
     def __init__(
         self,
         msg: str,
-        mismatched: List[Tuple[str, str, str]],
+        mismatched: List[tuple[str, str, str]],
     ) -> None:
         details = "\n".join(
             [

@@ -1084,7 +1084,7 @@ def _shape_as_tensor(self: List[int]) -> List[int]:
     return [len(self)]
 
 
-def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
+def topk(self: List[int], k: int, dim: int = -1) -> tuple[List[int], List[int]]:
     if len(self) == 0:
         result: List[int] = []
     else:
@@ -1098,7 +1098,7 @@ def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
 
 def nll_loss_forward(
     self: List[int], target: List[int], weight: Optional[List[int]], reduction: int
-) -> Tuple[List[int], List[int]]:
+) -> tuple[List[int], List[int]]:
     # This is taken shamelessly from the meta function in LossNLL.cpp
     self_dim = len(self)
     target_dim = len(target)
@@ -1118,7 +1118,7 @@ def nll_loss_forward(
 
 def native_layer_norm(
     input: List[int], normalized_shape: List[int]
-) -> Tuple[List[int], List[int], List[int]]:
+) -> tuple[List[int], List[int], List[int]]:
     reduction_shape: List[int] = []
     num_unreduced_dimensions = len(input) - len(normalized_shape)
     assert num_unreduced_dimensions >= 0
@@ -1136,7 +1136,7 @@ def native_batch_norm(
     running_mean: Optional[List[int]],
     running_var: Optional[List[int]],
     training: bool,
-) -> Tuple[List[int], List[int], List[int]]:
+) -> tuple[List[int], List[int], List[int]]:
     if training:
         _size = [input[1]]
     else:
@@ -1150,7 +1150,7 @@ def _batch_norm_with_update(
     bias: Optional[List[int]],
     running_mean: Optional[List[int]],
     running_var: Optional[List[int]],
-) -> Tuple[List[int], List[int], List[int], List[int]]:
+) -> tuple[List[int], List[int], List[int], List[int]]:
     _size = [input[1]]
     return _copy(input), _size, _size, [0]
 
@@ -1188,7 +1188,7 @@ def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[in
 
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping: Dict[str, ScriptFn] = {}
-bounded_compute_graph_mapping: Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
+bounded_compute_graph_mapping: Dict[str, tuple[ScriptFn, ScriptFn]] = {}
 script_func_map: Dict[Callable, ScriptFn] = {}
 
 

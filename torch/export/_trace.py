@@ -634,11 +634,11 @@ def _make_module_call_graph(
 
 def _export_to_torch_ir(
     f: Callable,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
     *,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
     restore_fqn: bool = True,
@@ -812,7 +812,7 @@ def _fakify_params_buffers(
 
 def _get_forward_arg_names(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """
@@ -1095,10 +1095,10 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
 def _get_module_call_graph(
     export_artifact: ExportArtifact,
     original_in_spec: TreeSpec,
-    preserve_module_call_signature: Tuple[str, ...],
+    preserve_module_call_signature: tuple[str, ...],
     strict_mode_export: bool,
     forward_arg_names: Optional[List[str]] = None,
-) -> Tuple[torch.fx.GraphModule, List[ModuleCallEntry]]:
+) -> tuple[torch.fx.GraphModule, List[ModuleCallEntry]]:
     """
     In-place modify the graph module in export_artifact, remove _export_tracepoint nodes and
     return module_call_graph.
@@ -1248,10 +1248,10 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
 
 def _strict_export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
-    preserve_module_call_signature: Tuple[str, ...],
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]],
+    preserve_module_call_signature: tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
@@ -1276,10 +1276,10 @@ def _strict_export(
 
 def _strict_export_lower_to_aten_ir(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
-    preserve_module_call_signature: Tuple[str, ...],
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]],
+    preserve_module_call_signature: tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
@@ -1530,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                 # Dictionary that tracks subclass type to original getattr function
                 # and the attributes we can proxy.
                 tensor_type_to_old_getattribute: Dict[
-                    Type[torch.Tensor], Tuple[Callable, Set[str]]
+                    Type[torch.Tensor], tuple[Callable, Set[str]]
                 ] = {}
                 for arg in args:
                     subclass_types_to_instances: Dict[
@@ -1722,10 +1722,10 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
 
 def _non_strict_export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Dict[str, Any],
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
-    preserve_module_call_signature: Tuple[str, ...],
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]],
+    preserve_module_call_signature: tuple[str, ...],
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
@@ -1888,12 +1888,12 @@ def _non_strict_export(
 @_disable_prexisiting_fake_mode
 def _export_for_training(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -1980,12 +1980,12 @@ def _export_for_training(
 @_disable_prexisiting_fake_mode
 def _export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
     _is_torch_jit_trace: bool = False,

@@ -73,7 +73,7 @@ except ImportError:
 PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 FSDP_SYNCED = "_fsdp_synced"
 # Specification of process groups for hybrid sharding strategies.
-HybridShardProcessGroupType = Tuple[dist.ProcessGroup, dist.ProcessGroup]
+HybridShardProcessGroupType = tuple[dist.ProcessGroup, dist.ProcessGroup]
 # Overall specification of process group.
 ProcessGroupType = Optional[Union[dist.ProcessGroup, HybridShardProcessGroupType]]
 
@@ -266,7 +266,7 @@ def _init_inter_node_process_group(
 def _init_intra_and_inter_node_groups(
     global_process_group: dist.ProcessGroup,
     num_devices_per_node: int,
-) -> Tuple[dist.ProcessGroup, dist.ProcessGroup]:
+) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
     """
     Initialize intra and inter-node process groups and return the ones corresponding to this process's rank.
 
@@ -858,7 +858,7 @@ def _need_to_materialize_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
     ignored_modules: Set[nn.Module],
-) -> Tuple[bool, bool]:
+) -> tuple[bool, bool]:
     """
     Return if ``module`` has parameters on meta device and if ``module`` is using torchdistX deferred initialization.
 

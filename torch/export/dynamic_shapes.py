@@ -242,7 +242,7 @@ Dim.DYNAMIC = _DimHint.DYNAMIC  # type: ignore[attr-defined]
 
 def dims(
     *names: str, min: Optional[int] = None, max: Optional[int] = None
-) -> Tuple[_Dim, ...]:
+) -> tuple[_Dim, ...]:
     """
     Util to create multiple :func:`Dim` types.
 
@@ -403,9 +403,9 @@ def _process_equalities(
     constraint: Constraint,
     get_sources: Callable[[int, int], List["Source"]],
     shape_env: "ShapeEnv",
-    names: Dict[str, Tuple[int, int]],
-    source_pairs: List[Tuple["Source", "Source"]],
-    derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
+    names: Dict[str, tuple[int, int]],
+    source_pairs: List[tuple["Source", "Source"]],
+    derived_equalities: List[tuple["Source", Union["Source", "Symbol"], Callable]],
     phantom_symbols: Dict[str, "Symbol"],
     relaxed_sources: Set["Source"],
 ):
@@ -685,7 +685,7 @@ def _warn_on_None_dynamic_shape_dimension():
 
 def _check_dynamic_shapes(
     combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
 ):
     """
     Checks the dynamic_shapes specification for correctness,
@@ -698,7 +698,7 @@ def _check_dynamic_shapes(
     if isinstance(dynamic_shapes, (tuple, list)):
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
 
-    bounds: Dict[str, Tuple[int, int]] = {}
+    bounds: Dict[str, tuple[int, int]] = {}
 
     def check_same_bounds(dim):
         if dim.__name__ in bounds:
@@ -800,7 +800,7 @@ def _check_dynamic_shapes(
 
 def _process_dynamic_shapes(
     combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
 ) -> List[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
@@ -979,7 +979,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None]
 ):
     name_to_dim = {}
     for dim in tree_flatten(
@@ -1002,8 +1002,8 @@ def _get_dim_name_mapping(
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
-) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
+    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any]],
+) -> Union[Dict[str, Any], tuple[Any], List[Any]]:
     """
     When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
     doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -

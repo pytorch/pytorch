@@ -74,7 +74,7 @@ def _get_total_norm(
         return torch.tensor(0.0)
     first_device = tensors[0].device
     grouped_tensors: Dict[
-        Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
+        tuple[torch.device, torch.dtype], tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
@@ -147,7 +147,7 @@ def _clip_grads_with_norm_(
     if len(grads) == 0:
         return
     grouped_grads: Dict[
-        Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
+        tuple[torch.device, torch.dtype], tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
         [grads]
     )  # type: ignore[assignment]

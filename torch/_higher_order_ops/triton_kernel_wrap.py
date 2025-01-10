@@ -49,8 +49,8 @@ if TYPE_CHECKING:
     from torch.utils._triton import has_triton
 
     TritonMetaParamsType = Dict[str, int]
-    TritonGridTupleType = Tuple[Union[int, sympy.Expr, SymInt], ...]
-    TritonGridCallableType = Callable[[TritonMetaParamsType], Tuple[int, ...]]
+    TritonGridTupleType = tuple[Union[int, sympy.Expr, SymInt], ...]
+    TritonGridCallableType = Callable[[TritonMetaParamsType], tuple[int, ...]]
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
     if has_triton():
@@ -78,7 +78,7 @@ log = logging.getLogger("torch._dynamo")
 # the metadata will look like ``([50, 60], [32, 15], 4)``. All ints can be SymInts.
 TMADescriptorMetadata = Dict[
     str,  # kernel parameter name
-    Tuple[
+    tuple[
         List[Union[int, SymInt]],  # dims
         List[Union[int, SymInt]],  # block_dims
         Union[int, SymInt],  # element_size
@@ -175,7 +175,7 @@ class Op:
 
 def generate_ttir(
     kernel: "TritonKernelType", kwargs: Dict[str, Any]
-) -> Tuple["TritonIRModule", List[str]]:
+) -> tuple["TritonIRModule", List[str]]:
     """
     Uses Triton's internal code generation to create TTIR
     """
@@ -480,7 +480,7 @@ def ttir_to_functions(
 
 class MemoizeWithCycleCheck:
     fn: Callable[..., Any]
-    cache: Dict[Tuple[str, int], Any]
+    cache: Dict[tuple[str, int], Any]
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         self.fn = fn
@@ -1024,7 +1024,7 @@ class TritonHOPifier:
         grid,
         meta,
         tx,
-    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
+    ) -> Union[tuple[Union[int, sympy.Expr, SymInt], ...], tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
     def wrap_user_defined_obj(
@@ -1111,7 +1111,7 @@ class TritonHOPifier:
 
     def check_grid(  # type: ignore[no-untyped-def]
         self, grid
-    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
+    ) -> Union[tuple[Union[int, sympy.Expr, SymInt], ...], tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
     def init_variable(
@@ -1487,7 +1487,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         grid: "TritonGridCallableType",
         meta: "TritonMetaParamsType",
         tx: None,
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+    ) -> tuple[Union[int, sympy.Expr, SymInt], ...]:
         assert tx is None
         assert isinstance(meta, dict)
         assert callable(grid)
@@ -1529,7 +1529,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def check_grid(
         self,
         grid: "TritonGridType",
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+    ) -> tuple[Union[int, sympy.Expr, SymInt], ...]:
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
                 "wrap_triton can only handle grids that resolve to Sequence[int]."

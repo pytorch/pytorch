@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 
-def _parent_name(target: str) -> Tuple[str, str]:
+def _parent_name(target: str) -> tuple[str, str]:
     """
     Splits a qualname into parent path and last atom.
     For example, `foo.bar.baz` -> (`foo.bar`, `baz`)
@@ -48,7 +48,7 @@ def matches_module_pattern(
 ):
     if len(node.args) == 0:
         return False
-    nodes: Tuple[Any, fx.Node] = (node.args[0], node)
+    nodes: tuple[Any, fx.Node] = (node.args[0], node)
     for expected_type, current_node in zip(pattern, nodes):
         if not isinstance(current_node, fx.Node):
             return False
@@ -120,7 +120,7 @@ def remove_dropout(model: nn.Module) -> nn.Module:
 
     class DropoutRemover(torch.fx.Transformer):
         def call_module(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: Dict[str, Any]
         ) -> Any:
             if isinstance(self.submodules[target], nn.Dropout):
                 assert len(args) == 1
@@ -388,7 +388,7 @@ def optimize_for_inference(
                     node.args, lambda n: fx_graph.call_method("to_mkldnn", (n,))
                 )
 
-            node.args = cast(Tuple[fx.node.Argument], mkldnn_args)
+            node.args = cast(tuple[fx.node.Argument], mkldnn_args)
 
             with fx_graph.inserting_after(node):
                 dense_x = fx_graph.create_node("call_method", "to_dense", (node,))

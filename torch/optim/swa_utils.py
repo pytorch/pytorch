@@ -28,7 +28,7 @@ __all__ = [
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 
-PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
+PARAM_LIST = Union[tuple[Tensor, ...], List[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):

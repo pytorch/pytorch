@@ -63,7 +63,7 @@ class ShardingPropagator:
         )
         # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
         self.op_to_shape_and_stride_idx: Dict[
-            OpOverload, Union[int, Tuple[int, int]]
+            OpOverload, Union[int, tuple[int, int]]
         ] = {
             # new factory ops
             aten.new_empty.default: 1,

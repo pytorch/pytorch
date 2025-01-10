@@ -33,7 +33,7 @@ _foreach_supported_types = [torch.Tensor]
 def _group_tensors_by_device_and_dtype(
     tensorlistlist: TensorListList,
     with_indices: bool = False,
-) -> Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]]:
+) -> Dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]]:
     return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
 def _device_has_foreach_support(device: torch.device) -> bool:

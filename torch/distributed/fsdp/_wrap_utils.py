@@ -178,7 +178,7 @@ def _validate_frozen_params(
 
 def _get_post_order_named_modules(
     root_module: nn.Module,
-) -> List[Tuple[str, nn.Module]]:
+) -> List[tuple[str, nn.Module]]:
     """
     This returns the named modules following a post-order traversal, which is a
     valid reverse topological sort. We achieve this using the reverse of a
@@ -202,7 +202,7 @@ def _get_post_order_named_modules(
     visited_modules = {root_module}
     stack = [("", root_module)]
     # Append and reverse at the end for linear-time algorithm
-    reverse_post_order_named_modules: List[Tuple[str, nn.Module]] = []
+    reverse_post_order_named_modules: List[tuple[str, nn.Module]] = []
     while stack:
         module_name, module = stack.pop()
         reverse_post_order_named_modules.append((module_name, module))

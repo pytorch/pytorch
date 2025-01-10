@@ -17,7 +17,7 @@ from torch.distributed import FileStore, Store, TCPStore
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
+_rendezvous_handlers: Dict[str, Callable[..., Iterator[tuple[Store, int, int]]]] = {}
 
 __all__ = ["register_rendezvous_handler", "rendezvous"]
 

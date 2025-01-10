@@ -21,7 +21,7 @@ class EinsumDims:
     rhs_out_only_dims: List[str]
 
     @classmethod
-    def parse_equation(cls, equation: str) -> Tuple[List[str], str]:
+    def parse_equation(cls, equation: str) -> tuple[List[str], str]:
         # parse einop equation and extract arg specs
         """
         Parse the einsum equation str to input dim chars and output dim char

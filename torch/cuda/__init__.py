@@ -46,7 +46,7 @@ _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+    tuple[Callable[[], None], List[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
@@ -101,7 +101,7 @@ else:
 has_half: bool = True
 has_magma: bool = torch._C._has_magma
 
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -492,7 +492,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
     return get_device_properties(device).name
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Get the cuda capability of a device.
 
     Args:

@@ -47,7 +47,7 @@ class FunctionCounts:
         4) Two higher order methods (`filter` and `transform`) for custom
            manipulation.
     """
-    _data: Tuple[FunctionCount, ...]
+    _data: tuple[FunctionCount, ...]
     inclusive: bool
     truncate_rows: bool = True
 
@@ -62,9 +62,9 @@ class FunctionCounts:
         return len(self._data)
 
     def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
-        data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
+        data: Union[FunctionCount, tuple[FunctionCount, ...]] = self._data[item]
         return (
-            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
+            FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
 
@@ -296,7 +296,7 @@ class Serialization(enum.Enum):
     TORCH_JIT = 2
 
 
-_GLOBALS_ALLOWED_TYPES: Dict[Serialization, Tuple[Any, ...]] = {
+_GLOBALS_ALLOWED_TYPES: Dict[Serialization, tuple[Any, ...]] = {
     Serialization.PICKLE: (str, bytes, bool, int, float, complex),
     Serialization.TORCH_JIT: (torch.jit.ScriptFunction, torch.jit.ScriptModule),
     Serialization.TORCH: (torch.nn.Module,),
@@ -526,7 +526,7 @@ class _ValgrindWrapper:
         collect_baseline: bool,
         is_python: bool,
         retain_out_file: bool,
-    ) -> Tuple[CallgrindStats, ...]:
+    ) -> tuple[CallgrindStats, ...]:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
         assert is_python or not collect_baseline
@@ -566,7 +566,7 @@ class _ValgrindWrapper:
         collect_baseline: bool,
         is_python: bool,
         retain_out_file: bool,
-    ) -> Tuple[Tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
+    ) -> tuple[tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -595,7 +595,7 @@ class _ValgrindWrapper:
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args: List[str], **kwargs: Any) -> Tuple[CompletedProcessType, str]:
+        def run(args: List[str], **kwargs: Any) -> tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:
@@ -719,7 +719,7 @@ class _ValgrindWrapper:
                 assert scan_state == ScanState.PARSING, f"Failed to parse {fpath}"
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
 
-            def read_results(i: int) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
+            def read_results(i: int) -> tuple[FunctionCounts, FunctionCounts, Optional[str]]:
                 if i == repeats and not collect_baseline:
                     # Null baseline.
                     return (

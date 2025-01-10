@@ -1805,7 +1805,7 @@ has_torch_function_variadic = _add_docstr(
 
 @functools.lru_cache(None)
 def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
+    tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
 ):
     overridable_funcs = collections.defaultdict(list)
     index = {}

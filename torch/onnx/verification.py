@@ -36,7 +36,7 @@ _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
-_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_InputArgsType = Union[torch.Tensor, tuple[Any, ...]]
 _InputKwargsType = Mapping[str, Any]
 _OutputsType = Union[Sequence[_NumericType], Sequence]
 

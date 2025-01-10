@@ -2438,7 +2438,7 @@ def flex_njt(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
 
     # TODO: Support this if needed; determine if NJT buffers need be unwrapped as dense.
@@ -2500,8 +2500,8 @@ def flex_njt_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     output = flex_attention_backward_hop(
         query.values().unsqueeze(0),

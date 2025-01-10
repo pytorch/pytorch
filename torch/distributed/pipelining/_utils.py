@@ -75,8 +75,8 @@ def validate_tensor_metadata(desc, expected, given):
 
 def validate_tensors_metadata(
     desc,
-    expected_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
-    actual_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    expected_tensors: Union[List[torch.Tensor], tuple[torch.Tensor, ...]],
+    actual_tensors: Union[List[torch.Tensor], tuple[torch.Tensor, ...]],
 ):
     if len(expected_tensors) != len(actual_tensors):
         raise PipeliningShapeError(

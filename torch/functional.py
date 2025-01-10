@@ -156,7 +156,7 @@ def split(
     tensor: Tensor,
     split_size_or_sections: Union[int, List[int]],
     dim: int = 0,
-) -> Tuple[Tensor, ...]:
+) -> tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -422,12 +422,12 @@ if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(
         *tensors: Union[Tensor, List[Tensor]], indexing: Optional[str] = None
-    ) -> Tuple[Tensor, ...]:
+    ) -> tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 
 else:
 
-    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+    def meshgrid(*tensors, indexing: Optional[str] = None) -> tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -807,7 +807,7 @@ if TYPE_CHECKING:
     # done by the caller of the _impl function
     _unique_impl_out = Any
 else:
-    _unique_impl_out = Tuple[Tensor, Tensor, Tensor]
+    _unique_impl_out = tuple[Tensor, Tensor, Tensor]
 
 
 def _unique_impl(
@@ -1236,7 +1236,7 @@ else:
     def tensordot(  # noqa: F811
         a,
         b,
-        dims: Tuple[List[int], List[int]],
+        dims: tuple[List[int], List[int]],
         out: Optional[torch.Tensor] = None,
     ):
         pass
@@ -1896,7 +1896,7 @@ def norm(  # noqa: F811
 def unravel_index(
     indices: Tensor,
     shape: Union[int, Sequence[int], torch.Size],
-) -> Tuple[Tensor, ...]:
+) -> tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
 

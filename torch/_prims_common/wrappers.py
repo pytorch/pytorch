@@ -253,7 +253,7 @@ def out_wrapper(
         out_type = (
             TensorLikeType
             if is_tensor
-            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+            else tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
         )
         return_type = (
             TensorLikeType

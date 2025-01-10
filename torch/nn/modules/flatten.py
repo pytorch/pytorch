@@ -103,7 +103,7 @@ class Unflatten(Module):
         torch.Size([2, 2, 5, 5])
     """
 
-    NamedShape = Tuple[Tuple[str, int]]
+    NamedShape = tuple[tuple[str, int]]
 
     __constants__ = ["dim", "unflattened_size"]
     dim: Union[int, str]

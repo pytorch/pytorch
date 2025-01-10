@@ -12,7 +12,7 @@ from torch._C._jit_tree_views import SourceRangeFactory
 def get_source_lines_and_file(
     obj: Any,
     error_msg: Optional[str] = None,
-) -> Tuple[List[str], int, Optional[str]]:
+) -> tuple[List[str], int, Optional[str]]:
     """
     Wrapper around inspect.getsourcelines and inspect.getsourcefile.
 

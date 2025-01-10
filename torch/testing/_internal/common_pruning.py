@@ -361,7 +361,7 @@ class LSTMLinearModel(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         output, _hidden = self.lstm(input)
         decoded = self.linear(output)
         return decoded, output
@@ -378,7 +378,7 @@ class LSTMLayerNormLinearModel(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x, state = self.lstm(x)
         x = self.norm(x)
         x = self.linear(x)

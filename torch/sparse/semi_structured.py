@@ -161,7 +161,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     def __tensor_flatten__(
         self,
-    ) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
+    ) -> tuple[List[str], tuple[torch.Size, bool, int, bool]]:
         inner_tensors = list(
             filter(lambda x: getattr(self, x) is not None, self.__slots__)
         )
@@ -177,7 +177,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def __tensor_unflatten__(
         cls,
         inner_tensors,
-        tensor_meta: Tuple[torch.Size, bool, int, bool],
+        tensor_meta: tuple[torch.Size, bool, int, bool],
         outer_size,
         outer_stride,
     ) -> torch.Tensor:

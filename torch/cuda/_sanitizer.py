@@ -462,15 +462,15 @@ class EventHandler:
         self.syncs.all_streams_wait_for_event(event)
 
 
-def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
+def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[tuple[TK, TVa, TVb]]:
     for arg, value in a.items():
         if arg in b:
             yield arg, value, b[arg]
 
 
 def zip_arguments(
-    schema: torch.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> Iterator[Tuple[torch.Argument, Any]]:
+    schema: torch.FunctionSchema, args: tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterator[tuple[torch.Argument, Any]]:
     schema_args = schema.arguments[: len(args)]
     schema_kwargs = {arg.name: arg for arg in schema.arguments[len(args) :]}
 
@@ -511,7 +511,7 @@ class ArgumentHandler:
     def parse_inputs(
         self,
         schema: torch.FunctionSchema,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Dict[str, Any],
         *,
         is_factory: bool,

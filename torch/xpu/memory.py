@@ -178,7 +178,7 @@ def max_memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
-def mem_get_info(device: _device_t = None) -> Tuple[int, int]:
+def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device.
 
     Args:

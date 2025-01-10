@@ -83,15 +83,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: Set[Union[Callable, Tuple[Callable, str]]] = set()
+_marked_safe_globals_set: Set[Union[Callable, tuple[Callable, str]]] = set()
 
 
-def _add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: List[Union[Callable, tuple[Callable, str]]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def _get_safe_globals() -> List[Union[Callable, tuple[Callable, str]]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -102,14 +102,14 @@ def _clear_safe_globals():
 
 
 def _remove_safe_globals(
-    globals_to_remove: List[Union[Callable, Tuple[Callable, str]]],
+    globals_to_remove: List[Union[Callable, tuple[Callable, str]]],
 ):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+    def __init__(self, safe_globals: List[Union[Callable, tuple[Callable, str]]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -221,7 +221,7 @@ def _get_allowed_globals():
     return rc
 
 
-def _read_global_instruction(readline: Callable) -> Tuple[str, str]:
+def _read_global_instruction(readline: Callable) -> tuple[str, str]:
     module = readline()[:-1].decode("utf-8")
     name = readline()[:-1].decode("utf-8")
     # Patch since torch.save default protocol is 2

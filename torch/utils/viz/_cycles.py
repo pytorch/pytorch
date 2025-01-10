@@ -258,7 +258,7 @@ class Node(NamedTuple):
     label: str
     context: Optional[str]
     root: bool
-    referrents: List[Tuple[str, int]]
+    referrents: List[tuple[str, int]]
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:

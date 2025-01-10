@@ -539,7 +539,7 @@ class ModuleDict(Module):
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[Tuple[str, Module]]:
+    def items(self) -> Iterable[tuple[str, Module]]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
@@ -855,7 +855,7 @@ class ParameterDict(Module):
         del self[key]
         return v
 
-    def popitem(self) -> Tuple[str, Any]:
+    def popitem(self) -> tuple[str, Any]:
         """Remove and return the last inserted `(key, parameter)` pair from the ParameterDict."""
         k, _ = self._keys.popitem()
         # We need the key in the _keys to be able to access/del
@@ -888,7 +888,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 
-    def items(self) -> Iterable[Tuple[str, Any]]:
+    def items(self) -> Iterable[tuple[str, Any]]:
         r"""Return an iterable of the ParameterDict key/value pairs."""
         return ((k, self[k]) for k in self._keys)
 

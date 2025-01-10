@@ -304,7 +304,7 @@ def autograd_cache_key(
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
-) -> Tuple[str, List[str]]:
+) -> tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """

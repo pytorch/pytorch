@@ -18,7 +18,7 @@ _foreach_map = ForeachMap()
 
 
 def foreach_map(
-    op: Callable, operands: Any, *unused: Tuple[Any], **kwargs: Dict[str, Any]
+    op: Callable, operands: Any, *unused: tuple[Any], **kwargs: Dict[str, Any]
 ):
     from torch._dynamo.polyfills import foreach_map_fn
 

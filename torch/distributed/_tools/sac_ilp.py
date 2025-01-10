@@ -38,7 +38,7 @@ def sac_milp(
     world_size: int = 1,
     ac_units: Optional[List[str]] = None,
     fsdp_units: Optional[List[str]] = None,
-) -> Tuple[Dict[str, float], float, int]:
+) -> tuple[Dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.
     The objective is to minimize recomputation time.

@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: Dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager

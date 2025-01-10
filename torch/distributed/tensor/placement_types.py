@@ -73,7 +73,7 @@ class Shard(Placement):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], List[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         This function uses torch.chunk to split a tensor into num_chunks shards along
         the Shard placement dimension, and return a list of shards with their pad sizes.
@@ -131,7 +131,7 @@ class Shard(Placement):
         num_chunks: int,
         rank: int,
         return_offset: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         returns the local shard size and offset on a given tensor dim
         """
@@ -464,7 +464,7 @@ class _StridedShard(Shard):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], List[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         TODO: currently _StridedShard does not support padding
         """
