@@ -82,9 +82,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
     def get_device_include(self):
+        assert self.device == "cpu", "ArrayRef only supported on CPU!"
         if V.graph.aot_mode:
-            return f"#include <torch/csrc/inductor/cpp_wrapper_array_ref/aoti_{self.device}.h>"
-        return f"#include <torch/csrc/inductor/cpp_wrapper_array_ref/{self.device}.h>"
+            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
+        return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
 
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
