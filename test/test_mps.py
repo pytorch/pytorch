@@ -12701,7 +12701,7 @@ class TestMetalLibrary(TestCaseMPS):
     def test_metal_capture(self):
         lib = torch.mps._compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
         mps_tensor = torch.rand(32, device="mps")
-        capture_name = "lib_full"+"".join(random.choice("0123456789") for i in range(5))
+        capture_name = f"lib_full{''.join(random.choice('0123456789') for i in range(5))}"
         capture_dirname = f"0000-{capture_name}.gputrace"
         if os.path.exists(capture_dirname):
             shutil.rmtree(capture_dirname)
@@ -12712,7 +12712,8 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertTrue(os.path.exists(capture_dirname), f"Capture file {capture_dirname} has not been generated")
         capture_listdir = os.listdir(capture_dirname)
         shutil.rmtree(capture_dirname)
-        self.assertGreater(len(capture_listdir), 3, f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+        self.assertGreater(len(capture_listdir), 3,
+                           f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
