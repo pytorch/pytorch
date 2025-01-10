@@ -9,7 +9,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (

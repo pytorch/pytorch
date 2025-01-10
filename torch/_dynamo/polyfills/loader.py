@@ -2,7 +2,7 @@
 # Please add a new import when adding a new polyfill module.
 
 import importlib
-from typing import Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .. import polyfills, trace_rules
 

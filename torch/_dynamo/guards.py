@@ -28,7 +28,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
     Union,

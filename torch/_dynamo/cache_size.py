@@ -2,7 +2,6 @@
 import logging
 import weakref
 from dataclasses import dataclass
-from typing import Tuple
 
 from torch._guards import CompileId
 

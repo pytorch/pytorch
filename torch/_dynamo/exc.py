@@ -6,7 +6,7 @@ import textwrap
 import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, NoReturn, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, Type, TYPE_CHECKING
 
 import torch._guards
 

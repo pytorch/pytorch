@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
 
 import torch
 
