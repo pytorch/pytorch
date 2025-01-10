@@ -488,9 +488,9 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // The purpose of `at::hasXXX()` is to check if device XXX is available at
-// runtime. In contrast, `at::globalContext().hasXXX()` determines support for
-// device XXX was included in the PyTorch build (enabled at compile time) or if
-// a device XXX extension has already been registered with PyTorch.
+// runtime. In contrast, `at::globalContext().hasXXX()` determines whether
+// support for device XXX was included in the PyTorch build (enabled at compile
+// time) or if a device XXX extension has already been registered with PyTorch.
 //
 // `at::globalContext().hasXXX()` is often used in functions like
 // `getAccelerator()` instead of `at::hasXXX()` to avoid initializing the
