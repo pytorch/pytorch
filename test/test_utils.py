@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     load_tests,
 )
 from torch.utils._device import set_device
-from torch.utils._pytree import tree_all_only, tree_any
 from torch.utils._traceback import (
     CapturedTraceback,
     format_traceback_short,
@@ -48,6 +47,7 @@ from torch.utils.checkpoint import (
     get_device_states,
 )
 from torch.utils.data import DataLoader
+from torch.utils.pytree.python import tree_all_only, tree_any
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for

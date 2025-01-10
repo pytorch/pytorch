@@ -637,7 +637,7 @@ def wrap_check_inputs(check_inputs):
 
 
 def analyze_ts_result_with_export_result(export, trace):
-    import torch.utils._pytree as pytree
+    import torch.utils.pytree.python as pytree
 
     flat_export = pytree.tree_leaves(export)
     flat_trace = pytree.tree_leaves(trace)

@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import TensorMetadata

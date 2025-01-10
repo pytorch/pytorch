@@ -13,6 +13,7 @@ import sympy
 import torch
 import torch.fx
 import torch.nn.functional as F
+import torch.utils.pytree.python as pytree
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
@@ -41,7 +42,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
     CleanDiv,

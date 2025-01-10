@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Union
 
 import torch
 import torch._guards
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import (

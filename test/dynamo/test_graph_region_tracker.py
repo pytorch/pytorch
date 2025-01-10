@@ -6,7 +6,7 @@ import torch
 import torch.fx
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 
 def get_nodes_by_name(graph, names):

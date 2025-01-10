@@ -8,7 +8,7 @@ from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (  # type: ignore[attr-defined]
     _get_node_type,
     BUILTIN_TYPES,
     keystr,

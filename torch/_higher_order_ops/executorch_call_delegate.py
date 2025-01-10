@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -22,7 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils.pytree.python import tree_flatten
 
 
 class ExecutorchCallDelegate(HigherOrderOperator):

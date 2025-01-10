@@ -16,7 +16,7 @@ from . import _functional_collectives_impl as fun_col_impl
 try:
     from torch.utils._cxx_pytree import tree_map_only
 except ImportError:
-    from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
+    from torch.utils.pytree.python import tree_map_only  # type: ignore[no-redef]
 
 
 if torch._running_with_deploy():

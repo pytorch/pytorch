@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from typing import Any, Dict, Iterable, List, Tuple
 
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (  # type: ignore[attr-defined]
     _dict_flatten,
     _dict_flatten_with_keys,
     _dict_unflatten,

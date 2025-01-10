@@ -10,7 +10,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,

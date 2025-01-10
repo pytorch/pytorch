@@ -286,7 +286,7 @@ def make_graphed_callables(
                 + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
                 + "``requires_grad=False``."
             )
-        flatten_arg = torch.utils._pytree.arg_tree_leaves(*args)
+        flatten_arg = torch.utils.pytree.python.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
         assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
             "In the beta API, sample_args "
@@ -320,7 +320,7 @@ def make_graphed_callables(
         ):
             grad_inputs, outputs, outputs_grad = None, None, None
             for _ in range(num_warmup_iters):
-                outputs = torch.utils._pytree.tree_leaves(func(*args))
+                outputs = torch.utils.pytree.python.tree_leaves(func(*args))
                 outputs_grad = tuple(o for o in outputs if o.requires_grad)
                 if len(outputs_grad) > 0:
                     grad_inputs = torch.autograd.grad(
@@ -350,7 +350,7 @@ def make_graphed_callables(
         with torch.cuda.graph(fwd_graph, pool=mempool):
             outputs = func(*args)
 
-        flatten_outputs, spec = torch.utils._pytree.tree_flatten(outputs)
+        flatten_outputs, spec = torch.utils.pytree.python.tree_flatten(outputs)
         per_callable_static_outputs.append(tuple(flatten_outputs))
         per_callable_output_unflatten_spec.append(spec)
 
@@ -445,9 +445,9 @@ def make_graphed_callables(
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            flatten_user_args = torch.utils._pytree.arg_tree_leaves(*user_args)
+            flatten_user_args = torch.utils.pytree.python.arg_tree_leaves(*user_args)
             out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
-            return torch.utils._pytree.tree_unflatten(out, output_unflatten_spec)
+            return torch.utils.pytree.python.tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
 

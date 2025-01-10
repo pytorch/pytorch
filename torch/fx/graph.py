@@ -29,7 +29,7 @@ from typing import (
 )
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import _NodeIter
 
 from . import _pytree as fx_pytree
@@ -90,7 +90,7 @@ _register_custom_builtin("NoneType", "NoneType = type(None)", type(None))
 _register_custom_builtin("torch", "import torch", torch)
 _register_custom_builtin("device", "from torch import device", torch.device)
 _register_custom_builtin("fx_pytree", "import torch.fx._pytree as fx_pytree", fx_pytree)
-_register_custom_builtin("pytree", "import torch.utils._pytree as pytree", pytree)
+_register_custom_builtin("pytree", "import torch.utils.pytree.python as pytree", pytree)
 
 
 def _is_magic(x: str) -> bool:

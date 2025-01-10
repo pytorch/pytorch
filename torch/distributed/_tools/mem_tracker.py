@@ -19,7 +19,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils.pytree.python import tree_flatten, tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
 

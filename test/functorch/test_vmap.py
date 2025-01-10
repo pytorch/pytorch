@@ -38,6 +38,7 @@ from functorch_additional_op_db import additional_op_db
 import functorch
 import torch
 import torch.nn.functional as F
+import torch.utils.pytree.python as pytree
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
 from functorch.experimental import chunk_vmap
 from torch import Tensor
@@ -76,7 +77,6 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
-from torch.utils import _pytree as pytree
 
 
 def get_platform_specific_sdpa():

@@ -539,7 +539,7 @@ def _convert_to_export_graph_signature(
     gm: "torch.fx.GraphModule",
     non_persistent_buffers: Set[str],
 ) -> "ExportGraphSignature":
-    from torch.utils import _pytree as pytree
+    import torch.utils.pytree.python as pytree
 
     is_joint = graph_signature.backward_signature is not None
 

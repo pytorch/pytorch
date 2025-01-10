@@ -2,7 +2,7 @@
 import weakref
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree.python as pytree
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._ops import OpOverload
 from torch.library import Library

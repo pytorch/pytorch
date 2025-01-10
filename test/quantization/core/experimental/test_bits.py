@@ -5,7 +5,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import tree_map
+from torch.utils.pytree.python import tree_map
 
 import itertools
 

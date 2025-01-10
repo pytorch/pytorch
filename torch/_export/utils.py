@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
-from torch.utils._pytree import (
+from torch.utils.pytree.python import (  # type: ignore[attr-defined]
     _register_pytree_node,
     Context,
     FlattenFunc,
