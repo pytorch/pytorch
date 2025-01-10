@@ -403,6 +403,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: angle
+    MPS: angle_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr
   tags: pointwise
 
@@ -410,6 +411,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: angle_out
+    MPS: angle_out_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr_out
   tags: pointwise
 
