@@ -162,7 +162,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
-        elif name == "__dict__":
+        elif name in ("__dict__", "__eq__"):
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
