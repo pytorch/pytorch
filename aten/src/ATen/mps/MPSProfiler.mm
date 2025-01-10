@@ -30,6 +30,23 @@ const std::string BaseInfo::toString(double gpuTime, double schedulingTime) cons
                      schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
 }
 
+std::string BaseInfo::buildTensorString(const Tensor& tensor, bool includeBufferId) {
+  if (tensor.defined()) {
+    std::stringstream tensorStr;
+    auto deviceType = tensor.device().type();
+    tensorStr << c10::DeviceTypeName(deviceType);
+    // see comments for INCLUDE_BUFFER_ID
+    if (includeBufferId && deviceType == at::kMPS) {
+      id<MTLBuffer> buffer = __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+      tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ":" << buffer.retainCount << ")";
+    }
+    tensorStr << ":" << tensor.scalar_type() << tensor.sizes();
+    return tensorStr.str();
+  } else {
+    return "undefined";
+  }
+}
+
 const std::string OperationInfo::toString(double gpuTime, double schedulingTime) const {
   return fmt::format("aten::{} (id={}{}, run={}{})",
                      strKey,
