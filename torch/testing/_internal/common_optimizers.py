@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Union
 
 import torch
 from torch import Tensor
@@ -123,10 +123,10 @@ class OptimizerInfo:
         ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
-        supported_impls: Tuple[str, ...] = ("foreach", "differentiable"),
+        supported_impls: tuple[str, ...] = ("foreach", "differentiable"),
         # A subset of all flags, signifying which ones were only supported after the
         # original optimizer had already been released. aka impls where we need to check BC.
-        not_og_supported_flags: Tuple[str, ...] = (
+        not_og_supported_flags: tuple[str, ...] = (
             "foreach",
             "differentiable",
             "maximize",
@@ -153,7 +153,7 @@ class OptimizerInfo:
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
-        supports_fused_on: Tuple[str, ...] = (),
+        supports_fused_on: tuple[str, ...] = (),
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
@@ -2308,7 +2308,7 @@ class TensorTracker:
 
     def add(self, tensor):
         """
-        Add a clone().detach()'d version of the tensor
+        Add a detach().clone()'d version of the tensor
         """
         self.tensors.append(tensor.detach().clone())
 

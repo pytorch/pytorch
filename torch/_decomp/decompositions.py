@@ -1633,7 +1633,9 @@ def native_layer_norm_backward(
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
     grad_out_cast, input_cast, weight_cast, bias_cast = (
-        x.to(computation_dtype).contiguous() if x is not None else x
+        x.to(computation_dtype, memory_format=torch.contiguous_format)
+        if x is not None
+        else x
         for x in (grad_out, input, weight, bias)
     )
     assert grad_out_cast is not None
@@ -5114,21 +5116,6 @@ def bernoulli(
             device=self.device,
         )
     p = (raw_p < self).to(self.dtype)
-    return p
-
-
-@register_decomposition(aten.bernoulli.p)
-def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
-    if generator is None:
-        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
-    else:
-        raw_p = torch.rand(
-            self.size(),
-            generator=generator,
-            dtype=self.float32,
-            device=self.device,
-        )
-    p = (raw_p < p).to(self.dtype)
     return p
 
 
