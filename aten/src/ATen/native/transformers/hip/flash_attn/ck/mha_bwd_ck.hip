@@ -380,10 +380,10 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-#if (defined(__gfx90a__) || defined(__gfx942__))
+//#if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
-#else
+/*#else
         TORCH_CHECK(
             false,
             "CK Flash Attention is not compiled with the right GPU arch. "
@@ -391,6 +391,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
             "GPU arch that CK attention supports."
         )
 #endif
+*/
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
         dk_expanded.zero_();

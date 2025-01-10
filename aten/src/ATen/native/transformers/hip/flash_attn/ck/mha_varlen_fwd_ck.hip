@@ -338,9 +338,10 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-#if (defined(__gfx90a__) || defined(__gfx942__))
+//#if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+/*
 #else
         TORCH_CHECK(
             false,
@@ -349,6 +350,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
             "GPU arch that CK attention supports."
         )
 #endif
+*/
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
