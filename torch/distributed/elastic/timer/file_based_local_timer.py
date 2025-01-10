@@ -13,7 +13,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 from torch.distributed.elastic.timer.debug_info_logging import (

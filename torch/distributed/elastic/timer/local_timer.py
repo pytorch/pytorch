@@ -10,7 +10,7 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 

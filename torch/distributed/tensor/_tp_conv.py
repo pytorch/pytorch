@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import cast, Dict, List, Tuple
+from typing import cast, Dict, List
 
 import torch
 import torch.distributed as dist

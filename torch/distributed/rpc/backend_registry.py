@@ -3,7 +3,7 @@
 
 import collections
 import enum
-from typing import cast, Dict, List, Set, Tuple
+from typing import cast, Dict, List, Set
 
 import torch
 import torch.distributed as dist

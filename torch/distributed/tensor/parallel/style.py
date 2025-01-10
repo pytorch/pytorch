@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 import torch.nn as nn

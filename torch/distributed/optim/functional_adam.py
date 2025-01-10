@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F

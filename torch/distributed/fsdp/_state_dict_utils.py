@@ -12,7 +12,6 @@ from typing import (
     Iterator,
     List,
     no_type_check,
-    Tuple,
 )
 
 import torch

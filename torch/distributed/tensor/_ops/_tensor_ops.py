@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Sized, Tuple
+from typing import cast, List, Optional, Sequence, Sized
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh

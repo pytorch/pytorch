@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import torch
 import torch.distributed as dist

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, NoReturn, Optional, Set
 
 import torch
 import torch.nn as nn

@@ -398,7 +398,7 @@ import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
 from importlib import metadata
-from typing import Callable, List, Optional, Set, Tuple, Type, Union
+from typing import Callable, List, Optional, Set, Type, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env

@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, Dict, List, Optional
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta

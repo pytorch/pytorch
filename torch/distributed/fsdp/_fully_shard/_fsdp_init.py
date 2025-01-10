@@ -1,5 +1,5 @@
 import itertools
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Optional, Set, Union
 
 import torch
 import torch.distributed as dist

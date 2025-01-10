@@ -13,7 +13,6 @@ from typing import (
     MutableMapping,
     NamedTuple,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )

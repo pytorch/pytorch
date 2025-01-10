@@ -1,6 +1,6 @@
 import itertools
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Set
 
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec

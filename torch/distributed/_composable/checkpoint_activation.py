@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager, nullcontext
-from typing import Any, ContextManager, Dict, Generator, Optional, Tuple
+from typing import Any, ContextManager, Dict, Generator, Optional
 
 import torch
 import torch.nn as nn

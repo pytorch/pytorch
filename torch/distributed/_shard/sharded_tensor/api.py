@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Callable, cast, Dict, List, Optional, Sequence, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch

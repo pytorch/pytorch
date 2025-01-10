@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set
 
 import torch
 import torch.distributed as dist
