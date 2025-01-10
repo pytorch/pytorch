@@ -52,7 +52,7 @@ For nightly wheels
 From Source
 ^^^^^^^^^^^
 
-Now we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
+Now that we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
 
 Build from source for ``torch`` refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
 
