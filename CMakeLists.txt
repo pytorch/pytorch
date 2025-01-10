@@ -876,6 +876,10 @@ cmake_dependent_option(
 # feature by default We dont currently document this feature because we don't
 # Suspect users building from source will need this
 add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
+add_definitions(-DFLASHATTENTION_DISABLE_SOFTCAP)
+add_definitions(-DFLASH_NAMESPACE=pytorch_flash)
+# See https://github.com/pytorch/pytorch/issues/121558 for details
+add_definitions(-DUNFUSE_FMA)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't

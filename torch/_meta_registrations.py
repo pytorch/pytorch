@@ -5301,8 +5301,8 @@ def meta__scaled_dot_product_flash_attention(
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((2), dtype=torch.uint64, device="meta"),
+        torch.empty((), dtype=torch.uint64, device="meta"),
         debug_mask,
     )
 
@@ -5619,11 +5619,17 @@ def meta__flash_attention_forward(
 
     # Cuda Path
     attention = torch.empty_like(query)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
+    if cum_seq_q is None:
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q),
+            dtype=torch.float,
+            device=query.device,
+        )
+    else:
+        total_q = query.size(0)
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
@@ -5644,8 +5650,8 @@ def meta__flash_attention_forward(
     return (
         attention,
         logsumexp,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((2), dtype=torch.uint64, device="meta"),
+        torch.empty((), dtype=torch.uint64, device="meta"),
         debug_mask,
     )
 
