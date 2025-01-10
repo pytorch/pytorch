@@ -297,6 +297,7 @@ SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST',
 SYCL_DLINK_FLAGS = [
     *COMMON_SYCL_FLAGS,
     '-fsycl-link',
+    '--offload-compress',
     f'-Xs "-device {SYCL_ARCH_LIST}"',
 ]
 
