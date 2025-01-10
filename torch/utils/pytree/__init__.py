@@ -90,7 +90,7 @@ if _TYPE_CHECKING:
     ]
 
 
-PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
+PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "1") not in {
     "0",
     "",
 }
