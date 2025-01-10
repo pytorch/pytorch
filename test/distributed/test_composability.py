@@ -107,7 +107,7 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP"])
+    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
         [
@@ -121,8 +121,6 @@ class ComposabilityTest(MultiProcContinousTest):
     @parametrize("use_new_runtime", [False, True])
     def test_pp_dp(self, dp_type, ScheduleClass, use_new_runtime):
         # TODO: fix DDP+ZB or at least add an error msg when using them together
-
-        # TODO(whc) test FSDP with mixed-precision
 
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
@@ -138,6 +136,9 @@ class ComposabilityTest(MultiProcContinousTest):
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
 
+        # fsdp_mixed-precition dtype
+        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+
         # Prepare inputs
         num_microbatches = 8
         inputs = [
@@ -147,7 +148,7 @@ class ComposabilityTest(MultiProcContinousTest):
         input = inputs[dp_mesh.get_local_rank()]
         input_mb = [[input[i].reshape((1, dim))] for i in range(num_microbatches)]
         targets = [
-            torch.rand((num_microbatches, dim), device=self.device)
+            torch.rand((num_microbatches, dim), device=self.device, dtype=mp_dtype)
             for _ in range(dp_mesh.size())
         ]
         target = targets[dp_mesh.get_local_rank()]
@@ -171,13 +172,10 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Apply DP to stage module
         def apply_dp(partial_model, dp_type):
-            if dp_type == "FSDP":
+            if dp_type in ("FSDP", "FSDP_MP"):
                 # apply FSDP
                 mp_policy = MixedPrecisionPolicy(
-                    # TODO(whc) need to fix PP + FSDP-mixed-precision
-                    # tracer for PP assumes f32 and is caught off guard when runtime FSDP interacts using bf16 inputs
-                    # param_dtype=torch.bfloat16, reduce_dtype=torch.float32
-                    param_dtype=torch.float32,
+                    param_dtype=mp_dtype,
                     reduce_dtype=torch.float32,
                 )
                 fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
@@ -256,10 +254,21 @@ class ComposabilityTest(MultiProcContinousTest):
         for p in ref_model.parameters():
             p.grad /= dp_mesh.size()
 
+        # for sim_dp_rank in range(dp_mesh.size()):
+        #     for sim_pp_mb in range(num_microbatches):
+        #         # simulate the accumulation of gradients as in PP where loss fn does less scaling (no scaling in this case)
+        #         # due to smaller local microbatch size
+        #         loss_fn(ref_model(inputs[sim_dp_rank][sim_pp_mb]), targets[sim_dp_rank][sim_pp_mb]).backward()
+
+        # # simulate the built-in averaging done by FSDP
+        # for p in ref_model.parameters():
+        #     p.grad /= dp_mesh.size()
+        #     p.grad /= num_microbatches
+
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
         ref_parameters = dict(ref_model.named_parameters())
-        if dp_type == "FSDP":
+        if dp_type in ("FSDP", "FSDP_MP"):
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():
                     parts = name.split(".")
@@ -267,7 +276,7 @@ class ComposabilityTest(MultiProcContinousTest):
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
                     self.assertTrue(isinstance(p.grad, DTensor))
-                    torch.testing.assert_close(ref_p.grad, p.grad.full_tensor())
+                    torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():
@@ -275,7 +284,7 @@ class ComposabilityTest(MultiProcContinousTest):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    torch.testing.assert_close(ref_p.grad, p.grad)
+                    torch.testing.assert_close(p.grad, ref_p.grad)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
