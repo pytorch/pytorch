@@ -696,8 +696,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
   TORCH_CHECK(!A.is_complex() && !B.is_complex(), "linalg.solve.triangular(); Not supported for complex yet!");
-  Tensor A_t, B_t;
-  std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
+  auto [B_t, A_t] = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());
 
   if (A.numel() == 0 || B.numel() == 0 || out.numel() == 0) {
