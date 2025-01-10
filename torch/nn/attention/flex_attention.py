@@ -173,13 +173,13 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     return out
 
 
-def _dense_to_ordered(dense_mask) -> Tuple:
+def _dense_to_ordered(dense_mask) -> Tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
-        num_blocks_in_row.to(torch.int32).contiguous(),
-        col_indices.to(torch.int32).contiguous(),
+        num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
+        col_indices.to(torch.int32, memory_format=torch.contiguous_format),
     )
 
 
@@ -758,7 +758,9 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm = _dense_to_ordered(full_blocks)
+        full_bm: Tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+            full_blocks
+        )
     else:
         full_bm = (None, None)
 
