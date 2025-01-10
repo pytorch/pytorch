@@ -214,9 +214,9 @@ def _extract_graph_with_inputs_outputs(
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
-            assert not isinstance(
-                env[x], InvalidNodeBase
-            ), f"Node {x} was invalid, but is output"
+            assert not isinstance(env[x], InvalidNodeBase), (
+                f"Node {x} was invalid, but is output"
+            )
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -882,7 +882,7 @@ def solve_min_cut(
         import networkx as nx
     except ImportError as e:
         raise RuntimeError(
-            "Need networkx installed to perform smart recomputation " "heuristics"
+            "Need networkx installed to perform smart recomputation heuristics"
         ) from e
 
     def is_materialized_backwards(node):

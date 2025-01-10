@@ -265,9 +265,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(
-        denom, int
-    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(numer, int) and isinstance(denom, int), (
+        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    )
     return runtime_ceildiv(numer, denom)
 
 
@@ -307,7 +307,7 @@ def _type_of(key):
 
 
 def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]]
+    lst: Iterable[Union[int, torch.SymInt]],
 ) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
@@ -318,7 +318,7 @@ def convert_shape_to_inductor(
 
 
 def convert_shape_to_symint(
-    lst: Iterable[Union[int, sympy.Expr]]
+    lst: Iterable[Union[int, sympy.Expr]],
 ) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
@@ -472,11 +472,9 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(self) -> None:
-        ...
+    def clear_cache(self) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -1535,18 +1533,18 @@ def get_code(fn, *args, **kwargs):
 def get_triton_code(fn, *args, **kwargs):
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -1664,9 +1662,9 @@ def is_cpu_device(inputs):
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(
-        val, sympy.Expr
-    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    assert isinstance(val, sympy.Expr), (
+        "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    )
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:

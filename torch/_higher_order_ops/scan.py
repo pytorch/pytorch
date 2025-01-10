@@ -98,6 +98,7 @@ def scan(
             next_carry = y = x + y
             return next_carry, y
 
+
         i0 = torch.zeros(1)
         xs = torch.arange(5)
         # returns torch.tensor([10.]), torch.tensor([[0], [1.], [3.], [6.], [10.]])
