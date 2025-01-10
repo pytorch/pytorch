@@ -115,14 +115,14 @@ class MetalOverrides(OpOverrides):
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         max_res = f"metal::max({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b}) ? ? {a} + {b} : {max_res}"
+        return f"metal::isnan({a} + {b}) ? {a} + {b} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         min_res = f"metal::min({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b}) ? ? {a} + {b} : {min_res}"
+        return f"metal::isnan({a} + {b})  ? {a} + {b} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
