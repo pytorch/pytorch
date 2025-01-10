@@ -2,7 +2,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -77,7 +77,7 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Tuple[Any, ...],
+        fn_args: tuple[Any, ...],
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
