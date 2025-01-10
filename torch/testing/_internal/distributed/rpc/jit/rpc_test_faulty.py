@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import torch.distributed.rpc as rpc

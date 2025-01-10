@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, List, Sequence, Union, Any
+from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5

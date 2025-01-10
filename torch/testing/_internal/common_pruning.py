@@ -1,6 +1,6 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F

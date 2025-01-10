@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, skipIfMPSOnMacOS13, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
-from typing import List, Type, Set, Dict
+from typing import List, Tuple, Type, Set, Dict
 import operator
 
 # List of all namespaces containing modules to test.

@@ -3,7 +3,7 @@
 import unittest
 from functools import partial
 from itertools import product
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 import numpy
 

@@ -2,7 +2,7 @@
 
 import time
 import io
-from typing import Dict, List, Any
+from typing import Dict, List, Tuple, Any
 
 import torch
 import torch.distributed as dist

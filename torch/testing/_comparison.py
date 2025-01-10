@@ -12,6 +12,7 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
+    Tuple,
     Type,
     Union,
 )

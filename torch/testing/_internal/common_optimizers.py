@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -2308,7 +2308,7 @@ class TensorTracker:
 
     def add(self, tensor):
         """
-        Add a clone().detach()'d version of the tensor
+        Add a detach().clone()'d version of the tensor
         """
         self.tensors.append(tensor.detach().clone())
 
