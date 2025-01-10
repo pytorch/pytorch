@@ -1,5 +1,5 @@
 # mypy: allow-untyped-decorators
-from typing import cast, List, NamedTuple, Optional, Tuple, Union
+from typing import cast, List, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -55,7 +55,7 @@ def all_gather_copy_in_meta(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
     )
@@ -66,6 +66,7 @@ def all_gather_copy_in_meta(
 
 
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
+@torch.library.impl(lib, "all_gather_copy_in", "XPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
 def all_gather_copy_in_cuda(
     all_gather_inputs: List[torch.Tensor],
@@ -75,7 +76,7 @@ def all_gather_copy_in_cuda(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
@@ -95,6 +96,7 @@ lib.define(
 
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
+@torch.library.impl(lib, "split_with_sizes_copy", "XPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
@@ -114,6 +116,7 @@ lib.define(
 
 @torch.library.impl(lib, "chunk_cat", "Meta")
 @torch.library.impl(lib, "chunk_cat", "CUDA")
+@torch.library.impl(lib, "chunk_cat", "XPU")
 @torch.library.impl(lib, "chunk_cat", "CPU")
 def chunk_cat(
     tensors: List[torch.Tensor],
@@ -254,7 +257,7 @@ def foreach_all_gather_copy_out(
     world_size, device = group.size(), all_gather_output.device
 
     split_with_sizes_out: List[torch.Tensor] = []
-    shard_i_copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
+    shard_i_copy_infos: List[tuple[FSDPParam, List[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -330,7 +333,7 @@ def foreach_reduce(
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[
+) -> tuple[
     torch.Tensor,
     torch.Event,
     torch.Event,
@@ -498,7 +501,7 @@ def foreach_reduce_scatter_copy_in(
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],
-) -> Tuple[List[List[torch.dtype]], List[List[int]], torch.dtype]:
+) -> tuple[List[List[torch.dtype]], List[List[int]], torch.dtype]:
     param_all_gather_input_dtypes: List[List[torch.dtype]] = []
     param_all_gather_input_numels: List[List[int]] = []
     all_gather_dtype = param_all_gather_inputs[0][0].dtype
@@ -523,7 +526,7 @@ def _get_gradient_divide_factors(
     reduce_scatter_group: dist.ProcessGroup,
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
-) -> Union[Tuple[None, None], Tuple[float, float]]:
+) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
     if reduce_dtype in (torch.float32, torch.bfloat16):

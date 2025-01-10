@@ -13,7 +13,6 @@ from typing import (
     MutableMapping,
     NamedTuple,
     Optional,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -92,7 +91,7 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
 ) -> Dict[str, Any]:
@@ -209,7 +208,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -294,7 +293,7 @@ def _gather_state_dict(
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -516,7 +515,6 @@ def _broadcast_tensors(
                 device=device,
                 dtype=tensor_info.dtype,
             )
-
         tensors.append(full_tensor)
         local_state = local_state_dict.get(key, None)
         if local_state is None:
@@ -560,16 +558,23 @@ def _distribute_tensors(
             slice(cur_offset, cur_offset + cur_shape)
             for cur_shape, cur_offset in zip(shape, offset)
         ]
-        local_tensor = full_tensor[slices]
-        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
-        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
-        local_state_dict[key] = DTensor.from_local(
-            local_tensor,
-            local_state.device_mesh,
-            local_state.placements,
-            shape=local_state.shape,
-            stride=local_state.stride(),
-        )
+        if local_state.is_meta:
+            # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
+            local_tensor = full_tensor[slices].detach().clone()
+            # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+            # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+            ret = DTensor.from_local(
+                local_tensor,
+                local_state.device_mesh,
+                local_state.placements,
+                shape=local_state.shape,
+                stride=local_state.stride(),
+            )
+        else:
+            ret = local_state
+            # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
+            ret.to_local().copy_(full_tensor[slices])
+        local_state_dict[key] = ret
 
 
 def _broadcast_state_dict(
@@ -578,6 +583,7 @@ def _broadcast_state_dict(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
     strict: bool = False,
+    cpu_offload: bool = False,
 ) -> None:
     # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
     # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
@@ -595,7 +601,6 @@ def _broadcast_state_dict(
     broadcast_list = [ret]
     dist.broadcast_object_list(broadcast_list, src=0, group=pg)
     ret = broadcast_list[0]
-
     # Gather values
     keys = []
     local_state_dict_keys = set(local_state_dict.keys())
@@ -614,6 +619,9 @@ def _broadcast_state_dict(
         # Broadcast every tensor to avoid OOM for now.
         if len(keys) >= 1:
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+            if cpu_offload:
+                for key in keys:
+                    local_state_dict[key] = local_state_dict[key].cpu()
             keys.clear()
 
     if strict:
@@ -623,6 +631,9 @@ def _broadcast_state_dict(
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+        if cpu_offload:
+            for key in keys:
+                local_state_dict[key] = local_state_dict[key].cpu()
 
 
 def _distribute_state_dict(
@@ -660,7 +671,7 @@ def _distribute_state_dict(
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
 PATH_ITEM = Union[str, int]
-OBJ_PATH = Tuple[PATH_ITEM, ...]
+OBJ_PATH = tuple[PATH_ITEM, ...]
 FLATTEN_MAPPING = Dict[str, OBJ_PATH]
 STATE_DICT_TYPE = Dict[str, Any]
 CONTAINER_TYPE = MutableMapping[PATH_ITEM, Any]
@@ -692,7 +703,7 @@ def _traverse_state_dict(
 
 def _flatten_state_dict(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+) -> tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
 

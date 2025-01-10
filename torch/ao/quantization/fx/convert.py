@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -92,7 +92,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     model: torch.fx.GraphModule,
     node: Node,
     modules: Dict[str, torch.nn.Module],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:
     """Replace activation_post_process module call node with quantize and
@@ -360,7 +360,7 @@ def _replace_observer_with_quantize_dequantize_node(
     model: torch.fx.GraphModule,
     node: Node,
     modules: Dict[str, torch.nn.Module],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:
     """Replace activation_post_process module call node with quantize and
@@ -589,9 +589,9 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
 
 def _get_module_path_and_prefix(
     obs_node: Node,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
     node_name_to_qconfig: Dict[str, QConfigAny],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Given and observer node, get the `Scope` or the fully qualified name for
     the submodule containing the observed node, also return a prefix of "_input"
     when the observed node is an input of a F.linear op, and not the output of another
@@ -992,6 +992,7 @@ def convert(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
     is_decomposed: bool = False,
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -1060,7 +1061,7 @@ def convert(
     assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
     node_name_to_scope: Dict[
-        str, Tuple[str, type]
+        str, tuple[str, type]
     ] = observed_graph_module_attrs.node_name_to_scope
     prepare_custom_config: PrepareCustomConfig = (
         observed_graph_module_attrs.prepare_custom_config
@@ -1122,10 +1123,6 @@ def convert(
     # always run weight observers in the top level forward method
     # for dynamic quant ops or weight only quant ops
     _run_weight_observers(model, backend_config)
-
-    graph_inputs: List[str] = [
-        node.name for node in model.graph.nodes if node.op == "placeholder"
-    ]
 
     # additional state to override inputs to be quantized, if specified
     # by the user
@@ -1247,7 +1244,9 @@ def convert(
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
-        model = lower_to_fbgemm(model, node_name_to_qconfig, node_name_to_scope)
+        model = lower_to_fbgemm(
+            model, node_name_to_qconfig, node_name_to_scope, keep_original_weights
+        )
 
     # TODO: this looks hacky, we want to check why we need this and see if we can
     # remove this

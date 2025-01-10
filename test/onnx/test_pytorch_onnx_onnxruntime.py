@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+# ruff: noqa: F841
 
 from __future__ import annotations
 
@@ -8927,6 +8928,40 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(5, 3, 3)
         y = torch.randn(5, 2, 3)
+        self.run_test(Cdist(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist_euclid_dist(self):
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(x, y, p=2.0, compute_mode="use_mm_for_euclid_dist")
+
+        x = torch.randn(2, 64, 4)
+        y = torch.randn(1, 32, 4)
+        self.run_test(Cdist(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist_euclid_dist_if_necessary(self):
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(
+                    x, y, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"
+                )
+
+        x = torch.randn(2, 64, 4)
+        y = torch.randn(1, 32, 4)
+        self.run_test(Cdist(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist_no_euclid_dist(self):
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(
+                    x, y, p=2.0, compute_mode="donot_use_mm_for_euclid_dist"
+                )
+
+        x = torch.randn(2, 64, 4)
+        y = torch.randn(1, 32, 4)
         self.run_test(Cdist(), input_args=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)

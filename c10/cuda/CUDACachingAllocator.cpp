@@ -211,7 +211,6 @@ struct Block {
       void* ptr)
       : device(device),
         stream(stream),
-        stream_uses(),
         size(size),
         requested_size(0),
         pool(pool),
@@ -219,11 +218,7 @@ struct Block {
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device),
-        stream(stream),
-        stream_uses(),
-        size(size),
-        requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -411,6 +406,7 @@ struct ExpandableSegment {
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           auto h = handles_.at(j).value();
           handles_.at(j) = std::nullopt;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
@@ -449,6 +445,7 @@ struct ExpandableSegment {
     ShareHeader header{getpid(), segment_size_, end - begin};
     buf.write((const char*)&header, sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
       if (!handle.fd) {
         int fd = 0;
@@ -498,6 +495,7 @@ struct ExpandableSegment {
         close((int)pidfd);
         for (auto& h : segment->handles_) {
           C10_CUDA_DRIVER_CHECK(
+              // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
               DriverAPI::get()->cuMemRelease_(h.value().handle));
           h = std::nullopt;
         }
@@ -560,6 +558,7 @@ struct ExpandableSegment {
           ptr_ + i * segment_size_,
           segment_size_,
           0,
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           handles_.at(i).value().handle,
           0ULL));
     }
@@ -584,6 +583,7 @@ struct ExpandableSegment {
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(

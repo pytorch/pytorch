@@ -106,6 +106,10 @@ const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const 
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
+Generator CUDAHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::CUDAGeneratorImpl>(device_index);
+}
+
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
@@ -144,7 +148,10 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
 }
 
 bool CUDAHooks::hasCUDA() const {
-  return at::cuda::is_available();
+  // This function determines if CUDA is built into PyTorch. It helps avoid
+  // initializing the CUDA runtime (which can poison child processes) while
+  // detecting the current accelerator.
+  return true;
 }
 
 bool CUDAHooks::hasMAGMA() const {
