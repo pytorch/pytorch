@@ -1494,10 +1494,6 @@ class InstructionTranslatorBase(
         assert isinstance(tos, ExceptionVariable)
         if tos.exc_type is StopIteration:
             unimplemented("CLEANUP_THROW")
-            # _type = self.pop()
-            # value = self.pop()
-            # _tb = self.pop()
-            # self.stack.append(value)
         else:
             self.RERAISE(inst)
 
