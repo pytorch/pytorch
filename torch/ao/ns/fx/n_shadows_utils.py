@@ -2,7 +2,7 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, List, Optional, Set
 
 import torch
 import torch.fx
@@ -60,7 +60,7 @@ class OutputProp:
 
     def propagate(self, *args):
         args_iter = iter(args)
-        env: Dict[str, Node] = {}
+        env: dict[str, Node] = {}
 
         def load_arg(a):
             return torch.fx.graph.map_arg(a, lambda n: env[n.name])
@@ -100,7 +100,7 @@ class OutputProp:
         return None
 
 
-def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Node]]:
+def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, List[Node]]:
     # the original matches variable is unique by node, make it unique by subgraph
     # instead
     seen_nodes = set()
@@ -310,7 +310,7 @@ def create_submodule_from_subgraph(
             cur_args_copy = []
             cur_kwargs_copy = {}
             seen_names: Set[str] = set()
-            old_name_to_new_node: Dict[str, Node] = {}
+            old_name_to_new_node: dict[str, Node] = {}
 
             def _add_placeholder(
                 g: Graph, node: Node, seen_names, old_name_to_new_node
@@ -449,11 +449,11 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     first_node: Node,
     last_node: Node,
     fqn: Optional[str],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    list_of_node_name_to_qconfig: List[dict[str, QConfigAny]],
     example_inputs: Any,
     last_added_shadow_node_list: List[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -532,7 +532,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 assert (
                     kwarg_name not in custom_prepare_kwargs
                 ), f"cannot specify {kwarg_name} in custom_prepare_kwargs"
-            prepare_kwargs: Dict[str, Any] = {
+            prepare_kwargs: dict[str, Any] = {
                 "example_inputs": example_inputs,
                 "qconfig_mapping": qconfig_mapping,
             }
@@ -609,9 +609,9 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     match_name: str,
     nodes_in_this_subgraph: List[Any],
     qconfig_mappings: List[QConfigMapping],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    list_of_node_name_to_qconfig: List[dict[str, QConfigAny]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -707,9 +707,9 @@ def create_n_transformed_and_logged_copies_of_subgraph(
 
 def create_add_loggers_graph(
     model: GraphModule,
-    subgraphs_dedup: Dict[str, List[Node]],
+    subgraphs_dedup: dict[str, List[Node]],
     qconfig_mapping: QConfigMapping,
-    node_name_to_qconfig: Dict[str, QConfigAny],
+    node_name_to_qconfig: dict[str, QConfigAny],
 ) -> None:
     r"""
     Given a model, a model graph partition (currently a set of matched

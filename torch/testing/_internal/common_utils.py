@@ -5072,7 +5072,7 @@ def get_tensors_from(args, kwargs):
 
 # Returns scalar tensor representation of a list of integer byte values
 def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
-    dtype_to_ctype: Dict[torch.dtype, Any] = {
+    dtype_to_ctype: dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
         torch.uint16: ctypes.c_uint16,

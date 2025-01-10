@@ -11,7 +11,6 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
-    Dict,
     Generator,
     List,
     Optional,
@@ -530,7 +529,7 @@ def _templated_ring_attention(
 def _sdpa_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
@@ -568,7 +567,7 @@ def _sdpa_handler(
 def _sdpa_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as output tensor
     args = list(args)
@@ -861,7 +860,7 @@ customized_ops = {
 }
 
 
-_replaced_functions: Dict[Callable, Tuple[str, Callable]] = {}
+_replaced_functions: dict[Callable, Tuple[str, Callable]] = {}
 
 
 def _distribute_function(
@@ -901,7 +900,7 @@ def _distribute_function(
     def wrapper(
         target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
     ) -> Callable:
-        def inner_fn(*args: Tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
+        def inner_fn(*args: Tuple[Any, ...], **kwargs: dict[str, Any]) -> Any:
             if input_fn is not None:
                 args, kwargs = input_fn(device_mesh, *args, **kwargs)
             output = target_fn(*args, **kwargs)
@@ -1056,8 +1055,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
-        mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
         placement = [Shard(seq_dim)]
         all_args = []
 

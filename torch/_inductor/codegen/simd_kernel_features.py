@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import collections
 import itertools
-from typing import Any, Dict, Iterable, List, Type, Union
+from typing import Any, Iterable, List, Type, Union
 
 import sympy
 
@@ -89,7 +89,7 @@ class SIMDKernelFeatures:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
 
     @cache_on_self
-    def buf_accesses(self) -> Dict[str, List[Dep]]:
+    def buf_accesses(self) -> dict[str, List[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
         for node in self.scheduler_nodes():
@@ -155,9 +155,9 @@ class SIMDKernelFeatures:
         return reduction_hint_val
 
     @cache_on_self
-    def buffer_read_counts(self) -> Dict[str, int]:
+    def buffer_read_counts(self) -> dict[str, int]:
         """Counts how many times each buffer is read within the kernel"""
-        read_counts: Dict[str, int] = collections.defaultdict(int)
+        read_counts: dict[str, int] = collections.defaultdict(int)
 
         for node in self.scheduler_nodes():
             # node.read_writes.reads contains MemoryDep objects for each read

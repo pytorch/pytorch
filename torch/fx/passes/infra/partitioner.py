@@ -3,7 +3,7 @@ import collections
 import itertools
 import logging
 from copy import copy
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Iterable, List, Optional, Sequence, Set
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import _get_qualified_name, Node
@@ -88,17 +88,17 @@ class CapabilityBasedPartitioner:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
-        partition_map: Dict[int, Set] = collections.defaultdict(set)
+        partition_map: dict[int, Set] = collections.defaultdict(set)
 
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}  # mapping from node to partition_id
-        partitions_by_id: Dict[
+        assignment: dict[Node, int] = {}  # mapping from node to partition_id
+        partitions_by_id: dict[
             int, Partition
         ] = {}  # mapping from partition_id to partition
-        nodes_order: Dict[
+        nodes_order: dict[
             Node, int
         ] = {}  # mapping from nodes to reversed topological order
-        partitions_order: Dict[
+        partitions_order: dict[
             int, int
         ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
         new_partition_id = itertools.count()
@@ -210,7 +210,7 @@ class CapabilityBasedPartitioner:
 
         for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
-            merge_candidates: Dict[int, None] = {}
+            merge_candidates: dict[int, None] = {}
 
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
@@ -241,7 +241,7 @@ class CapabilityBasedPartitioner:
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
-        nodes_reassignment: Dict[Node, int] = {}
+        nodes_reassignment: dict[Node, int] = {}
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
             for user in node.users:
@@ -316,8 +316,8 @@ class CapabilityBasedPartitioner:
             )
 
         # cache transparent nodes
-        transparent_input_nodes: Dict[Node, bool] = {}
-        transparent_output_nodes: Dict[Node, bool] = {}
+        transparent_input_nodes: dict[Node, bool] = {}
+        transparent_output_nodes: dict[Node, bool] = {}
 
         def is_transparent_input_node(
             node: Node, partition: Set[Node], removed_nodes: Set[Node]

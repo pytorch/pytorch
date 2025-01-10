@@ -3,7 +3,7 @@ import collections
 import functools
 import warnings
 from itertools import product
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
@@ -412,7 +412,7 @@ def _compute_numerical_jvps_wrt_specific_input(
 
 
 def _combine_jacobian_cols(
-    jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input, numel
+    jacobians_cols: dict[int, List[torch.Tensor]], outputs, input, numel
 ) -> Tuple[torch.Tensor, ...]:
     # jacobian_cols maps column_idx -> output_idx -> single column of jacobian Tensor
     # we return a list that maps output_idx -> full jacobian Tensor
@@ -473,7 +473,7 @@ def get_numerical_jacobian_wrt_specific_input(
     # jacobian_cols because indices aren't necessarily consecutive for sparse inputs
     # When we perturb only a single element of the input tensor at a time, the jvp
     # is equivalent to a single col of the Jacobian matrix of fn.
-    jacobian_cols: Dict[int, List[torch.Tensor]] = {}
+    jacobian_cols: dict[int, List[torch.Tensor]] = {}
     input = inputs[input_idx] if input is None else input
     assert input.requires_grad
     for x, idx, d_idx in _iter_tensor(input):

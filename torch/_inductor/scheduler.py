@@ -20,7 +20,6 @@ from typing import (
     Callable,
     Counter,
     DefaultDict,
-    Dict,
     Generic,
     List,
     Optional,
@@ -152,7 +151,7 @@ class SchedulerBuffer:
 
     def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
-        result: Dict[int, NodeUser] = {}
+        result: dict[int, NodeUser] = {}
         for use in users:
             if id(use.node) in result:
                 result[id(use.node)] = use.merge(result[id(use.node)])
@@ -208,7 +207,7 @@ class BaseSchedulerNode:
             )
             for output in node.get_outputs()
         ]
-        self.outputs_by_name: Dict[str, SchedulerBuffer] = {
+        self.outputs_by_name: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for buf in self.outputs
         }
 
@@ -274,7 +273,7 @@ class BaseSchedulerNode:
     ) -> None:
         return
 
-    def update_mutated_names(self, renames: Dict[str, str]) -> None:
+    def update_mutated_names(self, renames: dict[str, str]) -> None:
         self.set_read_writes(self.read_writes.rename(renames))
 
     def add_fake_dep(self, dep: Dep) -> None:
@@ -291,7 +290,7 @@ class BaseSchedulerNode:
         self.prune_deps()
 
     def set_last_usage(
-        self, future_used_buffers: OrderedSet[str], mutation_real_name: Dict[str, str]
+        self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
     ) -> None:
         used_buffers = self.used_or_aliased_buffer_names()
         used_buffers = OrderedSet(mutation_real_name.get(k, k) for k in used_buffers)
@@ -348,7 +347,7 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(
-        self, name_to_fused_node: Dict[str, BaseSchedulerNode]
+        self, name_to_fused_node: dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node, self.scheduler.name_to_buf)
 
@@ -578,7 +577,7 @@ class BaseSchedulerNode:
 
     def get_read_write_buffer_accesses(
         self, include_reads: bool, include_writes: bool
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -654,7 +653,7 @@ class BaseSchedulerNode:
             writes = writes - removed_buffers
             reads = reads - removed_buffers
 
-        buf_byte_accesses: Dict[str, int] = {}
+        buf_byte_accesses: dict[str, int] = {}
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
@@ -870,8 +869,8 @@ class OutputNode:
 
 def _prune_redundant_deps(
     node: BaseSchedulerNode,
-    name_to_fused_node: Dict[str, BaseSchedulerNode],
-    name_to_buf: Dict[str, SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+    name_to_buf: dict[str, SchedulerBuffer],
 ) -> None:
     """
     Prunes weakdeps intended for mutation ordering
@@ -957,7 +956,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
@@ -989,7 +988,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         self._compute_attrs(
@@ -1116,7 +1115,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def ranges_from_index_vars(
         self, index_vars: Sequence[Sequence[sympy.Expr]]
-    ) -> Dict[sympy.Expr, sympy.Expr]:
+    ) -> dict[sympy.Expr, sympy.Expr]:
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -1330,7 +1329,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return f"{self}, snodes: {snodes_str}"
 
     def set_last_usage(
-        self, future_used_buffers: OrderedSet[str], mutation_real_name: Dict[str, str]
+        self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
     ) -> None:
         # Set self.last_usage using the global information
         # This will be used for inter-kernel optimisations
@@ -1386,7 +1385,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
-    def update_mutated_names(self, renames: Dict[str, str]) -> None:
+    def update_mutated_names(self, renames: dict[str, str]) -> None:
         raise NotImplementedError
 
     def add_fake_dep(self, name: Dep) -> None:
@@ -1730,7 +1729,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return self.snodes[0].get_first_name()
 
     def prune_redundant_deps(
-        self, name_to_fused_node: Dict[str, BaseSchedulerNode]
+        self, name_to_fused_node: dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node, self.scheduler.name_to_buf)
 
@@ -1886,7 +1885,7 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
-    __dep_size_hint_cache: Dict[Dep, int]
+    __dep_size_hint_cache: dict[Dep, int]
 
     def __init__(self, nodes: List[ir.Operation]) -> None:
         with dynamo_timed("Scheduler.__init__"):
@@ -1896,7 +1895,7 @@ class Scheduler:
         super().__init__()
         self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
-        self.backends: Dict[torch.device, BaseScheduling] = {}
+        self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.completed_operations = OrderedSet[str]()
@@ -1915,23 +1914,23 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_donated_buffer: Dict[
+        self.name_to_donated_buffer: dict[
             str, SchedulerDonatedBuffer
         ] = self.get_donated_buffers()
-        self.name_to_node: Dict[str, BaseSchedulerNode] = {
+        self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
-        self.name_to_buf: Dict[str, SchedulerBuffer] = {
+        self.name_to_buf: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
-        self.name_to_fused_node: Dict[str, BaseSchedulerNode] = self.name_to_node.copy()
+        self.name_to_fused_node: dict[str, BaseSchedulerNode] = self.name_to_node.copy()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
         # mutation_real_name = {"buf0" : "buf1"}
         # all subsequent uses of buf0 become buf1's usage in dependency graph
-        self.mutation_real_name: Dict[str, str] = {}
+        self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
@@ -1941,7 +1940,7 @@ class Scheduler:
         # If you mutate buf0 inside of buf1's kernel, then:
         # mutation_renames = {"buf1" : "buf0"}
         # in codegen we only use buf0, never buf1
-        self.mutation_renames: Dict[str, str] = {}
+        self.mutation_renames: dict[str, str] = {}
 
         # Must run first to correctly set dependencies, before all other passes that rely on
         # reading from .read_writes.reads or .unmet_dependencies
@@ -1996,7 +1995,7 @@ class Scheduler:
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
-        self.origin_to_index: Dict[torch.fx.Node, int] = {}
+        self.origin_to_index: dict[torch.fx.Node, int] = {}
 
         get_metric_table("graph_stats").add_row(
             lambda: {
@@ -2006,7 +2005,7 @@ class Scheduler:
             }
         )
 
-    def get_donated_buffers(self) -> Dict[str, SchedulerDonatedBuffer]:
+    def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
         for name in V.graph.graph_inputs_original:
             if isinstance(V.graph.graph_inputs_original[name], ir.DonatedBuffer):
@@ -2168,7 +2167,7 @@ class Scheduler:
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
-        unbacked_symbol_to_origin_node: Dict[sympy.Symbol, Optional[str]] = {}
+        unbacked_symbol_to_origin_node: dict[sympy.Symbol, Optional[str]] = {}
 
         # NB: None means that the dependency is on an input.  Don't actually
         # generate a dependency because if we do, Inductor will start trying
@@ -2345,7 +2344,7 @@ class Scheduler:
         Ensure nodes is in topologically sorted order
         """
         seen = OrderedSet[BaseSchedulerNode]()
-        name_to_node: Dict[str, BaseSchedulerNode] = dict()
+        name_to_node: dict[str, BaseSchedulerNode] = dict()
         result: List[BaseSchedulerNode] = []
 
         def visit(n: BaseSchedulerNode) -> None:
@@ -2393,7 +2392,7 @@ class Scheduler:
         """
         order = []
         nodes = dict.fromkeys(self.nodes, 0)
-        children: Dict[Any, Any] = {}
+        children: dict[Any, Any] = {}
         for node in self.nodes:
             deps = self._get_unmet_dep_nodes(node)
             nodes[node] = len(deps)
@@ -2418,7 +2417,7 @@ class Scheduler:
         Populate each node.ancestors
         """
         # note self.nodes is topologically sorted
-        name_to_ancestors: Dict[str, OrderedSet[str]] = {}
+        name_to_ancestors: dict[str, OrderedSet[str]] = {}
         for node in self.nodes:
             ancestors = OrderedSet[str]()
             for dep in node.unmet_dependencies:
@@ -3369,7 +3368,7 @@ class Scheduler:
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
-        remaining_deps_by_name: Dict[str, List[Dep]] = defaultdict(list)
+        remaining_deps_by_name: dict[str, List[Dep]] = defaultdict(list)
 
         for dep in node2.unmet_dependencies:
             name = self.mutation_renames.get(dep.name, dep.name)
@@ -3534,7 +3533,7 @@ class Scheduler:
         # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
-        possible_fusions_group_by_priority: Dict[
+        possible_fusions_group_by_priority: dict[
             int, List[tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 

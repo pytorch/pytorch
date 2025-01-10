@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import namedtuple
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, TypeVar, Union
+from typing import Any, Callable, Iterator, List, Optional, Sized, TypeVar, Union
 
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -224,7 +224,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         self,
         datapipe: IterDataPipe,
         conversion: Union[
-            Callable[..., Any], Dict[Union[str, Any], Union[Callable, Any]], None
+            Callable[..., Any], dict[Union[str, Any], Union[Callable, Any]], None
         ] = default_collate,
         collate_fn: Optional[Callable] = None,
     ) -> None:

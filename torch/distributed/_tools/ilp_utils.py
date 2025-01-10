@@ -1,5 +1,5 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+from typing import cast, List, OrderedDict, Tuple, TypedDict
 
 import numpy as np
 
@@ -96,12 +96,12 @@ def aggregate_stats(
     """
 
     # Memory stats
-    mod_mem_stats: Dict[torch.nn.Module, _ModMemStats] = dict(
+    mod_mem_stats: dict[torch.nn.Module, _ModMemStats] = dict(
         copy.deepcopy(mem_tracker.memory_tracking)
     )
 
     # Runtime stats
-    mod_runtime_stats: Dict[str, ModRuntime] = {
+    mod_runtime_stats: dict[str, ModRuntime] = {
         fqn: {"fw": v["fw"], "bw": v["bw"]}
         for fqn, v in runtime_estimator.mod_runtimes.items()
     }
@@ -116,7 +116,7 @@ def aggregate_stats(
 
     # Selective Activation Checkpointing stats
     sac_estimator.pwlf_sac_tradeoff_curve()
-    mod_sac_tradeoff_stats: Dict[str, SACTradeOffStats] = copy.deepcopy(
+    mod_sac_tradeoff_stats: dict[str, SACTradeOffStats] = copy.deepcopy(
         sac_estimator.sac_mod_tradeoff_stats
     )
 
@@ -193,7 +193,7 @@ class Node(ModStats):
 class Graph:
     def __init__(self, n: int) -> None:
         self.nodes: List[Node] = []
-        self.name2node: Dict[str, Node] = {}
+        self.name2node: dict[str, Node] = {}
         self.ad_matrix = np.zeros((n, n))
         self.fw_post_order: List[str] = []
 

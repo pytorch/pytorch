@@ -5,7 +5,7 @@ import dataclasses
 import inspect
 import os
 from functools import partial
-from typing import Callable, Dict, List
+from typing import Callable, List
 
 from torch._jit_internal import FAKE_FILENAME_PREFIX, is_optional
 from torch._sources import ParsedDef, SourceContext
@@ -177,7 +177,7 @@ def synthesize_comparison(
     )
 
 
-DATACLASS_MAGIC_METHODS: Dict[str, Callable] = {
+DATACLASS_MAGIC_METHODS: dict[str, Callable] = {
     "__init__": synthesize__init__,
     "__repr__": synthesize__repr__,
     "__hash__": synthesize__hash__,

@@ -9,7 +9,6 @@ import types
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Set,
@@ -79,7 +78,7 @@ class OperatorBase:
         # for use with OpOverload; cache lookup is done entirely from C++
         # for speed.
         # TODO: The cache is NOT currently used by HigherOrderOperator, but it should!
-        self._dispatch_cache: Dict[
+        self._dispatch_cache: dict[
             DispatchKey, Union[DispatchKey, Callable[..., Any]]
         ] = {}
 
@@ -90,7 +89,7 @@ class OperatorBase:
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
         # API.
-        self.py_kernels: Dict[DispatchKey, Callable[..., Any]] = {}
+        self.py_kernels: dict[DispatchKey, Callable[..., Any]] = {}
 
         # This table allows you to override the behavior of a particular
         # operator for a particular TorchDispatchMode.  In practice,
@@ -98,7 +97,7 @@ class OperatorBase:
         # thought of as an open world extension of dispatch keys, so it
         # makes sense that you should be able to register them, the same
         # way you can register dispatch keys.
-        self.python_key_table: Dict[
+        self.python_key_table: dict[
             Union[Type[TorchDispatchMode], Type[torch.Tensor]], Callable[..., Any]
         ] = {}
 
@@ -258,7 +257,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
+_higher_order_ops: dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]

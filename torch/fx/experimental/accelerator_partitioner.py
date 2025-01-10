@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import deque
-from typing import Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Deque, List, NamedTuple, Set, Tuple
 
 import torch
 from torch.fx.experimental.partitioner_utils import (
@@ -158,18 +158,18 @@ def get_bfs_level_partition(partitions: List[Partition]) -> None:
     return
 
 
-def get_node_to_partition_mapping(partitions: List[Partition]) -> Dict[Node, int]:
+def get_node_to_partition_mapping(partitions: List[Partition]) -> dict[Node, int]:
     """Given a list of partitions,return node to partition mapping"""
-    node_to_partition: Dict[Node, int] = {}
+    node_to_partition: dict[Node, int] = {}
     for partition in partitions:
         for node in partition.nodes:
             node_to_partition[node] = partition.partition_id
     return node_to_partition
 
 
-def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
+def get_logical_id_to_device(devices: List[Device]) -> dict[int, Device]:
     """Get a mapping from device logical ID to Device object."""
-    logical_id_to_device: Dict[int, Device] = {}
+    logical_id_to_device: dict[int, Device] = {}
     for d in devices:
         logical_id_to_device[d.logical_id] = d
     return logical_id_to_device
@@ -177,7 +177,7 @@ def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
 
 def get_device_partition_stats(
     partitions: List[Partition], devices: List[Device]
-) -> Tuple[Dict[Device, List[Partition]], Dict[Device, int], List[Partition]]:
+) -> Tuple[dict[Device, List[Partition]], dict[Device, int], List[Partition]]:
     """Given a list of partitions and a list of devices, returns:
     1. A mapping from device to partitions on it;
     2. A mapping from device to its remaining memory size;
@@ -186,9 +186,9 @@ def get_device_partition_stats(
     # logical id to device
     logical_id_to_device = get_logical_id_to_device(devices)
     # Track partitions on device
-    device_to_partitions: Dict[Device, List[Partition]] = {}
+    device_to_partitions: dict[Device, List[Partition]] = {}
     # Track device's left mem size
-    device_to_left_mem_bytes: Dict[Device, int] = {}
+    device_to_left_mem_bytes: dict[Device, int] = {}
     for d in devices:
         device_to_partitions[d] = []
         device_to_left_mem_bytes[d] = d.available_mem_bytes
@@ -299,7 +299,7 @@ class Partitioner:
 
     def __init__(self) -> None:
         self.partitions: List[Partition] = []
-        self.node_to_partition: Dict[Node, int] = {}
+        self.node_to_partition: dict[Node, int] = {}
         self.devices: List[Device] = []
 
     def partition_graph(
@@ -435,7 +435,7 @@ class Partitioner:
             return device
 
         # Track partition and its left mem size
-        partition_to_left_mem_bytes: Dict[Partition, int] = {}
+        partition_to_left_mem_bytes: dict[Partition, int] = {}
         # Track all the devices that have been used
         occupied_devices: List[Device] = []
         partition = self.create_partition()
@@ -516,7 +516,7 @@ class Partitioner:
         # Devices that hold partitions
         used_devices = [d for d in self.devices if len(device_to_partitions[d]) > 0]
         # Track replicates of the assigned devices
-        replicated_device_to_used_device: Dict[Device, Device] = {}
+        replicated_device_to_used_device: dict[Device, Device] = {}
 
         while len(used_devices) * 2 + len(replicated_device_to_used_device) <= len(
             self.devices
@@ -583,7 +583,7 @@ class Partitioner:
                 continue
             if node.target == operator.__getitem__:
                 continue
-            input_nodes: Dict[Node, None] = {}
+            input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)
             map_arg(node.kwargs, input_nodes.setdefault)
             # When a node has two or more output nodes,
@@ -794,7 +794,7 @@ class Partitioner:
     def cost_aware_partition(
         self,
         transfer_rate_bytes_per_sec: float,
-        node_to_latency_mapping: Dict[Node, NodeLatency],
+        node_to_latency_mapping: dict[Node, NodeLatency],
     ) -> None:
         """This method is to partition the fx module based on the cost.
         The cost is the total latency of running the whole fx module.
@@ -915,7 +915,7 @@ class Partitioner:
     def kl_based_partition(
         self,
         transfer_rate_bytes_per_sec: float,
-        node_to_latency_mapping: Dict[Node, NodeLatency],
+        node_to_latency_mapping: dict[Node, NodeLatency],
     ) -> None:
         """This function is a cost aware partition based
         on Kernighan-Lin algorithm.
@@ -1060,7 +1060,7 @@ class Partitioner:
         """This function helps to rebuild the partitions given the nodes and its
         corresponding partition id
         """
-        partition_id_to_partition_mapping: Dict[int, Partition] = {}
+        partition_id_to_partition_mapping: dict[int, Partition] = {}
         self.node_to_partition = node_to_partition_mapping
         for node in self.node_to_partition:
             partition_id = self.node_to_partition[node]

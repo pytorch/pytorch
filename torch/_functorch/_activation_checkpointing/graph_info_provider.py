@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import networkx as nx
 
@@ -23,15 +23,15 @@ class GraphInfoProvider:
         graph_nodes_in_order: List[str],
         graph_edges: List[Tuple[str, str]],
         all_recomputable_banned_nodes: List[str],
-        all_node_runtimes: Optional[Dict[str, float]] = None,
-        all_node_memories: Optional[Dict[str, float]] = None,
+        all_node_runtimes: Optional[dict[str, float]] = None,
+        all_node_memories: Optional[dict[str, float]] = None,
         recorded_knapsack_input_memories: Optional[List[float]] = None,
         recorded_knapsack_input_runtimes: Optional[List[float]] = None,
         joint_graph: Optional[Graph] = None,
     ):
         self.graph_nodes_in_order = graph_nodes_in_order
         self.graph_edges = graph_edges
-        self.all_node_runtimes: Dict[str, float] = dict()
+        self.all_node_runtimes: dict[str, float] = dict()
         if all_node_runtimes is None:
             if recorded_knapsack_input_runtimes is None:
                 raise ValueError(
@@ -43,7 +43,7 @@ class GraphInfoProvider:
             }
         else:
             self.all_node_runtimes.update(all_node_runtimes)
-        self.all_node_memories: Dict[str, float] = dict()
+        self.all_node_memories: dict[str, float] = dict()
         if all_node_memories is None:
             if recorded_knapsack_input_memories is None:
                 raise ValueError(
@@ -59,7 +59,7 @@ class GraphInfoProvider:
         self.all_recomputable_banned_nodes_set = set(all_recomputable_banned_nodes)
         self.recorded_knapsack_input_memories = recorded_knapsack_input_memories
         self.recorded_knapsack_input_runtimes = recorded_knapsack_input_runtimes
-        self._lazily_initialized_graphs: Dict[str, Any] = {
+        self._lazily_initialized_graphs: dict[str, Any] = {
             self.__RECOMPUTABLE_NODE_ONLY_GRAPH: None,
             self.__RECOMPUTABLE_NODE_ONLY_GRAPH_WITH_LARGER_GRAPH_CONTEXT: None,
             self.__FULL_NX_JOINT_GRAPH: None,
@@ -224,7 +224,7 @@ class GraphInfoProvider:
 
     def _recreate_psuedo_joint_graph(self) -> Graph:
         # Create a dictionary to store the dependencies of each node
-        node_dependencies: Dict[str, List[str]] = {
+        node_dependencies: dict[str, List[str]] = {
             node: [] for node in self.graph_nodes_in_order
         }
         for a, b in self.graph_edges:
@@ -234,7 +234,7 @@ class GraphInfoProvider:
 
         joint_graph = Graph()
         # Create nodes in the graph
-        nodes: Dict[str, Node] = {}
+        nodes: dict[str, Node] = {}
         for node_name in self.graph_nodes_in_order:
             input_nodes = [nodes[dep] for dep in node_dependencies[node_name]]
             if input_nodes:

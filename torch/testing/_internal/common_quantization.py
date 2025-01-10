@@ -74,7 +74,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
+from typing import Callable, Tuple, Any, Union, Type, Optional
 import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.ao.quantization.quantizer.xpu_inductor_quantizer as xpuiq
@@ -898,8 +898,8 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
-            expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
+            matched_subgraph_pairs: dict[str, Tuple[NSSubgraph, NSSubgraph]],
+            expected_types: dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
         ) -> None:
@@ -952,7 +952,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_ns_compare_dict_valid(
             self,
-            act_compare_dict: Dict[str, Dict[str, Dict[str, Any]]],
+            act_compare_dict: dict[str, dict[str, dict[str, Any]]],
         ) -> None:
             """
             Verifies that the act_compare_dict (output of Numeric Suite APIs) is valid:

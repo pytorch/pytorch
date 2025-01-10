@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
+from typing import Collection, List, Mapping, Optional, Set, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import is_fake
@@ -144,8 +144,8 @@ class OutputSpec:
 
 @dataclasses.dataclass
 class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
+    gradients_to_parameters: dict[str, str]
+    gradients_to_user_inputs: dict[str, str]
     loss_output: str
 
 
@@ -393,8 +393,8 @@ class ExportGraphSignature:
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
         loss_output = None
-        gradients_to_parameters: Dict[str, str] = {}
-        gradients_to_user_inputs: Dict[str, str] = {}
+        gradients_to_parameters: dict[str, str] = {}
+        gradients_to_user_inputs: dict[str, str] = {}
         for spec in self.output_specs:
             if spec.kind == OutputKind.LOSS_OUTPUT:
                 assert loss_output is None

@@ -143,7 +143,7 @@ class ProcessFailure:
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
-    def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
+    def _get_error_data(self, error_file_data: dict[str, Any]) -> Tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
             timestamp = int(error_file_data.get("timestamp", 0))
@@ -231,7 +231,7 @@ class ChildFailedError(Exception):
     of trainer 1's error file to the scheduler's init process.
     """
 
-    def __init__(self, name: str, failures: Dict[GlobalRank, ProcessFailure]):
+    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
         assert (

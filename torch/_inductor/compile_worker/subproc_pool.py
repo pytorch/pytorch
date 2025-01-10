@@ -13,7 +13,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum
-from typing import Any, BinaryIO, Callable, Dict, Optional, TypeVar
+from typing import Any, BinaryIO, Callable, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -158,7 +158,7 @@ class SubprocPool:
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
-        self.pending_futures: Dict[int, Future[Any]] = {}
+        self.pending_futures: dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True

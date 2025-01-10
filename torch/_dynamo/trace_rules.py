@@ -32,7 +32,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, List, Optional, Set, Type, Union
 
 import torch
 import torch._inductor.test_operators
@@ -2853,8 +2853,8 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 
 @functools.lru_cache(None)
-def get_torch_obj_rule_map() -> Dict[Any, Type["VariableTracker"]]:
-    d: Dict[Any, Type[VariableTracker]] = {}
+def get_torch_obj_rule_map() -> dict[Any, Type["VariableTracker"]]:
+    d: dict[Any, Type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2949,10 +2949,10 @@ class FunctionIdSet:
     """
 
     function_ids: Optional[Set[int]] = None
-    function_names: Optional[Dict[int, str]] = None
+    function_names: Optional[dict[int, str]] = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+        self, lazy_initializer: Callable[[], Union[dict[int, str], Set[int]]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
@@ -2986,19 +2986,19 @@ class FunctionIdSet:
 
 
 @FunctionIdSet
-def _allowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _allowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _disallowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _disallowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _builtin_function_ids() -> Dict[int, str]:
+def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
@@ -3028,7 +3028,7 @@ def _polyfilled_function_ids() -> Set[int]:
 
 
 @FunctionIdSet
-def _numpy_function_ids() -> Dict[int, str]:
+def _numpy_function_ids() -> dict[int, str]:
     unsupported_funcs = {
         "seed",
         "ranf",
@@ -3062,7 +3062,7 @@ def _numpy_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _builtin_constant_ids() -> Dict[int, str]:
+def _builtin_constant_ids() -> dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
@@ -3074,7 +3074,7 @@ def _builtin_constant_ids() -> Dict[int, str]:
     return rv
 
 
-_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+_lazy_module_init: dict[str, List[Callable[[], None]]] = defaultdict(list)
 
 
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:

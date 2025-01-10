@@ -6,7 +6,6 @@ import warnings
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Mapping,
     Optional,
@@ -228,17 +227,17 @@ class Node(_NodeBase):
     """
 
     _args: Tuple["Argument", ...]
-    _kwargs: Dict[str, "Argument"]
+    _kwargs: dict[str, "Argument"]
     graph: "Graph"
     name: str
     op: str
     target: "Target"
-    _input_nodes: Dict["Node", None]
-    users: Dict["Node", None]
+    _input_nodes: dict["Node", None]
+    users: dict["Node", None]
     type: Optional[Any]
     _sort_key: Any
     _repr_fn: Optional[Callable[["Node"], str]]
-    meta: Dict[str, Any]
+    meta: dict[str, Any]
 
     @compatibility(is_backward_compatible=True)
     def __init__(
@@ -248,7 +247,7 @@ class Node(_NodeBase):
         op: str,
         target: "Target",
         args: Tuple["Argument", ...],
-        kwargs: Dict[str, "Argument"],
+        kwargs: dict[str, "Argument"],
         return_type: Optional[Any] = None,
     ) -> None:
         """
@@ -339,14 +338,14 @@ class Node(_NodeBase):
         # transformations. This metadata is preserved across node copies
         assign(self, "meta", {})
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_erased"] = self._erased
         state["_prev"] = self._prev
         state["_next"] = self._next
         return state
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         _erased = state.pop("_erased")
         _prev = state.pop("_prev")
         _next = state.pop("_next")
@@ -465,7 +464,7 @@ class Node(_NodeBase):
         self.__update_args_kwargs(a, self._kwargs)
 
     @property
-    def kwargs(self) -> Dict[str, Argument]:
+    def kwargs(self) -> dict[str, Argument]:
         """
         The dict of keyword arguments to this ``Node``. The interpretation of arguments
         depends on the node's opcode. See the :class:`Node` docstring for more
@@ -477,7 +476,7 @@ class Node(_NodeBase):
         return self._kwargs
 
     @kwargs.setter
-    def kwargs(self, k: Dict[str, Argument]) -> None:
+    def kwargs(self, k: dict[str, Argument]) -> None:
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -534,7 +533,7 @@ class Node(_NodeBase):
 
         self._args = args_left + (arg,) + args_right
 
-        _new_input_nodes: Dict[Node, None] = {}
+        _new_input_nodes: dict[Node, None] = {}
         map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
@@ -574,7 +573,7 @@ class Node(_NodeBase):
         self.meta["stack_trace"] = trace
 
     def __update_args_kwargs(
-        self, new_args: Tuple["Argument", ...], new_kwargs: Dict[str, "Argument"]
+        self, new_args: Tuple["Argument", ...], new_kwargs: dict[str, "Argument"]
     ) -> None:
         """
         This API is internal. Do *not* call it directly.
@@ -800,7 +799,7 @@ class Node(_NodeBase):
         self,
         root: torch.nn.Module,
         arg_types: Optional[Tuple[Any]] = None,
-        kwarg_types: Optional[Dict[str, Any]] = None,
+        kwarg_types: Optional[dict[str, Any]] = None,
         normalize_to_only_use_kwargs: bool = False,
     ) -> Optional[ArgsKwargsPair]:
         """

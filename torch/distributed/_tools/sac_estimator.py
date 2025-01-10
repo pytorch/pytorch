@@ -4,7 +4,7 @@ import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, List, NamedTuple, Optional, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -212,8 +212,8 @@ class SACGreedyOrderMeta:
 
     recomputed_ops: Set[int]
     stored_ops: Set[int]
-    inplace_op_groups: Dict[int, Set[int]]
-    random_ops_group: Dict[int, Set[int]]
+    inplace_op_groups: dict[int, Set[int]]
+    random_ops_group: dict[int, Set[int]]
     msps_meta: List[MSPS]
 
 
@@ -251,12 +251,12 @@ class SACEstimator(TorchDispatchMode):
     """
 
     def __init__(self) -> None:
-        self.sac_mod_stats: Dict[str, SACStats] = {}
-        self.sac_mod_tradeoff_stats: Dict[str, SACTradeOffStats] = {}
-        self.sac_mod_greedy_order_meta: Dict[str, SACGreedyOrderMeta] = {}
+        self.sac_mod_stats: dict[str, SACStats] = {}
+        self.sac_mod_tradeoff_stats: dict[str, SACTradeOffStats] = {}
+        self.sac_mod_greedy_order_meta: dict[str, SACGreedyOrderMeta] = {}
         self._mod_tracker = ModTracker()
         self._sac_metadata: List[_SACMetadata] = []
-        self._sac_mod_metadata: Dict[str, _SACModMetadata] = {}
+        self._sac_mod_metadata: dict[str, _SACModMetadata] = {}
         self._leaf_modules: Set[str] = set()
         self._saved_tensor_hook_ctx = torch.autograd.graph.saved_tensors_hooks(
             self._pack_hook, lambda x: x
@@ -382,7 +382,7 @@ class SACEstimator(TorchDispatchMode):
 
     def _get_inplace_metadata(
         self, func: Any, out_storages: Set[UntypedStorage]
-    ) -> Tuple[int, Tuple[int, ...], Dict[str, Tuple[int, ...]]]:
+    ) -> Tuple[int, Tuple[int, ...], dict[str, Tuple[int, ...]]]:
         # 1. Get the current index of the metadata obtained so far
         curr_idx = len(self._sac_metadata)
         # 2. Get the set of active modules that are not leaf
@@ -397,7 +397,7 @@ class SACEstimator(TorchDispatchMode):
 
         op_idx = curr_idx
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
-        mod_op_parent_idxs: Dict[str, int] = {
+        mod_op_parent_idxs: dict[str, int] = {
             mod_fqn: -1 for mod_fqn in active_mod_fqns
         }
         for i, d in enumerate(self._sac_metadata):
@@ -496,8 +496,8 @@ class SACEstimator(TorchDispatchMode):
         # 1. inplace_op_groups: A dictionary from the top-most parent of inplace-ops to the inplace-ops in the group
         #   The top-most op can itself be an inplace-op or can be a non-inplace op.
         # 2. inplace_op_to_group_head: A dictionary that maps all the inplace-ops to their respective group heads.
-        inplace_op_groups: Dict[int, Set[int]] = {}
-        inplace_op_to_group_head: Dict[int, int] = dict(sac_stats.inplace_ops)
+        inplace_op_groups: dict[int, Set[int]] = {}
+        inplace_op_to_group_head: dict[int, int] = dict(sac_stats.inplace_ops)
 
         # Initialize inplace_op_groups using inplace_op_to_group_head
         for op_idx, group_head_idx in inplace_op_to_group_head.items():
@@ -508,7 +508,7 @@ class SACEstimator(TorchDispatchMode):
         # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
         # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
-        random_ops_group: Dict[int, Set[int]] = {}
+        random_ops_group: dict[int, Set[int]] = {}
         random_group_head_idx = min(sac_stats.rand_ops, default=-1)
         has_rand_ops = bool(sac_stats.rand_ops)
         if has_rand_ops:

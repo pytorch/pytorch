@@ -9,7 +9,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     List,
     NamedTuple,
     Optional,
@@ -45,10 +44,10 @@ class ArgsKwargsPair(NamedTuple):
     """
 
     args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
 
 
-_manual_overrides: Dict[Callable, List[inspect.Signature]] = {}
+_manual_overrides: dict[Callable, List[inspect.Signature]] = {}
 
 
 def _nonzero_schemas():
@@ -154,7 +153,7 @@ def _torchscript_schema_to_signature_impl(
     return inspect.Signature(parameters, return_annotation=return_type)
 
 
-_SCHEMA_TO_SIGNATURE_CACHE: Dict[Tuple[str, str], inspect.Signature] = {}
+_SCHEMA_TO_SIGNATURE_CACHE: dict[Tuple[str, str], inspect.Signature] = {}
 
 
 def _torchscript_schema_to_signature(
@@ -173,7 +172,7 @@ def _torchscript_schema_to_signature(
 
 @compatibility(is_backward_compatible=False)
 def check_for_mutable_operation(
-    target: Callable, args: Tuple["Argument", ...], kwargs: Dict[str, "Argument"]
+    target: Callable, args: Tuple["Argument", ...], kwargs: dict[str, "Argument"]
 ):
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
@@ -345,9 +344,9 @@ def type_matches(signature_type: Any, argument_type: Any):
 def normalize_function(
     target: Callable,
     args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     arg_types: Optional[Tuple[Any]] = None,
-    kwarg_types: Optional[Dict[str, Any]] = None,
+    kwarg_types: Optional[dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -469,7 +468,7 @@ def normalize_module(
     root: torch.nn.Module,
     target: str,
     args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -514,7 +513,7 @@ def normalize_module(
 def _args_kwargs_to_normalized_args_kwargs(
     sig: inspect.Signature,
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
 ) -> Optional[ArgsKwargsPair]:
     """
@@ -552,7 +551,7 @@ def _args_kwargs_to_normalized_args_kwargs(
     bound_args = sig.bind(*args, **kwargs)
     bound_args.apply_defaults()
 
-    new_kwargs: Dict[str, Any] = {}
+    new_kwargs: dict[str, Any] = {}
     new_args: List[Any] = []
     for i, param in enumerate(sig.parameters):
         if not normalize_to_only_use_kwargs and i < len(args):

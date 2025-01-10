@@ -24,7 +24,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     final,
     Iterator,
     List,
@@ -115,7 +114,7 @@ class SerializeError(RuntimeError):
     pass
 
 
-def _reverse_map(d: Dict[Any, Enum]):
+def _reverse_map(d: dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
 
@@ -348,7 +347,7 @@ def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
         del copyreg.dispatch_table[FakeTensor]
 
 
-def deserialize_torch_artifact(serialized: Union[Dict[str, Any], tuple[Any, ...], bytes]):
+def deserialize_torch_artifact(serialized: Union[dict[str, Any], tuple[Any, ...], bytes]):
     if isinstance(serialized, (dict, tuple)):
         return serialized
     if len(serialized) == 0:
@@ -397,8 +396,8 @@ def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
 
 
 def serialize_range_constraints(
-    range_constraints: Dict[sympy.Symbol, ValueRanges]
-) -> Dict[str, RangeConstraint]:
+    range_constraints: dict[sympy.Symbol, ValueRanges]
+) -> dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
             _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
@@ -439,12 +438,12 @@ class GraphState:
     inputs: List[Argument] = field(default_factory=list)
     outputs: List[Argument] = field(default_factory=list)
     nodes: List[Node] = field(default_factory=list)
-    tensor_values: Dict[str, TensorMeta] = field(default_factory=dict)
-    sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
-    sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
-    sym_float_values: Dict[str, SymFloat] = field(default_factory=dict)
+    tensor_values: dict[str, TensorMeta] = field(default_factory=dict)
+    sym_int_values: dict[str, SymInt] = field(default_factory=dict)
+    sym_bool_values: dict[str, SymBool] = field(default_factory=dict)
+    sym_float_values: dict[str, SymFloat] = field(default_factory=dict)
     is_single_tensor_return: bool = False
-    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
+    custom_obj_values: dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 class Final(type):
@@ -465,8 +464,8 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state = GraphState()
         self.graph_signature = graph_signature
         self.module_call_graph = module_call_graph
-        self.custom_objs: Dict[str, torch._C.ScriptObject] = {}
-        self.duplicate_getitem_nodes: Dict[str, str] = {}
+        self.custom_objs: dict[str, torch._C.ScriptObject] = {}
+        self.duplicate_getitem_nodes: dict[str, str] = {}
 
     @contextmanager
     def save_graph_state(self):
@@ -602,7 +601,7 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             return user_node.name
 
-    def serialize_metadata(self, node: torch.fx.Node) -> Dict[str, str]:
+    def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -1400,7 +1399,7 @@ class GraphModuleSerializer(metaclass=Final):
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
-    def serialize_graph_module_metadata(self, meta: Dict[str, Any]):
+    def serialize_graph_module_metadata(self, meta: dict[str, Any]):
         ret = {}
         if custom := meta.get("custom"):
             try:
@@ -1425,8 +1424,8 @@ class GraphModuleSerializer(metaclass=Final):
 
 @final
 class ExportedProgramSerializer(metaclass=Final):
-    def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version: Dict[str, int] = {}
+    def __init__(self, opset_version: Optional[dict[str, int]] = None):
+        self.opset_version: dict[str, int] = {}
         if opset_version:
             self.opset_version.update(opset_version)
         if "aten" not in self.opset_version:
@@ -1491,14 +1490,14 @@ class GraphModuleDeserializer(metaclass=Final):
         graph_module: torch.fx.GraphModule
         signature: ep.ExportGraphSignature
         module_call_graph: List[ep.ModuleCallEntry]
-        names_to_symbols: Dict[str, sympy.Symbol]
-        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
-        example_inputs: Optional[tuple[tuple[torch.Tensor, ...], Dict[str, Any]]]
+        names_to_symbols: dict[str, sympy.Symbol]
+        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
+        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
-        self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: Dict[str, MetaType] = {}
+        self.serialized_name_to_node: dict[str, torch.fx.Node] = {}
+        self.serialized_name_to_meta: dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
 
@@ -1922,10 +1921,10 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize(
         self,
         serialized_graph_module: GraphModule,
-        serialized_state_dict: Union[Dict[str, torch.Tensor], bytes],
-        constants: Union[Dict[str, Any], bytes],
-        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
-        symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
+        serialized_state_dict: Union[dict[str, torch.Tensor], bytes],
+        constants: Union[dict[str, Any], bytes],
+        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]] = None,
+        symbol_name_to_range: Optional[dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
         assert _CURRENT_DESERIALIZER is None
@@ -1965,7 +1964,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "ToFloat": torch.utils._sympy.functions.ToFloat,
                 "Identity": torch.utils._sympy.functions.Identity,
             }
-            self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
+            self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
             self.constants = deserialize_torch_artifact(constants)
             self.signature = self.deserialize_signature(serialized_graph_module.signature)
 
@@ -2278,8 +2277,8 @@ class GraphModuleDeserializer(metaclass=Final):
         fx_node.meta["val"] = tuple(meta_val)
         self.serialized_name_to_node[fx_node.name] = fx_node
 
-    def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
-        ret: Dict[str, Any] = {}
+    def deserialize_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
+        ret: dict[str, Any] = {}
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -2386,8 +2385,8 @@ class GraphModuleDeserializer(metaclass=Final):
 
 @final
 class ExportedProgramDeserializer(metaclass=Final):
-    def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
-        self.expected_opset_version: Dict[str, int] = {}
+    def __init__(self, expected_opset_version: Optional[dict[str, int]] = None):
+        self.expected_opset_version: dict[str, int] = {}
         if expected_opset_version:
             self.expected_opset_version.update(expected_opset_version)
         if "aten" not in self.expected_opset_version:
@@ -2395,9 +2394,9 @@ class ExportedProgramDeserializer(metaclass=Final):
 
     def deserialize_range_constraints(
         self,
-        symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
-        symbol_name_to_symbol: Dict[str, sympy.Symbol],
-    ) -> Dict[sympy.Symbol, ValueRanges]:
+        symbol_name_to_range: dict[str, symbolic_shapes.ValueRanges],
+        symbol_name_to_symbol: dict[str, sympy.Symbol],
+    ) -> dict[sympy.Symbol, ValueRanges]:
         range_constraints = {}
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
@@ -2409,9 +2408,9 @@ class ExportedProgramDeserializer(metaclass=Final):
     def deserialize(
         self,
         exported_program: ExportedProgram,
-        state_dict: Union[Dict[str, torch.Tensor], bytes],
-        constants: Union[Dict[str, torch.Tensor], bytes],
-        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
+        state_dict: Union[dict[str, torch.Tensor], bytes],
+        constants: Union[dict[str, torch.Tensor], bytes],
+        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]] = None,
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
@@ -2489,7 +2488,7 @@ def _dataclass_to_dict(obj):
 
 def serialize(
     exported_program: ep.ExportedProgram,
-    opset_version: Optional[Dict[str, int]] = None,
+    opset_version: Optional[dict[str, int]] = None,
 ) -> SerializedArtifact:
     serialized_program = ExportedProgramSerializer(opset_version).serialize(
         exported_program
@@ -2548,7 +2547,7 @@ def _dict_to_dataclass(cls, data):
 
 def deserialize(
     artifact: SerializedArtifact,
-    expected_opset_version: Optional[Dict[str, int]] = None,
+    expected_opset_version: Optional[dict[str, int]] = None,
     *,
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
@@ -2570,7 +2569,7 @@ def deserialize(
 
 def _canonicalize_graph(
     sorted_inputs, sorted_outputs, graph
-) -> tuple[Graph, Dict[str, str]]:
+) -> tuple[Graph, dict[str, str]]:
     def _get_argument(a: Argument):
         if a.type == "as_none":
             return None
@@ -2637,10 +2636,10 @@ def _canonicalize_graph(
             ins: int
 
         graph_inputs: Set[str] = set()
-        def_table: Dict[str, int] = {}
-        edges: Dict[int, Edges] = {}
+        def_table: dict[str, int] = {}
+        edges: dict[int, Edges] = {}
         candidates: List[tuple[str, List[tuple[str, List[int]]], int]] = []
-        rank: Dict[str, int] = {}
+        rank: dict[str, int] = {}
         ret: List[Node] = []
 
         def get_name(a) -> Optional[str]:
@@ -2748,7 +2747,7 @@ def _canonicalize_graph(
     assert len(sorted_nodes) == len(graph.nodes)
 
     # Stage 2: Rename nodes.
-    name_table: Dict[str, str] = {}
+    name_table: dict[str, str] = {}
 
     def rename_def(a):
         def _rename(arg_name, values):
@@ -3108,5 +3107,5 @@ def _registered_extension_types():
 # namespace to avoid conflicts.
 # Serialization: Op type --> custom handler.
 # De-serialization: Namespace --> custom handler.
-_serialization_registry: Dict[Type[Any], Type[ExtensionHandler]] = {}
-_deserialization_registry: Dict[str, Type[ExtensionHandler]] = {}
+_serialization_registry: dict[Type[Any], Type[ExtensionHandler]] = {}
+_deserialization_registry: dict[str, Type[ExtensionHandler]] = {}

@@ -2,7 +2,7 @@
 import argparse
 import os
 from enum import Enum
-from typing import cast, Dict, List, Optional, Union
+from typing import cast, List, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -177,7 +177,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
         """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
-        state_dict_metadata: Dict[str, STORAGE_TYPES] = {}
+        state_dict_metadata: dict[str, STORAGE_TYPES] = {}
         for key, tensor in self.state_dict.items():
             if not torch.is_tensor(tensor):
                 raise RuntimeError(

@@ -4,7 +4,7 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -813,13 +813,13 @@ def miopen_batch_norm(
 
 
 @functools.lru_cache(None)
-def fast_random_decomps() -> Dict[Any, Callable[..., Any]]:
+def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
 
 # TODO(aakhundov): replace this (and the above) Any by more
 # specific type and fix all the cascading mypy errors
-def select_decomp_table() -> Dict[Any, Callable[..., Any]]:
+def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions

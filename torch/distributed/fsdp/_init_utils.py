@@ -7,7 +7,6 @@ from typing import (
     Any,
     Callable,
     Deque,
-    Dict,
     Generator,
     Iterable,
     Iterator,
@@ -417,7 +416,7 @@ def _init_buffer_state(
     # `module`) to its original dtype for restoring that dtype during model
     # checkpointing when buffer mixed precision is enabled. The names should
     # be clean since the casting happens in a `summon_full_params()` context.
-    _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    _buffer_name_to_orig_dtype: dict[str, torch.dtype] = {}
     for buffer_name, buffer in module.named_buffers():
         buffer_name = clean_tensor_name(buffer_name)
         _buffer_name_to_orig_dtype[buffer_name] = buffer.dtype
@@ -480,7 +479,7 @@ def _init_core_state(
     state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = {}
+    _fully_sharded_module_to_handle: dict[nn.Module, FlatParamHandle] = {}
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
@@ -543,7 +542,7 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state_dict_config: StateDictConfig = FullStateDictConfig()
     state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
-    unshard_params_ctx: Dict[nn.Module, Generator] = {}
+    unshard_params_ctx: dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
 
     return state

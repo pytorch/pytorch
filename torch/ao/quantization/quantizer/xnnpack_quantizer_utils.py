@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass
-from typing import Callable, Dict, List, NamedTuple, Optional
+from typing import Callable, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
@@ -66,7 +66,7 @@ AnnotatorType = Callable[
     ],
     Optional[List[List[Node]]],
 ]
-OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
+OP_TO_ANNOTATOR: dict[str, AnnotatorType] = {}
 
 
 def register_annotator(op: str) -> Callable[[AnnotatorType], None]:

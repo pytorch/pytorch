@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Sequence,
@@ -192,7 +191,7 @@ def _global_config_filter(nodes: List[Node]) -> bool:
 
 
 def _map_module_function_to_aten_operator_type():
-    module_function_to_aten_operator: Dict[Callable, torch._ops.OpOverloadPacket] = {}
+    module_function_to_aten_operator: dict[Callable, torch._ops.OpOverloadPacket] = {}
     map_list = (
         ([torch.nn.Conv2d, F.conv2d], torch.ops.aten.conv2d.default),
         ([torch.nn.Linear, F.linear], torch.ops.aten.linear.default),
@@ -284,7 +283,7 @@ def get_default_x86_inductor_quantization_config(
     """
     reduce_range is False by default. Set it to True on earlier CPUs without VNNI to avoid accuracy issue.
     """
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
@@ -412,10 +411,10 @@ class X86InductorQuantizer(Quantizer):
     def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_qconfig: Dict[
+        self.operator_type_qconfig: dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_name_qconfig: dict[str, Optional[QuantizationConfig]] = {}
 
     def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""

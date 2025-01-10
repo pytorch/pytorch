@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, cast, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -330,7 +330,7 @@ class UnflattenedModule(torch.nn.Module):
         # graph's forward pass (_sink_params).
         state_dict = export_module.state_dict
         assigned_params: Set[str] = set()  # tracking unused params
-        id_to_param: Dict[int, torch.nn.Parameter] = {}  # handling weight-sharing
+        id_to_param: dict[int, torch.nn.Parameter] = {}  # handling weight-sharing
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
@@ -348,7 +348,7 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: Set[str] = set()  # tracking unused buffers
-        id_to_buffer: Dict[int, Tuple[torch.nn.Parameter, bool]] = {}
+        id_to_buffer: dict[int, Tuple[torch.nn.Parameter, bool]] = {}
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -407,7 +407,7 @@ class UnflattenedModule(torch.nn.Module):
                 )
 
         # use id map so we don't double-clone aliased constants
-        id_to_const: Dict[int, Union[torch.Tensor, torch._C.ScriptObject]] = {}
+        id_to_const: dict[int, Union[torch.Tensor, torch._C.ScriptObject]] = {}
         for fqn, constant in export_module.constants.items():
             if id(constant) not in id_to_const:
                 if isinstance(constant, torch.Tensor):
@@ -423,7 +423,7 @@ class UnflattenedModule(torch.nn.Module):
 
         # This is to handle parameters/buffers that point to the same tensor
         # object id -> list of (node_name, target_name)
-        consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
+        consts_map: dict[int, List[Tuple[str, str]]] = defaultdict(list)
         consts_targets: Set[str] = set()
 
         def add_to_consts_map(obj_id, node_name, target_name):
@@ -476,7 +476,7 @@ class UnflattenedModule(torch.nn.Module):
                 add_to_consts_map(id(tensor), ph_name, fqn)
 
         # node name -> list of possible targets
-        inputs_to_state: Dict[str, List[str]] = {}
+        inputs_to_state: dict[str, List[str]] = {}
         for node_target in consts_map.values():
             targets = [t[1] for t in node_target]
             for n, _ in node_target:
@@ -790,7 +790,7 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
 def _check_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
     def graph_dump(graph: torch.fx.Graph) -> str:
         ret = []
-        nodes_idx: Dict[int, int] = {}
+        nodes_idx: dict[int, int] = {}
 
         def arg_dump(arg) -> str:
             if isinstance(arg, torch.fx.Node):
@@ -910,7 +910,7 @@ class _ModuleFrame:
         parent,
         module_stack: List[Tuple[str, Optional[str], int]],
         module_id,
-        module_call_graph: Dict[str, ModuleCallSignature],
+        module_call_graph: dict[str, ModuleCallSignature],
         module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,
     ):
         self.flat_graph = flat_graph
@@ -944,7 +944,7 @@ class _ModuleFrame:
         self.graph = self.module.graph
 
         # Mapping of nodes in the flat graph to nodes in this graph.
-        self.node_map: Dict[torch.fx.Node, torch.fx.Node] = {}
+        self.node_map: dict[torch.fx.Node, torch.fx.Node] = {}
         self.node_to_placeholder = {}
 
         self.parent_call_module: Optional[torch.fx.Node] = None
@@ -1351,10 +1351,10 @@ class _SubmoduleEntry:
 
 
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
-    seen_nodes: Dict[str, torch.fx.Node] = {}
-    seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
-    seen_attrs: Dict[str, Set[str]] = defaultdict(set)
-    created_modules: Dict[str, torch.nn.Module] = {}
+    seen_nodes: dict[str, torch.fx.Node] = {}
+    seen_modules: dict[int, List[_SubmoduleEntry]] = defaultdict(list)
+    seen_attrs: dict[str, Set[str]] = defaultdict(set)
+    created_modules: dict[str, torch.nn.Module] = {}
     _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
@@ -1376,7 +1376,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
 
 
 def _reorder_submodules(
-    parent: torch.nn.Module, fqn_order: Dict[str, int], prefix: str = ""
+    parent: torch.nn.Module, fqn_order: dict[str, int], prefix: str = ""
 ):
     # TODO Can be optimized by adding submodules ahead of time.
     if prefix == "":
@@ -1496,7 +1496,7 @@ class _IVals:
 def _copy_graph_attrs(
     gm: torch.fx.GraphModule,
     root_module: UnflattenedModule,
-    seen_attrs: Dict[str, Set[str]],
+    seen_attrs: dict[str, Set[str]],
 ):
     for child_fqn, names in seen_attrs.items():
         module = _get_attr(root_module, child_fqn) if child_fqn else root_module
@@ -1550,9 +1550,9 @@ def _deduplicate_modules(partitions):
 
 def _sink_params(
     module: torch.nn.Module,
-    inputs_to_state: Dict[str, List[str]],
+    inputs_to_state: dict[str, List[str]],
     scope: List[str],
-    module_id_to_inputs_removed: Optional[Dict[int, Set[str]]] = None,
+    module_id_to_inputs_removed: Optional[dict[int, Set[str]]] = None,
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
@@ -1613,7 +1613,7 @@ def _sink_params(
             )
 
     # Filter out inputs_to_state corresponding to current scope.
-    inputs_to_state_of_scope: Dict[torch.fx.Node, list[str]] = {}
+    inputs_to_state_of_scope: dict[torch.fx.Node, list[str]] = {}
     for node in inputs:
         if node.name not in inputs_to_state:
             continue

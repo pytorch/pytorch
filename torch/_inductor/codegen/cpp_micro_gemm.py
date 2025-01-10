@@ -2,7 +2,7 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, List, Optional, Type
 
 import sympy
 
@@ -186,7 +186,7 @@ class CppMicroGemmConfig:
     extra_check: Optional[Callable[..., bool]] = None
 
 
-micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+micro_gemm_configs: dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):

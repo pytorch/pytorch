@@ -3,7 +3,7 @@ import _operator
 import itertools
 from collections import defaultdict
 from enum import Enum
-from typing import Dict, Set
+from typing import Set
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -515,7 +515,7 @@ def reinplace(gm, *sample_args):
     }
 
     # We also need to know for a given node, what are all of its aliasing nodes.
-    storage_to_nodes: Dict[StorageWeakRef, Set[Node]] = defaultdict(set)
+    storage_to_nodes: dict[StorageWeakRef, Set[Node]] = defaultdict(set)
     for n in gm.graph.nodes:
         if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.

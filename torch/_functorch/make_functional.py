@@ -9,7 +9,6 @@ import copy
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     List,
     NoReturn,
@@ -41,9 +40,9 @@ def raise_parameter_tying_error() -> NoReturn:
 
 
 def create_names_map(
-    named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
-    tied_named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
-) -> Dict[str, List[str]]:
+    named_params: Union[dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
+    tied_named_params: Union[dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
+) -> dict[str, List[str]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
     tied_named_params is another dictionary of tensors {'A': A, 'B': B, 'B_tied': B}
@@ -59,7 +58,7 @@ def create_names_map(
     tied_tensors_dict_keys = set(tied_named_params.keys())
     assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
 
-    tensor_to_mapping: Dict[Tensor, Tuple[str, List[str]]] = {}
+    tensor_to_mapping: dict[Tensor, Tuple[str, List[str]]] = {}
     for key, tensor in named_params.items():
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
@@ -72,7 +71,7 @@ def _extract_members(
     mod: nn.Module,
     named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
     subclass: Callable[[Tensor], Tensor],
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], dict[str, List[str]]]:
     all_named_members = tuple(named_members(remove_duplicate=False))
     unique_named_members = tuple(named_members(remove_duplicate=True))
     names_map = create_names_map(unique_named_members, all_named_members)
@@ -95,7 +94,7 @@ def _extract_members(
 
 def extract_weights(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], dict[str, List[str]]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -109,7 +108,7 @@ def extract_weights(
 
 def extract_buffers(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], dict[str, List[str]]]:
     return _extract_members(mod, mod.named_buffers, lambda x: x)
 
 
@@ -131,7 +130,7 @@ def load_weights(
 
 
 def _swap_state(
-    mod: nn.Module, names_map: Dict[str, List[str]], elems: Iterable[Tensor]
+    mod: nn.Module, names_map: dict[str, List[str]], elems: Iterable[Tensor]
 ) -> List[Tensor]:
     result: List[Tensor] = []
     accessor = NamedMemberAccessor(mod)
@@ -263,8 +262,8 @@ class FunctionalModuleWithBuffers(nn.Module):
         stateless_model: nn.Module,
         param_names: Tuple[str, ...],
         buffer_names: Tuple[str, ...],
-        param_names_map: Dict[str, List[str]],
-        buffer_names_map: Dict[str, List[str]],
+        param_names_map: dict[str, List[str]],
+        buffer_names_map: dict[str, List[str]],
     ) -> None:
         super().__init__()
         self.stateless_model = stateless_model
@@ -318,7 +317,7 @@ class FunctionalModule(nn.Module):
         self,
         stateless_model: nn.Module,
         param_names: Tuple[str, ...],
-        names_map: Dict[str, List[str]],
+        names_map: dict[str, List[str]],
     ) -> None:
         super().__init__()
         self.stateless_model = stateless_model

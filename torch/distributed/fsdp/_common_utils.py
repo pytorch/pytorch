@@ -12,7 +12,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     Iterable,
     List,
@@ -130,13 +129,13 @@ class _FSDPState(_State):
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
-        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._unshard_params_ctx: dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handle: Optional[flat_param_file.FlatParamHandle] = None
-        self._fully_sharded_module_to_handle: Dict[
+        self._fully_sharded_module_to_handle: dict[
             nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
@@ -283,7 +282,7 @@ def _named_parameters_with_duplicates(
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
-) -> Dict[nn.Parameter, List[str]]:
+) -> dict[nn.Parameter, List[str]]:
     """
     Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
     we use canonical to mean the fully-qualified name assigned to the parameter
@@ -353,7 +352,7 @@ def _get_param_to_fqns(
     def return_fn(param_to_fqns):
         return param_to_fqns
 
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    param_to_unflat_param_names: dict[torch.nn.Parameter, List[str]] = {}
     return _apply_to_modules(
         model,
         module_fn,
@@ -490,7 +489,7 @@ def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
 def _override_module_mixed_precision(
     root: torch.nn.Module,
     module_classes_to_override: Iterable[Type[nn.Module]],
-    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
+    wrap_override_dict: dict[str, Any] = {"mixed_precision": None},  # noqa: B006
 ) -> Set[Type[nn.Module]]:
     module_classes_to_override = tuple(set(module_classes_to_override))
     # Return a set of the actually overridden module classes

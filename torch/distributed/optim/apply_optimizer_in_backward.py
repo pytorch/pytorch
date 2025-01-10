@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, no_type_check, Type
+from typing import Any, Iterable, List, no_type_check, Type
 
 import torch
 
@@ -17,7 +17,7 @@ param_to_acc_grad_map = torch.utils.weak.WeakTensorKeyDictionary()
 def _apply_optimizer_in_backward(
     optimizer_class: Type[torch.optim.Optimizer],
     params: Iterable[torch.nn.Parameter],
-    optimizer_kwargs: Dict[str, Any],
+    optimizer_kwargs: dict[str, Any],
     register_hook: bool = True,
 ) -> None:
     """

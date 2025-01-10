@@ -4,7 +4,7 @@ import functools
 import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
+from typing import Any, Callable, Generator, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,7 +20,7 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = Dict[Union[OpOverload, str], Callable[..., Any]]
+LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
 TargetType = Union[Callable[..., Any], str]
 
 
@@ -102,7 +102,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         target: TargetType,
         args: Any,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
     ) -> Any:
         from .lowering import lowerings
 
@@ -123,7 +123,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
             return lowerings[target](*args, **kwargs)
 
-    def output(self, target: str, args: tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
+    def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 

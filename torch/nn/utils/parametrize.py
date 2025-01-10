@@ -4,7 +4,7 @@ import collections
 import copyreg
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[Tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager

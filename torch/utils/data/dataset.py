@@ -5,7 +5,6 @@ import math
 import warnings
 from typing import (
     cast,
-    Dict,
     Generic,
     Iterable,
     List,
@@ -34,7 +33,7 @@ __all__ = [
 
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
-_T_dict = Dict[str, _T_co]
+_T_dict = dict[str, _T_co]
 _T_tuple = tuple[_T_co, ...]
 _T_stack = TypeVar("_T_stack", _T_tuple, _T_dict)
 

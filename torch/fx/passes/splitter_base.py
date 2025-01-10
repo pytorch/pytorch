@@ -4,7 +4,7 @@ import copy
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -225,7 +225,7 @@ class SplitResult(NamedTuple):
     """
 
     split_module: torch.fx.GraphModule
-    submodule_inputs: Dict[str, Any]
+    submodule_inputs: dict[str, Any]
     non_acc_submodule_prefix: str
 
 
@@ -235,7 +235,7 @@ def generate_inputs_for_submodules(
     inputs: Sequence[Any],
     target_submodules: Iterable[str],
     deepcopy: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -365,7 +365,7 @@ class _SplitterBase:
         self.update_deps_for_fusions()
 
         self.non_acc_submodule_name = non_acc_submodule_name
-        self._node_submodule_map: Dict[str, str] = {}
+        self._node_submodule_map: dict[str, str] = {}
         self._return_tuple = return_tuple
 
         self.tags: List[str] = []
@@ -374,7 +374,7 @@ class _SplitterBase:
     # Helpers for ctor and initial state
     # ===============================================================
 
-    def get_node_submodule_map(self) -> Dict[str, str]:
+    def get_node_submodule_map(self) -> dict[str, str]:
         """Returns a map from node name to submodule name, e.g.
         node: main_module_impl_impl_over_arch_unary_multiple_embedding
           _pooling_embedding_pooling_sparse_entity_equivalence_key
@@ -383,7 +383,7 @@ class _SplitterBase:
         """
         return self._node_submodule_map
 
-    def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
+    def find_deps(self) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds a graph of node dependencies. Leaf nodes don't have any
         dependencies and the "output" node doesn't have nodes depending on it.
@@ -391,7 +391,7 @@ class _SplitterBase:
         Resulting graph has only direct dependencies, i.e. there are no
         transitive dependencies.
         """
-        deps: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        deps: dict[torch.fx.Node, NodeSet] = defaultdict(set)
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
@@ -647,12 +647,12 @@ class _SplitterBase:
 
     def find_reverse_deps(
         self, tag_id: Optional[int] = None
-    ) -> Dict[torch.fx.Node, NodeSet]:
+    ) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds reversed topological node dependencies, if tag_id is specified,
         we ignore nodes that are in later subgraph i.e. nodes have greater tag_id.
         """
-        result: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        result: dict[torch.fx.Node, NodeSet] = defaultdict(set)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -667,7 +667,7 @@ class _SplitterBase:
 
         return result
 
-    def update_reverse_deps_for_fusions(self, deps: Dict[torch.fx.Node, NodeSet]):
+    def update_reverse_deps_for_fusions(self, deps: dict[torch.fx.Node, NodeSet]):
         processed_node = set()
 
         for node, fusion in self.fusions.items():

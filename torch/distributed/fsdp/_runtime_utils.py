@@ -2,7 +2,7 @@
 import functools
 import logging
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
+from typing import Any, Callable, List, no_type_check, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -178,7 +178,7 @@ def _share_state_and_init_handle_attrs(
     handle = root_state._handle
     if handle:
         handle.init_flat_param_attributes()
-    attr_name_to_values: Dict[str, Set[Any]] = {}
+    attr_name_to_values: dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
@@ -347,8 +347,8 @@ def _pre_forward(
     unshard_fn: Callable,
     module: nn.Module,
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
-) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+    kwargs: dict[str, Any],
+) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
     """
     Runs the pre-forward logic. This includes an opportunity to unshard
     currently sharded parameters such as those for the current forward and
@@ -1469,7 +1469,7 @@ def _register_post_backward_reshard_only_hook(
     state: _FSDPState,
     handle: Optional[FlatParamHandle],
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> None:
     """
     Registers post-backward hooks to reshard flat parameters that do not

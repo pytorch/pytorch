@@ -15,7 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, Hashable, List, Optional
+from typing import Any, Container, Hashable, List, Optional
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -67,7 +67,7 @@ from .triton_compat import (
 log = logging.getLogger(__name__)
 
 
-def get_total_reduction_numel(numels: Dict[str, int]) -> int:
+def get_total_reduction_numel(numels: dict[str, int]) -> int:
     return conditional_product(
         *[numel for prefix, numel in numels.items() if prefix_is_reduction(prefix)]
     )
@@ -730,7 +730,7 @@ class CachingAutotuner(KernelInterface):
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
-    ) -> tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[List[Any], dict[str, Any]]:
         """
         Prepare new args and kwargs by cloning any in-place buffers
         (that are not in the provided exclusion list), to avoid autotune
@@ -753,7 +753,7 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    def clone_args(self, *args, **kwargs) -> tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args, **kwargs) -> tuple[List[Any], dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
@@ -1243,7 +1243,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def check_max_block(cfg: Dict[str, int]):
+def check_max_block(cfg: dict[str, int]):
     """
     Check that block sizes are within the maximum allowed.
     """
@@ -1386,7 +1386,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def _get_nd_reduction_numels(r: int, size_hints: Dict[str, int]) -> Dict[str, int]:
+def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
     """
     Converts a linear reduction numel to ND, in row major order.
     This order is often desirable as it presents opportunities to coalesce memory
@@ -1477,7 +1477,7 @@ def triton_config_reduction(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def _get_config(numels: Dict[str, int]) -> Dict[str, int]:
+def _get_config(numels: dict[str, int]) -> dict[str, int]:
     """
     Convert numels ("x", "r0_", etc.) to block sizes ("XBLOCK", "R0_BLOCK"), etc.
     """
@@ -1610,7 +1610,7 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: Dict[str, int], inductor_meta: Dict[str, Any]
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
 ) -> List[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
@@ -1862,7 +1862,7 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
-def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     """Extract triton.Config options that should become kwargs"""
     popped = {}
     for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):

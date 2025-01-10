@@ -2,7 +2,7 @@
 
 import time
 import io
-from typing import Dict, List, Tuple, Any
+from typing import List, Tuple, Any
 
 import torch
 import torch.distributed as dist
@@ -435,7 +435,7 @@ class LocalRRefTest:
 
         def use_rref_on_owner(rref: RRef[MyScriptClass]) -> int:
             args = (rref,)
-            kwargs: Dict[str, Any] = {}
+            kwargs: dict[str, Any] = {}
             fut = rpc.rpc_async(
                 rref.owner(), script_rref_get_value_my_script_class, args, kwargs
             )
@@ -465,7 +465,7 @@ class LocalRRefTest:
 
         def use_rref_on_owner(rref: RRef[MyModuleInterface]) -> Tensor:
             args = (rref,)
-            kwargs: Dict[str, Any] = {}
+            kwargs: dict[str, Any] = {}
             fut = rpc.rpc_async(
                 rref.owner_name(),
                 script_rref_run_forward_my_script_module,
@@ -518,7 +518,7 @@ def raise_script():
 
 @torch.jit.script
 def script_rpc_async_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
@@ -526,14 +526,14 @@ def script_rpc_async_call(
 
 @torch.jit.script
 def script_rpc_sync_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: dict[str, Tensor]
 ):
     res = rpc.rpc_sync(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return res
 
 @torch.jit.script
 def script_rpc_remote_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: dict[str, Tensor]
 ):
     rref_res = rpc.remote(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return rref_res.to_here()
@@ -607,7 +607,7 @@ class JitRpcOpTest:
             # The error JIT gives is,
             # "Dict values must contain only a single type, "
             # "expected: Tensor but found str instead."
-            kwargs: Dict[str, Any] = {
+            kwargs: dict[str, Any] = {
                 "tensor_kwarg": torch.tensor([3, 3]),
                 "str_kwarg": "_str_kwarg",
                 "int_kwarg": 3,

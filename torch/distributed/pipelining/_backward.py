@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -67,10 +67,10 @@ def reverse_closure(
     return closure, visited_target_nodes
 
 
-def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
+def construct_reverse_graph(roots: List[Node]) -> dict[Node, List[Node]]:
     q: Deque[Node] = collections.deque()
     root_seen: Set[Node] = set()
-    reverse_edges_dict: Dict[Node, List[Node]] = collections.defaultdict(list)
+    reverse_edges_dict: dict[Node, List[Node]] = collections.defaultdict(list)
     for node in roots:
         if node is not None and node not in root_seen:
             q.append(node)
@@ -87,7 +87,7 @@ def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
 
 def get_param_groups(
     inputs: List[Node], params: List[Node], reverse_edges_dict
-) -> List[Dict[str, Any]]:
+) -> List[dict[str, Any]]:
     """
     Given a list of inputs and a list of parameters, return a list of parameter
     groups, where each group contains the parameters and the intermediates that
@@ -103,12 +103,12 @@ def get_param_groups(
     # reverse graph that starts with inputs, and goes up to the dOutput or the loss,
     # but omits weights and any subgraphs connecting weights to this closure
     inputs_closure, _ = reverse_closure(inputs, set(), reverse_edges_dict)
-    param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
+    param_groups: dict[Node, dict[str, Set]] = dict()  # keyed on intermediates
     for param in params:
         closure, intersected = reverse_closure(
             [param], inputs_closure, reverse_edges_dict
         )
-        param_group: Dict[str, Set] = {
+        param_group: dict[str, Set] = {
             "params": {param},
             "intermediates": intersected,
         }
@@ -144,7 +144,7 @@ def stage_backward_input(
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
-) -> Tuple[Tuple[Optional[torch.Tensor], ...], List[Dict[str, Any]]]:
+) -> Tuple[Tuple[Optional[torch.Tensor], ...], List[dict[str, Any]]]:
     """
     Compute the gradients for only the stage inputs with
     respect to the stage outputs (if non-last stage) or loss (if last stage)
@@ -222,7 +222,7 @@ def stage_backward_input(
 
 
 def stage_backward_weight(
-    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
+    weights: Iterator[Parameter], param_groups: List[dict[str, Any]], retain_graph=False
 ) -> Tuple[Optional[torch.Tensor], ...]:
     # map weights to param_group_weights
     grad_acc_to_weight = {}

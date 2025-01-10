@@ -138,7 +138,7 @@ class TracerBase:
     module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
-    node_name_to_scope: Dict[str, Tuple[str, type]]
+    node_name_to_scope: dict[str, Tuple[str, type]]
 
     @compatibility(is_backward_compatible=True)
     def create_node(
@@ -146,7 +146,7 @@ class TracerBase:
         kind: str,
         target: Target,
         args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        kwargs: dict[str, Argument],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -171,7 +171,7 @@ class TracerBase:
 
         # Optionally set stack trace on the created Node for debugging purposes
         if fx_traceback.has_preserved_node_meta():
-            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+            current_meta: dict[str, Any] = fx_traceback.get_current_meta()
 
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
@@ -212,7 +212,7 @@ class TracerBase:
         kind: str,
         target: Target,
         args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
         # fix noqa when updating bc tests
@@ -564,7 +564,7 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        tracers: Dict[Any, None] = {}
+        tracers: dict[Any, None] = {}
 
         def find_tracer(a):
             if isinstance(a, cls):

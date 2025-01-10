@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -22,7 +22,7 @@ except ImportError:
 
 # Common type aliases
 ArgsType = Tuple[object, ...]
-KwargsType = Dict[str, object]
+KwargsType = dict[str, object]
 
 PlacementList = List[Optional[Placement]]
 
@@ -450,7 +450,7 @@ class OpInfo:
     schema: OpSchema
     flat_args_schema: List[object]
     local_args: Sequence[object]
-    local_kwargs: Dict[str, object]
+    local_kwargs: dict[str, object]
     args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info

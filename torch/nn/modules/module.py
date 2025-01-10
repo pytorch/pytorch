@@ -74,9 +74,9 @@ def _addindent(s_, numSpaces):
 
 r"""This tracks hooks common to all modules that are executed immediately before
 .registering the buffer/module/parameter"""
-_global_buffer_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_module_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_parameter_registration_hooks: Dict[int, Callable] = OrderedDict()
+_global_buffer_registration_hooks: dict[int, Callable] = OrderedDict()
+_global_module_registration_hooks: dict[int, Callable] = OrderedDict()
+_global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
@@ -120,13 +120,13 @@ class _WrappedHook:
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
-_global_backward_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_backward_hooks: Dict[int, Callable] = OrderedDict()
+_global_backward_pre_hooks: dict[int, Callable] = OrderedDict()
+_global_backward_hooks: dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
-_global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_forward_hooks: Dict[int, Callable] = OrderedDict()
-_global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
-_global_forward_hooks_with_kwargs: Dict[int, bool] = OrderedDict()
+_global_forward_pre_hooks: dict[int, Callable] = OrderedDict()
+_global_forward_hooks: dict[int, Callable] = OrderedDict()
+_global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
+_global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -447,29 +447,29 @@ class Module:
     the change."""
 
     training: bool
-    _parameters: Dict[str, Optional[Parameter]]
-    _buffers: Dict[str, Optional[Tensor]]
+    _parameters: dict[str, Optional[Parameter]]
+    _buffers: dict[str, Optional[Tensor]]
     _non_persistent_buffers_set: Set[str]
-    _backward_pre_hooks: Dict[int, Callable]
-    _backward_hooks: Dict[int, Callable]
+    _backward_pre_hooks: dict[int, Callable]
+    _backward_hooks: dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: Dict[int, Callable]
+    _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_hooks_with_kwargs: Dict[int, bool]
+    _forward_hooks_with_kwargs: dict[int, bool]
     # forward hooks that should always be called even if an exception is raised
-    _forward_hooks_always_called: Dict[int, bool]
-    _forward_pre_hooks: Dict[int, Callable]
+    _forward_hooks_always_called: dict[int, bool]
+    _forward_pre_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_pre_hooks_with_kwargs: Dict[int, bool]
-    _state_dict_hooks: Dict[int, Callable]
-    _load_state_dict_pre_hooks: Dict[int, Callable]
-    _state_dict_pre_hooks: Dict[int, Callable]
-    _load_state_dict_post_hooks: Dict[int, Callable]
-    _modules: Dict[str, Optional["Module"]]
+    _forward_pre_hooks_with_kwargs: dict[int, bool]
+    _state_dict_hooks: dict[int, Callable]
+    _load_state_dict_pre_hooks: dict[int, Callable]
+    _state_dict_pre_hooks: dict[int, Callable]
+    _load_state_dict_post_hooks: dict[int, Callable]
+    _modules: dict[str, Optional["Module"]]
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
@@ -1582,8 +1582,8 @@ class Module:
         hook: Union[
             Callable[[T, Tuple[Any, ...]], Optional[Any]],
             Callable[
-                [T, Tuple[Any, ...], Dict[str, Any]],
-                Optional[Tuple[Any, Dict[str, Any]]],
+                [T, Tuple[Any, ...], dict[str, Any]],
+                Optional[Tuple[Any, dict[str, Any]]],
             ],
         ],
         *,
@@ -1647,7 +1647,7 @@ class Module:
         self,
         hook: Union[
             Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         ],
         *,
         prepend: bool = False,
@@ -2125,7 +2125,7 @@ class Module:
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrderedDict` is created and returned.
-    T_destination = TypeVar("T_destination", bound=Dict[str, Any])
+    T_destination = TypeVar("T_destination", bound=dict[str, Any])
 
     @overload
     def state_dict(
@@ -2134,7 +2134,7 @@ class Module:
         ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> dict[str, Any]:
         ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.

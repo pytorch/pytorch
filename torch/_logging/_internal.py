@@ -14,7 +14,7 @@ import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 import torch._logging.structured
@@ -53,7 +53,7 @@ class LogRegistry:
     # Note: this only contains loggers registered
     # from register_log
     # e.g. "dynamo" -> "torch._dynamo"
-    log_alias_to_log_qnames: Dict[str, List[str]] = field(default_factory=dict)
+    log_alias_to_log_qnames: dict[str, List[str]] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
@@ -75,7 +75,7 @@ class LogRegistry:
     visible_artifacts: Set[str] = field(default_factory=set)
 
     # A short description of each artifact
-    artifact_descriptions: Dict[str, str] = field(default_factory=dict)
+    artifact_descriptions: dict[str, str] = field(default_factory=dict)
 
     # artifacts which are not displayed unless explicitly named in the
     # settings. Ex. output_code is NOT displayed even if the inductor
@@ -83,7 +83,7 @@ class LogRegistry:
     off_by_default_artifact_names: Set[str] = field(default_factory=set)
 
     # logging format string for artifacts
-    artifact_log_formatters: Dict[str, logging.Formatter] = field(default_factory=dict)
+    artifact_log_formatters: dict[str, logging.Formatter] = field(default_factory=dict)
 
     def is_artifact(self, name):
         return name in self.artifact_names
@@ -144,7 +144,7 @@ class LogRegistry:
 @dataclass
 class LogState:
     # qualified log names -> currently set log level
-    log_qname_to_level: Dict[str, str] = field(default_factory=dict)
+    log_qname_to_level: dict[str, str] = field(default_factory=dict)
 
     # the set of currently enabled artifacts
     artifact_names: Set[str] = field(default_factory=set)
@@ -235,7 +235,7 @@ def set_logs(
     fusion: bool = False,
     overlap: bool = False,
     export: Optional[int] = None,
-    modules: Optional[Dict[str, Union[int, bool]]] = None,
+    modules: Optional[dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd: bool = False,
@@ -1105,7 +1105,7 @@ class LazyString:
 
 # Logs the time it takes to do structured logging by frame/compile id
 # key is always {frame_id}_{frame_compile_id}
-structured_logging_overhead: Dict[str, float] = defaultdict(float)
+structured_logging_overhead: dict[str, float] = defaultdict(float)
 
 
 def add_structured_logging_overhead(time_spent: float) -> None:
@@ -1157,7 +1157,7 @@ def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], Union[dict[str, Any], Tuple[str, int]]] = dict,
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
@@ -1189,7 +1189,7 @@ def trace_structured(
     # are handlers instead of checking the log level
     if trace_log.handlers:
         start_time = time.time_ns()
-        record: Dict[str, object] = {}
+        record: dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:
             # TODO: Actually, the rank probably should just be emitted once at
@@ -1247,7 +1247,7 @@ def dtrace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], Union[dict[str, Any], Tuple[str, int]]] = dict,
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,

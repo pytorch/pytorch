@@ -28,7 +28,7 @@ import functools
 import types
 import warnings
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Iterable, List, Optional, Set, Tuple, Type
 
 import torch
 from torch._C import (
@@ -401,7 +401,7 @@ def get_default_nowrap_functions() -> Set[Callable]:
 
 @functools.lru_cache(None)
 @_disable_user_warnings
-def get_testing_overrides() -> Dict[Callable, Callable]:
+def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -427,7 +427,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
     Tensor = torch.Tensor
-    ret: Dict[Callable, Callable] = {
+    ret: dict[Callable, Callable] = {
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
@@ -1805,7 +1805,7 @@ has_torch_function_variadic = _add_docstr(
 
 @functools.lru_cache(None)
 def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
+    Tuple[dict[Any, List[Callable]], dict[Callable, str]]
 ):
     overridable_funcs = collections.defaultdict(list)
     index = {}
@@ -1891,7 +1891,7 @@ def _get_overridable_functions() -> (
 
 
 @_disable_user_warnings
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
+def get_overridable_functions() -> dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns

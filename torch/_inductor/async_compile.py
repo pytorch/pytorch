@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -273,7 +273,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed(
             "async_compile.wait",
             log_pt2_compile_event=True,

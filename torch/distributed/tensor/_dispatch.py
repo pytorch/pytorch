@@ -4,7 +4,7 @@ import functools
 import logging
 import operator
 import warnings
-from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 def decompose_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     """
     Decomposes a op to core ATen op, this handler is mostly here
@@ -60,7 +60,7 @@ def decompose_handler(
 def is_same_size_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> bool:
     lhs = cast(torch.Tensor, args[0])
     rhs = cast(torch.Tensor, args[1])
@@ -70,7 +70,7 @@ def is_same_size_handler(
 def found_inf_reduce_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
@@ -154,7 +154,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         args: Tuple[object, ...],
-        kwargs: Dict[str, object],
+        kwargs: dict[str, object],
     ) -> object:
         """
         Main dispatching logic
@@ -330,7 +330,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         args: Tuple[object, ...],
-        kwargs: Dict[str, object],
+        kwargs: dict[str, object],
     ) -> OpInfo:
         # get runtime schema info to determine whether to use pytree to flatten inputs
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
@@ -345,9 +345,9 @@ class OpDispatcher:
             args_list, args_spec = args, None
 
         args_schema: List[object] = []
-        kwargs_schema: Dict[str, object] = {}
+        kwargs_schema: dict[str, object] = {}
         local_args: List[object] = []
-        local_kwargs: Dict[str, object] = {}
+        local_kwargs: dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 
         for arg in args_list:

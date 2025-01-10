@@ -13,7 +13,6 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
-    Dict,
     Generic,
     List,
     NewType,
@@ -480,7 +479,7 @@ class MetaStorageDesc:
     # serializable in JSON, you want to do something special here anyway
     data: Optional[torch.UntypedStorage]
 
-    def as_json(self, describer_id: _DescriberId) -> Dict[str, object]:
+    def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         return {
             "id": self.id,
             "describer_id": describer_id,
@@ -621,7 +620,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     unwrapped: Optional[MetaTensorDesc] = None  # is_functorch_wrapped
     bdim: Optional[int] = None  # is_functorch_wrapped
     base: Optional[MetaTensorDesc] = None  # is_view
-    attrs: Optional[Dict[str, MetaTensorDesc]] = None  # is_traceable_wrapper_subclass
+    attrs: Optional[dict[str, MetaTensorDesc]] = None  # is_traceable_wrapper_subclass
     creation_meta: Optional[CreationMeta] = None
     grad: Optional[MetaTensorDesc] = None
 
@@ -669,7 +668,7 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     # NB: This will reference numeric IDs, and it is assumed that you've
     # already serialized everything this recursively references
-    def as_json(self, describer_id: _DescriberId) -> Dict[str, object]:
+    def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         def json(k: str, v: object) -> object:
             # Some best-effort debugging serialization for unserializable
             # fields (feel free to add other special cases as appropriate)
@@ -1081,7 +1080,7 @@ class MetaConverter(Generic[_TensorT]):
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
             if t.is_traceable_wrapper_subclass:
                 assert t.attrs is not None
-                inner_contexts: Dict[
+                inner_contexts: dict[
                     str, torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ] = {}
                 for attr, inner in t.attrs.items():

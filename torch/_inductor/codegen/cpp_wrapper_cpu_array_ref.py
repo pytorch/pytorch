@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 import sympy
 
@@ -60,7 +60,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation
-        self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
+        self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
     def create(
@@ -400,7 +400,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
 
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue

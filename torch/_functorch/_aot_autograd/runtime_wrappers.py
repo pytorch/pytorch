@@ -13,7 +13,7 @@ import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -869,7 +869,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         #   ]
         #   keep_arg_mask = [True, True, False, True]
 
-        seen_args: Dict[Tensor, int] = {}
+        seen_args: dict[Tensor, int] = {}
         # Implicitly map duped arg position (list index) to de-duped arg position
         keep_arg_mask: List[bool] = []
         add_dupe_map: List[int] = []
@@ -966,7 +966,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         def debugged_compiled_fn(args):
             # Test that the computed remove/add arg functions are an inverse
             new_args = self.add_dupe_args(self.remove_dupe_args(args))
-            seen: Dict[Any, None] = {}
+            seen: dict[Any, None] = {}
             for i, (x, y) in enumerate(zip(new_args, args)):
                 seen[y] = None
                 assert x is y, format_guard_bug_msg(
@@ -1278,7 +1278,7 @@ def merge_view_inputs(
         # Return early when there are no mutations.
         return fwd_inputs, None
 
-    storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
+    storage_ref_to_idx: dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
@@ -1293,7 +1293,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,

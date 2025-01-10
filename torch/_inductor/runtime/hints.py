@@ -5,7 +5,7 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
@@ -189,7 +189,7 @@ class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
     scheduler: Optional[str] = None
-    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
+    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
     def args(self) -> List[str]:

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 import torch.optim._functional as F
@@ -49,7 +49,7 @@ class _FunctionalRprop:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group["params"]

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, List, Optional, Set, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -89,8 +89,8 @@ def _insert_logger_after_node(
 
 def add_loggers_to_model(
     gm: GraphModule,
-    node_to_instrument_inputs_to_ref_node_name: Dict[Node, tuple[str, str]],
-    node_to_instrument_outputs_to_ref_node_name: Dict[Node, tuple[str, str]],
+    node_to_instrument_inputs_to_ref_node_name: dict[Node, tuple[str, str]],
+    node_to_instrument_outputs_to_ref_node_name: dict[Node, tuple[str, str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -101,7 +101,7 @@ def add_loggers_to_model(
     """
 
     new_graph = Graph()
-    env: Dict[str, Any] = {}
+    env: dict[str, Any] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -240,7 +240,7 @@ def _insert_dtype_cast_after_node(
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
+    node_type_to_io_type_map: dict[str, Set[NSNodeTargetType]],
 ) -> Union[Node, List[Node]]:
     """
     Given a starting graph C (derived from graph B) of
@@ -705,10 +705,10 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_subgraph_pairs: Dict[str, tuple[NSSubgraph, NSSubgraph]],
+    matched_subgraph_pairs: dict[str, tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
-    node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    node_type_to_io_type_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
 ) -> GraphModule:
     """
     Creates a new GraphModule consisting of the graph of C, with the meaningful
@@ -742,7 +742,7 @@ def create_a_shadows_b(
     # graph_c is the graph created from copying the nodes of graph_b and inserting
     # the shadows with the nodes copied from graph_a
     graph_c = Graph()
-    env_c: Dict[str, Any] = {}
+    env_c: dict[str, Any] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])

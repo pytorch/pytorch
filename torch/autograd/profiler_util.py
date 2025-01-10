@@ -4,7 +4,7 @@ import itertools
 import math
 from collections import defaultdict, namedtuple
 from operator import attrgetter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from typing_extensions import deprecated
 
 import torch
@@ -310,7 +310,7 @@ class EventList(list):
             An EventList containing FunctionEventAvg objects.
         """
         assert self._tree_built
-        stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
+        stats: dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
         def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
             key = [
@@ -482,7 +482,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
         self.concrete_inputs: List[Any] = concrete_inputs
-        self.kwinputs: Dict[str, Any] = kwinputs
+        self.kwinputs: dict[str, Any] = kwinputs
         self.stack: List = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device

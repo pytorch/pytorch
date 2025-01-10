@@ -2,7 +2,7 @@
 import copy
 import warnings
 from itertools import chain
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -56,7 +56,7 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
     lifted_inputs: Sequence[Optional[str]],
-) -> Tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
+) -> Tuple[dict[str, torch.fx.Node], dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
     graph
@@ -85,8 +85,8 @@ def _unlift_inputs_as_getattr(
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
     mutated_outputs: Sequence[Optional[str]],
-    unlifted_name_to_node: Dict[str, torch.fx.Node],
-    input_name_to_node: Dict[str, torch.fx.Node],
+    unlifted_name_to_node: dict[str, torch.fx.Node],
+    input_name_to_node: dict[str, torch.fx.Node],
 ) -> None:
     """
     Find the all the buffers and inputs that were mutated and insert copy_
@@ -175,8 +175,8 @@ def _unlift(
     mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
-    state_dict: Dict[str, Any],
-    constants: Dict[str, Any],
+    state_dict: dict[str, Any],
+    constants: dict[str, Any],
     forward_arg_names: Optional[List[str]] = None,
 ):
     """
@@ -209,8 +209,8 @@ def _unlift(
 def _register_attrs_to_new_gm(
     new_gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
-    state_dict: Dict[str, Any],
-    constants: Dict[str, Any],
+    state_dict: dict[str, Any],
+    constants: dict[str, Any],
 ) -> None:
     non_persistent_buffers = set(graph_signature.non_persistent_buffers)
     for name in graph_signature.buffers:

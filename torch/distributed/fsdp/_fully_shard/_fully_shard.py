@@ -5,7 +5,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Iterable,
     List,
     NoReturn,
@@ -42,7 +41,7 @@ __all__ = [
 ]
 
 
-cls_to_fsdp_cls: Dict[Type, Type] = {}
+cls_to_fsdp_cls: dict[Type, Type] = {}
 
 
 # The decorator adds a state object to `module` that can be accessed via

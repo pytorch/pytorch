@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, List, Optional, Set, Type
 
 import torch.nn
 
@@ -51,8 +51,8 @@ class SideEffects:
     applied after an FX graph is run.
     """
 
-    id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[VariableTracker, Dict[str, VariableTracker]]
+    id_to_variable: dict[int, VariableTracker]
+    store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: List[Any]
 
     def __init__(

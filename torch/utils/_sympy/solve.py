@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, Tuple, Type
+from typing import Optional, Tuple, Type
 
 import sympy
 
@@ -8,7 +8,7 @@ from torch.utils._sympy.functions import FloorDiv
 
 log = logging.getLogger(__name__)
 
-_MIRROR_REL_OP: Dict[Type[sympy.Basic], Type[sympy.Rel]] = {
+_MIRROR_REL_OP: dict[Type[sympy.Basic], Type[sympy.Rel]] = {
     sympy.Eq: sympy.Eq,
     sympy.Ne: sympy.Ne,
     sympy.Ge: sympy.Le,

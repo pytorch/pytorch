@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, overload, Tuple, Union
+from typing import Any, Iterable, List, Optional, overload, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -12,7 +12,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 logger = logging.getLogger(__name__)
 
 
-def _refresh_per_optimizer_state() -> Dict[str, Any]:
+def _refresh_per_optimizer_state() -> dict[str, Any]:
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
 
@@ -36,7 +36,7 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
     def __init__(self, master_tensor: torch.Tensor) -> None:
         assert _is_supported_device(master_tensor)
         self.master = master_tensor
-        self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
+        self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
 
 
 class ShardedGradScaler(GradScaler):
@@ -175,7 +175,7 @@ class ShardedGradScaler(GradScaler):
         inv_scale: torch.Tensor,
         found_inf: torch.Tensor,
         allow_fp16: bool = True,
-    ) -> Dict[torch.device, torch.Tensor]:
+    ) -> dict[torch.device, torch.Tensor]:
         per_device_inv_scale = _GeneralMultiDeviceReplicator(inv_scale)
         per_device_found_inf = _GeneralMultiDeviceReplicator(found_inf)
 

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
+    cast, Any, Callable, DefaultDict, Iterator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
@@ -154,7 +154,7 @@ class FunctionCounts:
         return self._from_dict(counts, self.inclusive)
 
     @staticmethod
-    def _from_dict(counts: Dict[str, int], inclusive: bool) -> "FunctionCounts":
+    def _from_dict(counts: dict[str, int], inclusive: bool) -> "FunctionCounts":
         flat_counts = (FunctionCount(c, fn) for fn, c in counts.items() if c)
         return FunctionCounts(tuple(sorted(flat_counts, reverse=True)), inclusive)
 
@@ -296,7 +296,7 @@ class Serialization(enum.Enum):
     TORCH_JIT = 2
 
 
-_GLOBALS_ALLOWED_TYPES: Dict[Serialization, Tuple[Any, ...]] = {
+_GLOBALS_ALLOWED_TYPES: dict[Serialization, Tuple[Any, ...]] = {
     Serialization.PICKLE: (str, bytes, bool, int, float, complex),
     Serialization.TORCH_JIT: (torch.jit.ScriptFunction, torch.jit.ScriptModule),
     Serialization.TORCH: (torch.nn.Module,),
@@ -339,7 +339,7 @@ class CopyIfCallgrind:
         return self._serialization
 
     @staticmethod
-    def unwrap_all(globals: Dict[str, Any]) -> Dict[str, Any]:
+    def unwrap_all(globals: dict[str, Any]) -> dict[str, Any]:
         return {
             k: (v.value if isinstance(v, CopyIfCallgrind) else v)
             for k, v in globals.items()
@@ -419,8 +419,8 @@ class GlobalsBridge:
         operations.
     """
 
-    def __init__(self, globals: Dict[str, Any], data_dir: str) -> None:
-        self._globals: Dict[str, CopyIfCallgrind] = {}
+    def __init__(self, globals: dict[str, Any], data_dir: str) -> None:
+        self._globals: dict[str, CopyIfCallgrind] = {}
         self._data_dir = data_dir
         if not os.path.exists(data_dir):
             os.mkdir(data_dir)
@@ -493,7 +493,7 @@ class _ValgrindWrapper:
             assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
-        self._commands_available: Dict[str, bool] = {}
+        self._commands_available: dict[str, bool] = {}
         if self._supported_platform:
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
@@ -519,7 +519,7 @@ class _ValgrindWrapper:
     def collect_callgrind(
         self,
         task_spec: common.TaskSpec,
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
         *,
         number: int,
         repeats: int,
@@ -560,7 +560,7 @@ class _ValgrindWrapper:
         self,
         *,
         task_spec: common.TaskSpec,
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
         number: int,
         repeats: int,
         collect_baseline: bool,

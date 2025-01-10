@@ -3,7 +3,7 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -308,10 +308,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
-        self._tokens: Dict[Any, torch.Tensor] = {}
+        self._tokens: dict[Any, torch.Tensor] = {}
 
         # Filled after forward tracing.
-        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+        self._tokens_forward_output: dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to

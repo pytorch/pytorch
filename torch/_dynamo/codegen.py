@@ -4,7 +4,7 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from typing import Counter, List, Optional
 
 import torch.nn
 
@@ -58,7 +58,7 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
+        self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: List[Instruction] = []
         # This determines which VariableTracker should be stored as locals, and
         # maps the VariableTracker to the local variable name. Note that it
@@ -74,7 +74,7 @@ class PyCodegen:
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
-        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
+        self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prev = self.value_from_source

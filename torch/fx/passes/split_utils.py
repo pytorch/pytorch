@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import List, Optional, Tuple, Type, Union
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -54,7 +54,7 @@ class Component:
     orig_outputs: List = field(default_factory=list)
 
     # Mapping from get_attr node in original graph to get_attr node in `graph`.
-    getattr_maps: Dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
+    getattr_maps: dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
     constructor_args: List[str] = field(default_factory=list)
     gm: Optional[torch.fx.GraphModule] = None
 
@@ -66,7 +66,7 @@ def split_by_tags(
     return_fqn_mapping: bool = False,
     return_tuple: bool = False,
     GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
-) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, Dict[str, str]]]:
+) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, dict[str, str]]]:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
     tags. For example, we have tags = ["a", "b", "c"], the function will create
@@ -133,26 +133,26 @@ def split_by_tags(
         return r
 
     # Mapping from node in original module to node in created submodule.
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Mapping from node in original module or created submodules to
     # corresponding component.
-    node_to_component: Dict[torch.fx.Node, Component] = {}
+    node_to_component: dict[torch.fx.Node, Component] = {}
 
     # Mapping from tag to the corresponding component.
-    tag_to_component: Dict[str, Component] = {}
+    tag_to_component: dict[str, Component] = {}
 
     # Stores all components.
     all_components: List[Component] = []
 
     # Stores nodes that will be used in main graph.
-    used_in_main: Dict[torch.fx.Node, None] = {}
+    used_in_main: dict[torch.fx.Node, None] = {}
 
     # Main graph after split.
     main_g = torch.fx.Graph()
 
     # Mapping from node in original module to node in main graph after split.
-    main_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    main_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Output node of original module.
     output_node: Optional[torch.fx.Node] = None
@@ -258,7 +258,7 @@ def split_by_tags(
             node_to_component[n].orig_outputs.append(n)
 
     # Now we create a graphmodule for each component.
-    orig_to_split_fqn_mapping: Dict[str, str] = {}
+    orig_to_split_fqn_mapping: dict[str, str] = {}
     for comp in all_components:
         outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
 

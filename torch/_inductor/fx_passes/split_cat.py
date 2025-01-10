@@ -2,7 +2,7 @@
 import itertools
 import logging
 import operator
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, List, Optional, Sequence, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -43,8 +43,8 @@ _TransformParam: TypeAlias = tuple[
 _Range: TypeAlias = tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+PRE_GRAD_PATTERNS: dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -1779,7 +1779,7 @@ def update_args_from_split_getitem(
     parents_seen: List[torch.fx.Node],
     new_cat_args: List[torch.fx.Node],
     new_cat_args_meta: List[torch.fx.Node],
-    idx_to_getitems: Dict[int, torch.fx.Node],
+    idx_to_getitems: dict[int, torch.fx.Node],
     threshold_to_cat: int = 2,
 ):
     split_input, split_size, split_dim = _get_split_args_default(parents_seen[-1])
@@ -1872,7 +1872,7 @@ def update_args_from_unbind_getitem(
     parents_seen: List[torch.fx.Node],
     new_cat_args: List[torch.fx.Node],
     new_cat_args_meta: List[torch.fx.Node],
-    idx_to_getitems: Dict[int, torch.fx.Node],
+    idx_to_getitems: dict[int, torch.fx.Node],
     threshold_to_cat: int = 2,
 ):
     unbind_input = get_arg_value(parents_seen[-1], 0, "input")  # split or unbind input

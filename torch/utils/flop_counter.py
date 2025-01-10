@@ -2,7 +2,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing import List, Any, Optional, Union, Tuple, Iterator, TypeVar, Callable
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -22,7 +22,7 @@ def get_shape(i):
         return i.shape
     return i
 
-flop_registry: Dict[Any, Any] = {}
+flop_registry: dict[Any, Any] = {}
 
 def shape_wrapper(f):
     @wraps(f)
@@ -619,9 +619,9 @@ class FlopCounterMode:
             mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[Dict[Any, Any]] = None):
+            custom_mapping: Optional[dict[Any, Any]] = None):
         super().__init__()
-        self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
+        self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
         self.mode: Optional[_FlopCounterMode] = None
@@ -638,7 +638,7 @@ class FlopCounterMode:
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
 
-    def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
+    def get_flop_counts(self) -> dict[str, dict[Any, int]]:
         """Return the flop counts as a dictionary of dictionaries.
 
         The outer

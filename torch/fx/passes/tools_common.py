@@ -2,7 +2,7 @@
 import collections
 import operator
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, List, Mapping, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx
@@ -172,8 +172,8 @@ class FxNetAccFusionsFinder:
 
         return False
 
-    def __call__(self) -> Dict[torch.fx.Node, NodeSet]:
-        result: Dict[torch.fx.Node, NodeSet] = {}
+    def __call__(self) -> dict[torch.fx.Node, NodeSet]:
+        result: dict[torch.fx.Node, NodeSet] = {}
         acc_nodes = list(self.acc_nodes)
 
         for node in acc_nodes:
@@ -294,7 +294,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
         if indeg[node] == 0:
             queue.append(node)
-    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
     # Pop nodes from the queue, and add nodes that have had all their
     # dependencies fulfilled
     while len(queue) > 0:

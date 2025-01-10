@@ -5,7 +5,6 @@ from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
 from typing import (
     Any,
-    Dict,
     Iterable,
     Iterator,
     Mapping,
@@ -107,7 +106,7 @@ class Sequential(Module):
                 ]))
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     @overload
     def __init__(self, *args: Module) -> None:
@@ -302,7 +301,7 @@ class ModuleList(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super().__init__()
@@ -490,7 +489,7 @@ class ModuleDict(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
         super().__init__()
@@ -771,7 +770,7 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Any = None) -> None:
         super().__init__()
-        self._keys: Dict[str, None] = {}
+        self._keys: dict[str, None] = {}
         if parameters is not None:
             self.update(parameters)
 

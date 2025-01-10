@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -31,7 +31,7 @@ from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
-_ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
+_ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
 
 """
@@ -325,8 +325,8 @@ class FSDPParamGroup:
         self._to_sharded()
 
     def pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
@@ -539,8 +539,8 @@ class FSDPParamGroup:
 
     # Hook Registration #
     def _register_post_backward_hook(
-        self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, args: Tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
         # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
         if (not torch._dynamo.config.skip_fsdp_hooks) or compiled_autograd_enabled():
@@ -675,7 +675,7 @@ def _get_param_module_infos(
     find shared modules' parameters and shared parameters within a module.
     """
     params_set = set(params)
-    param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
+    param_to_module_info: dict[nn.Parameter, ParamModuleInfo] = {}
     for module in modules:
         for _, submodule in module.named_modules(remove_duplicate=False):
             for param_name, param in _named_parameters_with_duplicates(

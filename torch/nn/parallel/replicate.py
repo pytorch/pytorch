@@ -1,7 +1,6 @@
 from collections import OrderedDict
 from typing import (
     cast,
-    Dict,
     Iterator,
     List,
     Optional,
@@ -152,7 +151,7 @@ def replicate(
 
     modules = list(network.modules())
     module_copies: List[List[Module]] = [[] for _ in devices]
-    module_indices: Dict[Module, int] = {}
+    module_indices: dict[Module, int] = {}
 
     for i, module in enumerate(modules):
         module_indices[module] = i

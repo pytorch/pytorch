@@ -142,7 +142,7 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker],
         user_cls=dict,
         **kwargs,
     ) -> None:
@@ -601,7 +601,7 @@ class SetVariable(ConstDictVariable):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         # We foward the calls to the dictionary model
         if name == "add":
@@ -713,7 +713,7 @@ class FrozensetVariable(SetVariable):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
@@ -753,7 +753,7 @@ class DictKeySetVariable(SetVariable):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
@@ -801,7 +801,7 @@ class DictViewVariable(VariableTracker):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
@@ -828,7 +828,7 @@ class DictKeysVariable(DictViewVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)

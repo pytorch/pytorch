@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, List, Set, Tuple, Union
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -127,7 +127,7 @@ class _safe_globals:
 # the dynamic additions to safe_globals would not be picked up by
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
-    rc: Dict[str, Any] = {}
+    rc: dict[str, Any] = {}
     for f in _marked_safe_globals_set:
         if isinstance(f, tuple):
             if len(f) != 2:
@@ -171,7 +171,7 @@ def _tensor_rebuild_functions():
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
-    rc: Dict[str, Any] = {
+    rc: dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
@@ -302,7 +302,7 @@ class Unpickler:
         self.encoding = encoding
         self.readline = file.readline
         self.read = file.read
-        self.memo: Dict[int, Any] = {}
+        self.memo: dict[int, Any] = {}
         self.proto: int = -1
 
     def load(self):

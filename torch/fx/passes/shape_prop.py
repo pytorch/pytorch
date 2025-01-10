@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional, Tuple
 
 import torch
 import torch.fx
@@ -29,7 +29,7 @@ class TensorMetadata(NamedTuple):
 
     # Quantization metadata
     is_quantized: bool
-    qparams: Dict[str, Any]
+    qparams: dict[str, Any]
 
 
 def _extract_tensor_metadata(
@@ -57,7 +57,7 @@ def _extract_tensor_metadata(
                 break
 
     is_quantized = result.is_quantized
-    qparams: Dict[str, Any] = {}
+    qparams: dict[str, Any] = {}
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme

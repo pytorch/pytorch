@@ -6,7 +6,6 @@ import os
 from typing import (
     Any,
     Callable,
-    Dict,
     Final,
     List,
     Mapping,
@@ -105,7 +104,7 @@ def is_onnxrt_backend_supported() -> bool:
     return _SUPPORT_ONNXRT
 
 
-_dumped_onnx_model: Dict[str, int] = {}
+_dumped_onnx_model: dict[str, int] = {}
 
 
 def _dump_onnx_model(
@@ -184,7 +183,7 @@ class OrtOperatorSupport(OperatorSupport):
     OrtOperatorSupport and extra_support_dict is used by OperatorSupport.is_node_supported.
     """
 
-    def __init__(self, support_dict: Set[Any], extra_support_dict: Dict[str, Any]):
+    def __init__(self, support_dict: Set[Any], extra_support_dict: dict[str, Any]):
         # Use extra_support_dict[op_name] = None to indicate
         # we support op_name with all input types. Otherwise,
         # see support_dict (type: SupportDict) in operator_support.py
@@ -642,7 +641,7 @@ class OrtExecutionInfoForAllGraphModules:
     def __init__(self) -> None:
         # All sessions (and their related information) created by exporting the same GraphModule
         # with different inputs.
-        self.execution_info_per_graph_module: Dict[
+        self.execution_info_per_graph_module: dict[
             torch.fx.GraphModule, List[OrtExecutionInfoPerSession]
         ] = {}
 
@@ -805,7 +804,7 @@ class OrtBackend:
             self._resolved_onnx_exporter_options.onnx_registry
         )
 
-        extra_support_dict: Dict[str, Any] = {
+        extra_support_dict: dict[str, Any] = {
             "getattr": None,
             # To send operator.getitem to ORT, add the corresponding string
             # recognized by PyTorch's OperatorSupport class.
@@ -820,7 +819,7 @@ class OrtBackend:
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
         # TODO(wschin): this is a naive implementation of cache without proper guard
         # See https://github.com/pytorch/pytorch/issues/106868.
-        self._partitioner_cache: Dict[torch.fx.GraphModule, torch.fx.GraphModule] = {}
+        self._partitioner_cache: dict[torch.fx.GraphModule, torch.fx.GraphModule] = {}
         # Conceptually, this filed is a 2-layer dictionary
         #   GraphModule 0
         #     ONNX Model 0 (with ORT InferenceSession and related information. type: OrtExecutionInfoPerSession)

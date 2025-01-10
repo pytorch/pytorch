@@ -3,7 +3,7 @@ import inspect
 import logging
 from functools import wraps
 from queue import Queue
-from typing import Callable, Dict, List
+from typing import Callable, List
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -79,8 +79,8 @@ def _topological_sort_passes(
         return passes
 
     # Contruct a graph mapping nodes to a list of their users
-    graph: Dict[Callable, List[Callable]] = {p: [] for p in passes}
-    indegree_map: Dict[Callable, int] = dict.fromkeys(passes, 0)
+    graph: dict[Callable, List[Callable]] = {p: [] for p in passes}
+    indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()
     for a in passes:
         for b in passes:
@@ -95,7 +95,7 @@ def _topological_sort_passes(
         if indegree_map[a] == 0:
             candidates.put(a)
 
-    visited: Dict[Callable, bool] = dict.fromkeys(passes, False)
+    visited: dict[Callable, bool] = dict.fromkeys(passes, False)
     sorted_passes: List[Callable] = []
 
     while not candidates.empty():

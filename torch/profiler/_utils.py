@@ -4,7 +4,7 @@ import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from torch.autograd.profiler import profile
 from torch.profiler import DeviceType
@@ -100,7 +100,7 @@ class EventKey:
 class BasicEvaluation:
     def __init__(self, prof: profile):
         self.profile = prof
-        self.metrics: Dict[EventKey, EventMetrics] = {}
+        self.metrics: dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
         self.event_keys = sorted(
             (e for e in self.metrics.keys()), key=lambda x: x.event.start_time_ns
@@ -162,7 +162,7 @@ class BasicEvaluation:
             cuda_launch_events + cuda_kernel_events, key=lambda x: x.start_ns()
         )
 
-        kernel_mapping: Dict[_KinetoEvent, int] = {}
+        kernel_mapping: dict[_KinetoEvent, int] = {}
         last_mapped_kernel = 0
         for cuda_launch_event in cuda_launch_events:
             index = index_of_first_match(

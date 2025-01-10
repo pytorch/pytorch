@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import os
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, List
 
 import torch
 import torch._lazy as lazy
@@ -28,7 +28,7 @@ class GraphInputMatcher:
     TS/XLA graph inputs.
     """
 
-    tensor_id_to_arg_idx: Dict[int, int]
+    tensor_id_to_arg_idx: dict[int, int]
     graph_input_tensor_ids: List[int]
     # there are 2 categories of graph_input_tensors.
     # Category 1: those whose id are not found in tensor_id_to_arg_idx. These are
@@ -74,7 +74,7 @@ class ReturnValueHandler:
         self.index: List[List[int]] = []
         self.total_count = len(lazy_out_list)
 
-        tensor_id_to_idx: Dict[int, int] = {}
+        tensor_id_to_idx: dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
             uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
             if uniq_idx is not None:

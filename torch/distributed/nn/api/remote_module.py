@@ -7,7 +7,6 @@ import types
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterator,
     List,
     Mapping,
@@ -131,7 +130,7 @@ class _RemoteModule(nn.Module):
         remote_device: str,
         module_cls: Type[nn.Module],
         args: Optional[Tuple] = None,
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -371,8 +370,8 @@ class _RemoteModule(nn.Module):
         hook: Union[
             Callable[[T, Tuple[Any, ...]], Optional[Any]],
             Callable[
-                [T, Tuple[Any, ...], Dict[str, Any]],
-                Optional[Tuple[Any, Dict[str, Any]]],
+                [T, Tuple[Any, ...], dict[str, Any]],
+                Optional[Tuple[Any, dict[str, Any]]],
             ],
         ],
         prepend: bool = False,
@@ -384,7 +383,7 @@ class _RemoteModule(nn.Module):
         self,
         hook: Union[
             Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -683,7 +682,7 @@ class RemoteModule(_RemoteModule):
         remote_device: str,
         module_cls: Type[nn.Module],
         args: Optional[Tuple] = None,
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 

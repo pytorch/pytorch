@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import sympy
 
@@ -82,7 +82,7 @@ def signature_to_meta(
     size_dtype: Optional[str],
     argdefs: List[str],
     indices: Optional[List[int]] = None,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {

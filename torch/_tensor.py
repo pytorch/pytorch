@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
@@ -317,7 +317,7 @@ class Tensor(torch._C.TensorBase):
 
         # See Note [Don't serialize hooks]
         warn_if_has_hooks(self)
-        backward_hooks: Dict[Any, Any] = OrderedDict()
+        backward_hooks: dict[Any, Any] = OrderedDict()
 
         skip_data = torch.serialization._serialization_tls.skip_data
         materialize_fake_tensors = (
@@ -750,7 +750,7 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
 
         from torch.utils.hooks import RemovableHandle
 

@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, List, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,
@@ -222,7 +222,7 @@ class ResumeFunctionMetadata:
         default_factory=list
     )
     # map from new block target offsets to original block target offsets
-    block_target_offset_remap: Optional[Dict[int, int]] = None
+    block_target_offset_remap: Optional[dict[int, int]] = None
 
 
 def _filter_iter(l1, l2, cond):
@@ -304,7 +304,7 @@ class ContinueExecutionCache:
         is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
 
-        def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+        def update(instructions: List[Instruction], code_options: dict[str, Any]):
             meta.instructions = copy.deepcopy(instructions)
 
             args = [f"___stack{i}" for i in range(nstack)]
@@ -477,7 +477,7 @@ class ContinueExecutionCache:
         new_offset = None
 
         def find_new_offset(
-            instructions: List[Instruction], code_options: Dict[str, Any]
+            instructions: List[Instruction], code_options: dict[str, Any]
         ):
             nonlocal new_offset
             (target,) = (i for i in instructions if i.offset == offset)
@@ -501,7 +501,7 @@ class ContinueExecutionCache:
                 block_target_offset_remap = meta.block_target_offset_remap = {}
 
                 def remap_block_offsets(
-                    instructions: List[Instruction], code_options: Dict[str, Any]
+                    instructions: List[Instruction], code_options: dict[str, Any]
                 ):
                     # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
                     # so we can tell which block a prefix PUSH_EXC_INFO belongs to,

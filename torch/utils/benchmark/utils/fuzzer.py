@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 
@@ -26,7 +26,7 @@ class FuzzedParameter:
         name: str,
         minval: Optional[Union[int, float]] = None,
         maxval: Optional[Union[int, float]] = None,
-        distribution: Optional[Union[str, Dict[Any, float]]] = None,
+        distribution: Optional[Union[str, dict[Any, float]]] = None,
         strict: bool = False,
     ):
         """
@@ -415,9 +415,9 @@ class Fuzzer:
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+        strict_params: dict[str, Union[float, int, ParameterAlias]] = {}
         for _ in range(1000):
-            candidate_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+            candidate_params: dict[str, Union[float, int, ParameterAlias]] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:

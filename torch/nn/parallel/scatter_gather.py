@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, overload, Sequence, Tuple, TypeVar, Union
+from typing import Any, List, Optional, overload, Sequence, Tuple, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
@@ -80,10 +80,10 @@ def scatter(inputs, target_gpus, dim=0):
 
 def scatter_kwargs(
     inputs: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    kwargs: Optional[dict[str, Any]],
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
-) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
+) -> Tuple[Tuple[Any, ...], Tuple[dict[str, Any], ...]]:
     r"""Scatter with support for kwargs dictionary."""
     scattered_inputs = scatter(inputs, target_gpus, dim) if inputs else []
     scattered_kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []

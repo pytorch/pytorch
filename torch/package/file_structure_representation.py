@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List
+from typing import List
 
 from .glob_group import GlobGroup, GlobPattern
 
@@ -15,7 +15,7 @@ class Directory:
     def __init__(self, name: str, is_dir: bool):
         self.name = name
         self.is_dir = is_dir
-        self.children: Dict[str, Directory] = {}
+        self.children: dict[str, Directory] = {}
 
     def _get_dir(self, dirs: List[str]) -> "Directory":
         """Builds path of Directories if not yet built and returns last directory

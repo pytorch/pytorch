@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, List, Set, Tuple
 
 import networkx as nx
 import numpy as np
@@ -25,7 +25,7 @@ class KnapsackEvaluator:
     def _get_backward_memory_from_topologically_sorted_graph(
         self,
         node_graph: nx.DiGraph,
-        node_memories: Dict[str, float],
+        node_memories: dict[str, float],
         saved_nodes_set: Set[str],
         peak_memory_after_forward_pass: float,
     ) -> List[Tuple[float, str]]:
@@ -135,7 +135,7 @@ class KnapsackEvaluator:
         saved_nodes_idxs: List[int],
         recomputable_node_idxs: List[int],
         account_for_backward_pass: bool = False,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Evaluate the theoretical runtime and peak memory usage of a given checkpointing strategy.
         Args:
@@ -191,7 +191,7 @@ class KnapsackEvaluator:
             [List[float], List[float], float], Tuple[float, List[int], List[int]]
         ],
         memory_budget_values: List[float],
-    ) -> List[Dict[str, float]]:
+    ) -> List[dict[str, float]]:
         """
         Evaluates the distribution of results for a given knapsack algorithm.
         Args:

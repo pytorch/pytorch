@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
+from typing import Callable, Tuple, List, Sequence, Union, Any
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
@@ -502,7 +502,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -605,7 +605,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -662,7 +662,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -2671,7 +2671,7 @@ def get_new_module_tests():
         'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
         'Tanhshrink', 'Threshold'
     ]
-    non_linear_activations_extra_info: Dict[str, dict] = {
+    non_linear_activations_extra_info: dict[str, dict] = {
         'CELU': {'constructor_args': (2.,), 'default_dtype': torch.double},
         'Threshold': {'constructor_args': (2., 1.)},
         'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
@@ -3059,7 +3059,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
     return output
 
 
-loss_reference_fns: Dict['str', Callable] = {
+loss_reference_fns: dict['str', Callable] = {
     'KLDivLoss': kldivloss_reference,
     'KLDivLoss_log_target': partial(kldivloss_reference, log_target=True),
     'NLLLoss': nllloss_reference,
@@ -3173,7 +3173,7 @@ classification_criterion_no_batch = [
     ),
     ('MultiLabelSoftMarginLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.randn(9)),
 ]
-classification_criterion_no_batch_extra_info: Dict[str, dict] = {
+classification_criterion_no_batch_extra_info: dict[str, dict] = {
     'MultiLabelMarginLoss': {'check_gradgrad': False},
 }
 # TODO : Fix these discrepancies

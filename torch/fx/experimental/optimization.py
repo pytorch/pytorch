@@ -5,7 +5,7 @@ import operator
 import time
 from collections import defaultdict
 from enum import Enum
-from typing import Any, cast, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, cast, Iterable, List, Optional, Tuple, Type
 
 import torch
 import torch.fx as fx
@@ -44,7 +44,7 @@ def _parent_name(target: str) -> Tuple[str, str]:
 
 # Works for length 2 patterns with 2 modules
 def matches_module_pattern(
-    pattern: Iterable[Type], node: fx.Node, modules: Dict[str, Any]
+    pattern: Iterable[Type], node: fx.Node, modules: dict[str, Any]
 ):
     if len(node.args) == 0:
         return False
@@ -64,7 +64,7 @@ def matches_module_pattern(
 
 
 def replace_node_module(
-    node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module
+    node: fx.Node, modules: dict[str, Any], new_module: torch.nn.Module
 ):
     assert isinstance(node.target, str)
     parent_name, name = _parent_name(node.target)
@@ -120,7 +120,7 @@ def remove_dropout(model: nn.Module) -> nn.Module:
 
     class DropoutRemover(torch.fx.Transformer):
         def call_module(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: Tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             if isinstance(self.submodules[target], nn.Dropout):
                 assert len(args) == 1
@@ -141,7 +141,7 @@ def extract_subgraph(
     Given lists of nodes from an existing graph that represent a subgraph, returns a submodule that executes that subgraph.
     """
     new_graph = fx.Graph()
-    env: Dict[fx.Node, fx.Node] = {}
+    env: dict[fx.Node, fx.Node] = {}
     for input in inputs:
         new_node = new_graph.placeholder(input.name)
         env[input] = new_node
@@ -180,13 +180,13 @@ mkldnn_map = {
 }
 
 
-def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+def modules_to_mkldnn(nodes: List[fx.Node], modules: dict[str, nn.Module]):
     """
     For each node, if it's a module that can be preconverted into MKLDNN,
     then we do so and create a mapping to allow us to convert from the MKLDNN
     version of the module to the original.
     """
-    old_modules: Dict[nn.Module, nn.Module] = {}
+    old_modules: dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == "call_module":
             assert isinstance(node.target, str)
@@ -201,8 +201,8 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
 
 def reset_modules(
     nodes: List[fx.Node],
-    modules: Dict[str, nn.Module],
-    old_modules: Dict[nn.Module, nn.Module],
+    modules: dict[str, nn.Module],
+    old_modules: dict[nn.Module, nn.Module],
 ):
     """
     Maps each module that's been changed with `modules_to_mkldnn` back to its
@@ -308,7 +308,7 @@ class UnionFind:
 
 def optimize_for_inference(
     model: torch.nn.Module,
-    pass_config: Optional[Dict[str, Any]] = None,
+    pass_config: Optional[dict[str, Any]] = None,
     tracer: Type[fx.Tracer] = fx.Tracer,
 ) -> torch.nn.Module:
     """
@@ -348,7 +348,7 @@ def optimize_for_inference(
     cur_tracer = tracer()
     fx_graph = cur_tracer.trace(copy.deepcopy(model))
     fx.GraphModule(cur_tracer.root, fx_graph)
-    modules: Dict[str, nn.Module] = dict(model.named_modules())
+    modules: dict[str, nn.Module] = dict(model.named_modules())
 
     class MklSupport(Enum):
         NO = 1
@@ -455,7 +455,7 @@ def optimize_for_inference(
             for other_color in cur_colors[1:]:
                 uf.join(cur_colors[0], other_color)
 
-    mkldnn_graphs: Dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
+    mkldnn_graphs: dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
     for node in fx_graph.nodes:
         if hasattr(node, "color"):
             mkldnn_graphs[uf.find(node.color)].nodes.append(node)

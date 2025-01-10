@@ -4,7 +4,7 @@ import json
 import traceback
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from ._compatibility import compatibility
 from .graph import Graph
@@ -25,7 +25,7 @@ __all__ = [
     "get_graph_provenance_json",
 ]
 
-current_meta: Dict[str, Any] = {}
+current_meta: dict[str, Any] = {}
 should_preserve_node_meta = False
 
 
@@ -219,7 +219,7 @@ def set_current_meta(node, pass_name=""):
 
 
 @compatibility(is_backward_compatible=False)
-def get_current_meta() -> Dict[str, Any]:
+def get_current_meta() -> dict[str, Any]:
     return current_meta
 
 

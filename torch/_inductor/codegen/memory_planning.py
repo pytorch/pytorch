@@ -5,7 +5,7 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Iterable, List, Optional, Protocol
 
 import sympy
 
@@ -372,7 +372,7 @@ class AllocationPool:
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
     names_to_del: List[str] = dataclasses.field(default_factory=list)
-    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
+    creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: Allocation, is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
@@ -445,7 +445,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
+    device_to_pools: dict[torch.device, List[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 

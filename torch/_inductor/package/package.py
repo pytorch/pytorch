@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch._inductor
@@ -159,7 +159,7 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 def package_aoti(
     archive_file: Union[str, io.BytesIO],
-    aoti_files: Union[List[str], Dict[str, List[str]]],
+    aoti_files: Union[List[str], dict[str, List[str]]],
 ) -> Union[str, io.BytesIO]:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
@@ -244,12 +244,12 @@ class AOTICompiledModel:
         flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
-    def get_metadata(self) -> Dict[str, str]:
+    def get_metadata(self) -> dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
     def load_constants(
         self,
-        constants_map: Dict[str, torch.Tensor],
+        constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
     ) -> None:

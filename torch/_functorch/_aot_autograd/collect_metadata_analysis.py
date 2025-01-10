@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional, Set
+from typing import Callable, DefaultDict, List, Optional, Set
 
 import torch
 import torch.utils._pytree as pytree
@@ -156,7 +156,7 @@ def run_functionalized_fw_and_collect_metadata(
     # during analysis
     is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
-    memo: Dict[Tensor, Tensor] = {}
+    memo: dict[Tensor, Tensor] = {}
 
     def _to_fun(t):
         if isinstance(t, Tensor):
@@ -382,7 +382,7 @@ def run_functionalized_fw_and_collect_metadata(
                     ].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
-        intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
+        intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:

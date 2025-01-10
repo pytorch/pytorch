@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 from weakref import WeakKeyDictionary
 
 import torch
@@ -73,7 +73,7 @@ class WithEffects(HigherOrderOperator):
         token,
         op: OpType,
         *args: Tuple[Any, ...],
-        **kwargs: Dict[str, Any],
+        **kwargs: dict[str, Any],
     ) -> Tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
@@ -135,7 +135,7 @@ def with_effects_dense(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
     *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    **kwargs: dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
     new_token = new_token_tensor()
@@ -150,7 +150,7 @@ def with_effects_fake(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
     *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    **kwargs: dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
@@ -163,7 +163,7 @@ def with_effects_proxy(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
     *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    **kwargs: dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
@@ -203,10 +203,10 @@ def _get_schema(op, args) -> torch.FunctionSchema:
 
 def handle_effects(
     allow_token_discovery: bool,
-    tokens: Dict[_EffectType, torch.Tensor],
+    tokens: dict[_EffectType, torch.Tensor],
     op: OpType,
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> Any:
     """
     Args:

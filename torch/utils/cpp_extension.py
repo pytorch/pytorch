@@ -23,7 +23,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Dict, List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
@@ -47,7 +47,7 @@ MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
 VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
-VersionMap = Dict[str, VersionRange]
+VersionMap = dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132

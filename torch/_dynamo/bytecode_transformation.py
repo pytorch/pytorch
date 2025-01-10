@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Iterator,
     List,
     Optional,
@@ -711,7 +710,7 @@ def assemble(instructions: List[Instruction], firstlineno: int) -> tuple[bytes, 
     return bytes(code), bytes(lnotab)
 
 
-def _get_instruction_by_offset(offset_to_inst: Dict[int, Instruction], offset: int):
+def _get_instruction_by_offset(offset_to_inst: dict[int, Instruction], offset: int):
     """
     Get the instruction located at a given offset, accounting for EXTENDED_ARGs
     """
@@ -853,7 +852,7 @@ def compute_exception_table(
     instructions: List[Instruction],
 ) -> List[ExceptionTableEntry]:
     """Compute exception table in list format from instructions with exn_tab_entries"""
-    exn_dict: Dict[tuple[int, int], tuple[int, int, bool]] = {}
+    exn_dict: dict[tuple[int, int], tuple[int, int, bool]] = {}
     indexof = get_indexof(instructions)
 
     for inst in instructions:
@@ -948,7 +947,7 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
-    entries: Dict[tuple[int, int], InstructionExnTabEntry] = {}
+    entries: dict[tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
         if inst.exn_tab_entry:
             key = (
@@ -1415,7 +1414,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
 
 
 def clean_and_assemble_instructions(
-    instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
+    instructions: List[Instruction], keys: List[str], code_options: dict[str, Any]
 ) -> tuple[List[Instruction], types.CodeType]:
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)

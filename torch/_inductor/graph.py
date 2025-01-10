@@ -14,7 +14,6 @@ from typing import (
     Any,
     Callable,
     DefaultDict,
-    Dict,
     Iterable,
     Iterator,
     List,
@@ -198,8 +197,8 @@ def getattr_recursive(
     return attr_itr
 
 
-def get_user_visible_output_strides(g: Graph) -> Dict[Node, tuple[int, ...]]:
-    ret: Dict[Node, tuple[int, ...]] = {}
+def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
+    ret: dict[Node, tuple[int, ...]] = {}
     output_node = g.find_nodes(op="output")[0]
 
     if "user_visible_output_idxs" not in output_node.meta:
@@ -212,7 +211,7 @@ def get_user_visible_output_strides(g: Graph) -> Dict[Node, tuple[int, ...]]:
 
 
 def mark_nodes_dislike_padding(
-    g: Graph, user_visible_output_strides: Dict[Node, tuple[int, ...]]
+    g: Graph, user_visible_output_strides: dict[Node, tuple[int, ...]]
 ) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -346,7 +345,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_inference: bool = False,
         is_backward: bool = False,
         is_const_graph: bool = False,
-        const_output_index: Optional[Dict[str, int]] = None,
+        const_output_index: Optional[dict[str, int]] = None,
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
@@ -379,14 +378,14 @@ class GraphLowering(torch.fx.Interpreter):
         # you don't start adding new ones in the lowering process
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
-        self.ras_by_symbol: Dict[
+        self.ras_by_symbol: dict[
             Optional[sympy.Symbol], List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
-        self.graph_inputs: Dict[str, TensorBox] = {}
-        self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.graph_inputs: dict[str, TensorBox] = {}
+        self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
@@ -397,7 +396,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_type = "cpu"
         self.buffers: List[ir.Buffer] = []
         self.operations: List[ir.Operation] = []
-        self.const_output_index: Dict[str, int] = (
+        self.const_output_index: dict[str, int] = (
             const_output_index if const_output_index else {}
         )
         self.folded_constants: OrderedSet[str] = (
@@ -405,12 +404,12 @@ class GraphLowering(torch.fx.Interpreter):
             if const_output_index
             else OrderedSet()
         )
-        self.constants: Dict[str, torch.Tensor] = (
+        self.constants: dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
-        self.seen_subgraphs: Dict[str, ir.Subgraph] = {}
-        self.constant_reprs: Dict[str, str] = {}
+        self.torchbind_constants: dict[str, torch._C.ScriptObject] = {}
+        self.seen_subgraphs: dict[str, ir.Subgraph] = {}
+        self.constant_reprs: dict[str, str] = {}
         self.removed_operations = OrderedSet[str]()
         self.removed_buffers = OrderedSet[str]()
         self.removed_inplace_buffers = OrderedSet[str]()
@@ -431,12 +430,12 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
-        self.lists: Dict[str, List[str]] = {}
+        self.lists: dict[str, List[str]] = {}
         self.mutated_inputs = OrderedSet[str]()
         self.mutated_input_idxs: List[int] = []
-        self.name_to_buffer: Dict[str, ir.Buffer] = {}
+        self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
-        self.name_to_op: Dict[str, ir.Operation] = {}
+        self.name_to_op: dict[str, ir.Operation] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
@@ -445,7 +444,7 @@ class GraphLowering(torch.fx.Interpreter):
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
         # since cpp_wrapper flag is OrderedSet to false for the first pass of codegen.
         self.record_multi_kernel_choice = cpp_wrapper
-        self.multi_kernel_to_choice: Dict[str, str] = {}
+        self.multi_kernel_to_choice: dict[str, str] = {}
 
         self.aot_mode = aot_mode
         self.graph_id = graph_id
@@ -473,18 +472,18 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs_reason: Optional[str] = None
 
         # only keeping one node per device for stack trace purposes
-        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
+        self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(  # type: ignore[operator, union-attr]
             "dynamo_flat_name_to_original_fqn", {}
         )
-        self.allocated_constant_name: Dict[str, str] = (
+        self.allocated_constant_name: dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
         init_backend_registration()
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
-        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
+        self.effectful_ops: dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs = OrderedSet[str]()
         self.no_fuse_buffer_names = OrderedSet[str]()
 
@@ -599,7 +598,7 @@ class GraphLowering(torch.fx.Interpreter):
         if is_inference:
             from torch.utils.flop_counter import FlopCounterMode
 
-            flop_counts: Dict[str, float] = defaultdict(float)
+            flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
                 success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
                     node
@@ -995,7 +994,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
     def placeholder(
-        self, target: str, args: tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object], kwargs: dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
@@ -1072,7 +1071,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.aligned_inputs.add(target)
         return tensor
 
-    def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
+    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
@@ -1155,7 +1154,7 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: tuple[()], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[()], kwargs: dict[str, object]  # type: ignore[override]
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1203,7 +1202,7 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError
 
     def output(
-        self, target: str, args: tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: tuple[object], kwargs: dict[str, object]  # type: ignore[override]
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
@@ -1306,9 +1305,9 @@ class GraphLowering(torch.fx.Interpreter):
         self,
         fx_node: torch.fx.Node,
         old_args: tuple[Any],
-        old_kwargs: Dict[str, Any],
+        old_kwargs: dict[str, Any],
         new_args: tuple[Any],
-        new_kwargs: Dict[str, Any],
+        new_kwargs: dict[str, Any],
     ) -> None:
         """Propagate mutations on new_args/new_kwargs back to old_args/old_kwargs.
 

@@ -34,7 +34,7 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Dict, Optional, Set
+from typing import Optional, Set
 
 import torch
 import torch._prims as prims
@@ -193,7 +193,7 @@ class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
         self.storage_cache: Optional[
-            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+            dict[Optional[torch.device], dict[str, StorageWeakRef]]
         ] = None
         if cache:
             self.storage_cache = defaultdict(dict)

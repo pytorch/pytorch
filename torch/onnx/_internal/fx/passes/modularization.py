@@ -5,7 +5,7 @@ import abc
 import collections
 import copy
 import operator
-from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
+from typing import Any, Final, Generator, Iterator, Sequence, Tuple
 
 import torch
 import torch.fx
@@ -20,7 +20,7 @@ _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
 
 _DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
 """Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
-_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
+_DYNAMO_NN_MODULE_STACK_META_TYPE = dict[str, _DYNAMO_NN_MODULE_META_TYPE]
 """Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
 
 

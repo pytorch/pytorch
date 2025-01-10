@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     List,
     Literal,
@@ -200,11 +199,11 @@ class CustomOpDef:
 
         self._init_fn = fn
 
-        self._backend_fns: Dict[Union[str, None], Callable] = {}
+        self._backend_fns: dict[Union[str, None], Callable] = {}
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
-        self._torch_dispatch_fns: Dict[type, Callable] = {}
+        self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
@@ -807,7 +806,7 @@ def increment_version(val: Any) -> None:
 # decorator.
 
 
-OPDEF_TO_LIB: Dict[str, "torch.library.Library"] = {}
+OPDEF_TO_LIB: dict[str, "torch.library.Library"] = {}
 OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 

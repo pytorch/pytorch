@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Dict, List, NamedTuple, Set
+from typing import List, NamedTuple, Set
 
 from torch.fx.node import map_arg, Node
 
@@ -28,7 +28,7 @@ class Partition:
             self.used_mem_bytes += get_extra_size_of(node, self.nodes)
 
     def add_node(self, node):
-        input_nodes: Dict[Node, None] = {}
+        input_nodes: dict[Node, None] = {}
         map_arg(node.args, input_nodes.setdefault)
         map_arg(node.kwargs, input_nodes.setdefault)
         # Add current node's input nodes if they are placeholder or constants
@@ -43,7 +43,7 @@ class Partition:
         if node in self.nodes:
             self.nodes.remove(node)
             # Collect the node's input nodes
-            input_nodes: Dict[Node, None] = {}
+            input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)
             map_arg(node.kwargs, input_nodes.setdefault)
             # Check if an input node is a placeholder or get_attr,
@@ -91,9 +91,9 @@ class PartitionerConfig(NamedTuple):
     devices: List[Device]
     mode: PartitionMode = PartitionMode.size_based
     transfer_rate_bytes_per_sec: float = 0.0
-    node_to_latency_mapping: Dict[Node, NodeLatency] = {}
-    node_to_partition_mapping: Dict[Node, int] = {}
-    partition_to_logical_device_mapping: Dict[int, List[int]] = {}
+    node_to_latency_mapping: dict[Node, NodeLatency] = {}
+    node_to_partition_mapping: dict[Node, int] = {}
+    partition_to_logical_device_mapping: dict[int, List[int]] = {}
     # Saturate host by replicating partitions to the remaining idle devices.
     saturate_host: bool = False
 
@@ -104,7 +104,7 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
     if this node is included in this set.
     """
     # Find all its input nodes
-    input_nodes: Dict[Node, None] = {}
+    input_nodes: dict[Node, None] = {}
     map_arg(node.args, input_nodes.setdefault)
     map_arg(node.kwargs, input_nodes.setdefault)
     # Calculate total size of related nodes
@@ -127,7 +127,7 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
 
 
 def get_latency_of_one_partition(
-    partition: Partition, node_to_latency_mapping: Dict[Node, NodeLatency]
+    partition: Partition, node_to_latency_mapping: dict[Node, NodeLatency]
 ) -> PartitionLatency:
     """Given a partition and its nodes' latency, return a PartitionLatency for this partition"""
 
@@ -138,7 +138,7 @@ def get_latency_of_one_partition(
             # Skip placeholder and get_attr nodes
             if node.op in {"placeholder", "get_attr"}:
                 continue
-            input_nodes: Dict[Node, None] = {}
+            input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)
             map_arg(node.kwargs, input_nodes.setdefault)
             # If a node has no input nodes in this partition,
@@ -216,12 +216,12 @@ def get_latency_of_one_partition(
 
 
 def get_partition_to_latency_mapping(
-    partitions: List[Partition], node_to_latency_mapping: Dict[Node, NodeLatency]
-) -> Dict[Partition, PartitionLatency]:
+    partitions: List[Partition], node_to_latency_mapping: dict[Node, NodeLatency]
+) -> dict[Partition, PartitionLatency]:
     """Given all the partitions and node_to_latency_mapping dictionary,
     return a mapping dictionary of each partition to its overall latency
     """
-    partition_to_latency_mapping: Dict[Partition, PartitionLatency] = {}
+    partition_to_latency_mapping: dict[Partition, PartitionLatency] = {}
     # Go through each partition and get its latency
     for partition in partitions:
         partition_latency = get_latency_of_one_partition(
@@ -255,7 +255,7 @@ def get_comm_latency_between(
     # the output size of those input nodes will be counted
     # and added to comm_size
     for node in child_partition.nodes:
-        input_nodes: Dict[Node, None] = {}
+        input_nodes: dict[Node, None] = {}
         map_arg(node.args, input_nodes.setdefault)
         map_arg(node.kwargs, input_nodes.setdefault)
         for n in input_nodes:
@@ -269,7 +269,7 @@ def get_comm_latency_between(
 
 def get_latency_of_partitioned_graph(
     partitions: List[Partition],
-    partition_to_latency_mapping: Dict[Partition, PartitionLatency],
+    partition_to_latency_mapping: dict[Partition, PartitionLatency],
     transfer_rate_bytes_per_sec: float,
 ):
     """Given all partitions in a graph, find the critical path among all partitions

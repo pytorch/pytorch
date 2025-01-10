@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Dict, Set, Union
+from typing import Any, Set, Union
 
 import torch
 from torch.fx import GraphModule
@@ -18,7 +18,7 @@ __all__ = [
 class FusedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         preserved_attr_names: Set[str],
     ):
@@ -48,7 +48,7 @@ class FusedGraphModule(GraphModule):
 class ObservedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         preserved_attr_names: Set[str],
     ):
@@ -101,7 +101,7 @@ def _get_observed_graph_module_attr(
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         preserved_attr_names: Set[str],
     ):
@@ -148,7 +148,7 @@ class QuantizedGraphModule(GraphModule):
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         preserved_attr_names: Set[str],
     ):

@@ -17,7 +17,7 @@ import os
 import re
 import warnings
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, List, Optional, Set, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1112,7 +1112,7 @@ def trace(
     return traced_func
 
 
-_trace_module_map: Optional[Dict[Any, Any]] = None
+_trace_module_map: Optional[dict[Any, Any]] = None
 
 
 def trace_module(
@@ -1226,7 +1226,7 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        trace_module_map: Dict[Any, Any] = {}
+        trace_module_map: dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():

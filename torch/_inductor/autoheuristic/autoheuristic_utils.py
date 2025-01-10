@@ -1,5 +1,5 @@
 import functools
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, List
 
 import torch
 
@@ -52,7 +52,7 @@ class AHContext:
     """
 
     features: List[AHFeature]
-    context_dict: Dict[str, Value]
+    context_dict: dict[str, Value]
 
     def __init__(self) -> None:
         self.features = []
@@ -104,7 +104,7 @@ class AHMetadata:
         self.choices = choices
         self.name = name
 
-    def to_dict(self) -> Dict[str, Value]:
+    def to_dict(self) -> dict[str, Value]:
         return {
             "shared_memory": self.shared_memory,
             "device_capa": self.device_capa,

@@ -2,7 +2,7 @@
 import os
 import pathlib
 from collections import defaultdict
-from typing import Any, Dict, List, Set, Union
+from typing import Any, List, Set, Union
 
 
 def materialize_lines(lines: List[str], indentation: int) -> str:
@@ -75,7 +75,7 @@ def extract_class_name(line: str) -> str:
 
 def parse_datapipe_file(
     file_path: str,
-) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+) -> tuple[dict[str, str], dict[str, str], Set[str], dict[str, List[str]]]:
     """Given a path to file, parses the file and returns a dictionary of method names to function signatures."""
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
     doc_string_dict = defaultdict(list)
@@ -127,7 +127,7 @@ def parse_datapipe_file(
 
 def parse_datapipe_files(
     file_paths: Set[str],
-) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+) -> tuple[dict[str, str], dict[str, str], Set[str], dict[str, List[str]]]:
     (
         methods_and_signatures,
         methods_and_class_names,
@@ -200,7 +200,7 @@ def get_method_definitions(
     files_to_exclude: Set[str],
     deprecated_files: Set[str],
     default_output_type: str,
-    method_to_special_output_type: Dict[str, str],
+    method_to_special_output_type: dict[str, str],
     root: str = "",
 ) -> List[str]:
     """
@@ -254,7 +254,7 @@ def get_method_definitions(
 iterDP_file_path: str = "iter"
 iterDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 iterDP_deprecated_files: Set[str] = set()
-iterDP_method_to_special_output_type: Dict[str, str] = {
+iterDP_method_to_special_output_type: dict[str, str] = {
     "demux": "List[IterDataPipe]",
     "fork": "List[IterDataPipe]",
 }
@@ -262,7 +262,7 @@ iterDP_method_to_special_output_type: Dict[str, str] = {
 mapDP_file_path: str = "map"
 mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 mapDP_deprecated_files: Set[str] = set()
-mapDP_method_to_special_output_type: Dict[str, str] = {"shuffle": "IterDataPipe"}
+mapDP_method_to_special_output_type: dict[str, str] = {"shuffle": "IterDataPipe"}
 
 
 def main() -> None:

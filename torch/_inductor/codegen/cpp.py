@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, cast, List, Optional, Sequence, Union
 
 import sympy
 
@@ -1869,7 +1869,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
-        self.reduction_omp_dec: Dict[tuple[str, str], str] = {}
+        self.reduction_omp_dec: dict[tuple[str, str], str] = {}
         self.reduction_var_names: List[str] = []
 
     def _gen_parallel_reduction_buffers(
@@ -3539,10 +3539,10 @@ class TilingSelect:
                     itervars[:reduction_depth],
                     itervars[reduction_depth:],
                 )
-                op_counter: Dict[str, int] = {}
+                op_counter: dict[str, int] = {}
                 # ops may cause overhead with vectorization, like non-contiguous
                 # index_expr, load, store
-                non_contig_indexing_op_counter: Dict[str, int] = {}
+                non_contig_indexing_op_counter: dict[str, int] = {}
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
@@ -4672,7 +4672,7 @@ class CppScheduling(BaseScheduling):
 
             local_buffers: List[ir.Buffer] = []
             # Map local buffer name to a list of global buffers
-            local_to_global_buffers: Dict[str, List[ir.Buffer]] = {}
+            local_to_global_buffers: dict[str, List[ir.Buffer]] = {}
             if all(
                 len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
                 for _node in node.get_outer_nodes()

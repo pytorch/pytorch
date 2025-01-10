@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, List, Set, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,7 @@ toq = torch.ops.quantized
 
 
 def get_type_a_related_to_b(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+    base_name_to_sets_of_related_ops: dict[str, Set[NSNodeTargetType]],
 ) -> Set[tuple[NSNodeTargetType, NSNodeTargetType]]:
     # TODO(future PR): allow customizations
     # TODO(future PR): reuse existing quantization mappings

@@ -2,7 +2,7 @@
 import threading
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -51,18 +51,18 @@ class LocalLRUCache(threading.local):
 
 class ShardingPropagator:
     def __init__(self) -> None:
-        self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
-        self.op_strategy_funcs: Dict[
+        self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
+        self.op_strategy_funcs: dict[
             OpOverload,
             Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
-        self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
+        self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
         # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
-        self.op_to_shape_and_stride_idx: Dict[
+        self.op_to_shape_and_stride_idx: dict[
             OpOverload, Union[int, Tuple[int, int]]
         ] = {
             # new factory ops

@@ -7,7 +7,7 @@ from pickle import (  # type: ignore[attr-defined]
     whichmodule as _pickle_whichmodule,
 )
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -44,7 +44,7 @@ class Importer(ABC):
         assert obj1 is obj2
     """
 
-    modules: Dict[str, ModuleType]
+    modules: dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:

@@ -421,7 +421,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
 
 class ConcreteTypeStore:
-    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
+    type_store: dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 
     def __init__(self) -> None:
@@ -766,7 +766,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
-    overload_name_mappings: Dict[str, List[str]] = {}
+    overload_name_mappings: dict[str, List[str]] = {}
     for orig_fn, overloads in overload_info.items():
         original_name = orig_fn.__name__
         if original_name not in overload_name_mappings:

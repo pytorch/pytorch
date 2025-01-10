@@ -9,7 +9,7 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -1167,7 +1167,7 @@ def flex_attention(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[Dict[str, Any]] = None,
+    kernel_options: Optional[dict[str, Any]] = None,
 ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 

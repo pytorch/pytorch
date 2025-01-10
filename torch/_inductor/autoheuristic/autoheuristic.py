@@ -1,7 +1,7 @@
 import json
 import os
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, List, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -50,7 +50,7 @@ class AutoHeuristic:
     a heuristic (see torchgen/autoheuristic/).
     """
 
-    collected_feedback: Dict[Choice, Feedback]
+    collected_feedback: dict[Choice, Feedback]
 
     def __init__(
         self,
@@ -237,7 +237,7 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         have to be used here.
         """
         self.input_nodes = input_nodes
-        self.choicestr2choice: Dict[str, ChoiceCaller] = {}
+        self.choicestr2choice: dict[str, ChoiceCaller] = {}
         for choice in choices:
             self.choicestr2choice[choice.autoheuristic_id()] = choice
         choices_str = list(self.choicestr2choice.keys())
@@ -281,7 +281,7 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         def store_global_feedback(
             ah_inputs_key: str,
             ah_precompile_key: str,
-            timings: Dict[ChoiceCaller, float],
+            timings: dict[ChoiceCaller, float],
             name: str,
             input_nodes: List[Any],
             choices: List[ChoiceCaller],

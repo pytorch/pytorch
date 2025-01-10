@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import dataclasses
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import List, Set, TYPE_CHECKING
 
 from torch.distributed.checkpoint.planner import SavePlan, WriteItem
 
@@ -21,8 +21,8 @@ def dedup_save_plans(
     a set of SavePlans, only the smallest SavePlan in terms of planned storage keeps the entry.
     """
 
-    write_item_to_plan_indices: Dict[MetadataIndex, Set[int]] = defaultdict(set)
-    write_item_idx_to_write_item: Dict[MetadataIndex, WriteItem] = {}
+    write_item_to_plan_indices: dict[MetadataIndex, Set[int]] = defaultdict(set)
+    write_item_idx_to_write_item: dict[MetadataIndex, WriteItem] = {}
     for plan_idx, plan in enumerate(all_plans):
         for write_item in plan.items:
             # map each write item to its plan

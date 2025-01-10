@@ -3,7 +3,7 @@ import logging
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Type, Union
+from typing import Any, Callable, cast, Iterable, List, Optional, Type, Union
 
 import sympy
 from sympy import Integer, Symbol
@@ -40,8 +40,8 @@ BLOCK_UTILIZATION = 0.8
 def _default_custom_combo_kernel_horizontal_partition(
     nodes: List[BaseSchedulerNode],
     triton_scheduling: SIMDScheduling,
-    kernel_map: Dict[BaseSchedulerNode, TritonKernel],
-    node_info_map: Dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+    kernel_map: dict[BaseSchedulerNode, TritonKernel],
+    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
 ) -> List[List[BaseSchedulerNode]]:
     """Horizontally partition the given list of nodes into a list of list of nodes where each sublist
     represents a partion. Nodes in different partitions are implemented in different combo kernels.
@@ -117,8 +117,8 @@ _custom_combo_kernel_horizontal_partition_algorithm: Callable[
     [
         List[BaseSchedulerNode],
         SIMDScheduling,
-        Dict[BaseSchedulerNode, TritonKernel],
-        Dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        dict[BaseSchedulerNode, TritonKernel],
+        dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
     ],
     List[List[BaseSchedulerNode]],
 ] = _default_custom_combo_kernel_horizontal_partition
@@ -129,8 +129,8 @@ def set_custom_combo_kernel_horizontal_partition(
         [
             List[BaseSchedulerNode],
             SIMDScheduling,
-            Dict[BaseSchedulerNode, TritonKernel],
-            Dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+            dict[BaseSchedulerNode, TritonKernel],
+            dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
         ],
         List[List[BaseSchedulerNode]],
     ]
@@ -179,7 +179,7 @@ class ComboKernel(Kernel):
     def _base_horizontal_partition(
         subkernel_nodes: List[BaseSchedulerNode],
         triton_scheduling: SIMDScheduling,
-        node_info_map: Dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
         custom_algorithm: bool,
     ) -> List[List[BaseSchedulerNode]]:
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
@@ -191,10 +191,10 @@ class ComboKernel(Kernel):
             config.combo_kernel_allow_mixed_sizes == 1 and custom_algorithm
         )
 
-        ndim_to_partition_state: Dict[int, PartitionState] = defaultdict(
+        ndim_to_partition_state: dict[int, PartitionState] = defaultdict(
             lambda: PartitionState([], [], 0)
         )
-        yelem_to_partition_state: Dict[int, PartitionState] = defaultdict(
+        yelem_to_partition_state: dict[int, PartitionState] = defaultdict(
             lambda: PartitionState([], [], 0)
         )
 
@@ -234,8 +234,8 @@ class ComboKernel(Kernel):
     def horizontal_partition(
         nodes: List[BaseSchedulerNode],
         triton_scheduling: SIMDScheduling,
-        kernel_map: Dict[BaseSchedulerNode, TritonKernel],
-        node_info_map: Dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        kernel_map: dict[BaseSchedulerNode, TritonKernel],
+        node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
         custom_algorithm: bool = False,
     ) -> List[List[BaseSchedulerNode]]:
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnum)
@@ -455,7 +455,7 @@ class ComboKernel(Kernel):
 
     @staticmethod
     def create_triton_kernel(
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
@@ -554,7 +554,7 @@ class ComboKernel(Kernel):
         self.min_x_blocks_list.append(min_x_blocks)
         self.x_numels_list.append(x_numels)
 
-    def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, Dict[str, int]]:
+    def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, dict[str, int]]:
         size_hints = {
             prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
             for prefix, numel in sub_kernel.numels.items()
@@ -570,8 +570,8 @@ class ComboKernel(Kernel):
         return heuristics, size_hints
 
     def select_combo_heuristics(
-        self, heuristics_list: List[str], size_hints_list: List[Dict[str, int]]
-    ) -> tuple[str, Dict[str, int], TritonKernel]:
+        self, heuristics_list: List[str], size_hints_list: List[dict[str, int]]
+    ) -> tuple[str, dict[str, int], TritonKernel]:
         if not self.enable_autotune:
             return "foreach", size_hints_list[0], self.sub_kernels[0]
         if "reduction" in heuristics_list:
@@ -647,7 +647,7 @@ class ComboKernel(Kernel):
     def jit_line(
         self,
         heuristics: str,
-        size_hints: Dict[str, int],
+        size_hints: dict[str, int],
         selected_kernel: TritonKernel,
         signature: List[Any],
         argdefs: List[str],
@@ -1107,7 +1107,7 @@ class ComboKernel(Kernel):
         )
         return grid_func(meta)
 
-    def get_default_meta(self) -> Dict[str, int]:
+    def get_default_meta(self) -> dict[str, int]:
         if "YBLOCK" in self.block_args:
             meta = {"XBLOCK": self.block_size_2d, "YBLOCK": self.block_size_2d}
         else:

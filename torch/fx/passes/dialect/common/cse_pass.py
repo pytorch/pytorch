@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
@@ -90,14 +90,14 @@ class CSEPass(PassBase):
 
         modified = False
         new_graph = Graph()
-        env: Dict[
+        env: dict[
             Node, Node
         ] = {}  # map from node in the old graph to node in the new graph
-        hash_env: Dict[
+        hash_env: dict[
             Tuple[torch._ops.OpOverload, int], Node
         ] = {}  # map from hash to a node in the new graph
-        token_map: Dict[
-            Tuple[torch._ops.OpOverload, int], Dict[str, Any]
+        token_map: dict[
+            Tuple[torch._ops.OpOverload, int], dict[str, Any]
         ] = {}  # map from hash to token
         for n in graph_module.graph.nodes:
             # The placeholder, output, and get_attr nodes are copied to the new graph without change

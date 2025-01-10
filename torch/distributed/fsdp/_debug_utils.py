@@ -4,7 +4,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, Iterator, List, Set, Tuple
+from typing import Iterator, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -28,7 +28,7 @@ class SimpleProfiler:
         H2D = "H2D"
         D2H = "D2H"
 
-    results: Dict[str, float] = defaultdict(float)
+    results: dict[str, float] = defaultdict(float)
     profiling: Set[str] = set()
 
     @classmethod
@@ -65,7 +65,7 @@ class SimpleProfiler:
 
 def _get_sharded_module_tree_with_module_name_to_fqns(
     model: torch.nn.Module,
-) -> Tuple[str, Dict[str, List[str]]]:
+) -> Tuple[str, dict[str, List[str]]]:
     """
     It is used for composable fully_shard() code path, it returns
       1. sharded module tree info: each line reprents a submodule name that contats the
@@ -146,7 +146,7 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
     sharded_tree_info: List[str] = [
         "",
     ]
-    sharded_module_name_to_fqns: Dict[str, List[str]] = {}
+    sharded_module_name_to_fqns: dict[str, List[str]] = {}
     return _apply_to_modules(
         model,
         module_fn,

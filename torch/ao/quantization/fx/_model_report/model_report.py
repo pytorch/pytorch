@@ -131,7 +131,7 @@ class ModelReport:
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
         # this set can then be used to traverse the graph and remove added observers
-        self._detector_name_to_observer_fqns: Dict[str, Set[str]] = {}
+        self._detector_name_to_observer_fqns: dict[str, Set[str]] = {}
 
         # initialize each report to have empty set of observers of interest
         for desired_report in self._desired_detector_names:
@@ -143,13 +143,13 @@ class ModelReport:
 
         # store the reports that we generated for visualization purposes
         # initially empty since no reports generated
-        self._generated_reports: Dict[str, Dict] = {}
+        self._generated_reports: dict[str, Dict] = {}
 
     def get_desired_reports_names(self) -> Set[str]:
         """Returns a copy of the desired reports for viewing"""
         return self._desired_detector_names.copy()
 
-    def get_observers_of_interest(self) -> Dict[str, Set[str]]:
+    def get_observers_of_interest(self) -> dict[str, Set[str]]:
         """Returns a copy of the observers of interest for viewing"""
         return self._detector_name_to_observer_fqns.copy()
 
@@ -174,7 +174,7 @@ class ModelReport:
             )
 
         # loop through each detector, find where placements should be, and keep track
-        insert_observers_fqns: Dict[str, Any] = {}
+        insert_observers_fqns: dict[str, Any] = {}
 
         for detector in self._desired_report_detectors:
             # determine observer points for each detector
@@ -257,7 +257,7 @@ class ModelReport:
 
     def generate_model_report(
         self, remove_inserted_observers: bool
-    ) -> Dict[str, tuple[str, Dict]]:
+    ) -> dict[str, tuple[str, Dict]]:
         r"""
         Generates all the requested reports.
 
@@ -327,7 +327,7 @@ class ModelReport:
             self._model.recompile()
 
         # save the generated reports for visualization purposes
-        saved_reports: Dict[str, Dict] = {
+        saved_reports: dict[str, Dict] = {
             report_name: report_tuple[1]
             for report_name, report_tuple in reports_of_interest.items()
         }
@@ -386,7 +386,7 @@ class ModelReport:
         # found in the model
 
         # first create new dict with all modules as keys and features under respective module
-        module_fqns_to_features: Dict[str, Dict] = {}
+        module_fqns_to_features: dict[str, Dict] = {}
 
         for report_name in self._generated_reports:
             # get mod -> feature dict and go through
@@ -457,7 +457,7 @@ class ModelReport:
 
     def _generate_qconfig_mapping_helper(
         self,
-        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo],
+        detector_qconfig_info_combined: dict[str, DetectorQConfigInfo],
         generation_function: Callable,
     ) -> QConfigMapping:
         r"""
@@ -519,7 +519,7 @@ class ModelReport:
 
     def _generate_module_fqn_to_detector_info_mapping(
         self, update_qconfig_info_function: Callable
-    ) -> Dict[str, DetectorQConfigInfo]:
+    ) -> dict[str, DetectorQConfigInfo]:
         r"""
         Generates a QConfigMapping based on the suggestions of the
         ModelReport API. The generated mapping encompasses all the
@@ -552,11 +552,11 @@ class ModelReport:
             )
 
         # keep track of qconfig info for each module across detectors
-        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo] = {}
+        detector_qconfig_info_combined: dict[str, DetectorQConfigInfo] = {}
 
         for detector in self._desired_report_detectors:
             # get the info from the detector
-            detector_info: Dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(
+            detector_info: dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(
                 self._model
             )
 

@@ -170,7 +170,7 @@ def record_memory_history(
     torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
 
 
-def snapshot() -> Dict[str, Any]:
+def snapshot() -> dict[str, Any]:
     r"""Return a dictionary of MTIA memory allocator history"""
 
     return torch._C._mtia_memorySnapshot()

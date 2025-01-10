@@ -5,7 +5,6 @@ from typing import (
     Any,
     Callable,
     Container,
-    Dict,
     List,
     Optional,
     OrderedDict,
@@ -76,7 +75,7 @@ def _cast_forward_inputs(
 
 def _unpack_kwargs(
     flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
-) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -265,10 +264,10 @@ def _apply_to_tensors(fn, container):
 
 def _to_kwargs(
     inputs: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    kwargs: Optional[dict[str, Any]],
     target_device: torch.device,
     use_side_stream_for_tensor_copies: bool,
-) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
+) -> Tuple[Tuple[Any, ...], Tuple[dict[str, Any], ...]]:
     moved_inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
@@ -337,7 +336,7 @@ def _sync_params_and_buffers(
 
 
 def _replace_by_prefix(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     old_prefix: str,
     new_prefix: str,
 ) -> None:
@@ -372,7 +371,7 @@ def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
     module in ``modules``.
     """
     root_modules: List[nn.Module] = []
-    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {
+    module_to_modules: dict[nn.Module, Set[nn.Module]] = {
         module: set(module.modules()) for module in modules
     }
     for candidate_module in modules:

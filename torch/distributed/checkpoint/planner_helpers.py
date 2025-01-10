@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, cast, Dict, List
+from typing import Any, Callable, cast, List
 
 import torch
 import torch.distributed as dist
@@ -286,7 +286,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
         ]
 
 
-def _init_state_dict(state_dict: Dict[str, Any]) -> Any:
+def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     """
     Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """

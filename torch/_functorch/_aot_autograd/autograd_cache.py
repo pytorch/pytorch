@@ -666,7 +666,7 @@ class AOTAutogradCache:
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         with sanitize_gm_for_cache(gm):
             compiled_fn = None
-            cache_info: Dict[str, Any] = {}
+            cache_info: dict[str, Any] = {}
             cache_key = None
             debug_lines: List[str] = []
             cache_event_time = time.time_ns()

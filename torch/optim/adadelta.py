@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast, Dict, List, Optional, Union
+from typing import Any, cast, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -82,7 +82,7 @@ class Adadelta(Optimizer):
 
     def _init_group(
         self,
-        group: Dict[str, Any],
+        group: dict[str, Any],
         params_with_grad: List[Tensor],
         grads: List[Tensor],
         square_avgs: List[Tensor],

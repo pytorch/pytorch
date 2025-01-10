@@ -4,7 +4,7 @@ import operator
 import warnings
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -73,10 +73,10 @@ NON_QUANTIZABLE_WEIGHT_OPS = {
 
 @dataclass
 class ObservedGraphModuleAttrs:
-    node_name_to_qconfig: Dict[str, QConfigAny]
-    node_name_to_scope: Dict[str, tuple[str, type]]
+    node_name_to_qconfig: dict[str, QConfigAny]
+    node_name_to_scope: dict[str, tuple[str, type]]
     prepare_custom_config: PrepareCustomConfig
-    equalization_node_name_to_qconfig: Dict[str, Any]
+    equalization_node_name_to_qconfig: dict[str, Any]
     qconfig_mapping: QConfigMapping
     is_qat: bool
     observed_node_names: Set[str]
@@ -114,7 +114,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 
 
 def get_custom_module_class_keys(
-    custom_module_mapping: Dict[QuantType, Dict[Type, Type]]
+    custom_module_mapping: dict[QuantType, dict[Type, Type]]
 ) -> List[Any]:
     r"""Get all the unique custom module keys in the custom config dict
     e.g.
@@ -232,7 +232,7 @@ def graph_module_from_producer_nodes(
     # since we traced back from node to getattr
     producer_nodes.reverse()
     graph = Graph()
-    env: Dict[Any, Any] = {}
+    env: dict[Any, Any] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node])
@@ -275,7 +275,7 @@ def create_getattr_from_value(
 
 
 def all_node_args_have_no_tensors(
-    node: Node, modules: Dict[str, torch.nn.Module], cache: Dict[Node, bool]
+    node: Node, modules: dict[str, torch.nn.Module], cache: dict[Node, bool]
 ) -> bool:
     """
     If we know for sure that all of this node's args have no
@@ -382,8 +382,8 @@ NodeInfo = namedtuple("NodeInfo", "op target")
 # so that they can be propagated correctly since inserting observers
 # for them would cause errors
 
-NON_OBSERVABLE_ARG_DICT: Dict[
-    NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]
+NON_OBSERVABLE_ARG_DICT: dict[
+    NodeInfo, dict[Union[type, torch.dtype], Callable[[Node], List[int]]]
 ] = {
     NodeInfo("call_method", "masked_fill"): {
         torch.bool: return_arg_list([1]),
@@ -401,12 +401,12 @@ NON_OBSERVABLE_ARG_DICT: Dict[
     NodeInfo("call_method", "view"): {int: all_node_args_except_first},
 }
 
-EMPTY_ARG_DICT: Dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
+EMPTY_ARG_DICT: dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
 
 
 def get_non_observable_arg_indexes_and_types(
     node: Node,
-) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
+) -> dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
     """
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
@@ -418,7 +418,7 @@ def get_non_observable_arg_indexes_and_types(
 
 def maybe_get_next_module(
     node: Node,
-    modules: Dict[str, nn.Module],
+    modules: dict[str, nn.Module],
     target_module_type: Optional[Type[nn.Module]] = None,
     target_functional_type: Any = None,
 ) -> Optional[Node]:
@@ -485,7 +485,7 @@ def get_skipped_module_name_and_classes(
 
 def _is_custom_module_lstm(
     node: Node,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
     qconfig: QConfigAny = None,
     # QuantizeHandler, but we cannot include the type here due to circular imports
     qhandler: Optional[Any] = None,
@@ -507,7 +507,7 @@ def _is_custom_module_lstm(
 
 def _is_custom_module_mha(
     node: Node,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
     qconfig: QConfigAny = None,
     # QuantizeHandler, but we cannot include the type here due to circular imports
     qhandler: Optional[Any] = None,
@@ -528,7 +528,7 @@ def _is_custom_module_mha(
 
 
 def _get_module(
-    node: Node, named_modules: Dict[str, torch.nn.Module]
+    node: Node, named_modules: dict[str, torch.nn.Module]
 ) -> Optional[torch.nn.Module]:
     """
     If `node` refers to a call_module node, return the module, else None.
@@ -542,7 +542,7 @@ def _get_module(
 def _insert_dequant_stub(
     node: Node,
     model: torch.nn.Module,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
     graph: Graph,
 ) -> Node:
     """
@@ -562,7 +562,7 @@ def _insert_dequant_stub(
 def _insert_dequant_stubs_for_custom_module_lstm_output(
     node: Node,
     model: torch.nn.Module,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
     graph: Graph,
 ) -> Node:
     """
@@ -656,7 +656,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
 
 def _maybe_get_custom_module_lstm_from_node_arg(
     arg: Node,
-    named_modules: Dict[str, torch.nn.Module],
+    named_modules: dict[str, torch.nn.Module],
 ) -> Optional[Node]:
     """
     Given an argument of a node, if the argument refers to the path through which the node

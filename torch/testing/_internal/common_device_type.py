@@ -15,7 +15,6 @@ from typing import (
     Any,
     Callable,
     ClassVar,
-    Dict,
     Iterable,
     List,
     Optional,
@@ -506,7 +505,7 @@ class DeviceTypeTestBase(TestCase):
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
-                    param_kwargs: Dict[str, Any] = {}
+                    param_kwargs: dict[str, Any] = {}
                     _update_param_kwargs(param_kwargs, "dtype", dtype)
 
                     # Note that an empty test suffix is set here so that the dtype can be appended

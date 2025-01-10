@@ -4,7 +4,6 @@ from collections.abc import MutableSet, Set as AbstractSet
 from typing import (
     Any,
     cast,
-    Dict,
     Generic,
     Iterable,
     Iterator,
@@ -34,7 +33,7 @@ class OrderedSet(MutableSet, Generic[T]):
         self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod
-    def _from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
+    def _from_dict(dict_inp: dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
         s._dict = dict_inp
         return s

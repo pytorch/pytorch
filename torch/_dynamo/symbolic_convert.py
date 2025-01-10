@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, List, Optional, Set, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -127,7 +127,7 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
-compare_op_handlers: Dict[str, Any] = {
+compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
 handle_contains = BuiltinVariable(operator.contains).call_function
@@ -241,7 +241,7 @@ Otherwise, please submit a bug report, ideally including the contents of TORCH_L
 
 @dataclasses.dataclass
 class LocalState:
-    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: dict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=dict
     )
 
@@ -808,8 +808,8 @@ class InstructionTranslatorBase(
     metaclass=BytecodeDistpatchTableMeta,
 ):
     output: OutputGraph
-    symbolic_locals: Dict[str, VariableTracker]
-    symbolic_globals: Dict[str, VariableTracker]
+    symbolic_locals: dict[str, VariableTracker]
+    symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
@@ -902,7 +902,7 @@ class InstructionTranslatorBase(
         self,
         fn: VariableTracker,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ):
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
@@ -2152,7 +2152,7 @@ class InstructionTranslatorBase(
     def BUILD_STRING(self, inst):
         format_string_parts: List[str] = []
         args: List[VariableTracker] = []
-        kwargs: Dict[str, VariableTracker] = {}
+        kwargs: dict[str, VariableTracker] = {}
         for part in self.popn(inst.arg):
             if isinstance(part, ConstantVariable):
                 format_string_parts.append("{}")
@@ -2621,12 +2621,12 @@ class InstructionTranslatorBase(
         self,
         output: OutputGraph,
         instructions: List[Instruction],
-        f_locals: Dict[str, Any],
-        f_globals: Dict[str, Any],
-        f_builtins: Dict[str, Any],
-        code_options: Dict[str, Any],
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        f_locals: dict[str, Any],
+        f_globals: dict[str, Any],
+        f_builtins: dict[str, Any],
+        code_options: dict[str, Any],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         f_code: types.CodeType,
         export: bool,
@@ -2659,13 +2659,13 @@ class InstructionTranslatorBase(
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
-        self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: Dict[
+        self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
+        self.f_locals: dict[
             str, Any
         ] = f_locals  # needed for recording accessed locals for replay
-        self.f_globals: Dict[str, Any] = f_globals
-        self.f_builtins: Dict[str, Any] = f_builtins
-        self.code_options: Dict[str, Any] = code_options
+        self.f_globals: dict[str, Any] = f_globals
+        self.f_builtins: dict[str, Any] = f_builtins
+        self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
@@ -2678,8 +2678,8 @@ class InstructionTranslatorBase(
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
-        self.nn_module_stack: Dict[str, tuple[str, Type[Any]]] = {}
-        self.num_calls: Dict[str, int] = {}
+        self.nn_module_stack: dict[str, tuple[str, Type[Any]]] = {}
+        self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
         self.one_graph = False
@@ -3294,8 +3294,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self,
         parent: InstructionTranslatorBase,
         code: types.CodeType,
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         funcvar: BaseUserFunctionVariable,
     ) -> None:

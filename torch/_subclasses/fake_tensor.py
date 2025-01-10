@@ -17,7 +17,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     Iterable,
     List,
@@ -145,7 +144,7 @@ class MetadataMismatchError(RuntimeError):
     reason: str
 
 
-def ordered_set(*items: T) -> Dict[T, Literal[True]]:
+def ordered_set(*items: T) -> dict[T, Literal[True]]:
     return dict.fromkeys(items, True)
 
 
@@ -273,7 +272,7 @@ class FakeTensorConverter:
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    constant_storage_mapping: dict[StorageWeakRef, List[ReferenceType]]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -1088,7 +1087,7 @@ class DispatchCacheInfo:
 
     hits: int
     misses: int
-    bypasses: Dict[str, int]
+    bypasses: dict[str, int]
     size: int
 
 
@@ -1102,10 +1101,10 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
+    cache: dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
     cache_hits: int = 0
     cache_misses: int = 0
-    cache_bypasses: Dict[str, int] = defaultdict(int)
+    cache_bypasses: dict[str, int] = defaultdict(int)
     # Every time you retrace using the same fake tensor mode, you should
     # advance the epoch so we don't reuse unbacked memos
     epoch: int = 0
@@ -2710,7 +2709,7 @@ class FakeCopyMode(TorchFunctionMode):
         elif func == Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor = cast(Tensor, args[0])
-            memo = cast(Dict[int, FakeTensor], args[1])
+            memo = cast(dict[int, FakeTensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]

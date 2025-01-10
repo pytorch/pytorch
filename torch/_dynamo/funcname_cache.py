@@ -1,8 +1,8 @@
 import tokenize
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 
-cache: Dict[str, Dict[int, str]] = {}
+cache: dict[str, dict[int, str]] = {}
 
 
 def clearcache() -> None:
@@ -19,7 +19,7 @@ def _add_file(filename: str) -> None:
 
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
-    result: Dict[int, str] = {}
+    result: dict[int, str] = {}
     # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0

@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = Dict[str, object]
+_InductorMetaTy = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
@@ -88,7 +88,7 @@ class AutotuneCache:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> Optional[Dict[str, JsonDataTy]]:
+    def _read(self) -> Optional[dict[str, JsonDataTy]]:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -196,7 +196,7 @@ class _AutotuneCacheBundlerImpl:
     _cache: RemoteCache[JsonDataTy]
 
     # All known entries from LocalAutotuneCache.put()
-    _entries: Dict[str, JsonDataTy]
+    _entries: dict[str, JsonDataTy]
 
     def end_compile(self) -> None:
         # TODO: Do we need to compute time_taken_ms and encode that somehow?
@@ -407,7 +407,7 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 
 
 def _load_cached_autotuning(
-    best_config: Dict[str, JsonDataTy],
+    best_config: dict[str, JsonDataTy],
     configs_hash: str,
     configs: List[Config],
     inductor_meta: _InductorMetaTy,

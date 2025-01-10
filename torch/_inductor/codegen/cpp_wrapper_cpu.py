@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import sympy
 from sympy import Expr
@@ -64,7 +64,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
-        self.initialized_kernels: Dict[str, Kernel] = {}
+        self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
@@ -900,7 +900,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue

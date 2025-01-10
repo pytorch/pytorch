@@ -64,9 +64,9 @@ class PrepareCustomConfig:
     """
 
     def __init__(self) -> None:
-        self.standalone_module_names: Dict[str, StandaloneModuleConfigEntry] = {}
-        self.standalone_module_classes: Dict[Type, StandaloneModuleConfigEntry] = {}
-        self.float_to_observed_mapping: Dict[QuantType, Dict[Type, Type]] = {}
+        self.standalone_module_names: dict[str, StandaloneModuleConfigEntry] = {}
+        self.standalone_module_classes: dict[Type, StandaloneModuleConfigEntry] = {}
+        self.float_to_observed_mapping: dict[QuantType, dict[Type, Type]] = {}
         self.non_traceable_module_names: List[str] = []
         self.non_traceable_module_classes: List[Type] = []
         self.input_quantized_indexes: List[int] = []
@@ -183,7 +183,7 @@ class PrepareCustomConfig:
     # TODO: remove this
     @classmethod
     def from_dict(
-        cls, prepare_custom_config_dict: Dict[str, Any]
+        cls, prepare_custom_config_dict: dict[str, Any]
     ) -> PrepareCustomConfig:
         """
         Create a ``PrepareCustomConfig`` from a dictionary with the following items:
@@ -317,7 +317,7 @@ class PrepareCustomConfig:
         )
         return conf
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert this ``PrepareCustomConfig`` to a dictionary with the items described in
         :func:`~torch.ao.quantization.fx.custom_config.PrepareCustomConfig.from_dict`.
@@ -336,7 +336,7 @@ class PrepareCustomConfig:
                 e.backend_config,
             )
 
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
         for module_name, sm_config_entry in self.standalone_module_names.items():
             if STANDALONE_MODULE_NAME_DICT_KEY not in d:
                 d[STANDALONE_MODULE_NAME_DICT_KEY] = []
@@ -383,7 +383,7 @@ class ConvertCustomConfig:
     """
 
     def __init__(self) -> None:
-        self.observed_to_quantized_mapping: Dict[QuantType, Dict[Type, Type]] = {}
+        self.observed_to_quantized_mapping: dict[QuantType, dict[Type, Type]] = {}
         self.preserved_attributes: List[str] = []
 
     def __repr__(self):
@@ -418,7 +418,7 @@ class ConvertCustomConfig:
     # TODO: remove this
     @classmethod
     def from_dict(
-        cls, convert_custom_config_dict: Dict[str, Any]
+        cls, convert_custom_config_dict: dict[str, Any]
     ) -> ConvertCustomConfig:
         """
         Create a ``ConvertCustomConfig`` from a dictionary with the following items:
@@ -448,12 +448,12 @@ class ConvertCustomConfig:
         )
         return conf
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert this ``ConvertCustomConfig`` to a dictionary with the items described in
         :func:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig.from_dict`.
         """
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
         for (
             quant_type,
             observed_to_quantized_mapping,
@@ -494,7 +494,7 @@ class FuseCustomConfig:
 
     # TODO: remove this
     @classmethod
-    def from_dict(cls, fuse_custom_config_dict: Dict[str, Any]) -> FuseCustomConfig:
+    def from_dict(cls, fuse_custom_config_dict: dict[str, Any]) -> FuseCustomConfig:
         """
         Create a ``ConvertCustomConfig`` from a dictionary with the following items:
 
@@ -508,12 +508,12 @@ class FuseCustomConfig:
         )
         return conf
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert this ``FuseCustomConfig`` to a dictionary with the items described in
         :func:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig.from_dict`.
         """
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
         if len(self.preserved_attributes) > 0:
             d[PRESERVED_ATTRIBUTES_DICT_KEY] = self.preserved_attributes
         return d

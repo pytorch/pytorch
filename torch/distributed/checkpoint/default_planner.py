@@ -7,7 +7,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -334,7 +334,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: Dict[str, Any], metadata: Metadata, strict: bool = True
+    state_dict: dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -388,7 +388,7 @@ def create_default_global_load_plan(
 
 
 def create_default_local_save_plan(
-    state_dict: Dict[str, Any], is_coordinator: bool
+    state_dict: dict[str, Any], is_coordinator: bool
 ) -> SavePlan:
     """
     Create the ``SavePlan`` used by DefaultSavePlanner.
@@ -426,7 +426,7 @@ def create_default_global_save_plan(
     The only global planning change is to update index hints in all ``MetadataIndex`` objects if
     ``rewrite_index_hints`` is True.
     """
-    md: Dict[str, STORAGE_TYPES] = {}
+    md: dict[str, STORAGE_TYPES] = {}
     new_plans = []
     for plan in all_plans:
         new_items = []

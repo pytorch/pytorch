@@ -18,7 +18,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     IO,
     Iterable,
@@ -619,7 +618,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
+        self.storage_data: dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
@@ -633,7 +632,7 @@ class FileSystemReader(StorageReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = {}
+        per_file: dict[str, List[ReadItem]] = {}
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path

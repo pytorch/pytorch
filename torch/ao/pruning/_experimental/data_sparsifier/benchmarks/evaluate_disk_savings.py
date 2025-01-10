@@ -4,7 +4,7 @@ import copy
 import os
 import time
 import zipfile
-from typing import Dict, List
+from typing import List
 from zipfile import ZipFile
 
 import pandas as pd  # type: ignore[import]
@@ -119,7 +119,7 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
     orig_model = orig_model.to(device)
     step_time_dict = {}
 
-    stat_dict: Dict[str, List] = {
+    stat_dict: dict[str, List] = {
         "norm": [],
         "sparse_block_shape": [],
         "sparsity_level": [],

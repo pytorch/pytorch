@@ -2,7 +2,7 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -53,7 +53,7 @@ class _ExecOrderData:
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
         # Names are prefixed from the root module
-        self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
+        self.param_to_fqn: dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
         self.current_order_index = 0
         self.warn_status = _ExecOrderWarnStatus.NONE
@@ -197,7 +197,7 @@ class _ExecOrderData:
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
-            tensor_kwargs: Dict[str, Union[torch.dtype, torch.device]] = {
+            tensor_kwargs: dict[str, Union[torch.dtype, torch.device]] = {
                 "dtype": torch.int32,
                 "device": device,
             }

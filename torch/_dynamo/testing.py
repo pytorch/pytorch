@@ -11,7 +11,6 @@ import unittest
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     overload,
@@ -140,7 +139,7 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
+    out: Union[List[Any], tuple[Any, ...], dict[Any, Any]]
 ) -> float:
     ...
 

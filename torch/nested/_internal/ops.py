@@ -15,7 +15,7 @@ from .nested_tensor import NestedTensor
 
 __all__: List[Any] = []
 
-JAGGED_OPS_TABLE: Dict[Any, Any] = {}
+JAGGED_OPS_TABLE: dict[Any, Any] = {}
 
 
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
@@ -2435,7 +2435,7 @@ def flex_njt(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2497,7 +2497,7 @@ def flex_njt_backward(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[

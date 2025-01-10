@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import textwrap
 import time
-from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import cast, Any, DefaultDict, Iterable, Iterator, List, Optional, Tuple
 import uuid
 
 import torch
@@ -81,7 +81,7 @@ class Measurement:
     number_per_run: int
     raw_times: List[float]
     task_spec: TaskSpec
-    metadata: Optional[Dict[Any, Any]] = None  # Reserved for user payloads.
+    metadata: Optional[dict[Any, Any]] = None  # Reserved for user payloads.
 
     def __post_init__(self) -> None:
         self._sorted_times: Tuple[float, ...] = ()

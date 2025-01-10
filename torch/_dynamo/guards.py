@@ -24,7 +24,6 @@ from inspect import currentframe
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Set,
@@ -408,7 +407,7 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-_CLOSURE_VARS: Optional[Dict[str, object]] = None
+_CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
 def _get_closure_vars():
@@ -591,8 +590,8 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
-        local_scope: Dict[str, object],
-        global_scope: Dict[str, object],
+        local_scope: dict[str, object],
+        global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
@@ -600,7 +599,7 @@ class GuardBuilder(GuardBuilderBase):
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -640,10 +639,10 @@ class GuardBuilder(GuardBuilderBase):
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
-        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
+        self.id_matched_objs: dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[
+        self._cached_guard_managers: dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
         self._cached_duplicate_input_guards: Set[tuple[str, str]] = set()
@@ -1234,7 +1233,7 @@ class GuardBuilder(GuardBuilderBase):
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
         _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -1816,12 +1815,12 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
-            names: Dict[str, tuple[int, int]] = {}
+            names: dict[str, tuple[int, int]] = {}
             source_pairs: List[tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
                 tuple[Source, Union[Source, Symbol], Callable]
             ] = []
-            phantom_symbols: Dict[str, Symbol] = {}
+            phantom_symbols: dict[str, Symbol] = {}
             relaxed_sources: Set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
@@ -2108,8 +2107,8 @@ class PyExprCSEPass:
 
     @dataclasses.dataclass
     class Config:
-        expr_count: Dict[str, int]
-        expr_to_name: Dict[str, str]
+        expr_count: dict[str, int]
+        expr_to_name: dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
         def __init__(self, config: PyExprCSEPass.Config) -> None:
@@ -2220,7 +2219,7 @@ class CheckFunctionManager:
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
-        self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self._weakrefs: dict[int, ReferenceType[object]] = {}
 
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
@@ -2640,7 +2639,7 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     """
@@ -2708,7 +2707,7 @@ def get_guard_fail_reason_helper(
 def get_guard_fail_reason(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -2817,7 +2816,7 @@ def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
 def guard_error_hook(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     index: int,
     last: bool,
 ):

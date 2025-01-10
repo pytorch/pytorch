@@ -11,7 +11,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     Iterable,
     Optional,
@@ -83,7 +82,7 @@ def _post_order_apply(
 
 def _construct_wrap_fn(
     root_module: nn.Module,
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    target_module_to_kwargs: dict[nn.Module, dict[str, Any]],
     fsdp_fn: Callable,
 ) -> Callable[[nn.Module], Optional[nn.Module]]:
     """
@@ -107,8 +106,8 @@ def _run_mixed_precision_override_policy(
     root_module: nn.Module,
     module_classes: Iterable[Type[nn.Module]],
     ignored_modules: Set[nn.Module],
-    root_kwargs: Dict[str, Any],
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    root_kwargs: dict[str, Any],
+    target_module_to_kwargs: dict[nn.Module, dict[str, Any]],
 ):
     module_classes_tuple = tuple(set(module_classes))
     for module in root_module.modules():
@@ -143,8 +142,8 @@ class _Policy(ABC):
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
         """
         This should return a dict ``target_module_to_kwargs`` that maps from
         each target module to wrap to its kwargs.
@@ -199,10 +198,10 @@ class ModuleWrapPolicy(_Policy):
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
         module_classes = tuple(self._module_classes)
-        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        target_module_to_kwargs: dict[nn.Module, dict[str, Any]] = {}
         for module in root_module.modules():
             if module in ignored_modules:
                 continue
@@ -246,16 +245,16 @@ class CustomPolicy(_Policy):
         >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
-    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, Dict[str, Any]]]):
+    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]):
         self._lambda_fn = lambda_fn
 
     def _run_policy(
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
-        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
+        target_module_to_kwargs: dict[nn.Module, dict[str, Any]] = {}
         for module in root_module.modules():
             if module in ignored_modules:
                 continue
@@ -574,9 +573,9 @@ class _ConfigAutoWrap:
 
     in_autowrap_context: bool = False  # Context flag
     wrapper_cls: Optional[Callable] = None  # The wrapper class
-    kwargs: Dict[str, Any] = {}  # Wrapper's args
+    kwargs: dict[str, Any] = {}  # Wrapper's args
 
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]):
         self.kwargs = kwargs
 
     @staticmethod

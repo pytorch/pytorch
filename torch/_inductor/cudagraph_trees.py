@@ -54,7 +54,6 @@ from typing import (
     Callable,
     cast,
     ContextManager,
-    Dict,
     Generator,
     Iterator,
     List,
@@ -362,7 +361,7 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
-    fn_cache: Dict[tuple[int, ...], Callable[..., Any]] = {}
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
@@ -800,7 +799,7 @@ class CUDAGraphNode:
 
         # A single wrapped function may be recorded multiple times if memory patterns or
         # invariants change from one execution to the next
-        self.children: Dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
+        self.children: dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
 
         # StorageWeakRef maintains whether the Storage C++ object remains allocated,
         # not whether the corresponding memory has been deallocated. In order
@@ -983,7 +982,7 @@ class CUDAGraphNode:
         self.recording_outputs: Optional[OutputType] = self._record(
             wrapped_function.model, recording_inputs
         )
-        self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
+        self.outputs_metadata: OutputList[Union[dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
@@ -1130,7 +1129,7 @@ class CUDAGraphNode:
     def prepare_alias_info_for_tensor_construction(
         self,
         out_alias_info: Optional[OutputAliasInfo],
-        metadata: Union[Dict[str, Any], int, None],
+        metadata: Union[dict[str, Any], int, None],
     ) -> Union[UntypedStorage, None, int]:
         if (
             isinstance(metadata, (int, type(None)))
@@ -1185,7 +1184,7 @@ class CUDAGraphNode:
                     yield _inp
 
         # see: output_is_alias_of_persistent_static_inputs above
-        static_input_persistent_storage_ptrs: Dict[int, StorageWeakRefWrapper] = {
+        static_input_persistent_storage_ptrs: dict[int, StorageWeakRefWrapper] = {
             inp.untyped_storage().data_ptr(): StorageWeakRefWrapper(inp)
             for inp in itertools.chain(
                 static_input_iter(), self.wrapped_function.constants
@@ -1229,7 +1228,7 @@ class CUDAGraphNode:
     def _add_first_outputs(
         self,
         outputs: OutputType,
-        static_input_persistent_storage_ptrs: Dict[int, StorageWeakRefWrapper],
+        static_input_persistent_storage_ptrs: dict[int, StorageWeakRefWrapper],
     ) -> None:
         "Add the outputs from the first invocation of the node and set up metadata"
 
@@ -1243,7 +1242,7 @@ class CUDAGraphNode:
 
         assert len(self.outputs_weakrefs) == 0
         # index from data pointer to index in outputs
-        output_new_storages_index: Dict[StorageDataPtr, int] = {}
+        output_new_storages_index: dict[StorageDataPtr, int] = {}
 
         self.unaliased_in_all_paths = [False for _ in range(len(outputs))]
         self.static_output_tensors = [None for _ in range(len(outputs))]
@@ -1568,7 +1567,7 @@ class CUDAGraphNode:
     @staticmethod
     def _tensor_metadata(
         x: torch.Tensor, ignore_storage_offset: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         assert isinstance(x, torch.Tensor)
         # We ignore the storage offset for inputs, but not for outputs
         # TODO: - should we make the storage resizable ?
@@ -1583,12 +1582,12 @@ class CUDAGraphNode:
         }
 
     def _reconstruct_from_tensor_metadata(
-        self, metadata: Dict[str, Any], storage: Optional[UntypedStorage] = None
+        self, metadata: dict[str, Any], storage: Optional[UntypedStorage] = None
     ) -> Tensor:
         s = self.create_storage(metadata) if storage is None else storage
         return torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(metadata, s)  # type: ignore[arg-type]
 
-    def create_storage(self, metadata: Dict[str, Any]) -> torch.types.Storage:
+    def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
         return torch._C._construct_storage_from_data_pointer(
             metadata["data_ptr"], metadata["device"], metadata["nbytes"]
         )
@@ -1839,12 +1838,12 @@ class CUDAGraphTreeManager:
         # when they are first invoked, none of their inputs are outputs are outputs
         # of another node, nor are there any live outputs of another node whose
         # liveness would create a dependency.
-        self.roots: Dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
+        self.roots: dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
 
         # mapping from function id to wrapped function
-        self.ids_to_funcs: Dict[FunctionID, WrappedFunction] = {}
+        self.ids_to_funcs: dict[FunctionID, WrappedFunction] = {}
 
-        self.ids_to_stack_traces: Dict[FunctionID, Optional[StackTraces]] = {}
+        self.ids_to_stack_traces: dict[FunctionID, Optional[StackTraces]] = {}
 
         self.warmed_up_functions: OrderedSet[FunctionID] = OrderedSet()
         # if we fail to increment generation, and are stuck warming up,
@@ -1883,14 +1882,14 @@ class CUDAGraphTreeManager:
 
         # mapping from graph_id to (function id to mutation type hint) since we are
         # specializing on a particular combination of Parent Node -> Function ID.
-        self.non_cudagraph_managed_mutation_hint: Dict[
-            Optional[GraphID], Dict[FunctionID, bool]
+        self.non_cudagraph_managed_mutation_hint: dict[
+            Optional[GraphID], dict[FunctionID, bool]
         ] = defaultdict(dict)
         self.warmup_node_counter = itertools.count(start=-1, step=-1)
 
         # mapping from graph_id to (function id to re-record count). We fall back to
         # eager function if a function is re-recorded frequently on a node.
-        self.num_rerecord: Dict[Optional[GraphID], Dict[FunctionID, int]] = defaultdict(
+        self.num_rerecord: dict[Optional[GraphID], dict[FunctionID, int]] = defaultdict(
             lambda: defaultdict(lambda: 0)
         )
 
@@ -1916,7 +1915,7 @@ class CUDAGraphTreeManager:
         # number of instances we had to checkpoint the function
         self.debug_checkpointing_counter = 0
 
-        self.id_to_mode: Dict[FunctionID, CompilationMode] = {}
+        self.id_to_mode: dict[FunctionID, CompilationMode] = {}
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -2409,7 +2408,7 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_stack_trace: Dict[int, Optional[str]] = {}
+        stor_stack_trace: dict[int, Optional[str]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)

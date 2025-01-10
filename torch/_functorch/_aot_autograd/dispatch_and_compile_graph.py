@@ -5,7 +5,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -133,7 +133,7 @@ def aot_dispatch_base_graph(
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.
-        assigned_buffers: Dict[str, str] = {}
+        assigned_buffers: dict[str, str] = {}
         hook = register_buffer_assignment_hook(
             mod_when_exporting_non_strict, assigned_buffers
         )

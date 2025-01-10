@@ -16,7 +16,6 @@ from typing import (
     Callable,
     ClassVar,
     ContextManager,
-    Dict,
     Generator,
     Iterable,
     List,
@@ -165,11 +164,11 @@ e.g. it may be a graph input or compile time constant.
 _NodeOrNodes: TypeAlias = Union[
     int,
     "TensorBox",
-    Dict[str, "TensorBox"],
+    dict[str, "TensorBox"],
     "Symbol",
     "IRNode",
     Sequence[
-        Optional[Union[int, Dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
+        Optional[Union[int, dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
     ],
 ]
 
@@ -936,7 +935,7 @@ class Scatter(Pointwise):
         )
 
 
-REDUCTION_COMBINE_FN: Dict[str, Callable[..., OpsValue]] = {
+REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
     "min": ops_wrapper("minimum"),
@@ -4059,7 +4058,7 @@ class ComputedBuffer(OperationBuffer):
 
     def simplify_and_reorder(
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> tuple[tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
         """
@@ -4282,7 +4281,7 @@ class TemplateBuffer(OperationBuffer):
 
     def simplify_and_reorder(  # type: ignore[no-untyped-def]
         self,
-        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         return (
@@ -4389,7 +4388,7 @@ class ChoiceCaller:
     def output_node(self) -> TensorBox:
         raise NotImplementedError
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
 
@@ -4415,7 +4414,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self,
         layout: Layout,
         inputs: List[IRNode],
-        choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+        choice_timings: Callable[[], dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
         allowed_prologue_inps: OrderedSet[str],
     ) -> None:
@@ -4426,7 +4425,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             allowed_prologue_inps=allowed_prologue_inps,
         )
         self._choice_timings_fn = choice_timings
-        self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
+        self._choice_timings: Optional[dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
@@ -4445,7 +4444,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return self._output_plannable
 
     @property
-    def choice_timings(self) -> Dict[ChoiceCaller, float]:
+    def choice_timings(self) -> dict[ChoiceCaller, float]:
         if self._choice_timings is None:
             self._choice_timings = self._choice_timings_fn()
         return self._choice_timings
@@ -4740,7 +4739,7 @@ class ConcatKernel(NopKernel):
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
     constant_args: tuple[Any, ...] = ()
-    kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
     python_kernel_name: Optional[str] = None
     cpp_kernel_name: Optional[str] = None
@@ -4752,9 +4751,9 @@ class ExternKernel(InputsKernel):
     op_overload: Optional[
         Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator]
     ] = None
-    arg_properties: Optional[List[Dict[str, Any]]] = None
-    kwarg_properties: Optional[Dict[str, Dict[str, Any]]] = None
-    unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
+    arg_properties: Optional[List[dict[str, Any]]] = None
+    kwarg_properties: Optional[dict[str, dict[str, Any]]] = None
+    unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
     mutation_outputs: List[MutationOutput] = dataclasses.field(default_factory=list)
@@ -4910,7 +4909,7 @@ class ExternKernel(InputsKernel):
         List[Any],
         List[Any],
         Callable[[Any, Any], Any],
-        Optional[Dict[sympy.Symbol, pytree.KeyPath]],
+        Optional[dict[sympy.Symbol, pytree.KeyPath]],
     ]:
         binded_args = {"args": args, "kwargs": kwargs}
 
@@ -4972,7 +4971,7 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
-        unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
             rebind_unbacked(shape_env, V.current_node, example_output)
             unbacked_bindings = compute_unbacked_bindings(
@@ -5623,7 +5622,7 @@ class TMADescriptor(ExternKernel):
 
     # as TMA descriptors are immutable,
     # we can dedup them by the input args
-    _CACHE: Dict[Any, TMADescriptor] = {}
+    _CACHE: dict[Any, TMADescriptor] = {}
 
     @classmethod
     def create(  # type: ignore[no-untyped-def]

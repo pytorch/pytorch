@@ -15,7 +15,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -259,18 +259,18 @@ class Backend(str):
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
-    _plugins: Dict[str, _BackendPlugin] = {}
+    _plugins: dict[str, _BackendPlugin] = {}
 
     backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
     # 3rd-party devices can register the default backend support here
-    default_device_backend_map: Dict[str, str] = {
+    default_device_backend_map: dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
     }
 
-    backend_capability: Dict[str, List[str]] = {
+    backend_capability: dict[str, List[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
         XCCL: ["xpu"],
@@ -278,7 +278,7 @@ class Backend(str):
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: Dict[str, ProcessGroup.BackendType] = {
+    backend_type_map: dict[str, ProcessGroup.BackendType] = {
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
@@ -371,7 +371,7 @@ class BackendConfig:
 
     def __init__(self, backend: Backend):
         """Init."""
-        self.device_backend_map: Dict[str, Backend] = {}
+        self.device_backend_map: dict[str, Backend] = {}
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
@@ -441,7 +441,7 @@ class BackendConfig:
             f"{device}:{backend}" for device, backend in self.device_backend_map.items()
         )
 
-    def get_device_backend_map(self) -> Dict[str, Backend]:
+    def get_device_backend_map(self) -> dict[str, Backend]:
         """Return backend map of the device."""
         return self.device_backend_map
 
@@ -572,14 +572,14 @@ class _CollOp:
 
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
-_pg_map: Dict[ProcessGroup, Tuple[str, Store]] = {}
-_pg_names: Dict[ProcessGroup, str] = {}
-_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
+_pg_map: dict[ProcessGroup, Tuple[str, Store]] = {}
+_pg_names: dict[ProcessGroup, str] = {}
+_pg_group_ranks: dict[ProcessGroup, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
-_pg_backend_config: Dict[ProcessGroup, str] = {}
+_pg_backend_config: dict[ProcessGroup, str] = {}
 _group_count = 0
-_tags_to_pg: Dict[str, List[ProcessGroup]] = {}
-_pg_to_tag: Dict[ProcessGroup, str] = {}
+_tags_to_pg: dict[str, List[ProcessGroup]] = {}
+_pg_to_tag: dict[ProcessGroup, str] = {}
 _backend: Optional[str] = None
 
 
@@ -595,7 +595,7 @@ class _World:
 
     def __init__(self) -> None:
         self._default_pg = None
-        self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
+        self._pg_coalesce_state: dict[ProcessGroup, List[_CollOp]] = {}
 
     @property
     def default_pg(self) -> Optional[ProcessGroup]:
@@ -612,7 +612,7 @@ class _World:
         self._default_pg = value
 
     @property
-    def pg_map(self) -> Dict[ProcessGroup, Tuple[str, Store]]:
+    def pg_map(self) -> dict[ProcessGroup, Tuple[str, Store]]:
         """
         Provide Mapping from ProcessGroup to backend name and store.
 
@@ -625,7 +625,7 @@ class _World:
         return _pg_map
 
     @property
-    def pg_names(self) -> Dict[ProcessGroup, str]:
+    def pg_names(self) -> dict[ProcessGroup, str]:
         """
         Process group's names, map from ProcessGroup to str.
 
@@ -635,7 +635,7 @@ class _World:
         return _pg_names
 
     @property
-    def pg_group_ranks(self) -> Dict[ProcessGroup, Dict[int, int]]:
+    def pg_group_ranks(self) -> dict[ProcessGroup, dict[int, int]]:
         """
         Process group's global rank to local rank mapping.
 
@@ -645,7 +645,7 @@ class _World:
         return _pg_group_ranks
 
     @property
-    def pg_backend_config(self) -> Dict[ProcessGroup, str]:
+    def pg_backend_config(self) -> dict[ProcessGroup, str]:
         """
         Process group's backend config.
 
@@ -671,27 +671,27 @@ class _World:
         _group_count = value
 
     @property
-    def tags_to_pg(self) -> Dict[str, List[ProcessGroup]]:
+    def tags_to_pg(self) -> dict[str, List[ProcessGroup]]:
         global _tags_to_pg
         return _tags_to_pg
 
     @property
-    def pg_to_tag(self) -> Dict[ProcessGroup, str]:
+    def pg_to_tag(self) -> dict[ProcessGroup, str]:
         global _pg_to_tag
         return _pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> Dict[ProcessGroup, List[_CollOp]]:
+    def pg_coalesce_state(self) -> dict[ProcessGroup, List[_CollOp]]:
         return self._pg_coalesce_state
 
     @property
-    def pg_config_info(self) -> List[Dict[str, Any]]:
+    def pg_config_info(self) -> List[dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
 
         Along with their unique IDs and configurations (types and ranks).
         """
-        config_info: List[Dict[str, Any]] = []
+        config_info: List[dict[str, Any]] = []
         default_pg_size = _get_group_size(None)
         for pg in self.pg_map.keys():
             ranks = self.pg_group_ranks[pg]
@@ -1401,7 +1401,7 @@ def _get_process_group_uid(pg: ProcessGroup) -> int:
     return -1
 
 
-def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
+def _get_pg_config(group: Optional[ProcessGroup] = None) -> dict[str, Any]:
     """
     Return the pg configuration of the given process group.
 
@@ -1416,12 +1416,12 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     }
 
 
-def _get_all_pg_configs() -> List[Dict[str, Any]]:
+def _get_all_pg_configs() -> List[dict[str, Any]]:
     """
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = [
+    config_info: List[dict[str, Any]] = [
         _get_pg_config(pg) for pg in _world.pg_map.keys()
     ]
     return config_info
@@ -2652,7 +2652,7 @@ def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
 
-    def peer_kwarg(op: P2POp) -> Dict[str, int]:
+    def peer_kwarg(op: P2POp) -> dict[str, int]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 

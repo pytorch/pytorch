@@ -481,7 +481,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
     def __init__(
         self,
         bound_arguments: inspect.BoundArguments,
-        defaults: Dict[str, VariableTracker],
+        defaults: dict[str, VariableTracker],
         signature: InspectSignatureVariable,
         **kwargs,
     ):
@@ -1022,7 +1022,7 @@ class GetAttrVariable(VariableTracker):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
             name in ("__getitem__", "get")
@@ -1499,7 +1499,7 @@ class ConstantLikeVariable(VariableTracker):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
             # we only support constant propagation for methods
@@ -1680,7 +1680,7 @@ class RandomVariable(VariableTracker):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":
             tx.output.side_effects.mutation(self)

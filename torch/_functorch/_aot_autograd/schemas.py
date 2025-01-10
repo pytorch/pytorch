@@ -9,7 +9,7 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
+from typing import Any, Callable, Iterable, List, NewType, Optional, Set, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -190,7 +190,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: Dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    attrs: dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -398,7 +398,7 @@ class ViewAndMutationMeta:
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
-    tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
+    tokens: dict[Any, torch.Tensor] = field(default_factory=dict)
 
     # Only filled in if/when we trace the joint function
     # If an input requires grad and is mutated in the backward, it is only safe to keep the mutation
@@ -704,8 +704,8 @@ class BackwardSignature:
     Each string name is the `node.name` of the corresponding node in the fx graph.
     """
 
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
+    gradients_to_parameters: dict[str, str]
+    gradients_to_user_inputs: dict[str, str]
     loss_output: str
 
 
@@ -737,16 +737,16 @@ class GraphSignature:
 
     user_inputs: List[GraphInputName]
     user_outputs: List[GraphOutputName]
-    inputs_to_parameters: Dict[GraphInputName, FQN]
-    inputs_to_buffers: Dict[GraphInputName, FQN]
+    inputs_to_parameters: dict[GraphInputName, FQN]
+    inputs_to_buffers: dict[GraphInputName, FQN]
 
     # If the user's module mutates a buffer,
     # it's represented in the graph as an extra graph output.
     # This dict is a mapping from
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
-    buffers_to_mutate: Dict[GraphOutputName, FQN]
-    user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
+    buffers_to_mutate: dict[GraphOutputName, FQN]
+    user_inputs_to_mutate: dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
@@ -877,7 +877,7 @@ class AOTConfig:
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
-    decompositions: Dict[OpOverload, Callable]
+    decompositions: dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool

@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -56,9 +56,9 @@ class OptimizerInput:
     def __init__(
         self,
         params: Union[
-            List[Parameter], List[Tensor], Dict[Any, Any], List[Dict[str, Any]]
+            List[Parameter], List[Tensor], dict[Any, Any], List[dict[str, Any]]
         ],
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         desc: str = "",
     ):
         # params can be a list of Tensors OR param_groups OR None

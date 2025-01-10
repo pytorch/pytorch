@@ -83,9 +83,9 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 def export_for_training(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -178,12 +178,12 @@ def export_for_training(
 def export_for_inference(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
-    decomp_table: Optional[Dict["OpOverload", Optional[Callable]]] = None,
+    decomp_table: Optional[dict["OpOverload", Optional[Callable]]] = None,
 ) -> ExportedProgram:
     """
     :func:`export_for_inference` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -263,9 +263,9 @@ def export_for_inference(
 def export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -380,8 +380,8 @@ def save(
     ep: ExportedProgram,
     f: Union[str, os.PathLike, io.BytesIO],
     *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    opset_version: Optional[Dict[str, int]] = None,
+    extra_files: Optional[dict[str, Any]] = None,
+    opset_version: Optional[dict[str, int]] = None,
 ) -> None:
     """
 
@@ -461,8 +461,8 @@ def save(
 def load(
     f: Union[str, os.PathLike, io.BytesIO],
     *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    expected_opset_version: Optional[Dict[str, int]] = None,
+    extra_files: Optional[dict[str, Any]] = None,
+    expected_opset_version: Optional[dict[str, int]] = None,
 ) -> ExportedProgram:
     """
 

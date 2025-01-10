@@ -7,7 +7,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -166,7 +166,7 @@ class _KinetoProfile:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = {}
+        self.preset_metadata: dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -722,7 +722,7 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map: Dict[
+        self.action_map: dict[
             tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.

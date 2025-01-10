@@ -9,7 +9,6 @@ import math
 import operator
 from typing import (
     Callable,
-    Dict,
     Generic,
     Optional,
     overload,
@@ -1108,7 +1107,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(
-    expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
+    expr: sympy.Expr, ranges: Optional[dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
     log.debug(
         "bound_sympy(%s)%s",

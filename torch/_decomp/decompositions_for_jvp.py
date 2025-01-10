@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch._decomp
@@ -10,7 +10,7 @@ from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 
 decomposition_table = torch._decomp.decomposition_table
-decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
+decomposition_table_for_jvp: dict[torch._ops.OperatorBase, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
 aten = torch.ops.aten
 

@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Tuple
+from typing import Any, List, Tuple
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -13,7 +13,7 @@ class SubclassCreationMeta:
     start_idx: int
     num_tensors: int
     class_type: Any
-    attrs: Dict[str, "SubclassCreationMeta"]
+    attrs: dict[str, "SubclassCreationMeta"]
     metadata: Any
 
 

@@ -36,7 +36,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     List,
     NoReturn,
@@ -173,7 +172,7 @@ def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
-    def get_system() -> Dict[str, Any]:
+    def get_system() -> dict[str, Any]:
         try:
             from triton.compiler.compiler import triton_key
 
@@ -184,7 +183,7 @@ class CacheBase:
             triton_version = None
 
         try:
-            system: Dict[str, Any] = {
+            system: dict[str, Any] = {
                 "device": {"name": None},
                 "version": {
                     "triton": triton_version,
@@ -222,7 +221,7 @@ class CacheBase:
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
 
-    def get_local_cache(self) -> Dict[str, Any]:
+    def get_local_cache(self) -> dict[str, Any]:
         local_cache_path = self.get_local_cache_path()
         if not local_cache_path.is_file():
             return {}
@@ -230,7 +229,7 @@ class CacheBase:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
-    def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
+    def update_local_cache(self, local_cache: dict[str, Any]) -> None:
         local_cache_path = self.get_local_cache_path()
         write_atomic(
             str(local_cache_path),
@@ -240,7 +239,7 @@ class CacheBase:
 
 
 class LocalCache(CacheBase):
-    def lookup(self, *keys: str) -> Optional[Dict[str, Any]]:
+    def lookup(self, *keys: str) -> Optional[dict[str, Any]]:
         cache = self.get_local_cache()
 
         sub_cache = cache
@@ -266,7 +265,7 @@ class LocalCache(CacheBase):
 
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)  # noqa: B019
-    def get_global_cache(self) -> Dict[str, Any]:
+    def get_global_cache(self) -> dict[str, Any]:
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
             return {}
@@ -279,8 +278,8 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
-    ) -> Dict[ChoiceCaller, float]:
+        benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+    ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
@@ -301,7 +300,7 @@ class PersistentCache(CacheBase):
         )
         timings = {}
 
-        def check_cache(cache: Dict[str, Any], callback: Any = None) -> bool:
+        def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
@@ -589,7 +588,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_graph_module(
         self, gm: torch.fx.GraphModule
-    ) -> tuple[Any, tuple[Dict[str, Any], str]]:
+    ) -> tuple[Any, tuple[dict[str, Any], str]]:
         """
         Custom reducer for graph module to handle irrelevant data for user
         defined triton kernels
@@ -758,7 +757,7 @@ class FxGraphHashDetails:
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
         # such since we're just using it to generate a hash.
-        self.fx_kwargs: Dict[str, object] = {}
+        self.fx_kwargs: dict[str, object] = {}
         for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
                 if type(v) in (set, OrderedSet):  # noqa: set_linter
@@ -981,7 +980,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         constants: CompiledFxGraphConstants,
-    ) -> tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1026,7 +1025,7 @@ class FxGraphCache:
         # their guards to determine whether there's a hit.
         graph = None
         pickled_content = None
-        cache_info: Dict[str, Any] = dict()
+        cache_info: dict[str, Any] = dict()
 
         for candidate, pickled_content in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1239,7 +1238,7 @@ class FxGraphCache:
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
-    ) -> tuple[Optional[tuple[str, List[str]]], Dict[str, Any]]:
+    ) -> tuple[Optional[tuple[str, List[str]]], dict[str, Any]]:
         """
         Checks that the inductor input is cacheable, then computes
         and returns the cache key for the input.
@@ -1291,7 +1290,7 @@ class FxGraphCache:
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-    ) -> tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
@@ -1376,11 +1375,11 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = {}
+    cache: dict[str, dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: Dict[str, str], cubin: str, bin_type: str) -> None:
+    def set(cls, key: str, params: dict[str, str], cubin: str, bin_type: str) -> None:
         _, path = write(
             cubin,
             bin_type,
@@ -1394,7 +1393,7 @@ class CudaKernelParamCache:
         cls.cache[key] = params
 
     @classmethod
-    def get(cls, key: str) -> Optional[Dict[str, str]]:
+    def get(cls, key: str) -> Optional[dict[str, str]]:
         return cls.cache.get(key, None)
 
     @classmethod
@@ -1951,9 +1950,9 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
 
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    cpp_compile_command_flags: Dict[str, Any] = {}
+    cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
@@ -2096,7 +2095,7 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
@@ -2272,7 +2271,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
 @clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": True,
@@ -2338,7 +2337,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
 @clear_on_fresh_inductor_cache
 class HalideCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
+    cache: dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: Optional[str] = None
     prefix = textwrap.dedent(
@@ -2737,7 +2736,7 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    linemaps: Dict[str, List[tuple[Any, ...]]] = {}
+    linemaps: dict[str, List[tuple[Any, ...]]] = {}
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> tuple[str, str]:
@@ -2749,7 +2748,7 @@ class PyCodeCache:
         source_code: str,
         extra: str = "",
         linemap: Optional[List[tuple[int, str]]] = None,
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
     ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap, attrs)
@@ -2760,7 +2759,7 @@ class PyCodeCache:
         key: str,
         path: str,
         linemap: Optional[List[tuple[int, str]]] = None,
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
     ) -> ModuleType:
         if linemap is None:
             linemap = []
@@ -2801,7 +2800,7 @@ class PyCodeCache:
     @functools.lru_cache(None)
     def stack_frames_for_code(
         cls, path: str, lineno: int
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> Optional[List[dict[str, Any]]]:
         if path not in cls.linemaps:
             return None
         # [(starting_line, <fx node>), ...]
@@ -2813,7 +2812,7 @@ class PyCodeCache:
         if not entry:
             return None
 
-        def parse_stack_trace(stack_trace: str) -> List[Dict[str, Any]]:
+        def parse_stack_trace(stack_trace: str) -> List[dict[str, Any]]:
             # ideally fx stores stack traces as data rather than a string
             # but this is not along a performance critical path
             regex = r'File "(.+)", line (\d+), in (.+)\n'
@@ -3055,7 +3054,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = {}
+    cache: dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3140,7 +3139,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = {}
+    cache: dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False

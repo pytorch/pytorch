@@ -1,5 +1,5 @@
 import re
-from typing import Any, DefaultDict, Dict, List, Tuple, Union
+from typing import Any, DefaultDict, List, Tuple, Union
 
 import numpy as np
 import sympy as sp
@@ -15,7 +15,7 @@ s_pattern = r"s\d+"
 def infer_symbol_values(
     symints: List[Union[torch.SymInt, int]],
     init_symints: List[Union[torch.SymInt, int]],
-    symbol_idx_dict: Dict[str, int],
+    symbol_idx_dict: dict[str, int],
     padding_constraints: DefaultDict[torch.SymInt, List[Union[sp.Expr, int]]],
     constraint: str,
 ) -> None:
@@ -84,7 +84,7 @@ def calculate_value(
     left_expression: Union[str, Any, None],
     right_expression: Union[str, Any, None],
     symints: List[Union[torch.SymInt, int]],
-    symbol_idx_dict: Dict[str, int],
+    symbol_idx_dict: dict[str, int],
 ) -> None:
     var, val = solve_equation(left_expression, right_expression)
     idx = symbol_idx_dict[var]

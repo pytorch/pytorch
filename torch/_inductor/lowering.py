@@ -9,7 +9,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -90,9 +90,9 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 )
 
 log = logging.getLogger(__name__)
-lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
-_maybe_layout_constraints: Dict[
+_maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
 ] = {}
 fallbacks = OrderedSet[torch._ops.OpOverload]()
@@ -106,7 +106,7 @@ foreach_ops = OrderedSet[torch._ops.OpOverload](
 # TODO(rec): torch._higher_order_ops._foreach_map is not an OpOverload
 # so why is it in foreach_ops?
 inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
+inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -314,11 +314,11 @@ def in_namespace(op, namespace):
 
 def transform_args(
     args: List[Any],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-) -> tuple[List[Any], Dict[str, Any]]:
+) -> tuple[List[Any], dict[str, Any]]:
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -429,7 +429,7 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args: List[Any] = list(args)
-        kwargs: Dict[str, Any] = dict(kwargs)
+        kwargs: dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):

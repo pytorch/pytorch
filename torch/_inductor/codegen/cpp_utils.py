@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 from unittest.mock import patch
 
 import sympy
@@ -313,7 +313,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local: Dict[str, ir.Buffer],
+        global_to_local: dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
@@ -361,11 +361,11 @@ class LocalBufferContext:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
-        self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to global buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.global_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
-        self.global_to_local: Dict[str, ir.Buffer] = {}
+        self.global_to_local: dict[str, ir.Buffer] = {}
         # record the global buffers that are removed by this LocalBufferContext
         self.removed_buffers: OrderedSet[str] = OrderedSet()
 

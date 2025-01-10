@@ -17,7 +17,6 @@ from typing import (
     Callable,
     cast,
     DefaultDict,
-    Dict,
     List,
     Optional,
     Sequence,
@@ -133,7 +132,7 @@ class PackagingError(Exception):
 
     def __init__(self, dependency_graph: DiGraph, debug=False):
         # Group errors by reason.
-        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
+        broken: dict[PackagingErrorReason, List[str]] = defaultdict(list)
         for module_name, attrs in dependency_graph.nodes.items():
             error = attrs.get("error")
             if error is None:
@@ -238,7 +237,7 @@ class PackageExporter:
         self.zip_file.set_min_version(6)
         self._written_files: Set[str] = set()
 
-        self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_reduces: dict[int, Any] = {}
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -266,7 +265,7 @@ class PackageExporter:
                 )
             self.importer = OrderedImporter(*importer)
 
-        self.patterns: Dict[GlobGroup, _PatternInfo] = {}
+        self.patterns: dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
 
     def save_source_file(

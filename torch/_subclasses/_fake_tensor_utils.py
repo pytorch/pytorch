@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Type, TYPE_CHECKING, Union
+from typing import List, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
@@ -216,7 +216,7 @@ class _CacheKeyState:
 
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
-    sym_node_lookup: Dict[int, int]  # id(SymNode) -> index
+    sym_node_lookup: dict[int, int]  # id(SymNode) -> index
 
     # There are cases where we're asked to perform an op when we have no
     # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a

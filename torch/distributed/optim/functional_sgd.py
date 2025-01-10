@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
 import torch.optim._functional as F
@@ -47,7 +47,7 @@ class _FunctionalSGD:
         self.maximize = maximize
         self.foreach = foreach
         self.fused = fused
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")

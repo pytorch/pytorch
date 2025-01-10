@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-from typing import Dict, Tuple
+from typing import Tuple
 
 import torch
 import torch.distributed.rpc as rpc
@@ -28,7 +28,7 @@ def two_args_two_kwargs(
 
 @torch.jit.script
 def script_rpc_async_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
@@ -39,7 +39,7 @@ def script_rpc_async_call(
 def rpc_async_call_with_timeout(
     dst_worker_name: str,
     args: Tuple[Tensor, Tensor],
-    kwargs: Dict[str, Tensor],
+    kwargs: dict[str, Tensor],
     timeout: float,
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs, timeout)
@@ -51,7 +51,7 @@ def rpc_async_call_with_timeout(
 def rpc_async_call_with_timeout_future_ret(
     dst_worker_name: str,
     args: Tuple[Tensor, Tensor],
-    kwargs: Dict[str, Tensor],
+    kwargs: dict[str, Tensor],
     timeout: float,
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs, timeout)
@@ -60,7 +60,7 @@ def rpc_async_call_with_timeout_future_ret(
 
 @torch.jit.script
 def rpc_async_call_future_ret(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return fut

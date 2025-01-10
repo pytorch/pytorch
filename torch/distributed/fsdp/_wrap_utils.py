@@ -4,7 +4,7 @@ import functools
 import inspect
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
+from typing import Any, Callable, List, Set, Tuple, Type, Union
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
@@ -27,7 +27,7 @@ def _auto_wrap(
     policy: Union[Callable, _Policy],
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-    root_kwargs: Dict[str, Any],
+    root_kwargs: dict[str, Any],
     fsdp_fn: Callable,  # e.g. `FullyShardedDataParallel` or `fully_shard`
 ):
     """
@@ -223,7 +223,7 @@ def _get_managed_param_to_fqn(
     ignored_params: Set[nn.Parameter],
     visited_modules: Set[nn.Module],
     root_prefix: str,
-) -> Dict[nn.Parameter, str]:
+) -> dict[nn.Parameter, str]:
     """
     This returns a dict that maps managed parameter to its FQN for the given
     ``module_to_wrap``. The dict's keys are exactly the parameters that would
@@ -238,7 +238,7 @@ def _get_managed_param_to_fqn(
     on the full module tree in one shot. Given those differences, we do not try
     to unify the two.
     """
-    param_to_fqn: Dict[nn.Parameter, str] = {}
+    param_to_fqn: dict[nn.Parameter, str] = {}
     # Run BFS (or any tree traversal works)
     queue = collections.deque([(module_to_wrap, root_prefix)])
     visited_modules.add(module_to_wrap)

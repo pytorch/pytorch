@@ -12,7 +12,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -109,7 +109,7 @@ def create_synthetic_base_metadata(
     inner_args: List[Any],
 ) -> Tuple[ViewAndMutationMeta, List[int]]:
     # maps inner arg indices to outer arg indices
-    synthetic_base_to_indices: Dict[int, List[int]] = {}
+    synthetic_base_to_indices: dict[int, List[int]] = {}
     for inner_idx in range(len(inner_args)):
         outer_aliased_indices_of_current_base_arg = [
             outer_idx

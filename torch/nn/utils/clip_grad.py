@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import cast, Dict, Iterable, List, Optional, Tuple, Union
+from typing import cast, Iterable, List, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
@@ -73,7 +73,7 @@ def _get_total_norm(
     if len(tensors) == 0:
         return torch.tensor(0.0)
     first_device = tensors[0].device
-    grouped_tensors: Dict[
+    grouped_tensors: dict[
         Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
         [tensors]  # type: ignore[list-item]
@@ -146,7 +146,7 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
-    grouped_grads: Dict[
+    grouped_grads: dict[
         Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
         [grads]

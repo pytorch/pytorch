@@ -10,7 +10,6 @@ from typing import (
     Callable,
     cast,
     DefaultDict,
-    Dict,
     Hashable,
     Iterable,
     List,
@@ -40,10 +39,10 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 Args: TypeAlias = Tuple[Any, ...]
-Kwargs: TypeAlias = Dict[str, Any]
-StateDict: TypeAlias = Dict[str, Any]
-DeviceDict = Dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict = Dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
+Kwargs: TypeAlias = dict[str, Any]
+StateDict: TypeAlias = dict[str, Any]
+DeviceDict = dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict = dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
 
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
@@ -56,8 +55,8 @@ __all__ = [
     "register_optimizer_step_pre_hook",
     "register_optimizer_step_post_hook",
 ]
-_global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
+_global_optimizer_pre_hooks: dict[int, GlobalOptimizerPreHook] = OrderedDict()
+_global_optimizer_post_hooks: dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 
@@ -321,7 +320,7 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
 
 
 ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+    Iterable[torch.Tensor], Iterable[dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
 ]
 
 R = TypeVar("R")
@@ -346,14 +345,14 @@ class Optimizer:
     OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
-    _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
-    _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
+    _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
+    _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:  # noqa: D107
+    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -372,7 +371,7 @@ class Optimizer:
             )
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
-        self.param_groups: List[Dict[str, Any]] = []
+        self.param_groups: List[dict[str, Any]] = []
 
         param_groups = list(params)
         if len(param_groups) == 0:
@@ -388,14 +387,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> Dict[str, Any]:  # noqa: D105
+    def __getstate__(self) -> dict[str, Any]:  # noqa: D105
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:  # noqa: D105
+    def __setstate__(self, state: dict[str, Any]) -> None:  # noqa: D105
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -516,8 +515,8 @@ class Optimizer:
         tensorlistlist: TensorListList,
         with_indices: bool = False,
     ) -> Union[
-        Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
-        Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
+        dict[Tuple[None, None], Tuple[TensorListList, Indices]],
+        dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
     ]:
         """Group a list of lists of tensors by device and dtype.
 
@@ -705,10 +704,10 @@ class Optimizer:
             pre_hook(self)
 
         # Save order indices instead of Tensors
-        param_mappings: Dict[int, int] = {}
+        param_mappings: dict[int, int] = {}
         start_index = 0
 
-        def pack_group(group: Dict[str, Any]) -> Dict[str, Any]:
+        def pack_group(group: dict[str, Any]) -> dict[str, Any]:
             nonlocal start_index
             packed = {k: v for k, v in group.items() if k != "params"}
             param_mappings.update(
@@ -745,7 +744,7 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: List[Dict[Any, Any]],
+        param_groups: List[dict[Any, Any]],
         key: Hashable = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
@@ -918,7 +917,7 @@ class Optimizer:
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
+        state: DefaultDict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
                 param = id_map[k]
@@ -930,8 +929,8 @@ class Optimizer:
 
         # Update parameter groups, setting their 'params' value
         def update_group(
-            group: Dict[str, Any], new_group: Dict[str, Any]
-        ) -> Dict[str, Any]:
+            group: dict[str, Any], new_group: dict[str, Any]
+        ) -> dict[str, Any]:
             new_group["params"] = group["params"]
             if "param_names" in group and "param_names" not in new_group:
                 new_group["param_names"] = group["param_names"]
@@ -1016,7 +1015,7 @@ class Optimizer:
         raise NotImplementedError
 
     @torch._disable_dynamo
-    def add_param_group(self, param_group: Dict[str, Any]) -> None:
+    def add_param_group(self, param_group: dict[str, Any]) -> None:
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
         This can be useful when fine tuning a pre-trained network as frozen layers can be made

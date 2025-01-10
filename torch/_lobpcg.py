@@ -3,7 +3,7 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch import _linalg_utils as _utils, Tensor
@@ -268,9 +268,9 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         largest: Optional[bool] = None,
         method: Optional[str] = None,
         tracker: None = None,
-        ortho_iparams: Optional[Dict[str, int]] = None,
-        ortho_fparams: Optional[Dict[str, float]] = None,
-        ortho_bparams: Optional[Dict[str, bool]] = None,
+        ortho_iparams: Optional[dict[str, int]] = None,
+        ortho_fparams: Optional[dict[str, float]] = None,
+        ortho_bparams: Optional[dict[str, bool]] = None,
     ) -> Tuple[Tensor, Tensor]:
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
@@ -354,9 +354,9 @@ def lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
@@ -591,9 +591,9 @@ def _lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
@@ -697,9 +697,9 @@ class LOBPCG:
         B: Optional[Tensor],
         X: Tensor,
         iK: Optional[Tensor],
-        iparams: Dict[str, int],
-        fparams: Dict[str, float],
-        bparams: Dict[str, bool],
+        iparams: dict[str, int],
+        fparams: dict[str, float],
+        bparams: dict[str, bool],
         method: str,
         tracker: None,
     ) -> None:
@@ -720,10 +720,10 @@ class LOBPCG:
         self.E = torch.zeros((n,), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars: Dict[str, Tensor] = {}
-        self.ivars: Dict[str, int] = {"istep": 0}
-        self.fvars: Dict[str, float] = {"_": 0.0}
-        self.bvars: Dict[str, bool] = {"_": False}
+        self.tvars: dict[str, Tensor] = {}
+        self.ivars: dict[str, int] = {"istep": 0}
+        self.fvars: dict[str, float] = {"_": 0.0}
+        self.bvars: dict[str, bool] = {"_": False}
 
     def __str__(self):
         lines = ["LOPBCG:"]

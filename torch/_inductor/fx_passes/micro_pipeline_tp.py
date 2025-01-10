@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, List, Optional
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -759,7 +759,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
+) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
     Compute the ancestors for all nodes in a graph.
     """
@@ -776,7 +776,7 @@ def _get_node_to_ancestors(
 
 def _get_collective_to_overlappable_nodes(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+) -> dict[torch.fx.Node, List[torch.fx.Node]]:
     """
     For each collective in the graph, find nodes that are neither ancestors nor
     descendants of the collective.

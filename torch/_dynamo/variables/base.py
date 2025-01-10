@@ -227,7 +227,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[Dict[int, Any]] = None,
+        cache: Optional[dict[int, Any]] = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances

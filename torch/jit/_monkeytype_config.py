@@ -94,7 +94,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # A dictionary keeping all collected CallTrace
             # key is fully qualified name of called function
             # value is list of all CallTrace
-            self.trace_records: Dict[str, list] = defaultdict(list)
+            self.trace_records: dict[str, list] = defaultdict(list)
 
         def add(self, traces: Iterable[CallTrace]):
             for t in traces:

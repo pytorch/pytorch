@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -22,7 +22,7 @@ def _gen_reshard_suggestions(
     op_schema: OpSchema,
     input_dims: List[str],
     input_specs: Tuple[DTensorSpec, ...],
-    dim_to_sharding: Dict[str, int],
+    dim_to_sharding: dict[str, int],
     pending_sum: List[int],
 ) -> OutputSharding:
     suggested_arg_specs: List[DTensorSpec] = []
@@ -49,7 +49,7 @@ def einop_rule(
     op_schema: OpSchema,
     *,
     linearity: bool = False,
-    enforce_sharding: Optional[Dict[str, int]] = None,
+    enforce_sharding: Optional[dict[str, int]] = None,
 ) -> OutputSharding:
     """
     Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
@@ -77,12 +77,12 @@ def einop_rule(
     # NOTE: only support single output unless needed in future
     output_dim = output_dims[0]
 
-    dim_to_sharding: Dict[str, int] = {}
-    dim_to_size: Dict[str, int] = {}
+    dim_to_sharding: dict[str, int] = {}
+    dim_to_size: dict[str, int] = {}
     # record pending sum, key is mesh dimension, value is pending sum
     # counter across input specs
-    pending_sums_counter: Dict[int, int] = {}
-    seen_shardings: Dict[int, str] = {}
+    pending_sums_counter: dict[int, int] = {}
+    seen_shardings: dict[int, str] = {}
     needs_reshard = False
 
     def merge_sharding(dim: str, a: int, b: int) -> int:
@@ -271,7 +271,7 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
 
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
-    enforce_sharding: Dict[str, int] = {}
+    enforce_sharding: dict[str, int] = {}
     if _is_inplace_op(op_schema.op):
         # inplace op should keep the input sharding it writes to
         for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map):

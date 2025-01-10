@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import copy
 import itertools
-from typing import Callable, Dict, List
+from typing import Callable, List
 
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     ApplyBroadcasting,
@@ -50,7 +50,7 @@ from torch.fx.experimental.migrate_gradual_types.util import (
 from torch.fx.tensor_type import Dyn, TensorType
 
 
-_TRANSFORMATION_RULES: Dict[Constraint, Callable] = {}
+_TRANSFORMATION_RULES: dict[Constraint, Callable] = {}
 
 
 def register_transformation_rule(call_target):

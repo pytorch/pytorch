@@ -3,7 +3,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 from functools import partial, reduce
 
 import torch
@@ -455,14 +455,14 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
-    pg_names: Dict[dist.ProcessGroup, str]
-    pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
-    pg_backend_config: Dict[dist.ProcessGroup, str]
+    pg_map: dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
+    pg_names: dict[dist.ProcessGroup, str]
+    pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
+    pg_backend_config: dict[dist.ProcessGroup, str]
     group_count: int
-    tags_to_pg: Dict[str, List[dist.ProcessGroup]]
-    pg_to_tag: Dict[dist.ProcessGroup, str]
-    pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+    tags_to_pg: dict[str, List[dist.ProcessGroup]]
+    pg_to_tag: dict[dist.ProcessGroup, str]
+    pg_coalesce_state: dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
 
 
 class ThreadLocalWorld:
@@ -514,7 +514,7 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
 
 

@@ -8,7 +8,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -39,7 +39,7 @@ class _EvalCacheLoader:
         self.eval_cache = {}
         self.next_id = 0
 
-    def cache(self, src: str, globals: Dict[str, Any], co_fields=None):
+    def cache(self, src: str, globals: dict[str, Any], co_fields=None):
         """Store the source in a private cache, and add a lazy entry in linecache
         that allows the source to be retrieved by 'filename'.
 
@@ -83,19 +83,19 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
-def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
+def _exec_with_source(src: str, globals: dict[str, Any], co_fields=None):
     key = _loader.cache(src, globals, co_fields)
     exec(compile(src, key, "exec"), globals)
 
 
-def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
+def _forward_from_src(src: str, globals: dict[str, Any], co_fields=None):
     return _method_from_src(
         method_name="forward", src=src, globals=globals, co_fields=co_fields
     )
 
 
 def _method_from_src(
-    method_name: str, src: str, globals: Dict[str, Any], co_fields=None
+    method_name: str, src: str, globals: dict[str, Any], co_fields=None
 ) -> Callable:
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
@@ -114,7 +114,7 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
     return f"from {module_name} import {attr_name} as {name}"
 
 
-def _format_import_block(globals: Dict[str, Any], importer: Importer):
+def _format_import_block(globals: dict[str, Any], importer: Importer):
     import_strs: Set[str] = {
         _format_import_statement(name, obj, importer) for name, obj in globals.items()
     }
@@ -124,7 +124,7 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
 
 
 @compatibility(is_backward_compatible=True)
-def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
+def reduce_graph_module(body: dict[Any, Any], import_block: str) -> torch.nn.Module:
     # BC: attribute name was changed from `code` to `_code` to facilitate
     # making `code` into a property and adding a docstring to it
     fn_src = body.get("_code") or body["code"]
@@ -134,7 +134,7 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
 
 @compatibility(is_backward_compatible=True)
 def reduce_package_graph_module(
-    importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
+    importer: PackageImporter, body: dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
@@ -142,7 +142,7 @@ def reduce_package_graph_module(
 
 @compatibility(is_backward_compatible=True)
 def reduce_deploy_graph_module(
-    importer: PackageImporter, body: Dict[Any, Any], import_block: str
+    importer: PackageImporter, body: dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
     ns = {}
     ns["__builtins__"] = importer.patched_builtins
@@ -162,7 +162,7 @@ class _CodeOnlyModule(torch.nn.Module):
 
 
 def _deserialize_graph_module(
-    forward, body: Dict[Any, Any], graph_module_cls=None
+    forward, body: dict[Any, Any], graph_module_cls=None
 ) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
@@ -437,7 +437,7 @@ class GraphModule(torch.nn.Module):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         class_name: str = "GraphModule",
     ):
@@ -527,7 +527,7 @@ class GraphModule(torch.nn.Module):
             self._tracer_extras = self.graph._tracer_extras
 
         # Dictionary to store metadata
-        self.meta: Dict[str, Any] = {}
+        self.meta: dict[str, Any] = {}
         self._replace_hooks: List[Callable] = []
         self._create_node_hooks: List[Callable] = []
         self._erase_node_hooks: List[Callable] = []

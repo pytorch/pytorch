@@ -28,7 +28,7 @@ def torch_to_refs_map():
         (torch.fft, torch._refs.fft),
         (torch.linalg, torch._refs.linalg),
     ]
-    r: Dict[Any, Any] = {
+    r: dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
         torch.Tensor.__xor__: torch._refs.bitwise_xor,
         torch.Tensor.__and__: torch._refs.bitwise_and,

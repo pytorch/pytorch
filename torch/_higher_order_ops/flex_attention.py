@@ -1,5 +1,5 @@
 import math
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -83,7 +83,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         score_mod: Callable,
         block_mask: Tuple,
         scale: float,
-        kernel_options: Dict[str, Any],
+        kernel_options: dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -121,7 +121,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         joint_graph: GraphModule,
         block_mask: Tuple,
         scale: float,
-        kernel_options: Dict[str, Any],
+        kernel_options: dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[
@@ -156,7 +156,7 @@ def _math_attention_inner(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -199,7 +199,7 @@ def math_attention(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -258,7 +258,7 @@ def sdpa_dense(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -285,7 +285,7 @@ def trace_flex_attention(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -355,7 +355,7 @@ def flex_attention_proxy_torch_dispatch_mode(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -383,7 +383,7 @@ def flex_attention_functionalize(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -468,7 +468,7 @@ def flex_attention_fake_tensor_mode(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -587,7 +587,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         joint_graph: Callable,
         block_mask: Tuple[Any, ...],
         scale: float,
-        kernel_options: Dict[str, Any],
+        kernel_options: dict[str, Any],
         mask_mod_other_buffers: Tuple[Any, ...],
         *score_mod_other_buffers: Tuple[Any, ...],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -716,7 +716,7 @@ def flex_attention_autograd(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple[Tensor, ...] = (),
     mask_mod_other_buffers: Tuple[Tensor, ...] = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -771,7 +771,7 @@ def sdpa_dense_backward(
     joint_graph: Callable,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[
@@ -923,7 +923,7 @@ def trace_flex_attention_backward(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[
@@ -1020,7 +1020,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[
@@ -1060,7 +1060,7 @@ def flex_attention_backward_functionalize(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[
@@ -1138,7 +1138,7 @@ def flex_attention_backward_fake_tensor_mode(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
-    kernel_options: Dict[str, Any],
+    kernel_options: dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[

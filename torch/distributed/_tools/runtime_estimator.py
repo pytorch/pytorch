@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, List, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -135,7 +135,7 @@ class RuntimeEstimator(TorchDispatchMode):
         self._estimate: Callable
         self._estimate_mode_type: str
         self._mod_tracker = ModTracker()
-        self.mod_runtimes: Dict[str, Dict[str, float]] = defaultdict(
+        self.mod_runtimes: dict[str, dict[str, float]] = defaultdict(
             lambda: defaultdict(lambda: 0.0)
         )
         self.mod_fw_pre_order: List[str] = []

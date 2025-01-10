@@ -14,7 +14,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Iterable,
     List,
     Optional,
@@ -119,8 +118,8 @@ class OpDtypeSupport:
     This class records which dtypes are supported by specific IR ops.
     """
 
-    supported_dtypes: Dict[str, OrderedSet[torch.dtype]] = {}
-    convert_outputs: Dict[str, bool] = {}
+    supported_dtypes: dict[str, OrderedSet[torch.dtype]] = {}
+    convert_outputs: dict[str, bool] = {}
 
     @classmethod
     def register_upcast(cls, func: Callable[..., str], convert_output: bool):
@@ -433,7 +432,7 @@ class BlockPtrOptions:
 
         # Substitute maximum block sizes in shape expressions.
         # This works in multiple_of checks because block sizes are powers of 2.
-        block_to_max: Dict[sympy.Expr, Any] = {
+        block_to_max: dict[sympy.Expr, Any] = {
             block_size: get_max_block(prefix_str[symt])
             for symt, block_size in TritonSymbols.block_sizes.items()
         }
@@ -1418,7 +1417,7 @@ def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str
 class HelperFunctions:
     """An ordered set of helper functions."""
 
-    _templates_seen: Dict[str, str]  # Template code to function name
+    _templates_seen: dict[str, str]  # Template code to function name
     finalized_helpers: List[str]
 
     def __init__(self) -> None:
@@ -1512,7 +1511,7 @@ class CooperativeReductionWorkspaceCache:
 
 @dataclasses.dataclass
 class FixedTritonConfig:
-    config: Dict[str, int]
+    config: dict[str, int]
 
     def __getitem__(self, item):
         return self.config[item]
@@ -1539,7 +1538,7 @@ class TritonKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
@@ -1555,14 +1554,14 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
-        self.pointer_advancements: Dict[
-            SymT, Dict[str, List[sympy.Expr]]
+        self.pointer_advancements: dict[
+            SymT, dict[str, List[sympy.Expr]]
         ] = collections.defaultdict(dict)
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
-        self.triton_meta: Optional[Dict[str, Any]] = None
+        self.triton_meta: Optional[dict[str, Any]] = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -3354,7 +3353,7 @@ class TritonKernel(SIMDKernel):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        triton_meta: Dict[str, Any] = {
+        triton_meta: dict[str, Any] = {
             "signature": triton_meta_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
@@ -4040,7 +4039,7 @@ class TritonScheduling(SIMDScheduling):
         self,
         kernel: SIMDKernel,
         kernel_args: List[Any],
-        kernel_kwargs: Dict[str, Any],
+        kernel_kwargs: dict[str, Any],
     ) -> List[SIMDKernel]:
         kernels: List[SIMDKernel] = [kernel]
         if not config.triton.multi_kernel:

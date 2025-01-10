@@ -277,7 +277,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods: Dict[str, Any] = {}
+        cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
@@ -1046,7 +1046,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
 
 def call_prepare_scriptable_func(obj):
-    memo: Dict[int, torch.nn.Module] = {}
+    memo: dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
 
@@ -1089,7 +1089,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[List[Tuple], dict[Callable, List[Tuple]], None] = None,
 ):
     global type_trace_db
 
@@ -1220,7 +1220,7 @@ def script(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[List[Tuple], dict[Callable, List[Tuple]], None] = None,
 ):
     r"""Script the function.
 
@@ -1619,7 +1619,7 @@ class _ScriptProfileColumn:
         self.header = header
         self.alignment = alignment
         self.offset = offset
-        self.rows: Dict[int, Any] = {}
+        self.rows: dict[int, Any] = {}
 
     def add_row(self, lineno: int, value: Any):
         self.rows[lineno] = value
@@ -1649,7 +1649,7 @@ class _ScriptProfileTable:
 
     def dump_string(self):
         outputs: List[str] = []
-        cells: List[Tuple[str, Dict[int, str]]] = []
+        cells: List[Tuple[str, dict[int, str]]] = []
         header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()

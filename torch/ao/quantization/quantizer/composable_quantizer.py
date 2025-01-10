@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from .quantizer import QuantizationAnnotation, Quantizer
 
@@ -37,7 +37,7 @@ class ComposableQuantizer(Quantizer):
     def __init__(self, quantizers: List[Quantizer]):
         super().__init__()
         self.quantizers = quantizers
-        self._graph_annotations: Dict[Node, QuantizationAnnotation] = {}
+        self._graph_annotations: dict[Node, QuantizationAnnotation] = {}
 
     def _record_and_validate_annotations(
         self, gm: torch.fx.GraphModule, quantizer: Quantizer

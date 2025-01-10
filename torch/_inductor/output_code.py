@@ -31,7 +31,6 @@ from typing import (
     Any,
     Callable,
     Counter,
-    Dict,
     List,
     Optional,
     Sequence,
@@ -146,7 +145,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: Dict[str, torch.Tensor],
+    constants: dict[str, torch.Tensor],
 ) -> None:
     """
     Checks for any reasons not to run cudagraphs and then
@@ -270,7 +269,7 @@ class CompiledFxGraphConstants:
     the value of constants directly off of the original saved object.
     """
 
-    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
         assert g.constants is not None
         return g.constants
 
@@ -287,7 +286,7 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
         if g.allocated_constant_name is not None:
             return {
                 name: getattr(self.gm, name)
@@ -320,9 +319,9 @@ class CompiledFxGraph(OutputCode):
     # original name of the attribute in the GraphModule. When we create the module from
     # the cache entry, we then look up the constants from the current GraphModule. This
     # scheme allows us to support caching with freezing.
-    allocated_constant_name: Optional[Dict[str, str]]
-    constants: Optional[Dict[str, torch.Tensor]]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
+    allocated_constant_name: Optional[dict[str, str]]
+    constants: Optional[dict[str, torch.Tensor]]
+    torchbind_constants: dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas

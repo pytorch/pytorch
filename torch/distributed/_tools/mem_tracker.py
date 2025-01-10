@@ -8,7 +8,6 @@ from functools import partial, wraps
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Set,
@@ -127,8 +126,8 @@ class _ModMemStats:
         self.buffer_mem: int
         self.input_mem: int
         self.output_mem: int
-        self.local_peak: Dict[torch.device, int] = {}
-        self.snapshots: Dict[_ModState, List[Dict[torch.device, Dict[str, int]]]] = {}
+        self.local_peak: dict[torch.device, int] = {}
+        self.snapshots: dict[_ModState, List[dict[torch.device, dict[str, int]]]] = {}
 
 
 class _WeakRefInfo:
@@ -253,7 +252,7 @@ def _rounding_fn(value: int, divisor: int, precision: int) -> Union[float, int]:
     return value if divisor == 1 else round(value / divisor, precision)
 
 
-def _print_snapshot(snapshot: Dict[torch.device, Dict[str, int]], units: str) -> None:
+def _print_snapshot(snapshot: dict[torch.device, dict[str, int]], units: str) -> None:
     if len(snapshot) == 0:
         print("No memory tracked.")
         return
@@ -272,7 +271,7 @@ def _print_snapshot(snapshot: Dict[torch.device, Dict[str, int]], units: str) ->
 
 
 def _print_snapshot_tabular(
-    snapshot: Dict[torch.device, Dict[str, int]], units: str
+    snapshot: dict[torch.device, dict[str, int]], units: str
 ) -> None:
     if len(snapshot) == 0:
         print("No memory tracked.")
@@ -298,7 +297,7 @@ def _print_snapshot_tabular(
 
 
 def _print_state_snapshots(
-    snapshots: Dict[_State, List[Dict[torch.device, Dict[str, int]]]], units: str
+    snapshots: dict[_State, List[dict[torch.device, dict[str, int]]]], units: str
 ) -> None:
     for state, snapshot_list in snapshots.items():
         print(f"{state}")
@@ -309,7 +308,7 @@ def _print_state_snapshots(
 
 
 def _print_state_snapshots_tabular(
-    snapshots: Dict[_State, List[Dict[torch.device, Dict[str, int]]]], units: str
+    snapshots: dict[_State, List[dict[torch.device, dict[str, int]]]], units: str
 ) -> None:
     try:
         from tabulate import tabulate
@@ -404,9 +403,9 @@ class MemTracker(TorchDispatchMode):
 
     def __init__(self) -> None:
         self.memory_tracking = WeakIdKeyDictionary()
-        self._curr_mem_snap: Dict[torch.device, Dict[str, int]] = {}
-        self._peak_mem: Dict[torch.device, int] = {}
-        self._peak_mem_snap: Dict[torch.device, Dict[str, int]] = {}
+        self._curr_mem_snap: dict[torch.device, dict[str, int]] = {}
+        self._peak_mem: dict[torch.device, int] = {}
+        self._peak_mem_snap: dict[torch.device, dict[str, int]] = {}
         self._param_to_grad_hook_handles = WeakIdKeyDictionary()
         self._optimizer_hook_handles: Optional[
             Tuple[RemovableHandle, RemovableHandle]
@@ -576,7 +575,7 @@ class MemTracker(TorchDispatchMode):
 
     def get_tracker_snapshot(
         self, type: str = "current"
-    ) -> Dict[torch.device, Dict[str, int]]:
+    ) -> dict[torch.device, dict[str, int]]:
         """
         Capture a snapshot of the memory usage breakdown per device, based on the specified type.
 

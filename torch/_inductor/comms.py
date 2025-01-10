@@ -7,7 +7,7 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, List, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -149,13 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, OrderedSet[str]] = {
+    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
         snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
         for snode in snodes
     }
 
     ready: List[Runnable] = []
-    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
+    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -654,8 +654,8 @@ def get_op_idx(snode):
 
 def enforce_comm_ordering_for_fsdp(
     snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: Dict[str, BaseSchedulerNode],
+    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
 ) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 

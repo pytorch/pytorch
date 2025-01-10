@@ -1187,9 +1187,9 @@ def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[in
 """
 
 ScriptFn = torch._C.ScriptFunction
-shape_compute_graph_mapping: Dict[str, ScriptFn] = {}
-bounded_compute_graph_mapping: Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
-script_func_map: Dict[Callable, ScriptFn] = {}
+shape_compute_graph_mapping: dict[str, ScriptFn] = {}
+bounded_compute_graph_mapping: dict[str, Tuple[ScriptFn, ScriptFn]] = {}
+script_func_map: dict[Callable, ScriptFn] = {}
 
 
 def process_func(func: Callable):

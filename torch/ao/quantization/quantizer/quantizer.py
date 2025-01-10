@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -117,7 +117,7 @@ class QuantizationAnnotation:
     """
 
     # a map from torch.fx.Node to a type of QuantizationSpecBase
-    input_qspec_map: Dict[Node, Optional[QuantizationSpecBase]] = field(
+    input_qspec_map: dict[Node, Optional[QuantizationSpecBase]] = field(
         default_factory=dict
     )
 
@@ -163,7 +163,7 @@ class Quantizer(ABC):
     def prepare_obs_or_fq_callback(
         self,
         model: torch.fx.GraphModule,
-        edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+        edge_or_node_to_obs_or_fq: dict[EdgeOrNode, ObserverOrFakeQuantize],
     ) -> None:
         """A callback that will be called after the observers or fake quants are created
         for each sharing group, but before they are inserted into the graph. The

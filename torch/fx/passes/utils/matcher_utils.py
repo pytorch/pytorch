@@ -4,7 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, List, Set, Tuple, Union
 
 import torch
 from torch.fx import Graph, Node
@@ -39,7 +39,7 @@ class InternalMatch:
     # Nodes from which the match was found
     anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+    nodes_map: dict[Node, Node] = field(default_factory=dict)
 
     # nodes in target graph that are matched placeholder in pattern
     placeholder_nodes: List[Node] = field(default_factory=list)
@@ -49,7 +49,7 @@ class InternalMatch:
 
     # map from a string name to a node in the target graph
     # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
-    name_node_map: Dict[str, Node] = field(default_factory=dict)
+    name_node_map: dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(
@@ -150,12 +150,12 @@ class SubgraphMatcher:
             return pn.target == gn.target
         return False
 
-    def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
+    def _is_contained(self, nodes_map: dict[Node, Node]) -> bool:
         # `lookup` represents all the nodes in `original_graph`
         # that are part of `pattern`
 
         # Placeholders can be used by other nodes in the graphs
-        lookup: Dict[Node, Node] = {
+        lookup: dict[Node, Node] = {
             gn: pn for pn, gn in nodes_map.items() if pn.op != "placeholder"
         }
 
@@ -352,7 +352,7 @@ class SubgraphMatcher:
         from torch.fx.passes.utils.fuser_utils import validate_partition
 
         # find candidate nodes to match with pattern anchors
-        match_candidates: Dict[Node, List[Node]] = defaultdict(list)
+        match_candidates: dict[Node, List[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
                 if self._nodes_are_equal(pattern_anchor, node):

@@ -44,7 +44,6 @@ from typing import (
     Counter,
     DefaultDict,
     Deque,
-    Dict,
     Generator,
     Generic,
     Iterable,
@@ -134,7 +133,7 @@ unpatched_nn_module_call = torch.nn.Module.__call__
 unpatched_nn_module_call_impl = torch.nn.Module._call_impl
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
-optimus_scuba_log: Dict[str, Any] = {}
+optimus_scuba_log: dict[str, Any] = {}
 troubleshooting_url = (
     "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
 )
@@ -143,12 +142,12 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time by function
-compilation_time_metrics: Dict[str, List[float]] = {}
+compilation_time_metrics: dict[str, List[float]] = {}
 
 # This supports calculate_time_spent(), which reports cumulative times
 # across the process for any "phase" populated by dynamo_timed. Reset if
 # reset_frame_count() is called.
-cumulative_time_spent_ns: Dict[str, float] = collections.defaultdict(float)
+cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
 
@@ -241,7 +240,7 @@ def increment_op_count(cnt: int) -> None:
 
 # Get the total time in seconds for each "phase"
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
-def calculate_time_spent() -> Dict[str, float]:
+def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
         total_by_key[phase] = timing / 1e9
@@ -342,7 +341,7 @@ class CompileEventLogger:
     @staticmethod
     def log_instant_event(
         event_name: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         time_ns: Optional[int] = None,
         log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
     ):
@@ -438,7 +437,7 @@ class CompileEventLogger:
 
     @staticmethod
     def instant(
-        event_name: str, metadata: Dict[str, Any], time_ns: Optional[int] = None
+        event_name: str, metadata: dict[str, Any], time_ns: Optional[int] = None
     ):
         CompileEventLogger.log_instant_event(
             event_name, metadata, time_ns, CompileEventLogLevel.CHROMIUM
@@ -460,7 +459,7 @@ def dynamo_timed(
     # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
     log_pt2_compile_event: bool = False,
-    metadata: Optional[Dict[str, object]] = None,
+    metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
@@ -1078,7 +1077,7 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[Set[str]] = None
 
     @classmethod
-    def create(cls, metrics: Dict[str, Any]):
+    def create(cls, metrics: dict[str, Any]):
         """
         Factory method to create a CompilationMetrics from a dict of fields.
         Includes the logic to add legacy fields and any pre-processing, e.g.,
@@ -1254,7 +1253,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
-    metrics: Dict[str, Any],
+    metrics: dict[str, Any],
     exc_type: Optional[Type[BaseException]],
     exc_value: Optional[BaseException],
 ):
@@ -1390,7 +1389,7 @@ class ChromiumEventLogger:
             self.tls.pt2_compile_substack = []
             return self.tls.pt2_compile_substack
 
-    def get_event_data(self) -> Dict[str, Any]:
+    def get_event_data(self) -> dict[str, Any]:
         if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
         return self.tls.event_data
@@ -1436,7 +1435,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         log_pt2_compile_event: bool = False,
         compile_id: Optional[CompileId] = None,
     ) -> None:
@@ -1476,7 +1475,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         start_time_ns: int,
         log_pt2_compile_event: bool,
         compile_id: Optional[CompileId] = None,
@@ -1550,8 +1549,8 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         phase: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
         """
@@ -1578,7 +1577,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         # By default, an instant event isn't logged internally, only to structured logging.
         log_pt2_compile_event: bool = False,
     ) -> None:
@@ -1664,7 +1663,7 @@ def chromium_event_timed(
 class CleanupHook:
     """Remove a global variable when hook is called"""
 
-    scope: Dict[str, Any]
+    scope: dict[str, Any]
     name: str
 
     def __call__(self, *args):
@@ -1777,7 +1776,7 @@ def clone_input(x, *, dtype=None):
 
 
 def clone_inputs(example_inputs):
-    res: Union[Dict[Any, Any], List[Any]]
+    res: Union[dict[Any, Any], List[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -1916,7 +1915,7 @@ def namedtuple_fields(cls) -> tuple[str, ...]:
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: Dict[str, int] = {}
+    fields: dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
             fields[name] = getattr(obj, name).index
@@ -3999,7 +3998,7 @@ def _extract_tensor_dict(t):
 # This is useful for reconstructing within the Dynamo graph the non-graph-input objects
 # whose lifetime is governed by the user.
 # e.g. torch.cuda.Event is a prime example.
-user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[object]] = {}
+user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
 
 
 def get_user_object_from_id(obj_id):

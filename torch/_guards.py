@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
     List,
     NamedTuple,
@@ -500,7 +499,7 @@ class GuardsCheckpointState:
 
 
 class ModuleContextCheckpointState:
-    nn_modules: Dict[str, torch.nn.Module] = {}
+    nn_modules: dict[str, torch.nn.Module] = {}
 
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
@@ -523,7 +522,7 @@ class ModuleContextCheckpointState:
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
     def __init__(self) -> None:
-        self.nn_modules: Dict[str, Any] = {}
+        self.nn_modules: dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
@@ -534,7 +533,7 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    global_state: Dict[str, Tuple[Callable, ...]] = {}
+    global_state: dict[str, Tuple[Callable, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -572,7 +571,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     }
 
     def __init__(self) -> None:
-        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+        self.global_state: dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -674,9 +673,9 @@ class HopSubgraphCache:
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
-        self.autograd_cache: Dict[str, Callable] = {}
-        self.proxy_dispatch_cache: Dict[str, Callable] = {}
-        self.dynamo_identifiers: Dict[str, str] = {}
+        self.autograd_cache: dict[str, Callable] = {}
+        self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.dynamo_identifiers: dict[str, str] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier

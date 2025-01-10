@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set
+from typing import Any, Set
 
 
 NodeMetadataValue = Any
@@ -14,8 +14,8 @@ PROTECTED_KEYS: Set[str] = {
 
 
 class NodeMetadata:
-    def __init__(self, data: Dict[str, Any]) -> None:
-        self.data: Dict[str, Any] = data.copy()
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.data: dict[str, Any] = data.copy()
 
     def __getitem__(self, key: str) -> NodeMetadataValue:
         return self.data[key]

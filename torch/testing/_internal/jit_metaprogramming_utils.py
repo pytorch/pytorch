@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import is_iterable_of_tensors, noncont
 
 import collections
 from copy import deepcopy
-from typing import Any, Dict, List, Union
+from typing import Any, List, Union
 import math  # noqa: F401
 
 # Testing utils
@@ -409,10 +409,10 @@ class SplitInputs:
     tensor_args: List[Any]
     nontensor_args: List[Any]
     arg_types: List[str]
-    tensor_kwargs: Dict[str, Any]
+    tensor_kwargs: dict[str, Any]
     kwarg_order: List[str]
-    nontensor_kwargs: Dict[str, Any]
-    kwarg_types: Dict[str, Any]
+    nontensor_kwargs: dict[str, Any]
+    kwarg_types: dict[str, Any]
 
     @staticmethod
     def _is_tensor_input(arg):

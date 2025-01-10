@@ -3,7 +3,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -140,8 +140,8 @@ def try_use_slice(base, tensor):
 def write_view_information_to_args(
     mutable_arg_names: List[str],
     mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    arg_to_base_index: Dict[str, Any],
+    kwargs: dict[str, Any],
+    arg_to_base_index: dict[str, Any],
 ):
     """
     This function writes the view information into kwargs. It reads mutable_args from kwargs.
@@ -218,7 +218,7 @@ def write_view_information_to_args(
 def read_view_information_from_args(
     mutable_arg_names: List[str],
     mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     all_bases: List[Tensor],
 ):
     """
@@ -255,7 +255,7 @@ def read_view_information_from_args(
             # This means that the argument is the base tensor
             return NotView(base_index)
 
-    args_view_info: Dict[str, Any] = {}
+    args_view_info: dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         if isinstance(arg_type, torch.ListType):
             length = get_arg(f"_{arg_name}_length")
@@ -434,7 +434,7 @@ def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
 def do_auto_functionalize(
     op: OpOverload,
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
@@ -523,7 +523,7 @@ def do_auto_functionalize(
 def do_auto_functionalize_v2(
     op: OpOverload,
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
@@ -554,7 +554,7 @@ def do_auto_functionalize_v2(
     all_bases_addresses: list[int] = []
 
     # Map arg_name to the index of its base in all_bases.
-    arg_to_base_index: Dict[str, Any] = {}
+    arg_to_base_index: dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
         base = tensor if get_base(tensor) is None else get_base(tensor)
@@ -795,7 +795,7 @@ def auto_functionalized_v2_dense(
 def auto_functionalized_v2_fake(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
+    **kwargs: dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_v2_dense(
@@ -808,7 +808,7 @@ def auto_functionalized_v2_fake(
 def auto_functionalized_v2_proxy(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
+    **kwargs: dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)

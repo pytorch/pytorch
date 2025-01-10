@@ -13,7 +13,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import torch
 import torch.nn as nn
@@ -789,9 +789,9 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
         missing_keys: List[str],
         unexpected_keys: List[str],
@@ -849,9 +849,9 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict_script(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
         missing_keys: List[str],
         unexpected_keys: List[str],

@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, List, Optional
 
 from torch._export.serde.union import _Union
 
@@ -211,7 +211,7 @@ class Node:
     target: Annotated[str, 10]
     inputs: Annotated[List[NamedArgument], 20]
     outputs: Annotated[List[Argument], 30]
-    metadata: Annotated[Dict[str, str], 40]
+    metadata: Annotated[dict[str, str], 40]
 
 
 @dataclass
@@ -219,16 +219,16 @@ class Graph:
     inputs: Annotated[List[Argument], 10]
     outputs: Annotated[List[Argument], 20]
     nodes: Annotated[List[Node], 30]
-    tensor_values: Annotated[Dict[str, TensorMeta], 40]
-    sym_int_values: Annotated[Dict[str, SymInt], 50]
-    sym_bool_values: Annotated[Dict[str, SymBool], 60]
+    tensor_values: Annotated[dict[str, TensorMeta], 40]
+    sym_int_values: Annotated[dict[str, SymInt], 50]
+    sym_bool_values: Annotated[dict[str, SymBool], 60]
     # This is for deserializing the submodule graphs from higher order ops
     # (ex. cond, map) where single tensor returns will just return a single
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: Annotated[bool, 70] = False
-    custom_obj_values: Annotated[Dict[str, CustomObjArgument], 80] = field(default_factory=dict)
-    sym_float_values: Annotated[Dict[str, SymFloat], 90] = field(default_factory=dict)
+    custom_obj_values: Annotated[dict[str, CustomObjArgument], 80] = field(default_factory=dict)
+    sym_float_values: Annotated[dict[str, SymFloat], 90] = field(default_factory=dict)
 
 @dataclass
 class UserInputSpec:
@@ -384,7 +384,7 @@ class GraphModule:
     # the modules in order to unflatten the modules back to the eager calling
     # conventions.
     module_call_graph: Annotated[List[ModuleCallEntry], 60]
-    metadata: Annotated[Dict[str, str], 40] = field(default_factory=dict)
+    metadata: Annotated[dict[str, str], 40] = field(default_factory=dict)
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
@@ -399,8 +399,8 @@ class SchemaVersion:
 class ExportedProgram:
     graph_module: Annotated[GraphModule, 10]
     # Key is the opset namespace (ex. aten), and value is the version number
-    opset_version: Annotated[Dict[str, int], 20]
-    range_constraints: Annotated[Dict[str, RangeConstraint], 30]
+    opset_version: Annotated[dict[str, int], 20]
+    range_constraints: Annotated[dict[str, RangeConstraint], 30]
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[List[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"

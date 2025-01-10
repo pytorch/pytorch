@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import logging
-from typing import Any, Dict, Optional, Protocol, Tuple, Union
+from typing import Any, Optional, Protocol, Tuple, Union
 
 import torch
 from torch._library.utils import parse_namespace
@@ -56,7 +56,7 @@ class HasStaticMethodFromReal(Protocol):
 
 class FakeClassRegistry:
     def __init__(self) -> None:
-        self._registered_class: Dict[str, Any] = {}
+        self._registered_class: dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:
         return full_qualname in self._registered_class

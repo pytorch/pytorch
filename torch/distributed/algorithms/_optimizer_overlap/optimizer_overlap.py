@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from abc import ABC, abstractmethod
-from typing import Dict, Type
+from typing import Type
 
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
 from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
@@ -15,7 +15,7 @@ from torch.optim import Optimizer
 
 
 # Contains the mappings between the regular and overlapped optimizer types.
-_registered_overlapped_optims: Dict[Type, Type] = {}
+_registered_overlapped_optims: dict[Type, Type] = {}
 
 
 def register_overlapped(optim_cls):

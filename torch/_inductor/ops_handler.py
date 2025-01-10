@@ -3,7 +3,6 @@ import itertools
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
     List,
     Literal,
@@ -1076,7 +1075,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
 
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache: Dict[str, Union[T, tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, List, Optional, Set, Union
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -39,7 +39,7 @@ def get_node_first_input_and_output_type(
     node: Node,
     gm: GraphModule,
     logger_cls: Callable,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
+    node_type_to_io_type_map: dict[str, Set[NSNodeTargetType]],
 ) -> tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     # TODO(future PR): clean this up
     FUNS_IO_TYPE_FP32 = node_type_to_io_type_map["funs_io_type_fp32"]
@@ -161,7 +161,7 @@ def get_node_first_input_and_output_type(
 def get_node_input_qparams(
     node: Node,
     gm: GraphModule,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
+    node_type_to_io_type_map: dict[str, Set[NSNodeTargetType]],
 ) -> Optional[tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
     """
     Returns the qparams (scale, zero_point) of the first input to `node`,

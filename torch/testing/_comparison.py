@@ -7,7 +7,6 @@ from typing import (
     Any,
     Callable,
     Collection,
-    Dict,
     List,
     NoReturn,
     Optional,
@@ -83,7 +82,7 @@ _DTYPE_PRECISIONS.update(
 
 def default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[Dict[torch.dtype, Tuple[float, float]]] = None,
+    dtype_precisions: Optional[dict[torch.dtype, Tuple[float, float]]] = None,
 ) -> Tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 

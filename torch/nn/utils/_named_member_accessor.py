@@ -1,7 +1,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Iterable, List, Tuple
 
 import torch
 
@@ -113,7 +113,7 @@ class NamedMemberAccessor:
 
     def __init__(self, module: "torch.nn.Module") -> None:
         self.module = module
-        self.memo: Dict[str, torch.nn.Module] = {}
+        self.memo: dict[str, torch.nn.Module] = {}
 
     # Nested attribute access
 
@@ -252,7 +252,7 @@ class NamedMemberAccessor:
         for name, value in zip(names, values):
             self.set_tensor(name, value)
 
-    def set_tensors_dict(self, named_tensors: Dict[str, torch.Tensor]) -> None:
+    def set_tensors_dict(self, named_tensors: dict[str, torch.Tensor]) -> None:
         """
         Set the attributes specified by the given paths to values.
 
@@ -301,8 +301,8 @@ class NamedMemberAccessor:
         ]
 
     def swap_tensors_dict(
-        self, named_tensors: Dict[str, torch.Tensor], allow_missing: bool = False
-    ) -> Tuple[Dict[str, torch.Tensor], List[str]]:
+        self, named_tensors: dict[str, torch.Tensor], allow_missing: bool = False
+    ) -> Tuple[dict[str, torch.Tensor], List[str]]:
         """
         Swap the attributes specified by the given paths to values.
 

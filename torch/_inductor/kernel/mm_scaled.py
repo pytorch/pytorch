@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import sympy
 
@@ -428,7 +428,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -464,7 +464,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )

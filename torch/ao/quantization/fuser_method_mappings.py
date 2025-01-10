@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import torch.ao.nn.intrinsic as nni
 import torch.nn as nn
@@ -191,7 +191,7 @@ def _sequential_wrapper2(sequential):
     return fuser_method
 
 
-_DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
+_DEFAULT_OP_LIST_TO_FUSER_METHOD: dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -275,7 +275,7 @@ def _get_valid_patterns(op_pattern):
 
 def get_fuser_method_new(
     op_pattern: Pattern,
-    fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]],
+    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]],
 ):
     """Get fuser method.
 

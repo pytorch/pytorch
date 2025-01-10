@@ -86,7 +86,7 @@ across models. Example usage::
 """
 
 import collections
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Set, Type, TYPE_CHECKING
 
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
@@ -307,7 +307,7 @@ def _extract_weights_one_model(
     nodes_and_names_to_instrument: List[tuple[Node, str]],
     results: NSResultsType,
     op_to_type_to_weight_extraction_fn: Optional[
-        Dict[str, Dict[Callable, Callable]]
+        dict[str, dict[Callable, Callable]]
     ] = None,
 ) -> None:
     torch._C._log_api_usage_once(
@@ -329,10 +329,10 @@ def _extract_weights_impl(
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
     op_to_type_to_weight_extraction_fn: Optional[
-        Dict[str, Dict[Callable, Callable]]
+        dict[str, dict[Callable, Callable]]
     ] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once(
@@ -381,10 +381,10 @@ def extract_weights(
     model_a: nn.Module,
     model_name_b: str,
     model_b: nn.Module,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
     op_to_type_to_weight_extraction_fn: Optional[
-        Dict[str, Dict[Callable, Callable]]
+        dict[str, dict[Callable, Callable]]
     ] = None,
 ) -> NSResultsType:
     """
@@ -449,8 +449,8 @@ def _add_loggers_one_model(
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    node_to_instrument_inputs_to_ref_name: Dict[Node, tuple[str, str]] = {}
-    node_to_instrument_outputs_to_ref_name: Dict[Node, tuple[str, str]] = {}
+    node_to_instrument_inputs_to_ref_name: dict[Node, tuple[str, str]] = {}
+    node_to_instrument_outputs_to_ref_name: dict[Node, tuple[str, str]] = {}
     for node, ref_name, ref_node_type in nodes_and_names_to_instrument_inputs:
         node_to_instrument_inputs_to_ref_name[node] = (ref_name, ref_node_type)
     for node, ref_name, ref_node_type in nodes_and_names_to_instrument_outputs:
@@ -473,8 +473,8 @@ def _add_loggers_impl(
     gm_b: GraphModule,
     logger_cls: Callable,
     should_log_inputs: bool,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
 ) -> tuple[nn.Module, nn.Module]:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
@@ -529,8 +529,8 @@ def add_loggers(
     model_b: nn.Module,
     logger_cls: Callable,
     should_log_inputs: bool = False,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
 ) -> tuple[nn.Module, nn.Module]:
     """
     Instrument model A and model B with loggers.
@@ -675,9 +675,9 @@ def _add_shadow_loggers_impl(
     gm_b: GraphModule,
     logger_cls: Callable,
     should_log_inputs: bool,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    node_type_to_io_type_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._add_shadow_loggers_impl"
@@ -705,9 +705,9 @@ def add_shadow_loggers(
     model_b: nn.Module,
     logger_cls: Callable,
     should_log_inputs: bool = False,
-    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    node_type_to_io_type_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
     """
     Instrument model A and model B with shadow loggers.
@@ -849,7 +849,7 @@ def prepare_n_shadows_model(
     qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
     custom_tracer: Any = None,
 ) -> GraphModule:
     """
@@ -916,11 +916,11 @@ def prepare_n_shadows_model(
         standalone_module_classes,
         custom_module_classes,
     )
-    subgraphs_dedup: Dict[str, List[Node]] = _get_dedup_subgraphs(matches)
+    subgraphs_dedup: dict[str, List[Node]] = _get_dedup_subgraphs(matches)
 
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
+    list_of_node_name_to_qconfig: List[dict[str, QConfigAny]] = []
     for qconfig_mapping in qconfig_multi_mapping.qconfig_mappings_list:
         node_name_to_qconfig = _generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope
@@ -1018,7 +1018,7 @@ def _prepare_n_shadows_add_loggers_model(
         standalone_module_classes,
         custom_module_classes,
     )
-    subgraphs_dedup: Dict[str, List[Node]] = _get_dedup_subgraphs(matches)
+    subgraphs_dedup: dict[str, List[Node]] = _get_dedup_subgraphs(matches)
 
     # generate node to qconfig for each subgraph
     node_name_to_qconfig = _generate_node_name_to_qconfig(
@@ -1086,7 +1086,7 @@ def loggers_set_save_activations(
 def convert_n_shadows_model(
     model: GraphModule,
     custom_convert_fn: Optional[Callable] = None,
-    custom_convert_kwargs: Optional[Dict[str, Any]] = None,
+    custom_convert_kwargs: Optional[dict[str, Any]] = None,
 ) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`

@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -216,11 +216,11 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -242,7 +242,7 @@ use_mixed_mm = True
 # floating point numbers,about 16 decimal digits for double precision floating point numbers)
 # according to PyTorch documentation.
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
-fx_passes_numeric_check: Dict[str, Any] = {
+fx_passes_numeric_check: dict[str, Any] = {
     "pre_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
@@ -1093,7 +1093,7 @@ class aot_inductor:
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
-    metadata: Dict[str, str] = {}
+    metadata: dict[str, str] = {}
 
     # fbcode only. Whether to raise error if C++ codegen is too big to optimize
     raise_error_on_ignored_optimization: bool = (
@@ -1104,7 +1104,7 @@ class aot_inductor:
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
     # Dictionary of presets that can be passed in
-    presets: Dict[str, Any] = {}
+    presets: dict[str, Any] = {}
 
     # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
     # should be run with this flag both on and off to make sure we have coverage.

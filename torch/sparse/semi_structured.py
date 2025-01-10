@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -54,13 +54,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     _DEFAULT_ALG_ID: int = 0
-    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
+    _DTYPE_SHAPE_CONSTRAINTS: dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
     _FORCE_CUTLASS: bool = False
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
     BACKEND: str
-    SPARSE_DISPATCH: Dict[Callable, Callable]
+    SPARSE_DISPATCH: dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
     meta: Optional[torch.Tensor]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, TYPE_CHECKING, Union
+from typing import Any, Callable, List, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 __all__ = ["QConfigMultiMapping"]
 
-_QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
+_QCONFIG_STYLE_TO_METHOD: dict[str, str] = {
     "global_qconfig": "set_global",
     "object_type_qconfigs": "set_object_type",
     "module_name_regex_qconfigs": "set_module_name_regex",
@@ -229,7 +229,7 @@ class QConfigMultiMapping:
         for style in _QCONFIG_STYLE_ORDER[1:]:
             # gather all key+qconfigs for current style
             # into qconfig_dict_list
-            qconfig_dict_list: Dict[Any, List[QConfigAny]] = {}
+            qconfig_dict_list: dict[Any, List[QConfigAny]] = {}
             for qconfig_mapping in qconfig_mapping_list:
                 qconfig_dict = getattr(qconfig_mapping, style)
                 for key, qconfig in qconfig_dict.items():

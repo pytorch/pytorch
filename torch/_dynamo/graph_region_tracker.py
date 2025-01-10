@@ -9,7 +9,6 @@ from typing import (
     Any,
     Callable,
     Deque,
-    Dict,
     List,
     Optional,
     Set,
@@ -187,8 +186,8 @@ class GraphRegionTracker:
     """
 
     def __init__(self) -> None:
-        self.hash_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
-        self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
+        self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
+        self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(

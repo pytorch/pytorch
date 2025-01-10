@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -153,8 +153,8 @@ def get_qlinear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     return weight
 
 
-def get_op_to_type_to_weight_extraction_fn() -> Dict[str, Dict[Callable, Callable]]:
-    op_to_type_to_weight_extraction_fn: Dict[str, Dict[Callable, Callable]] = {
+def get_op_to_type_to_weight_extraction_fn() -> dict[str, dict[Callable, Callable]]:
+    op_to_type_to_weight_extraction_fn: dict[str, dict[Callable, Callable]] = {
         "call_module": {
             # Conv1d
             nn.Conv1d: mod_weight_detach,
@@ -222,7 +222,7 @@ def extract_weight_from_node(
     node: Node,
     gm: GraphModule,
     op_to_type_to_weight_extraction_fn: Optional[
-        Dict[str, Dict[Callable, Callable]]
+        dict[str, dict[Callable, Callable]]
     ] = None,
 ) -> Optional[NSSingleResultType]:
     res_type = NSSingleResultValuesType.WEIGHT.value

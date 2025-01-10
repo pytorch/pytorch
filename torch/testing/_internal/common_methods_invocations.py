@@ -6637,7 +6637,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
     batch_size, num_classes = shape = (2, 3)
     reductions = ("mean", "sum", "none")
 
-    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
+    input_shape_and_kwargs: List[Tuple[Tuple[int, ...], dict[str, Any]]] = [
         (shape, {}),
         ((*shape, 1), {}),
         ((*shape, 1, 2), {}),

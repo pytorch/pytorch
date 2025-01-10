@@ -3,7 +3,7 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from typing import Any, DefaultDict, Deque, Dict, Iterable, Iterator, List, Optional
+from typing import Any, DefaultDict, Deque, Iterable, Iterator, List, Optional
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
@@ -105,8 +105,8 @@ class GroupBatchFusionBase:
         raise NotImplementedError("fuse called on base")
 
 
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
+PRE_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
+POST_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
 
 
 def register_fusion(name: str, pre_grad=True):
@@ -1201,7 +1201,7 @@ class _OrderedSet:
 
 def find_independent_subset_greedy(
     node_list: Iterable[torch.fx.Node],
-    graph_search_options: Dict[str, Any],
+    graph_search_options: dict[str, Any],
 ) -> Iterator[Iterable[torch.fx.Node]]:
     """
     Yields a list of subsets of `node_list` where no element in the subset
@@ -1248,7 +1248,7 @@ def find_independent_subset_greedy(
     # keep the correct order.
     node_list = _OrderedSet(node_list)
 
-    cache: Dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
+    cache: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
     while node_list:
         subset: List[torch.fx.Node] = []
         subset_deps = OrderedSet[torch.fx.Node]()
@@ -1351,7 +1351,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
 
 
-def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
+def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     for name, options in config_options.items():
         # we skip all patterns from pattern_matcher passes (e.g., split_cat)

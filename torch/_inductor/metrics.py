@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -122,7 +122,7 @@ class CachedMetricsHelper:
             globals()[metric] += getattr(delta, metric)
 
 
-REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
+REGISTERED_METRIC_TABLES: dict[str, MetricTable] = {}
 
 
 @dataclass

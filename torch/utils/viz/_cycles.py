@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, List, NamedTuple, Optional, Tuple
 import types
 import weakref
 import json
@@ -101,7 +101,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: Dict[int, List[str]] = {}
+    references: dict[int, List[str]] = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -293,7 +293,7 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: Dict[int, int] = {}
+    id_to_filtered_id: dict[int, int] = {}
     filtered: List[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:

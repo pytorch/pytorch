@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, Callable, cast, Iterable, List, Optional, Sequence, Union
 
 import sympy
 from sympy import Expr
@@ -60,7 +60,7 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
         # f(s0), we may choose to precompute it on the host and then replace
@@ -71,8 +71,8 @@ class SizeVarAllocator:
         # which potentially could have already had a precomputed replacement
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
-        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = {}
-        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = {}
+        self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
+        self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -84,7 +84,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[tuple[Any, ...], Expr] = {}
+        cache: dict[tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -106,7 +106,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[tuple[Any, ...], Any] = {}
+        cache: dict[tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):

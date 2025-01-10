@@ -16,7 +16,7 @@ from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
-_group_name_to_store: Dict[str, c10d.Store] = {}
+_group_name_to_store: dict[str, c10d.Store] = {}
 
 
 def enable_symm_mem_for_group(group_name: str) -> None:
@@ -96,7 +96,7 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     return _is_test_mode or group_name in _group_name_to_store
 
 
-_group_name_to_workspace_tensor: Dict[str, Optional[torch.Tensor]] = {}
+_group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
 
 
 def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
@@ -140,7 +140,7 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_streams: Dict[int, torch.cuda.Stream] = {}
+_backend_streams: dict[int, torch.cuda.Stream] = {}
 
 
 def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
@@ -508,7 +508,7 @@ def _fused_all_gather_matmul_impl(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: Optional[torch.Tensor],
-    kwargs_list: List[Dict[str, Any]],
+    kwargs_list: List[dict[str, Any]],
     out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
@@ -1006,7 +1006,7 @@ def _fused_matmul_reduce_scatter_impl(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: Optional[torch.Tensor],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
     scatter_dim: int,

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -323,9 +323,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.recompile()
 
 
-def _get_node_name_to_scope(model: GraphModule) -> Dict[str, tuple[str, type]]:
+def _get_node_name_to_scope(model: GraphModule) -> dict[str, tuple[str, type]]:
     # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, tuple[str, type]] = {}
+    node_name_to_scope: dict[str, tuple[str, type]] = {}
     for n in model.graph.nodes:
         nn_module_stack = n.meta.get("nn_module_stack", None)
         current_scope = ("", type(None))
@@ -459,7 +459,7 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
+    literal_to_ph: dict[Union[float, bool, int, torch.dtype], Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -498,7 +498,7 @@ def _replace_literals_with_new_placeholders(
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
     exclude_literals: Optional[List[Any]] = None,
-    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None,
+    literal_to_ph_idx: Optional[dict[Union[float, int, bool, torch.dtype], int]] = None,
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced

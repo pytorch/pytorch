@@ -104,7 +104,7 @@ def post_training_sparse_quantize(
         torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
-        quantize_params: Dict[str, Dict] = {
+        quantize_params: dict[str, Dict] = {
             "scales": {},
             "zero_points": {},
             "dequant_weights": {},

@@ -160,10 +160,10 @@ class _PipelineStageBase(ABC):
         self.dw_builder = dw_builder
 
         # backward state
-        self.backward_state: Dict[int, Tuple[Any, ...]] = {}
+        self.backward_state: dict[int, Tuple[Any, ...]] = {}
 
         # store dw_runner per microbatch_id
-        self.dw_runner: Dict[int, Callable[..., None]] = {}
+        self.dw_runner: dict[int, Callable[..., None]] = {}
 
         # `group_rank` is rank in process group `group`.
         self.group_rank = dist.get_rank(self.group)
@@ -176,9 +176,9 @@ class _PipelineStageBase(ABC):
         # Run time states
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
-        self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
+        self.fwd_cache: dict[int, Tuple[Any, List[torch.Tensor]]] = {}
         # map microbatch ID to list of backward grad tensor args
-        self.bwd_cache: Dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
+        self.bwd_cache: dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
 
@@ -189,8 +189,8 @@ class _PipelineStageBase(ABC):
         self.log_prefix = f"[Stage {self.stage_index}]"
 
         # Forward infra
-        self.args_recv_info: Dict[int, Tuple[InputInfo, ...]] = {}
-        self.act_send_info: Dict[int, List] = {}
+        self.args_recv_info: dict[int, Tuple[InputInfo, ...]] = {}
+        self.act_send_info: dict[int, List] = {}
 
         # Backward infra will created lazily
         self.grad_recv_info: Dict = {}
@@ -198,7 +198,7 @@ class _PipelineStageBase(ABC):
 
         # To be populated later by the Schedule
         self.chunks: Optional[int] = None
-        self.stage_index_to_group_rank: Dict[int, int] = {
+        self.stage_index_to_group_rank: dict[int, int] = {
             i: i % self.group_size for i in range(self.num_stages)
         }
 
@@ -286,7 +286,7 @@ class _PipelineStageBase(ABC):
         self,
         num_microbatches: int,
         args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> Tuple[Any, ...]:
         raise NotImplementedError
 
@@ -576,7 +576,7 @@ class _PipelineStageBase(ABC):
 
     def backward_maybe_with_nosync(
         self, backward_type, bwd_kwargs: Dict, last_backward=False
-    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
+    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -588,7 +588,7 @@ class _PipelineStageBase(ABC):
             backward_type,
         ) -> Callable[
             [],
-            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]],
+            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[dict[str, Any]]]],
         ]:
             if backward_type == "full":
                 return lambda: (
@@ -661,7 +661,7 @@ class _PipelineStageBase(ABC):
         self,
         fwd_chunk_id: int,
         args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         """
         Perform forward pass on the stage with one microbatch.
@@ -790,7 +790,7 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                param_groups: List[Dict[str, Any]] | None = None
+                param_groups: List[dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
@@ -959,7 +959,7 @@ class _PipelineStage(_PipelineStageBase):
         )
 
         # Create mapping from stage name to stage index
-        self.submod_to_stage_index: Dict[str, int] = {}
+        self.submod_to_stage_index: dict[str, int] = {}
         for i, node in enumerate(submod_nodes):
             self.submod_to_stage_index.setdefault(node.name, i)
 
@@ -983,7 +983,7 @@ class _PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> Tuple[Any, ...]:
         """
         Create send/recv infrastructures for activations (during forward)
@@ -1107,7 +1107,7 @@ class _PipelineStage(_PipelineStageBase):
         be consumed by multiple stages.
         """
         # Output index: List of receiver ranks
-        act_send_info: Dict[int, List] = {}
+        act_send_info: dict[int, List] = {}
         out_idx = 0
 
         for user in self.node.users:
@@ -1150,7 +1150,7 @@ class _PipelineStage(_PipelineStageBase):
         Create a tuple of `_RecvInfo` for gradients.
         """
         # Dict[output_index, _RecvInfo]
-        grad_recv_info: Dict[int, _RecvInfo] = {}
+        grad_recv_info: dict[int, _RecvInfo] = {}
         output_node = self._get_output_node()
 
         # The output node may take multiple args, meaning the submod having multiple output values.
@@ -1315,7 +1315,7 @@ class PipelineStage(_PipelineStageBase):
     def _shape_inference(
         self,
         args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -1411,7 +1411,7 @@ class PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> Tuple[Any, ...]:
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"
@@ -1449,7 +1449,7 @@ class PipelineStage(_PipelineStageBase):
 
         # Send info during forward for each activation
         # only need the rank that is being sent to
-        self.act_send_info: Dict[int, List] = {}
+        self.act_send_info: dict[int, List] = {}
 
         for idx in range(len(self.get_outputs_meta())):
             # We assume we always send to stage + 1

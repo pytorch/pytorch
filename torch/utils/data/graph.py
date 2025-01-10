@@ -3,7 +3,7 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
-from typing import Dict, List, Optional, Set, Type, Union
+from typing import List, Optional, Set, Type, Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -12,7 +12,7 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 __all__ = ["traverse", "traverse_dps"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
-DataPipeGraph = Dict[int, tuple[DataPipe, "DataPipeGraph"]]
+DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
 def _stub_unpickler():

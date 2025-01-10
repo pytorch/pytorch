@@ -19,7 +19,6 @@ from io import StringIO
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Type,
@@ -86,7 +85,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = {}
+VERIFY: dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -226,7 +225,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         self,
         kernel,
         subgraph_number: int,
-        fixed_inputs: Dict[str, Any],
+        fixed_inputs: dict[str, Any],
         mask: Optional[str],
     ):
         super().__init__(V.ops)
@@ -317,7 +316,7 @@ class TritonTemplateKernel(TritonKernel):
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: Optional[Dict[str, object]] = None
+        self.triton_meta: Optional[dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
@@ -330,7 +329,7 @@ class TritonTemplateKernel(TritonKernel):
         # used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
         # `set_subgraph_body`
-        self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
+        self.subgraph_bodies: dict[str, SubgraphInfo] = {}
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
@@ -420,7 +419,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta: Dict[str, Any] = {
+        triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=self.index_dtype, argdefs=argdefs
             ),
@@ -1032,7 +1031,7 @@ def _jinja2_env():
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = {}
+    all_templates: dict[str, "TritonTemplate"] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
@@ -1292,7 +1291,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         description,
         bmreq,
         log_info: Optional[
-            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+            dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
         workspace_arg: Optional[WorkspaceArg] = None,
@@ -1303,7 +1302,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
             log_info = {}
-        self.log_info: Dict[str, Any] = log_info
+        self.log_info: dict[str, Any] = log_info
         self.log_info.update(
             {
                 "backend": "Triton",
@@ -1351,7 +1350,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             )
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
 
@@ -1447,7 +1446,7 @@ class ExternKernelCaller(ChoiceCaller):
 
         return ir.TensorBox.create(inner)
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "extern",
@@ -1609,11 +1608,11 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: Dict[str, Callable[[], None]] = {}
+        self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
         self.feedback_saver_fns: List[
             Callable[
-                [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+                [dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
             ]
         ] = []
 
@@ -1628,7 +1627,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # corresponding ir.Buffer. if passed for a given
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
-        input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
     ):
@@ -1761,9 +1760,9 @@ class AlgorithmSelectorCache(PersistentCache):
             executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
 
-            futures: Dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
-            start_times: Dict[concurrent.futures.Future[Any], float] = {}
-            elapsed_times: Dict[concurrent.futures.Future[Any], float] = {}
+            futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
+            start_times: dict[concurrent.futures.Future[Any], float] = {}
+            elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
 
             for c in choices:
                 if hasattr(c, "precompile"):
@@ -1997,7 +1996,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(
             choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
-        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+        ) -> dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
             timings = {}
             for choice in choices:
@@ -2070,7 +2069,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def log_results(
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: Dict[ChoiceCaller, float],
+        timings: dict[ChoiceCaller, float],
         elapse: float,
         precompile_elapse: float,
     ):
@@ -2227,7 +2226,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(
         self,
         fn: Callable[
-            [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+            [dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
         ],
     ):
         self.feedback_saver_fns.append(fn)
@@ -2250,7 +2249,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
 
 def add_feedback_saver(
-    fn: Callable[[Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None]
+    fn: Callable[[dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None]
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:

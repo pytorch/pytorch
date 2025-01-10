@@ -4,7 +4,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -84,7 +84,7 @@ class ShapeEnvEvent:
 
     # Arguments and keyword arguments called with.
     args: Optional[List[Any]] = None
-    kwargs: Optional[Dict[str, Any]] = None
+    kwargs: Optional[dict[str, Any]] = None
 
     # List of tracked_fakes at the time the method was called.
     tracked_fakes: Optional[List[Any]] = None

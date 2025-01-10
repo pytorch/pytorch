@@ -15,7 +15,6 @@ from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     List,
     Optional,
@@ -397,7 +396,7 @@ class TuningProcessPool:
     def benchmark(
         self,
         choices: List[TritonTemplateCaller],
-    ) -> Dict[TritonTemplateCaller, float]:
+    ) -> dict[TritonTemplateCaller, float]:
         """
         Benchmark each choice in a separate process.
         """
@@ -941,7 +940,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
 
 def benchmark_in_sub_process(
     choices: List[TritonTemplateCaller],
-) -> Dict[TritonTemplateCaller, float]:
+) -> dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """

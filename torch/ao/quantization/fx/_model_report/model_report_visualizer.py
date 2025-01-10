@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict as OrdDict
-from typing import Any, Dict, List, OrderedDict, Set
+from typing import Any, List, OrderedDict, Set
 
 import torch
 
@@ -125,7 +125,7 @@ class ModelReportVisualizer:
         unique_feature_names = set()
         for module_fqn in self.generated_reports:
             # get dict of the features
-            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
+            feature_dict: dict[str, Any] = self.generated_reports[module_fqn]
 
             # loop through features
             for feature_name in feature_dict:
@@ -179,7 +179,7 @@ class ModelReportVisualizer:
 
     def _generate_tensor_table(
         self,
-        filtered_data: OrderedDict[str, Dict[str, Any]],
+        filtered_data: OrderedDict[str, dict[str, Any]],
         tensor_features: List[str],
     ) -> tuple[List, List]:
         r"""
@@ -297,7 +297,7 @@ class ModelReportVisualizer:
 
     def generate_filtered_tables(
         self, feature_filter: str = "", module_fqn_filter: str = ""
-    ) -> Dict[str, tuple[List, List]]:
+    ) -> dict[str, tuple[List, List]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 

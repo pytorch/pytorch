@@ -18,7 +18,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -357,8 +357,8 @@ class RunResult:
     """
 
     state: WorkerState
-    return_values: Dict[int, Any] = field(default_factory=dict)
-    failures: Dict[int, ProcessFailure] = field(default_factory=dict)
+    return_values: dict[int, Any] = field(default_factory=dict)
+    failures: dict[int, ProcessFailure] = field(default_factory=dict)
 
     def is_failed(self) -> bool:
         return self.state == WorkerState.FAILED
@@ -448,7 +448,7 @@ class SimpleElasticAgent(ElasticAgent):
         return self._worker_group
 
     @abc.abstractmethod
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         r"""Start ``worker_group.spec.local_world_size`` number of workers.
 
         This is according to worker spec for the worker group .

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 import torch.fx
@@ -124,13 +124,13 @@ class _MinimizerBase:
         self.exclusion_fn = exclusion_fn
 
         # Stores outputs of run_a function
-        self.a_outputs: Dict[str, Any] = {}
+        self.a_outputs: dict[str, Any] = {}
 
         # Stores outputs of run_b function
-        self.b_outputs: Dict[str, Any] = {}
+        self.b_outputs: dict[str, Any] = {}
 
         # Stores the results of compare_fn
-        self.results: Dict[Any, Any] = {}
+        self.results: dict[Any, Any] = {}
 
         # Stores the report for the runs
         self.reports: List[List[str]] = []

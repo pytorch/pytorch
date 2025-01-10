@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
+from typing import Any, Callable, Iterable, Optional, Type, Union
 
 import torch
 
@@ -15,8 +15,8 @@ else:
 _device_t = Union[torch.device, str, int, None]
 
 # Recording the device properties in the main process but used in worker process.
-caching_worker_device_properties: Dict[str, Any] = {}
-caching_worker_current_devices: Dict[str, int] = {}
+caching_worker_device_properties: dict[str, Any] = {}
+caching_worker_current_devices: dict[str, int] = {}
 
 
 class DeviceInterface:
@@ -375,7 +375,7 @@ class MpsInterface(DeviceInterface):
             return {}
 
 
-device_interfaces: Dict[str, Type[DeviceInterface]] = {}
+device_interfaces: dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
 

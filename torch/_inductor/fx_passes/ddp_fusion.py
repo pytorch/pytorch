@@ -6,7 +6,7 @@ import math
 import operator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Dict, Generator, List, Optional, Union
+from typing import Any, Callable, cast, Generator, List, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -40,7 +40,7 @@ def call_function(
     graph: fx.Graph,
     target: Union[str, Callable[..., Any]],
     args: Optional[tuple[fx.node.Argument, ...]] = None,
-    kwargs: Optional[Dict[str, fx.node.Argument]] = None,
+    kwargs: Optional[dict[str, fx.node.Argument]] = None,
 ) -> fx.Node:
     # We accept target as a str to avoid typing error as the type of
     # a node.target is Union[str, Callable[..., Any]].
@@ -292,7 +292,7 @@ def _scatter_fused_allreduce_waits(
     graph: fx.Graph,
     fused_comm_block: CommBlock,
     orig_comm_blocks: List[CommBlock],
-    node_indices: Dict[fx.Node, int],
+    node_indices: dict[fx.Node, int],
     split_and_reshape: bool = True,
 ) -> None:
     """
@@ -377,7 +377,7 @@ def _scatter_fused_allreduce_waits(
 def _fuse_allreduce(
     graph: fx.Graph,
     comm_blocks: List[CommBlock],
-    node_indices: Dict[fx.Node, int],
+    node_indices: dict[fx.Node, int],
     use_concat: bool,
 ) -> CommBlock:
     """Given a list of allreduce CommBlock, fuse the CommBlocks into one CommBlock."""

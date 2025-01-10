@@ -3,7 +3,7 @@ import functools
 import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Dict, List, TYPE_CHECKING
+from typing import Callable, List, TYPE_CHECKING
 
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
@@ -95,7 +95,7 @@ class ShardingSpec(ABC):
 
 
 # Ops customized for a particular ShardingSpec.
-_CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
+_CUSTOM_SHARDING_SPEC_OPS: dict[str, dict[Callable, Callable]] = {}
 
 
 def _has_custom_op(sharding_spec, op):

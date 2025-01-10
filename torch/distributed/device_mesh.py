@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -66,14 +66,14 @@ else:
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: Dict[
+            self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: dict[
                 int, Tuple[str, Optional[C10dBackend.Options]]
             ] = {}
-            self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
-            self.flatten_name_to_root_dims: Dict[
-                DeviceMesh, Dict[str, Tuple[int, ...]]
+            self.flatten_name_to_root_dims: dict[
+                DeviceMesh, dict[str, Tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":

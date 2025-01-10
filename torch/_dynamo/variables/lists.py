@@ -111,7 +111,7 @@ class BaseListVariable(VariableTracker):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
             from .tensor import TensorVariable
@@ -316,7 +316,7 @@ class CommonListMethodsVariable(BaseListVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
@@ -406,7 +406,7 @@ class ListVariable(CommonListMethodsVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
@@ -533,7 +533,7 @@ class DequeVariable(CommonListMethodsVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
@@ -612,7 +612,7 @@ class TupleVariable(BaseListVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -746,7 +746,7 @@ class SizeVariable(TupleVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -848,7 +848,7 @@ class NamedTupleVariable(TupleVariable):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
             assert len(args) == 2
@@ -1119,7 +1119,7 @@ class RestrictedListSubclassVariable(ListVariable):
         tx,
         name,
         args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name in self.user_cls.__dict__:
             method = self.user_cls.__dict__[name]

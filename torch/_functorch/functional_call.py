@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -10,9 +10,9 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
+    parameter_and_buffer_dicts: Union[dict[str, Tensor], Sequence[dict[str, Tensor]]],
     args: Optional[Union[Any, Tuple]] = None,
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -126,7 +126,7 @@ def functional_call(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
         all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
-        all_keys_counter: Dict[str, int] = {}
+        all_keys_counter: dict[str, int] = {}
         for k in all_keys:
             v = all_keys_counter.get(k, 0)
             all_keys_counter[k] = v + 1
@@ -157,7 +157,7 @@ def functional_call(
 @exposed_in("torch.func")
 def stack_module_state(
     models: Union[Sequence[nn.Module], nn.ModuleList],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[dict[str, Any], dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.

@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     NamedTuple,
     Optional,
@@ -37,7 +36,7 @@ class Match(NamedTuple):
     # Node from which the match was found
     anchor: Node
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node]
+    nodes_map: dict[Node, Node]
 
 
 @compatibility(is_backward_compatible=False)
@@ -46,7 +45,7 @@ class ReplacedPatterns:
     # Node from which the match was found
     anchor: Node
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node]
+    nodes_map: dict[Node, Node]
     # List of nodes that were added into the graph
     replacements: List[Node]
 
@@ -323,7 +322,7 @@ def _replace_pattern(
         common_replacement_graph = None
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
-    match_changed_node: Dict[Node, Node] = {}
+    match_changed_node: dict[Node, Node] = {}
 
     match_and_replacements = []
     for match in _matches:
@@ -345,7 +344,7 @@ def _replace_pattern(
         # Initialize `val_map` with mappings from placeholder nodes in
         # `replacement` to their corresponding node in `original_graph`
         assert len(match.placeholder_nodes) == len(replacement_placeholders)
-        val_map: Dict[Node, Node] = {}
+        val_map: dict[Node, Node] = {}
         for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
             if isinstance(gn, Node):
                 val_map[rn] = match_changed_node.get(gn, gn)

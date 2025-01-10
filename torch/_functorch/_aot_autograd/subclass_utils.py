@@ -7,7 +7,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 
 import collections
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Iterable, List, Optional, Tuple, Type, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -59,7 +59,7 @@ def maybe_suggest_memory_format(
 
 def get_subclass_typing_container(
     tensor_subclass: torch.Tensor,
-) -> Dict[Type[torch.Tensor], List[Type[torch.Tensor]]]:
+) -> dict[Type[torch.Tensor], List[Type[torch.Tensor]]]:
     """
     Given a subclass, returns a recursive dictionary mapping each
     inner tensors to its' subclass types.
@@ -74,7 +74,7 @@ def get_subclass_typing_container(
             inner_tensor = getattr(tensor_subclass, key)
             _get_types_for_subclass(inner_tensor)
 
-    tracker: Dict[Any, List[Any]] = collections.defaultdict(list)
+    tracker: dict[Any, List[Any]] = collections.defaultdict(list)
     _get_types_for_subclass(tensor_subclass)
     return tracker
 

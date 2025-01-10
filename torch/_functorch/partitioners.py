@@ -9,7 +9,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -85,7 +85,7 @@ class NodeInfo:
     _required_fw_nodes: Set[fx.Node]
     required_bw_nodes: Set[fx.Node]
     unclaimed_nodes: Set[fx.Node]
-    fw_order: Dict[fx.Node, int]
+    fw_order: dict[fx.Node, int]
 
     @functools.cached_property
     def required_fw_nodes(self) -> List[fx.Node]:
@@ -512,7 +512,7 @@ def _size_of(node: fx.Node) -> int:
 def _count_ops(graph: fx.Graph):
     from collections import defaultdict
 
-    cnt: Dict[str, int] = defaultdict(int)
+    cnt: dict[str, int] = defaultdict(int)
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
@@ -537,7 +537,7 @@ def pointwise_ops():
     return ops
 
 
-def sort_depths(args, depth_map: Dict[fx.Node, int]) -> List[Tuple[fx.Node, int]]:
+def sort_depths(args, depth_map: dict[fx.Node, int]) -> List[Tuple[fx.Node, int]]:
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
@@ -568,7 +568,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
 
     new_graph = fx.Graph()
-    env: Dict[fx.Node, fx.Node] = {}
+    env: dict[fx.Node, fx.Node] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in gm.graph.find_nodes(op="placeholder"):
@@ -1886,7 +1886,7 @@ def min_cut_rematerialization_partition(
         }
         remat_nodes = fw_module_nodes & bw_module_nodes
 
-        counts: Dict[str, int] = defaultdict(int)
+        counts: dict[str, int] = defaultdict(int)
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1

@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Callable, cast, List, Optional, Sequence, Tuple, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -47,13 +47,13 @@ if TYPE_CHECKING:
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, weakref.ReferenceType[ShardedTensor]] = {}
+_sharded_tensor_map: dict[int, weakref.ReferenceType[ShardedTensor]] = {}
 
 # Default sharded ops
-_SHARDED_OPS: Dict[Callable, Callable] = {}
+_SHARDED_OPS: dict[Callable, Callable] = {}
 
 # Customized user ops
-_CUSTOM_SHARDED_OPS: Dict[Callable, Callable] = {}
+_CUSTOM_SHARDED_OPS: dict[Callable, Callable] = {}
 
 
 def _register_remote_shards(
@@ -290,7 +290,7 @@ class ShardedTensor(ShardedTensorBase):
         self._sharded_tensor_id = None
 
         self._process_group = self._normalize_pg(process_group)
-        self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
+        self._remote_shards: dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
         # Initialize RPC if available.
@@ -430,7 +430,7 @@ class ShardedTensor(ShardedTensorBase):
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = {}
+        shard_placement: dict[ShardMetadata, Tuple[int, int]] = {}
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
@@ -1194,7 +1194,7 @@ class ShardedTensor(ShardedTensorBase):
     ):
         self._remote_shards[rpc_rank] = remote_shards
 
-    def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
+    def remote_shards(self) -> dict[int, List[rpc.RRef[Shard]]]:
         """
         Returns a Dict[int, RRef] with keys being the RPC rank and values
         being RRefs to shards on that rank. Need to initialize the

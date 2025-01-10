@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Union
+from typing import Any, Callable, Iterable, Iterator, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -189,7 +189,7 @@ def fill_defaults(schema, args, kwargs):
 
 
 def zip_schema(
-    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Iterable[Tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
@@ -332,7 +332,7 @@ def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
 
 
 def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
+    args: Tuple[Any], kwargs: dict[str, Any], allowed_nesting: int = 1
 ) -> Iterator[torch.Tensor]:
     def check(arg):
         if isinstance(arg, torch.Tensor):

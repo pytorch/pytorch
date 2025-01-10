@@ -2,7 +2,7 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
+from typing import overload, Any, Callable, List, NoReturn, Optional, Tuple, Type, Union
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -41,7 +41,7 @@ class CPPTimer:
         setup: str,
         global_setup: str,
         timer: Callable[[], float],
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
     ) -> None:
         if timer is not timeit.default_timer:
             raise NotImplementedError(
@@ -188,7 +188,7 @@ class Timer:
         setup: str = "pass",
         global_setup: str = "",
         timer: Callable[[], float] = timer,
-        globals: Optional[Dict[str, Any]] = None,
+        globals: Optional[dict[str, Any]] = None,
         label: Optional[str] = None,
         sub_label: Optional[str] = None,
         description: Optional[str] = None,

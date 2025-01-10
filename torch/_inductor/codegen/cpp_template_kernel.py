@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -54,9 +54,9 @@ class CppTemplateKernel(CppKernel):
 
     def def_kernel(
         self,
-        inputs: Dict[str, ir.Buffer],
-        outputs: Dict[str, ir.Buffer],
-        aliases: Optional[Dict[str, str]] = None,
+        inputs: dict[str, ir.Buffer],
+        outputs: dict[str, ir.Buffer],
+        aliases: Optional[dict[str, str]] = None,
         function_name: str = "",
         extra_sizevars: Optional[List[sympy.Expr]] = None,
         placeholder: str = "<DEF_KERNEL>",
@@ -365,7 +365,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
         info_kwargs: Optional[
-            Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
+            dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
@@ -393,7 +393,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:

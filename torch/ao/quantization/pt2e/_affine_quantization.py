@@ -3,7 +3,7 @@
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 from torch.ao.quantization.observer import (
@@ -40,7 +40,7 @@ _SUB_BYTE_UINT_BOUNDS = {
 Map from dtype to the bound value of integers
 TODO: maybe can replace this with call to torch.iinfo
 """
-_DTYPE_TO_QVALUE_BOUNDS: Dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
+_DTYPE_TO_QVALUE_BOUNDS: dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
     torch.int16: (-(2**15), 2**15 - 1),

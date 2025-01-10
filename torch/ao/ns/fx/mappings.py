@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, List, Optional, Set
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -22,7 +22,7 @@ from .ns_types import NSNodeTargetType
 toq = torch.ops.quantized
 
 
-def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
+def get_base_name_to_sets_of_related_ops() -> dict[str, Set[NSNodeTargetType]]:
     # note: this set is modified below by items from backend_config
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
@@ -443,7 +443,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
                 set_of_related_ops.add(item2)
                 break
 
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
+    base_name_to_sets_of_related_ops: dict[str, Set[NSNodeTargetType]] = {}
 
     counter = 0
     for set_of_related_ops in sets_of_related_ops:
@@ -455,7 +455,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
 
 
 def get_base_name_for_op(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+    base_name_to_sets_of_related_ops: dict[str, Set[NSNodeTargetType]],
     op: NSNodeTargetType,
 ) -> Optional[str]:
     for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
@@ -465,7 +465,7 @@ def get_base_name_for_op(
 
 
 def add_op_to_sets_of_related_ops(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+    base_name_to_sets_of_related_ops: dict[str, Set[NSNodeTargetType]],
     op: NSNodeTargetType,
     related_op: Optional[NSNodeTargetType],
 ) -> None:
@@ -484,7 +484,7 @@ def add_op_to_sets_of_related_ops(
 
 
 # TODO(future PR): clean this up
-def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
+def get_node_type_to_io_type_map() -> dict[str, Set[NSNodeTargetType]]:
     FUNS_IO_TYPE_FP32: Set[NSNodeTargetType] = {
         F.linear,
         F.conv1d,
@@ -717,7 +717,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
     }
 
 
-def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
+def get_unmatchable_types_map() -> dict[str, Set[NSNodeTargetType]]:
     FUNS_UNMATCHABLE: Set[NSNodeTargetType] = {
         torch.quantize_per_tensor,
         operator.getitem,

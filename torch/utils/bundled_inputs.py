@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
-from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Callable
 import textwrap
 import torch
 from torch._C import TupleType, ListType
@@ -39,8 +39,8 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Union[Optional[Sequence[Tuple[Any, ...]]], Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
-        info: Optional[Union[List[str], Dict[Callable, List[str]]]] = None,
+        inputs: Union[Optional[Sequence[Tuple[Any, ...]]], dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
+        info: Optional[Union[List[str], dict[Callable, List[str]]]] = None,
         *,
         _receive_inflate_expr: Optional[List[str]] = None,
 ) -> torch.jit.ScriptModule:
@@ -181,9 +181,9 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
+        inputs: dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
-        info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
+        info: Optional[dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
         skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for an arbitrary list of public functions.

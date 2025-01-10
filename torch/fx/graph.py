@@ -77,7 +77,7 @@ class _CustomBuiltin(NamedTuple):
     obj: Any
 
 
-_custom_builtins: Dict[str, _CustomBuiltin] = {}
+_custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: Any):
@@ -143,10 +143,10 @@ class _Namespace:
     """
 
     def __init__(self):
-        self._obj_to_name: Dict[Any, str] = {}
+        self._obj_to_name: dict[Any, str] = {}
         self._unassociated_names = set()
         self._used_names: Set[str] = set()
-        self._base_count: Dict[str, int] = defaultdict(int)
+        self._base_count: dict[str, int] = defaultdict(int)
 
         self._illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
         self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
@@ -260,10 +260,10 @@ class PythonCode:
     # Python source code for the forward function definition.
     src: str
     # Values in global scope during execution of `src_def`.
-    globals: Dict[str, Any]
+    globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index.
-    _lineno_map: Optional[Dict[int, Optional[int]]]
+    _lineno_map: Optional[dict[int, Optional[int]]]
 
 
 def _format_target(base: str, target: str) -> str:
@@ -418,8 +418,8 @@ class CodeGen:
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
-        globals_: Dict[str, Any] = {}
-        wrapped_fns: Dict[str, None] = {}
+        globals_: dict[str, Any] = {}
+        wrapped_fns: dict[str, None] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation: List[str] = [""]
@@ -553,7 +553,7 @@ class CodeGen:
                 return blue(repr(arg))
 
         def _format_args(
-            args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            args: Tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
             args_s = ", ".join(_get_repr(a) for a in args)
             kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
@@ -565,8 +565,8 @@ class CodeGen:
         # of a given node. This represents the *last* use of the node in the
         # execution order of the program, which we will use to free unused
         # values
-        node_to_last_use: Dict[Node, Node] = {}
-        user_to_last_uses: Dict[Node, List[Node]] = {}
+        node_to_last_use: dict[Node, Node] = {}
+        user_to_last_uses: dict[Node, List[Node]] = {}
 
         def register_last_uses(n: Node, user: Node):
             if n not in node_to_last_use:
@@ -782,7 +782,7 @@ class CodeGen:
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: Dict[int, Optional[int]] = {}
+        lineno_map: dict[int, Optional[int]] = {}
         prologue_len = prologue.count("\n") + 1
         new_lines: List[str] = []
         cur_idx = None
@@ -904,7 +904,7 @@ class _FindNodesLookupTable:
     """
 
     def __init__(self):
-        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(
+        self.table: dict[Tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
             dict
         )
 
@@ -986,13 +986,13 @@ class Graph:
         self,
         owning_module: Optional["GraphModule"] = None,
         tracer_cls: Optional[Type["Tracer"]] = None,
-        tracer_extras: Optional[Dict[str, Any]] = None,
+        tracer_extras: Optional[dict[str, Any]] = None,
     ):
         """
         Construct an empty Graph.
         """
         self._root: Node = Node(self, "", "root", "", (), {})
-        self._used_names: Dict[str, int] = {}  # base name -> number
+        self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
@@ -1000,7 +1000,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
-        self._co_fields: Dict[str, Any] = {}
+        self._co_fields: dict[str, Any] = {}
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
@@ -1060,7 +1060,7 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(
-        self, g: "Graph", val_map: Dict[Node, Node], return_output_node=False
+        self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
     ) -> "Optional[Argument]":
         """
         Copy all nodes from a given graph into ``self``.
@@ -1114,7 +1114,7 @@ class Graph:
         op: str,
         target: "Target",
         args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -1374,7 +1374,7 @@ class Graph:
         self,
         module_name: str,
         args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1424,7 +1424,7 @@ class Graph:
         self,
         method_name: str,
         args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1463,7 +1463,7 @@ class Graph:
         self,
         the_function: Callable[..., Any],
         args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """

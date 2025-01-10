@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch.distributed as dist
 from torch.distributed import Store
@@ -298,10 +298,10 @@ class _RendezvousState:
     complete: bool
     deadline: Optional[datetime]
     closed: bool
-    participants: Dict[_NodeDesc, int]
+    participants: dict[_NodeDesc, int]
     wait_list: Set[_NodeDesc]
     redundancy_list: Set[_NodeDesc]
-    last_heartbeats: Dict[_NodeDesc, datetime]
+    last_heartbeats: dict[_NodeDesc, datetime]
 
     def __init__(self) -> None:
         self.round = 0

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import functools
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Set, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -64,8 +64,8 @@ def _get_linear_patterns(input_size: List[int]):
     return [pattern_w_bias, pattern_wo_bias]
 
 
-def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
-    supported_operators: Dict[str, List[OperatorPatternType]] = {
+def _supported_symmetric_quantized_operators() -> dict[str, List[OperatorPatternType]]:
+    supported_operators: dict[str, List[OperatorPatternType]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -110,7 +110,7 @@ def get_symmetric_quantization_config(
     weight_qmin: int = -127,
     weight_qmax: int = 127,
 ):
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
@@ -148,7 +148,7 @@ def get_symmetric_quantization_config(
     elif is_per_channel:
         weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver
 
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if weight_qscheme == torch.per_tensor_symmetric:
             extra_args["observer"] = MovingAverageMinMaxObserver
@@ -269,11 +269,11 @@ class XNNPACKQuantizer(Quantizer):
     def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_config: Dict[
+        self.operator_type_config: dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
-        self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_type_config: dict[Callable, Optional[QuantizationConfig]] = {}
+        self.module_name_config: dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:

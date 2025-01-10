@@ -55,7 +55,6 @@ from typing import (
     Any,
     Callable,
     DefaultDict,
-    Dict,
     Generator,
     Iterable,
     List,
@@ -139,7 +138,7 @@ MULTIPLE = Multiple()
 
 
 def _transfer_meta(
-    new_meta: Dict[str, Any], old_node: torch.fx.Node, pass_name: str = ""
+    new_meta: dict[str, Any], old_node: torch.fx.Node, pass_name: str = ""
 ) -> None:
     from torch.fx.traceback import NodeSource, NodeSourceAction
 
@@ -178,9 +177,9 @@ class Match:
 
     pattern: PatternExpr
     args: List[Any]
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
     nodes: List[torch.fx.Node]
-    targets: Dict[_TargetExpr, torch.fx.node.Target]
+    targets: dict[_TargetExpr, torch.fx.node.Target]
     ctx: MatchContext
     replacement_graph: Optional[torch.fx.GraphModule]
 
@@ -189,7 +188,7 @@ class Match:
         ctx: MatchContext,
         pattern: PatternExpr,
         args: Optional[Sequence[Any]] = None,
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__()
         self.pattern = pattern
@@ -339,14 +338,14 @@ class MatchContext:
     """
 
     outputs: List[Optional[PatternExpr]]
-    pattern_to_node: Dict[PatternExpr, Optional[torch.fx.Node]]
+    pattern_to_node: dict[PatternExpr, Optional[torch.fx.Node]]
     graph: torch.fx.Graph
     exclusive_node_set: List[NodeOrConstant]
 
     def __init__(
         self,
         outputs: List[Optional[PatternExpr]],
-        pattern_to_node: Optional[Dict[PatternExpr, torch.fx.Node]] = None,
+        pattern_to_node: Optional[dict[PatternExpr, torch.fx.Node]] = None,
         *,
         graph: torch.fx.Graph,
     ) -> None:
@@ -367,7 +366,7 @@ class MatchContext:
         self.pattern_to_node[pattern] = node if m else None
         return m
 
-    def filter_multi_user_patterns(self) -> Dict[PatternExpr, torch.fx.Node]:
+    def filter_multi_user_patterns(self) -> dict[PatternExpr, torch.fx.Node]:
         return {
             pattern: node
             for pattern, node in self.pattern_to_node.items()
@@ -959,8 +958,8 @@ class PatternPrettyPrinter:
 
     def __init__(self) -> None:
         self.namespace = torch.fx.graph._Namespace()
-        self.memoized_objs_names: Dict[PatternExpr, str] = {}
-        self.memoized_objs_pp: Dict[PatternExpr, str] = {}
+        self.memoized_objs_names: dict[PatternExpr, str] = {}
+        self.memoized_objs_pp: dict[PatternExpr, str] = {}
 
     @staticmethod
     @functools.lru_cache(None)
@@ -1253,7 +1252,7 @@ def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
 def check_and_add_duplicate_pattern(
     pattern: PatternExpr,
     graph: Optional[torch.fx.Graph],
-    seen_patterns: Dict[str, List[Optional[str]]],
+    seen_patterns: dict[str, List[Optional[str]]],
     skip_duplicates: bool = False,
 ) -> bool:
     """
@@ -1299,7 +1298,7 @@ def register_replacement(
     trace_fn: TraceFn,
     pass_dicts: Union[_PassDictsType, Sequence[_PassDictsType]],
     extra_check: Callable[[Match], bool] = _return_true,
-    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: Union[PatternExpr, None] = None,
     skip_duplicates: bool = False,
@@ -1493,7 +1492,7 @@ def _serialize_pattern(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[Dict[str, Union[float, int]], None],
+    scalar_workaround: Union[dict[str, Union[float, int]], None],
 ) -> PatternExpr:
     def get_file_template() -> str:
         auto_generated_msg = textwrap.dedent(
@@ -1585,7 +1584,7 @@ def gen_register_replacement(
     trace_fn: TraceFn,
     pass_dicts: Union[_PassDictsType, Sequence[_PassDictsType]],
     extra_check: Callable[[Match], bool] = _return_true,
-    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
 ) -> None:
@@ -1638,7 +1637,7 @@ def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
@@ -1672,7 +1671,7 @@ def gen_pattern(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> PatternExpr:
     return gen_pattern_and_search_gm(
@@ -1812,7 +1811,7 @@ class PatternMatcherPass:
         # of the graph used to generate them. Because we ignore certain patterns
         # in searching, but not in matching, use the graph to distinguish if two equivalent
         # searches are actually different.
-        self.seen_patterns: Dict[str, List[Optional[str]]] = defaultdict(list)
+        self.seen_patterns: dict[str, List[Optional[str]]] = defaultdict(list)
 
     def __getitem__(self, item: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
@@ -1890,7 +1889,7 @@ def fx_to_pattern(
     gm: Union[torch.fx.GraphModule, torch.fx.Graph],
     ignore_types: Sequence[Type[Any]] = (),
     argnames: Sequence[str] = (),
-    scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
+    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> PatternExpr:
     """

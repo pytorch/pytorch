@@ -4,7 +4,7 @@ import enum
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -823,7 +823,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
+        res: dict[str, cutlass_gemm_op.GemmOperation] = {}
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:

@@ -9,7 +9,7 @@
 
 import functools
 import logging
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
+from typing import Any, Callable, List, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -48,7 +48,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
+def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
     if dist.is_initialized():
         group = kwargs.get("group") or kwargs.get("process_group")
         msg_dict = {

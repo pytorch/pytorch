@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Iterable,
     List,
     Literal,
@@ -163,7 +162,7 @@ class LRScheduler:
             key: value for key, value in self.__dict__.items() if key != "optimizer"
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]):
+    def load_state_dict(self, state_dict: dict[str, Any]):
         """Load the scheduler's state.
 
         Args:
@@ -183,7 +182,7 @@ class LRScheduler:
     def print_lr(
         self,
         is_verbose: bool,
-        group: Dict[str, Any],
+        group: dict[str, Any],
         lr: float,
         epoch: Optional[int] = None,
     ):

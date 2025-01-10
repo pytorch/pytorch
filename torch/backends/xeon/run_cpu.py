@@ -594,7 +594,7 @@ won't take effect even if it is set explicitly."
         )
         entrypoint = ""
         launch_args = {}
-        launch_envs: Dict[int, Dict] = {}
+        launch_envs: dict[int, Dict] = {}
         launch_tee = {}
         # check whether is launched from torchrun with --nproc-per-node <num workers>
         local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))

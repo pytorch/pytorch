@@ -108,7 +108,7 @@ def _overwrite_signature_for_non_persistent_buffers(
     return new_sig
 
 
-def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
+def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     """
     Param/buffer metadata needs to be saved before lowering to aten IR
     because aten IR lifts them, as a result, automatic preservation doesn't work.
@@ -166,7 +166,7 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
 
 
 def _populate_param_buffer_metadata_to_new_gm(
-    params_buffers_to_node_meta: Dict[str, Any],
+    params_buffers_to_node_meta: dict[str, Any],
     gm: torch.fx.GraphModule,
     new_sig: "ExportGraphSignature",
 ) -> None:
@@ -209,7 +209,7 @@ def _get_shape_env_from_gm(gm: torch.fx.GraphModule):
 
 
 def _rename_without_collisions(
-    name_map: Dict[str, str],
+    name_map: dict[str, str],
     orig_name: str,
     name: str,
     is_placeholder: bool = False,
@@ -272,7 +272,7 @@ def _check_input_constraints_for_graph(
     # NOTE: export already guarantees that the same symbol is used in metadata
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
-    unification_map: Dict[sympy.Symbol, Any] = {}
+    unification_map: dict[sympy.Symbol, Any] = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
@@ -761,7 +761,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
 
     # propagate names
     for subgraph, hoo_phs in subgraph_ph_tuples:
-        name_map: Dict[str, str] = {}
+        name_map: dict[str, str] = {}
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
@@ -781,7 +781,7 @@ def placeholder_naming_pass(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
-    constants: Dict[str, Any],
+    constants: dict[str, Any],
 ) -> None:
     """
     This pass is run at the end of _export_non_strict() to assign better placeholder node names:
@@ -820,7 +820,7 @@ def placeholder_naming_pass(
         else:
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
-    name_map: Dict[str, str] = {}
+    name_map: dict[str, str] = {}
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
@@ -972,8 +972,8 @@ def _detect_fake_mode_from_gm(
 
 @contextmanager
 def _disable_load_state_dict_hooks(mod: torch.nn.Module):
-    state_dict_hooks: Dict[int, Callable] = dict(mod._state_dict_hooks)
-    state_dict_pre_hooks: Dict[int, Callable] = dict(mod._state_dict_pre_hooks)
+    state_dict_hooks: dict[int, Callable] = dict(mod._state_dict_hooks)
+    state_dict_pre_hooks: dict[int, Callable] = dict(mod._state_dict_pre_hooks)
     mod._state_dict_hooks.clear()
     mod._state_dict_pre_hooks.clear()
     try:

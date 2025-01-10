@@ -4,7 +4,6 @@ from collections import OrderedDict
 from functools import wraps
 from typing import (
     Callable,
-    Dict,
     Generic,
     List,
     Optional,
@@ -153,21 +152,21 @@ def contract(
             # `func` is allowed to return different module instances than the
             # input modules as long as FQNs are preserved following the input
             # module order
-            all_orig_named_params: List[Dict[str, nn.Parameter]] = []
-            all_orig_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_orig_named_modules: List[Dict[str, nn.Module]] = []
+            all_orig_named_params: List[dict[str, nn.Parameter]] = []
+            all_orig_named_buffers: List[dict[str, torch.Tensor]] = []
+            all_orig_named_modules: List[dict[str, nn.Module]] = []
 
             for module in modules:
-                default_all_state: Dict[Callable, _State] = OrderedDict()
-                default_registry: Dict[str, RegistryItem] = OrderedDict()
-                all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                default_all_state: dict[Callable, _State] = OrderedDict()
+                default_registry: dict[str, RegistryItem] = OrderedDict()
+                all_state: dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     STATE_KEY, default_all_state
                 )
                 if not isinstance(all_state, dict):
                     raise AssertionError(
                         f"Distributed composable API states corrupted: {all_state}"
                     )
-                registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                registry: dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     REGISTRY_KEY, default_registry
                 )
                 if not isinstance(registry, dict):
@@ -195,9 +194,9 @@ def contract(
             else:
                 updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
 
-            all_new_named_params: List[Dict[str, nn.Parameter]] = []
-            all_new_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_new_named_modules: List[Dict[str, nn.Module]] = []
+            all_new_named_params: List[dict[str, nn.Parameter]] = []
+            all_new_named_buffers: List[dict[str, torch.Tensor]] = []
+            all_new_named_modules: List[dict[str, nn.Module]] = []
             for module in updated_modules:
                 all_new_named_params.append(OrderedDict(module.named_parameters()))
                 all_new_named_buffers.append(OrderedDict(module.named_buffers()))
@@ -280,7 +279,7 @@ def contract(
     return inner
 
 
-def _get_registry(module: nn.Module) -> Optional[Dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

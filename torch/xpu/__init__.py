@@ -216,7 +216,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:

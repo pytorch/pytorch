@@ -3,7 +3,7 @@
 
 import collections
 import enum
-from typing import cast, Dict, List, Set, Tuple
+from typing import cast, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -164,7 +164,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
     gathered: List[
-        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]]
+        Tuple[str, int, dict[str, dict[torch.device, torch.device]], List[torch.device]]
     ] = [("", 0, {}, []) for _ in range(group.size())]
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
@@ -265,7 +265,7 @@ def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
 
 
 def _create_reverse_mapping(my_name, all_names, all_device_maps):
-    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
+    reverse_device_maps: dict[str, dict[torch.device, torch.device]] = {}
     for node in all_names:
         if my_name in all_device_maps[node]:
             reverse_device_maps[node] = {

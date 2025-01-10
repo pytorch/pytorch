@@ -5,7 +5,6 @@ import warnings
 from typing import (
     Callable,
     Collection,
-    Dict,
     Generic,
     Optional,
     Sequence,
@@ -70,9 +69,9 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     """
 
     def __init__(self) -> None:
-        self._base: Dict[_K, _V] = {}
-        self._overrides: Dict[_K, _V] = {}
-        self._merged: Dict[_K, _V] = {}
+        self._base: dict[_K, _V] = {}
+        self._overrides: dict[_K, _V] = {}
+        self._merged: dict[_K, _V] = {}
 
     def set_base(self, key: _K, value: _V) -> None:
         self._base[key] = value
@@ -209,7 +208,7 @@ class SymbolicRegistry:
     """
 
     def __init__(self) -> None:
-        self._registry: Dict[str, _SymbolicFunctionGroup] = {}
+        self._registry: dict[str, _SymbolicFunctionGroup] = {}
 
     def register(
         self, name: str, opset: OpsetVersion, func: Callable, custom: bool = False

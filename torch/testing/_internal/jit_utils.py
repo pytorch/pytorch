@@ -39,7 +39,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -176,7 +176,7 @@ class JitTestCase(JitCommonTestCase):
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
 
-        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        fusion_groups : dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
         self.assertTrue(len(fusion_groups) == 1, f'got {graph}')
         (graph, fusion_nodes) = next(iter(fusion_groups.items()))
@@ -385,7 +385,7 @@ class JitTestCase(JitCommonTestCase):
             if not frame:
                 raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars: Dict[str, Any] = {}
+        defined_vars: dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
@@ -407,7 +407,7 @@ class JitTestCase(JitCommonTestCase):
             with self.assertRaisesRegex(exception, regex):
                 if isinstance(script, str):
                     frame = self.get_frame_vars(frames_up)
-                    the_locals: Dict[str, Any] = {}
+                    the_locals: dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -471,7 +471,7 @@ class JitTestCase(JitCommonTestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals: Dict[str, Any] = {}
+                    the_locals: dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 

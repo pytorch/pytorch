@@ -5,7 +5,6 @@ import logging
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     Optional,
     Sequence,
@@ -118,8 +117,8 @@ class FSDPState(_State):
             self._post_forward_hook_handle = hook_handle
 
     def _root_pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
@@ -198,8 +197,8 @@ class FSDPState(_State):
         """Sets module and parameter FQN attributes for debugging."""
         assert self._is_root
         root_module = self._modules[0]
-        param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
-        module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
+        param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
+        module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
         for state in self._state_ctx.all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
@@ -221,8 +220,8 @@ class FSDPState(_State):
 
     @disable_if_config_true
     def _pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:

@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
+from typing import Any, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
 from typing_extensions import TypeIs
 from collections import deque
 
@@ -527,7 +527,7 @@ class SchemaInfo:
 
 
 # Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: Dict[Any, SchemaInfo] = {}
+parsed_schema_map: dict[Any, SchemaInfo] = {}
 
 
 # Given an OpOverload, returns schema information on it.

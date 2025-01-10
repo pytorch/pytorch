@@ -771,7 +771,7 @@ class _Handle:
 
 class _Holder:
     def __init__(self):
-        self.handles: Dict[int, Optional[_Handle]] = {}
+        self.handles: dict[int, Optional[_Handle]] = {}
 
 
 class _NoopSaveInputs(torch.autograd.Function):
@@ -1029,7 +1029,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
 
     return context_fn, unpack_error_cb
 
-def _default_meta_extractor(x: torch.Tensor) -> Dict[str, Any]:
+def _default_meta_extractor(x: torch.Tensor) -> dict[str, Any]:
     # These properties are fast to check, easy to understand
     return {
         "shape": x.shape,
@@ -1037,7 +1037,7 @@ def _default_meta_extractor(x: torch.Tensor) -> Dict[str, Any]:
         "device": x.device
     }
 
-_allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
+_allowed_determinism_checks_to_fns: dict[str, Callable[[torch.Tensor], Any]] = {
     _DEFAULT_DETERMINISM_MODE: _default_meta_extractor,
     "none": lambda _: None,
 }
@@ -1409,7 +1409,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     else:
         raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
 
-    storage: Dict[Any, List[Any]] = defaultdict(list)
+    storage: dict[Any, List[Any]] = defaultdict(list)
     return (
         _CachingTorchDispatchMode(policy_fn, storage),
         _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),

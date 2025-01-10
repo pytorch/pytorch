@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -133,7 +133,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         func: OpOverload,
         types: tuple[torch._C._TensorMeta, ...],
         args: tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
+        kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])

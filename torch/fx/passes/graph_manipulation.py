@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -29,7 +29,7 @@ def replace_target_nodes_with(
     """Modifies all nodes in fx_module.graph.nodes which match the specified op code and target,
     and updates them to match the new op code and target"""
     new_graph = Graph()
-    val_map: Dict[Node, Node] = {}
+    val_map: dict[Node, Node] = {}
     for node in fx_module.graph.nodes:
         if node.op == old_op and node.target == old_target:
             args = map_arg(node.args, lambda n: val_map[n])

@@ -2,7 +2,7 @@ import importlib
 import inspect
 import pkgutil
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -49,7 +49,7 @@ class LearnedHeuristicController:
     a way to get the decision of a learned heuristic.
     """
 
-    existing_heuristics: Dict[str, List[LearnedHeuristic]] = defaultdict(list)
+    existing_heuristics: dict[str, List[LearnedHeuristic]] = defaultdict(list)
     """
     A dictionary that stores all the learned heuristics for each optimization.
     The key is the optimization name, and the value is a list of LearnedHeuristic objects.

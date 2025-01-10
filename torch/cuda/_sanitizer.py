@@ -21,7 +21,7 @@ import sys
 import textwrap
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
+from typing import Any, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
@@ -167,7 +167,7 @@ class TensorInfo:
 
 class _TensorsAccessed:
     def __init__(self) -> None:
-        self.accesses: Dict[DataPtr, TensorInfo] = {}
+        self.accesses: dict[DataPtr, TensorInfo] = {}
 
     def ensure_tensor_exists(self, data_ptr: DataPtr) -> None:
         if data_ptr not in self.accesses:
@@ -222,9 +222,9 @@ class _TensorsAccessed:
 
 class StreamSynchronizations:
     def __init__(self) -> None:
-        self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
-        self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
-        self.host_sync_state: Dict[StreamId, SeqNum] = {}
+        self.current_sync_states: dict[StreamId, dict[StreamId, SeqNum]] = {}
+        self.recorded_sync_states: dict[EventId, dict[StreamId, SeqNum]] = {}
+        self.host_sync_state: dict[StreamId, SeqNum] = {}
         self.create_stream(DEFAULT_STREAM_ID)
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
@@ -288,7 +288,7 @@ class StreamSynchronizations:
         self.recorded_sync_states[event] = self.current_sync_states[stream].copy()
 
     def _state_wait_for_other(
-        self, state: Dict[StreamId, SeqNum], other: Dict[StreamId, SeqNum]
+        self, state: dict[StreamId, SeqNum], other: dict[StreamId, SeqNum]
     ) -> None:
         for stream, seq_num in other.items():
             state[stream] = max(state.get(stream, -1), seq_num)
@@ -353,7 +353,7 @@ class EventHandler:
         read_write: Set[DataPtr],
         outputs: Set[DataPtr],
         operator: str,
-        tensor_aliases: Dict[int, List[str]],
+        tensor_aliases: dict[int, List[str]],
     ) -> List[SynchronizationError]:
         def check_conflict(
             data_ptr: DataPtr, current_access: Access, previous_access: Optional[Access]
@@ -462,14 +462,14 @@ class EventHandler:
         self.syncs.all_streams_wait_for_event(event)
 
 
-def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
+def zip_by_key(a: dict[TK, TVa], b: dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
     for arg, value in a.items():
         if arg in b:
             yield arg, value, b[arg]
 
 
 def zip_arguments(
-    schema: torch.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    schema: torch.FunctionSchema, args: Tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Iterator[Tuple[torch.Argument, Any]]:
     schema_args = schema.arguments[: len(args)]
     schema_kwargs = {arg.name: arg for arg in schema.arguments[len(args) :]}
@@ -484,7 +484,7 @@ class ArgumentHandler:
     def __init__(self) -> None:
         self.dataptrs_read: Set[DataPtr] = set()
         self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
+        self.tensor_aliases: dict[DataPtr, List[str]] = {}
         self.outputs: Set[DataPtr] = set()
 
     def _handle_argument(
@@ -512,7 +512,7 @@ class ArgumentHandler:
         self,
         schema: torch.FunctionSchema,
         args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         *,
         is_factory: bool,
     ) -> None:

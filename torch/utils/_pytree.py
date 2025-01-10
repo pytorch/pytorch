@@ -32,7 +32,6 @@ from typing import (
     cast,
     DefaultDict,
     Deque,
-    Dict,
     FrozenSet,
     Generic,
     Hashable,
@@ -149,7 +148,7 @@ class NodeDef(NamedTuple):
 
 
 _NODE_REGISTRY_LOCK = threading.Lock()
-SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+SUPPORTED_NODES: dict[Type[Any], NodeDef] = {}
 
 
 # _SerializeNodeDef holds the following:
@@ -166,8 +165,8 @@ class _SerializeNodeDef(NamedTuple):
     from_dumpable_context: Optional[FromDumpableContextFn]
 
 
-SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
-SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
+SUPPORTED_SERIALIZED_TYPES: dict[Type[Any], _SerializeNodeDef] = {}
+SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, Type[Any]] = {}
 
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
@@ -463,18 +462,18 @@ def _list_unflatten(values: Iterable[Any], context: Context) -> List[Any]:
     return list(values)
 
 
-def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
+def _dict_flatten(d: dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: Dict[Any, Any]
+    d: dict[Any, Any]
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
-def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
+def _dict_unflatten(values: Iterable[Any], context: Context) -> dict[Any, Any]:
     return dict(zip(context, values))
 
 
@@ -1385,7 +1384,7 @@ class _ProtocolFn(NamedTuple):
     json_to_treespec: Callable[[DumpableContext], TreeSpec]
 
 
-_SUPPORTED_PROTOCOLS: Dict[int, _ProtocolFn] = {}
+_SUPPORTED_PROTOCOLS: dict[int, _ProtocolFn] = {}
 
 
 def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:

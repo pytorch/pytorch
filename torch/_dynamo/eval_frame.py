@@ -30,7 +30,6 @@ from os.path import dirname, join
 from typing import (
     Any,
     Callable,
-    Dict,
     List,
     NamedTuple,
     Optional,
@@ -102,7 +101,7 @@ class Unset(Enum):
     token = 0
 
 
-cached_backends: Dict[int, CompilerFn] = {}
+cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
@@ -1377,10 +1376,10 @@ def export(
     aten_graph: bool = False,
     pre_dispatch: bool = False,
     decomposition_table: Optional[
-        Dict[torch._ops.OpOverload, Callable[..., Any]]
+        dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], List[Any]]] = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,

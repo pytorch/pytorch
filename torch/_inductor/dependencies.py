@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, List, Optional, Sequence, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -38,7 +38,7 @@ class Dep(abc.ABC):
     index: sympy.Expr
 
     @abc.abstractmethod
-    def rename(self, renames: Dict[str, str]) -> "Dep":
+    def rename(self, renames: dict[str, str]) -> "Dep":
         pass
 
     @abc.abstractmethod
@@ -197,7 +197,7 @@ class MemoryDep(Dep):
         return out
 
     @property
-    def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
+    def ranges(self) -> dict[sympy.Symbol, sympy.Expr]:
         """{c0: 128, c1: 512, ...}"""
         return dict(zip(self.var_names, self.size))
 
@@ -221,7 +221,7 @@ class MemoryDep(Dep):
                     numel = numel * size
         return numel  # type: ignore[return-value]
 
-    def rename(self, renames: Dict[str, str]) -> "MemoryDep":
+    def rename(self, renames: dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(
                 renames[self.name],
@@ -299,7 +299,7 @@ class StarDep(Dep):
     def get_numel(self) -> sympy.Expr:
         return V.graph.get_numel(self.name)  # type: ignore[return-value]
 
-    def rename(self, renames: Dict[str, str]) -> "StarDep":
+    def rename(self, renames: dict[str, str]) -> "StarDep":
         if self.name in renames:
             return StarDep(renames[self.name], self.mode)
         return self
@@ -347,7 +347,7 @@ class WeakDep(Dep):
     def get_numel(self) -> sympy.Expr:
         return sympy.S.One
 
-    def rename(self, renames: Dict[str, str]) -> "WeakDep":
+    def rename(self, renames: dict[str, str]) -> "WeakDep":
         if self.name in renames:
             return WeakDep(renames[self.name], self.mutating_buf)
         return self

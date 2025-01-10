@@ -8,7 +8,7 @@ import warnings
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, cast, List, Optional, Sequence, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -32,15 +32,15 @@ R = TypeVar("R")
 
 def _get_failure_dict(
     results: List[Union[T, WRAPPED_EXCEPTION]]
-) -> Dict[int, WRAPPED_EXCEPTION]:
+) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
-        Dict[int, WRAPPED_EXCEPTION],
+        dict[int, WRAPPED_EXCEPTION],
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
 
 def _all_gather_keys(
-    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
 ) -> List[Any]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())

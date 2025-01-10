@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -110,12 +110,12 @@ class _RNGStateTracker:
                 f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
             )
 
-        self._states: Dict[str, Tensor] = {}
+        self._states: dict[str, Tensor] = {}
         self._devices = [self._device_handle.current_device()]
         self._use_distribute_region = True
 
     @property
-    def rng_states(self) -> Dict[str, Tensor]:
+    def rng_states(self) -> dict[str, Tensor]:
         return self._states
 
     @property

@@ -73,7 +73,7 @@ class NestedTensor(torch.Tensor):
     _strides: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    _metadata_cache: Dict[str, Any]
+    _metadata_cache: dict[str, Any]
 
     @staticmethod
     def __new__(
@@ -385,7 +385,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         ctx,
         values: torch.Tensor,
         offsets: torch.Tensor,
-        metadata_cache: Optional[Dict[str, Any]] = None,
+        metadata_cache: Optional[dict[str, Any]] = None,
     ):  # type: ignore[override]
         # maintain BC with this usages of this where the seqlens are stuffed
         # directly into the metadata cache as non-Tensors / ints

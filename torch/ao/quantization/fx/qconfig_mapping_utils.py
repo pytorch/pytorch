@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, List, Set, Union
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -92,11 +92,11 @@ def _update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappi
 
 def _generate_node_name_to_qconfig(
     root: torch.nn.Module,
-    modules: Dict[str, torch.nn.Module],
+    modules: dict[str, torch.nn.Module],
     input_graph: Graph,
     qconfig_mapping: QConfigMapping,
-    node_name_to_scope: Dict[str, tuple[str, type]],
-) -> Dict[str, QConfigAny]:
+    node_name_to_scope: dict[str, tuple[str, type]],
+) -> dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
     node_name_to_qconfig = {}
 
@@ -106,7 +106,7 @@ def _generate_node_name_to_qconfig(
     #
     # meaning in submodule 'foo.bar', we have seen 0 F.linear and
     # 1 F.conv2d invocations so far.
-    submodule_to_object_type_to_cur_idx: Dict[str, Dict[Callable, int]] = defaultdict(
+    submodule_to_object_type_to_cur_idx: dict[str, dict[Callable, int]] = defaultdict(
         lambda: defaultdict(int)
     )
     for node in input_graph.nodes:
@@ -349,7 +349,7 @@ def _maybe_adjust_qconfig_for_module_type_or_name(
 
 def _get_flattened_qconfig_dict(
     qconfig_mapping: QConfigMapping,
-) -> Dict[Union[Callable, str], QConfigAny]:
+) -> dict[Union[Callable, str], QConfigAny]:
     """flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
     propagate_qconfig_ function.
@@ -373,7 +373,7 @@ def _get_flattened_qconfig_dict(
       "conv": qconfig
     }
     """
-    flattened: Dict[Union[Callable, str], QConfigAny] = {
+    flattened: dict[Union[Callable, str], QConfigAny] = {
         "": qconfig_mapping.global_qconfig
     }
     for obj, qconfig in qconfig_mapping.object_type_qconfigs.items():

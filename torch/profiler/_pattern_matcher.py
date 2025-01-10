@@ -34,7 +34,7 @@ class Pattern:
         self.url = ""
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
         self.event_tree = prof.profiler.kineto_results.experimental_event_tree()
-        self.tid_root: Dict[int, List[_ProfilerEvent]] = {}
+        self.tid_root: dict[int, List[_ProfilerEvent]] = {}
         for event in self.event_tree:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 

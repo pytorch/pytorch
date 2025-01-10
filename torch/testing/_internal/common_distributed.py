@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
+from typing import NamedTuple, Optional, Union, List, Any, Callable, Tuple
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log
@@ -963,7 +963,7 @@ class DistributedTestBase(MultiProcessTestCase):
 
 def run_subtests(
     cls_inst,
-    subtest_config: Dict[str, List[Any]],
+    subtest_config: dict[str, List[Any]],
     test_fn: Callable,
     *test_args,
     **test_kwargs: Any,
@@ -1314,7 +1314,7 @@ class MultiThreadedTestCase(TestCase):
 class SaveForwardInputsModule(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
@@ -1330,7 +1330,7 @@ class SaveForwardInputsModule(nn.Module):
 class SaveForwardInputsModel(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import itertools
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -172,7 +172,7 @@ class CppBmmTemplate(CppGemmTemplate):
         flag_template_buffer_has_other_users: Optional[bool] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         options = super().get_options(
             kernel=kernel,
             template_buffer_node=template_buffer_node,

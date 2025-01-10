@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, List, Optional, Sequence, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -160,7 +160,7 @@ def _get_use_stack_trace(node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
@@ -180,7 +180,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
@@ -292,7 +292,7 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[tuple[int, ...], Callable[..., Any]],
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1

@@ -16,7 +16,6 @@ from itertools import count
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterator,
     List,
     Optional,
@@ -184,7 +183,7 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 
 
 # TODO: Move to a well known place
-TritonMetaParams = Dict[str, int]
+TritonMetaParams = dict[str, int]
 TritonGrid = Union[
     tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], tuple[int, ...]]
 ]
@@ -368,7 +367,7 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
+        self.reuse_pool: dict[
             ReuseKey, List[FreeIfNotReusedLine]
         ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
@@ -661,7 +660,7 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_names = OrderedSet[str]()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
-        self.src_to_kernel: Dict[str, str] = {}
+        self.src_to_kernel: dict[str, str] = {}
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
@@ -673,7 +672,7 @@ class PythonWrapperCodegen(CodeGen):
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.user_defined_kernel_cache: Dict[tuple[Any, ...], tuple[str, Any]] = {}
+        self.user_defined_kernel_cache: dict[tuple[Any, ...], tuple[str, Any]] = {}
         self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
@@ -700,7 +699,7 @@ class PythonWrapperCodegen(CodeGen):
         self.freed = OrderedSet[BufferName]()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = {}
+        self.reuses: dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -713,11 +712,11 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_calls.writeline(line)
 
         self.add_import_once = add_import_once
-        self._metas: Dict[str, str] = {}
+        self._metas: dict[str, str] = {}
         self._meta_vars = OrderedSet[str]()
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs = OrderedSet[str]()
-        self.allocated_workspaces: Dict[str, Any] = {}
+        self.allocated_workspaces: dict[str, Any] = {}
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -1582,7 +1581,7 @@ class PythonWrapperCodegen(CodeGen):
         from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
 
         signature: List[KernelArgType] = []
-        constants: Dict[str, Any] = {}
+        constants: dict[str, Any] = {}
         non_constant_indices = []
         equal_to_1_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
@@ -1629,7 +1628,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-        triton_meta: Dict[str, Any] = {
+        triton_meta: dict[str, Any] = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=None,  # try to infer based on symints

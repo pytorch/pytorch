@@ -16,7 +16,6 @@ from typing import (
     Any,
     Callable,
     ContextManager,
-    Dict,
     Generator,
     List,
     Optional,
@@ -208,7 +207,7 @@ def _unlift_graph(
 ) -> GraphModule:
     from torch.export.unflatten import _assign_attr, _AttrKind
 
-    state_dict: Dict[str, Union[torch.nn.parameter.Parameter, torch.Tensor]] = {}
+    state_dict: dict[str, Union[torch.nn.parameter.Parameter, torch.Tensor]] = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
         state_dict[name] = param
         _assign_attr(
@@ -345,7 +344,7 @@ def split_const_gm(
     skip_constructor: bool = True,
     lifted_constant_names: Optional[List[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
-) -> tuple[GraphModule, Dict[str, int]]:
+) -> tuple[GraphModule, dict[str, int]]:
     """
     This function takes an GraphModule input "gm".
     The gm will be split into 2 components,
@@ -488,8 +487,8 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: Optional[Union[str, Dict[str, Any]]] = None
-) -> Dict[str, Any]:
+    config_patches: Optional[Union[str, dict[str, Any]]] = None
+) -> dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
 
@@ -1345,14 +1344,14 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: List[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[Dict[str, str]] = None,
+    config_patches: Optional[dict[str, str]] = None,
 ) -> Union[List[str], str]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    config_patches: Dict[str, Any] = (
+    config_patches: dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
@@ -1505,7 +1504,7 @@ def fw_compiler_freezing(
     return wrapper
 
 
-def get_cpp_wrapper_config() -> Dict[str, object]:
+def get_cpp_wrapper_config() -> dict[str, object]:
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
@@ -1551,8 +1550,8 @@ def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
-    config_patches: Optional[Dict[str, Any]] = None,
-    decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
+    decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
 ) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2018,10 +2017,10 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 def _aoti_flatten_inputs(
     gm: torch.fx.GraphModule,
     args: Union[List[Any], tuple[Any, ...]],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    options: Optional[Dict[str, Any]] = None,
-) -> tuple[List[Any], Dict[str, Any]]:
+    options: Optional[dict[str, Any]] = None,
+) -> tuple[List[Any], dict[str, Any]]:
     """
     Flatten the inputs to the graph module and return the flat inputs and options.
     Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.

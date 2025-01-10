@@ -26,7 +26,6 @@ from io import StringIO
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
     Iterable,
     List,
@@ -94,7 +93,7 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-VarRanges = Dict[sympy.Expr, sympy.Expr]
+VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
@@ -716,7 +715,7 @@ def sympy_index_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.Expr:
     """
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.
@@ -2383,7 +2382,7 @@ class OpDtypeRule:
     override_return_dtype: Optional[torch.dtype]
 
 
-op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+op_dtype_propagation_rules: dict[str, OpDtypeRule] = {}
 
 
 def register_op_dtype_propagation_rules(

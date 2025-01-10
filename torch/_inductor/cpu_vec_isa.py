@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, List, Union
 
 import torch
 from torch._inductor import config
@@ -35,7 +35,7 @@ class VecISA:
     _bit_width: int
     _macro: List[str]
     _arch_flags: str
-    _dtype_nelements: Dict[torch.dtype, int]
+    _dtype_nelements: dict[torch.dtype, int]
 
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions

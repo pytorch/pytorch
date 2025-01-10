@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
     Generator,
     Iterator,
     List,
@@ -660,7 +659,7 @@ class FlatParamHandle:
         contiguities: List[bool] = []
         fqns: List[str] = []
         shared_param_infos: List[SharedParamInfo] = []
-        shared_param_memo: Dict[
+        shared_param_memo: dict[
             Union[Tensor, nn.Parameter], Tuple[nn.Module, str, str]
         ] = {}
         params_to_flatten: List[Union[Tensor, nn.Parameter]] = []

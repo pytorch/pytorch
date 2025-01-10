@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -600,7 +600,7 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     )
 
 
-noop_registry: Dict[Any, Any] = {}
+noop_registry: dict[Any, Any] = {}
 
 
 def register_noop_decomp(targets, nop_arg=0):
@@ -1187,11 +1187,11 @@ class ConstructorMoverPass:
         ten = node.meta.get("val")
         return None if not isinstance(ten, torch.Tensor) else ten.device
 
-    def get_cpu_indeg_count(self, graph: fx.Graph) -> Dict[fx.Node, int]:
+    def get_cpu_indeg_count(self, graph: fx.Graph) -> dict[fx.Node, int]:
         """
         Get the number of cpu inputs to a node
         """
-        cpu_indeg: Dict[fx.Node, int] = Counter()
+        cpu_indeg: dict[fx.Node, int] = Counter()
 
         for node in graph.nodes:
             cpu_count = 0
@@ -1249,20 +1249,20 @@ class ConstructorMoverPass:
         Starting from the cpu constructors, iterate through the graph and test that all of their
         downstream uses can safely be moved to cpu.
         """
-        cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
+        cpu_indeg: dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
         # which constructors cannot be moved to gpu
         cannot_move_to_gpu = OrderedSet[fx.Node]()
 
         # For any node in the graph, which constructors does it have a dependency on
-        constructor_dependencies: Dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(
+        constructor_dependencies: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(
             OrderedSet
         )
 
         # if a cpu node has a dependency on two different cpu constructors,
         # then if either constructor cannot be moved to gpu, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
-        equal_constructor_sets: Dict[fx.Node, OrderedSet[fx.Node]] = {
+        equal_constructor_sets: dict[fx.Node, OrderedSet[fx.Node]] = {
             c: OrderedSet([c]) for c in constructors
         }
 

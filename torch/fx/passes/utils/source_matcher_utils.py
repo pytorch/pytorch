@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -56,7 +56,7 @@ def get_source_partitions(
     graph: Graph,
     wanted_sources: List[Any],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Dict[Any, List[SourcePartition]]:
+) -> dict[Any, List[SourcePartition]]:
     """
     Args:
         graph: The graph we want to partition
@@ -69,7 +69,7 @@ def get_source_partitions(
         that correspond to the list of nodes that were decomposed from the given
         source.
     """
-    modules: Dict[Type, Dict[str, List[Node]]] = {}
+    modules: dict[Type, dict[str, List[Node]]] = {}
 
     for node in graph.nodes:
         # The metadata source_fn should contain a tuple of a unique name for the
@@ -124,7 +124,7 @@ def get_source_partitions(
             list(params),  # type: ignore[arg-type]
         )
 
-    ret: Dict[Type[Any], List[SourcePartition]] = {}
+    ret: dict[Type[Any], List[SourcePartition]] = {}
 
     if filter_fn:
         # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the

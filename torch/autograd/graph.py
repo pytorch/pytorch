@@ -9,7 +9,6 @@ from typing import (
     Callable,
     cast,
     Deque,
-    Dict,
     Generator,
     Iterable,
     Iterator,
@@ -502,9 +501,9 @@ def register_multi_grad_hook(
         raise ValueError(f"Expects mode to be one of {supported_modes} but got {mode}")
 
     if mode == "all":
-        count: Dict[int, int] = {}
+        count: dict[int, int] = {}
         nb_calls = None
-        buffer: Dict[int, List[Optional[torch.Tensor]]] = {}
+        buffer: dict[int, List[Optional[torch.Tensor]]] = {}
 
         grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
         len_tensors = len(tensors)
@@ -544,7 +543,7 @@ def register_multi_grad_hook(
         )
     elif mode == "any":
         fn = cast(Callable[[torch.Tensor], None], fn)
-        ran_hook: Dict[int, bool] = defaultdict(bool)
+        ran_hook: dict[int, bool] = defaultdict(bool)
 
         @functools.wraps(fn)
         def wrapped_fn(grad: torch.Tensor) -> None:
@@ -666,7 +665,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         func: "OpOverload",
         types: Iterable[type],
         args: Tuple[Any, ...] = (),
-        kwargs: Optional[Dict[Any, Any]] = None,
+        kwargs: Optional[dict[Any, Any]] = None,
     ) -> Any:
         kwargs = kwargs or {}
 
@@ -704,7 +703,7 @@ class _AllowMutationOnSavedContext:
         self.cloned: MutableMapping[_Handle, torch.Tensor] = WeakKeyDictionary()
         self.original: MutableMapping[_Handle, torch.Tensor] = WeakKeyDictionary()
         self.tid_to_weakhandle: MutableMapping[_TID, _Handle] = WeakValueDictionary()
-        self.sid_to_tid: Dict[_SID, Set[_TID]] = defaultdict(set)
+        self.sid_to_tid: dict[_SID, Set[_TID]] = defaultdict(set)
 
     def clear(self) -> None:
         self.cloned.clear()

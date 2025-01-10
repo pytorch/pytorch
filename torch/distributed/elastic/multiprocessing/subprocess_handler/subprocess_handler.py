@@ -9,7 +9,7 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 
 __all__ = ["SubprocessHandler"]
@@ -35,7 +35,7 @@ class SubprocessHandler:
         self,
         entrypoint: str,
         args: Tuple,
-        env: Dict[str, str],
+        env: dict[str, str],
         stdout: Optional[str],
         stderr: Optional[str],
         local_rank_id: int,
@@ -50,8 +50,8 @@ class SubprocessHandler:
         self.local_rank_id = local_rank_id
         self.proc: subprocess.Popen = self._popen(args_str, env_vars)
 
-    def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
-        kwargs: Dict[str, Any] = {}
+    def _popen(self, args: Tuple, env: dict[str, str]) -> subprocess.Popen:
+        kwargs: dict[str, Any] = {}
         if not IS_WINDOWS:
             kwargs["start_new_session"] = True
         return subprocess.Popen(

@@ -1,5 +1,5 @@
 import copy
-from typing import Dict, Optional, List
+from typing import Optional, List
 
 import torch
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, PassResult, Argument
@@ -9,7 +9,7 @@ from torch._ops import OpOverload
 
 aten = torch.ops.aten
 
-_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload] = {
+_NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: dict[OpOverload, OpOverload] = {
     aten.sym_constrain_range.default: aten._functional_sym_constrain_range,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
@@ -60,7 +60,7 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
         self,
         op: OpOverload,
         args: tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
+        kwargs: dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
         if op not in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS:

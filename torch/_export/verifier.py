@@ -4,7 +4,7 @@ import inspect
 import math
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Type, TYPE_CHECKING
+from typing import Any, final, List, Type, TYPE_CHECKING
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
@@ -83,7 +83,7 @@ def _check_torch_fn(node: torch.fx.Node) -> None:
         raise SpecViolationError(f"Node.meta {node.name} has invalid torch_fn field {torch_fn}")
 
 class _VerifierMeta(type):
-    _registry: Dict[str, Type['Verifier']] = {}
+    _registry: dict[str, Type['Verifier']] = {}
 
     def __new__(metacls, name, bases, attrs):
         if bases:

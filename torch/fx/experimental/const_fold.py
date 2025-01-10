@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import re
-from typing import Callable, Dict, Optional, Set, Union
+from typing import Callable, Optional, Set, Union
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -100,7 +100,7 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     call_mod_args = call_mod_node_to_replace.args
     call_mod_kwargs = call_mod_node_to_replace.kwargs
 
-    replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
     def replacement_fn(node):

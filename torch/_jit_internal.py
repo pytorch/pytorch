@@ -957,7 +957,7 @@ def copy_torchscript_modifier(orig, new) -> None:
 # so that they can be imported in nn/functional.py without an import cycle
 
 # qualified_name => list[overload_functions]
-_overloaded_fns: Dict[str, List[Callable]] = {}  # noqa: T484
+_overloaded_fns: dict[str, List[Callable]] = {}  # noqa: T484
 
 
 _OVERLOAD_EXAMPLE = """
@@ -1068,11 +1068,11 @@ def get_class_name_lineno(method) -> Tuple[str, int]:
 # when modules of the same name are in the same file
 
 # qualified_name => class name => list[overload_functions]
-_overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
+_overloaded_methods: dict[str, dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
+_overloaded_method_class_fileno: dict[Tuple[str, str], int] = {}
 
 
 def _overload_method(func):

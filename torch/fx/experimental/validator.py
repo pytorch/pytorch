@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Set, Tuple, Type, Union
 
 import sympy
 
@@ -350,13 +350,13 @@ try:
             super().__init__(module, garbage_collect_values=True)
 
         def placeholder(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: Tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             symbol = fx_traceback.get_current_meta()["symbol"]
             return self.validator.z3var(symbol)
 
         def call_function(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: Tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             if target != torch._assert:
                 # Lift and runs the node target function
@@ -481,7 +481,7 @@ try:
             log.debug("new instance")
 
             # Mapping of SymPy symbols to Z3 variables.
-            self.symbols: Dict[sympy.Symbol, z3.ExprRef] = {}
+            self.symbols: dict[sympy.Symbol, z3.ExprRef] = {}
 
             # Set of source Z3 expressions.
             # They represent the generated guards without any kind of

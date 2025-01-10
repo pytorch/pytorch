@@ -469,7 +469,7 @@ class RNNBase(torch.nn.Module):
 
     def _weight_bias(self):
         # Returns a dict of weights and biases
-        weight_bias_dict: Dict[str, Dict] = {"weight": {}, "bias": {}}
+        weight_bias_dict: dict[str, Dict] = {"weight": {}, "bias": {}}
         count = 0
         num_directions = 2 if self.bidirectional else 1
         for layer in range(self.num_layers):
@@ -1134,7 +1134,7 @@ class RNNCellBase(torch.nn.Module):
 
     def _weight_bias(self):
         # Returns a dict of weights and biases
-        weight_bias_dict: Dict[str, Dict] = {"weight": {}, "bias": {}}
+        weight_bias_dict: dict[str, Dict] = {"weight": {}, "bias": {}}
         w1, b1 = self._packed_weight_ih.__getstate__()[0]
         w2, b2 = self._packed_weight_hh.__getstate__()[0]
         # TODO: these can be simplified to one level? e.g. using weight_ih as key

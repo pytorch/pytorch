@@ -1392,7 +1392,7 @@ class TensorSubclassVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
@@ -1432,7 +1432,7 @@ class UntypedStorageVariable(VariableTracker):
         tx,
         name,
         args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
             assert not args

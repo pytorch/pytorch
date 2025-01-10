@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
+from typing import Any, Callable, List, NamedTuple, Optional, Tuple, Type
 
 import torch.return_types
 from torch.utils._pytree import PyTree, TreeSpec
@@ -9,8 +9,8 @@ from torch.utils._pytree import PyTree, TreeSpec
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
-SUPPORTED_NODES: Dict[Type[Any], FlattenFuncSpec] = {}
-SUPPORTED_NODES_EXACT_MATCH: Dict[Type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
+SUPPORTED_NODES: dict[Type[Any], FlattenFuncSpec] = {}
+SUPPORTED_NODES_EXACT_MATCH: dict[Type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
 
 
 def register_pytree_flatten_spec(
@@ -51,7 +51,7 @@ def tree_flatten_spec(
     return result
 
 
-def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
+def _dict_flatten_spec(d: dict[Any, Any], spec: TreeSpec) -> List[Any]:
     return [d[k] for k in spec.context]
 
 
@@ -67,7 +67,7 @@ def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> List[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
-def _dict_flatten_spec_exact_match(d: Dict[Any, Any], spec: TreeSpec) -> bool:
+def _dict_flatten_spec_exact_match(d: dict[Any, Any], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 

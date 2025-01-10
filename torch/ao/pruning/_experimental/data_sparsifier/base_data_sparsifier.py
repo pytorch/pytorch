@@ -66,7 +66,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
         self._container = _Container()
 
-        self.data_groups: Dict[str, Dict] = defaultdict(dict)  # name -> {**config}
+        self.data_groups: dict[str, Dict] = defaultdict(dict)  # name -> {**config}
         if data_list is not None:
             # add data with default config here
             [self.add_data(name, data, **self.defaults) for name, data in data_list]

@@ -6,7 +6,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
 from torch._environment import is_fbcode
@@ -175,7 +175,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
+skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -524,7 +524,7 @@ fake_tensor_cache_crosscheck_enabled = (
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
-compiled_autograd_kwargs_override: Dict[str, Any] = {}
+compiled_autograd_kwargs_override: dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes

@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, skipIfMPSOnMacOS13, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
-from typing import List, Tuple, Type, Set, Dict
+from typing import List, Tuple, Type, Set
 import operator
 
 # List of all namespaces containing modules to test.
@@ -57,7 +57,7 @@ MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
 
 # Dict of module class -> common name. Useful for making test names more intuitive.
 # Example: torch.nn.modules.linear.Linear -> "nn.Linear"
-MODULE_CLASS_NAMES: Dict[Type, str] = {}
+MODULE_CLASS_NAMES: dict[Type, str] = {}
 for namespace in MODULE_NAMESPACES:
     for module_name in namespace.__all__:  # type: ignore[attr-defined]
         module_cls = getattr(namespace, module_name)
