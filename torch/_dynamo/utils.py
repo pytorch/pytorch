@@ -54,7 +54,6 @@ from typing import (
     Optional,
     overload,
     Set,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -106,7 +105,7 @@ try:
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
-        NP_SUPPORTED_MODULES: Tuple[types.ModuleType, ...] = (
+        NP_SUPPORTED_MODULES: tuple[types.ModuleType, ...] = (
             np,
             np.fft,
             np.linalg,
@@ -202,8 +201,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: Union[List[Tuple[str, object]], List[List[object]]],
-    headers: Union[Tuple[str, ...], List[str]],
+    rows: Union[List[tuple[str, object]], List[List[object]]],
+    headers: Union[tuple[str, ...], List[str]],
 ) -> str:
     try:
         import tabulate
@@ -590,7 +589,7 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> Tuple[List[str], List[object]]:
+) -> tuple[List[str], List[object]]:
     ...
 
 
@@ -658,7 +657,7 @@ class DuplicateWarningChecker:
     def reset(self):
         self.set = OrderedDict()
 
-    def add(self, key: Union[str, Tuple[object, object]]) -> bool:
+    def add(self, key: Union[str, tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -797,7 +796,7 @@ def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
 
 @overload
 def istype(
-    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+    obj: object, allowed_types: tuple[Type[List[T]], Type[tuple[T, ...]]]
 ) -> TypeIs[T]:
     ...
 
@@ -940,7 +939,7 @@ def is_numpy_ndarray(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    tensor_list: Tuple[type, ...] = (
+    tensor_list: tuple[type, ...] = (
         torch.Tensor,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
@@ -1241,7 +1240,10 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
                 del inductor_config_copy[key]
             # Stringify Inductor config
             inductor_conf_str = json.dumps(
-                inductor_config_copy, cls=TypeSafeSerializer, skipkeys=True
+                inductor_config_copy,
+                cls=TypeSafeSerializer,
+                skipkeys=True,
+                sort_keys=True,
             )
         except Exception:
             # Don't crash because of runtime logging errors
@@ -1897,7 +1899,7 @@ def is_namedtuple_cls(cls):
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls) -> Tuple[str, ...]:
+def namedtuple_fields(cls) -> tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
         return ("start", "stop", "step")
@@ -2185,7 +2187,7 @@ def tuple_iterator_getitem(it, index):
 iter_next = next
 
 
-def normalize_range_iter(range_iter) -> Tuple[int, int, int]:
+def normalize_range_iter(range_iter) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
     # already incremented by the current index.
@@ -3067,7 +3069,7 @@ def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
     tensor_source: Source,
-) -> Tuple[bool, Optional[TensorStaticReason]]:
+) -> tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 

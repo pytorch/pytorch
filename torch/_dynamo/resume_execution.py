@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,
@@ -89,7 +89,7 @@ def _try_except_tf_mode_template(dummy, stack_var_name):
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: Optional[Tuple[Any, ...]] = None
+    target_values: Optional[tuple[Any, ...]] = None
 
     def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
         """
@@ -271,14 +271,14 @@ class ContinueExecutionCache:
         code,
         lineno,
         offset: int,
-        setup_fn_target_offsets: Tuple[int, ...],  # only used in Python 3.11+
+        setup_fn_target_offsets: tuple[int, ...],  # only used in Python 3.11+
         nstack: int,
-        argnames: Tuple[str, ...],
-        argnames_null: Tuple[str, ...],
-        setup_fns: Tuple[ReenterWith, ...],
-        stack_ctx_vars: Tuple[Tuple[int, Tuple[Any]], ...],
-        argnames_ctx_vars: Tuple[Tuple[str, Tuple[Any]], ...],
-        null_idxes: Tuple[int, ...],
+        argnames: tuple[str, ...],
+        argnames_null: tuple[str, ...],
+        setup_fns: tuple[ReenterWith, ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[Any]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[Any]], ...],
+        null_idxes: tuple[int, ...],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -461,7 +461,7 @@ class ContinueExecutionCache:
 
     @classmethod
     def generate_based_on_original_code_object(
-        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int, ...], *args
+        cls, code, lineno, offset: int, setup_fn_target_offsets: tuple[int, ...], *args
     ):
         """
         This handles the case of generating a resume into code generated
