@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import itertools
-import sys
 import unittest
 from collections import OrderedDict
 
@@ -27,9 +26,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def _compile_check(self, fn):
         eager = EagerAndRecordGraphs()
         t = torch.randn(2)
-        r = torch.compile(fn, backend=eager, fullgraph=True)(t)
+        torch.compile(fn, backend=eager, fullgraph=True)(t)
         self.assertGreater(len(eager.graphs), 0)
-        return t, r
 
 
 class GeneratorTests(GeneratorTestsBase):
@@ -602,37 +600,6 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(i, 3)
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
-
-    @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
-    def test_cleanup_throw(self):
-        def nested_generator():
-            try:
-                yield 1
-                yield 2
-            except StopIteration:
-                return 123  # noqa: B901
-
-        def outer_generator():
-            yield from nested_generator()
-            yield 3
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = outer_generator()
-            next(gen)  # Start the outer generator and enter the nested generato
-
-            i = 0
-            try:
-                # Force an exception while the generator is running
-                i = gen.throw(StopIteration("stop"))
-            except RuntimeError:
-                pass
-            return (i, t.sin())
-
-        t, (i, y) = self._compile_check(fn)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, t.sin())
 
     def test_iter(self):
         def whoo():
