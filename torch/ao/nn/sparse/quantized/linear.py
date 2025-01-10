@@ -268,7 +268,7 @@ class Linear(torch.nn.Module):
         qlinear.set_weight_bias(
             qweight,
             mod.bias,
-            row_block_size,
+            row_block_size,  # type: ignore[arg-type]
             col_block_size,  # type: ignore[arg-type]
         )
         qlinear.scale = float(act_scale)
