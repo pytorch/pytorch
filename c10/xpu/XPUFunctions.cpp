@@ -96,7 +96,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
     }
   }
 
-  // Case 3: No GPUs found (neither dGPU nor iGPU).
+  // Case 3: No GPUs found (neither dGPU nor iGPU) - Do nothing.
 }
 
 inline void initGlobalDevicePoolState() {
