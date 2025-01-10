@@ -6,7 +6,7 @@ namespace at::accelerator {
 
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
 #define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
-  if (at::has##device_name()) {                    \
+  if (at::globalContext().has##device_name()) {    \
     device_type = k##device_name;                  \
     TORCH_CHECK(                                   \
         !is_accelerator_detected,                  \
@@ -54,6 +54,7 @@ bool isAccelerator(c10::DeviceType device_type) {
   }
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 c10::DeviceIndex deviceCount() {
   const auto device_type = getAccelerator(false);
   if (!device_type.has_value()) {
@@ -99,5 +100,6 @@ void synchronizeDevice(c10::DeviceIndex device_index) {
   // impl.synchronizeDevice should can be safely called from any device
   impl.synchronizeDevice(device_index);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace at::accelerator
