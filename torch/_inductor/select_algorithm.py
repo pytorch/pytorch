@@ -2041,10 +2041,9 @@ class AlgorithmSelectorCache(PersistentCache):
             # we want to convert all benchmark results into floats at this point,
             # this will cause any lazy benchmarks to finalize (i.e. by executing
             # a grouped benchmark).
-            finalized_timings: Dict[Union[ExternKernelCaller, TritonTemplateCaller], float] = {
-                choice: float(timing)
-                for choice, timing in timings.items()
-            }
+            finalized_timings: Dict[
+                Union[ExternKernelCaller, TritonTemplateCaller], float
+            ] = {choice: float(timing) for choice, timing in timings.items()}
 
             return finalized_timings
 
