@@ -185,9 +185,7 @@ class PagedAttention:
 
         addr = (
             physical_block_idx * self.page_size + logical_block_offset[None, :]
-        ).view(
-            -1
-        )  # [B*S]
+        ).view(-1)  # [B*S]
 
         k_val = k_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, K_D)
         v_val = v_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, V_D)

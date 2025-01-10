@@ -131,6 +131,7 @@ from . import config
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
+
     id: int
 
 
@@ -725,6 +726,7 @@ UnaliasedStorage = _UnaliasedStorage()
 
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
+
     __slots__ = ["index"]
 
     index: PathOutputIndex
@@ -1253,13 +1255,15 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            torch._check(
-                o.is_cuda or o.untyped_storage().data_ptr() == 0,
-                lambda: (
-                    "Expected all cuda outputs in cuda graph recording. Non cuda output "
-                    f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+            (
+                torch._check(
+                    o.is_cuda or o.untyped_storage().data_ptr() == 0,
+                    lambda: (
+                        "Expected all cuda outputs in cuda graph recording. Non cuda output "
+                        f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+                    ),
                 ),
-            ),
+            )
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
@@ -1297,9 +1301,9 @@ class CUDAGraphNode:
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
         else:
-            assert len(self.stack_traces) == len(
-                outputs
-            ), "Wrong number of stack traces passed in"
+            assert len(self.stack_traces) == len(outputs), (
+                "Wrong number of stack traces passed in"
+            )
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
@@ -1742,12 +1746,8 @@ def check_memory_pool(
     pool_id: tuple[int, int],
     live_storages_ptrs: List[StorageWeakRefWrapper],
 ) -> None:
-    assert all(
-        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
-    )  # noqa: C419
-    unique_storages = {
-        stor.data_ptr() for stor in live_storages_ptrs if stor()
-    }  # noqa: set_linter
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
@@ -2236,7 +2236,10 @@ class CUDAGraphTreeManager:
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
-    ) -> tuple[ModelType, OutputType,]:
+    ) -> tuple[
+        ModelType,
+        OutputType,
+    ]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
