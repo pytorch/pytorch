@@ -28,6 +28,20 @@ DTYPE_TO_METAL = {
 }
 
 
+def value_to_metal(val: CSEVariable) -> str:
+    if isinstance(val, float):
+        if val == torch.inf:
+            return "HUGE_VALF"
+        elif val == -torch.inf:
+            return "-HUGE_VALF"
+        elif val != val:  # Only float that not equal to self is nan
+            return "NAN"
+        return str(val)
+    elif isinstance(val, bool):
+        return "true" if val else "false"
+    return str(val)
+
+
 class MetalExprPrinter(ExprPrinter_):
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
@@ -62,17 +76,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
-        if isinstance(val, float):
-            if val == torch.inf:
-                return "HUGE_VALF"
-            elif val == -torch.inf:
-                return "-HUGE_VALF"
-            elif val != val:  # Only float that not equal to self is nan
-                return "NAN"
-            return str(val)
-        elif isinstance(val, bool):
-            return "true" if val else "false"
-        return str(val)
+        return value_to_metal(val)
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
@@ -84,6 +88,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        # TODO: Type annotation for other is wrong, it's often float or int
         with V.kernel.mask_loads(mask, other) as new_mask:
             result = body()
 
@@ -94,7 +99,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
-        return f"{a} ? {b} : {c}"
+        return f"{a} ? {b} : {value_to_metal(c)}"
 
     @staticmethod
     def remainder(a: CSEVariable, b: CSEVariable) -> str:

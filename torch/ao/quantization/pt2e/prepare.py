@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch._subclasses import FakeTensor
@@ -533,7 +533,7 @@ def _maybe_insert_input_and_output_observers_for_node(
 
 def prepare(
     model: GraphModule,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
     is_qat: bool,
     obs_or_fq_callback=None,
 ) -> GraphModule:

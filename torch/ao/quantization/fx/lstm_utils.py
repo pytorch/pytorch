@@ -1,6 +1,6 @@
 import copy
 import operator
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -18,7 +18,7 @@ from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_f
 # TODO: move all LSTM util functions from fx/utils.py to this file
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     backend_config: Optional[BackendConfig] = None,
     linear_output_obs_ctr: Optional[_PartialWrapper] = None,
     sigmoid_obs_ctr: Optional[_PartialWrapper] = None,
@@ -133,7 +133,7 @@ def _get_lstm_with_individually_observed_parts(
         add_count = 0
         mul_count = 0
         for node in cell.graph.nodes:
-            op_index: Optional[Tuple[Callable, int]] = None  # e.g. (torch.add, 1)
+            op_index: Optional[tuple[Callable, int]] = None  # e.g. (torch.add, 1)
             if node.target == torch.add:
                 op_index = (torch.add, add_count)
                 add_count += 1
