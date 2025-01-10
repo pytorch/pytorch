@@ -226,6 +226,8 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if name == "__eq__":
+            return variables.GetAttrVariable(self, name)
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
