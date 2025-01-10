@@ -223,7 +223,7 @@ class UsageLogger:
 
                 # if has errors but data list is None, a bug may exist in the monitor code, log the errors
                 if not data_list and len(errors) > 0:
-                    raise Exception(
+                    raise ValueError(
                         f"no data is collected but detected errors during the interval: {errors}"
                     )
                 if not data_list:
