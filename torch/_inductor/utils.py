@@ -52,6 +52,7 @@ import sympy
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pytree import tree_map_only
 
 
 if TYPE_CHECKING:
@@ -383,6 +384,30 @@ def is_pointwise_use(
     return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
 
 
+def gen_gm_and_inputs(
+    target: Any, args: list[Any], kwargs: dict[str, Any]
+) -> tuple[GraphModule, list[torch.Tensor]]:
+    g = torch.fx.Graph()
+    graph_args: list[torch.Tensor] = []
+
+    def add_tensor_arg(arg: torch.Tensor) -> Node:
+        graph_args.append(arg)
+        return g.placeholder(f"arg{len(graph_args)}")
+
+    node = g.call_function(
+        target, *tree_map_only(torch.Tensor, add_tensor_arg, (args, kwargs))
+    )
+    if (
+        len(target._schema.returns) == 1
+        and str(target._schema.returns[0].type) == "Tensor"
+    ):
+        node = (node,)  # type: ignore[assignment]
+    g.output(node)
+
+    gm = torch.fx.GraphModule({}, g)
+    return gm, graph_args
+
+
 def synchronize(device: str = "cuda") -> None:
     if device == "cpu":
         return
@@ -392,7 +417,10 @@ def synchronize(device: str = "cuda") -> None:
 
 
 def timed(
-    model: Callable[..., Any], example_inputs: Sequence[Any], times: int = 1, device: str = "cuda"
+    model: Callable[..., Any],
+    example_inputs: Sequence[Any],
+    times: int = 1,
+    device: str = "cuda",
 ) -> float:
     synchronize(device)
     torch.manual_seed(1337)
@@ -414,7 +442,9 @@ def print_performance(
     baseline: float = 1.0,
     device: str = "cuda",
 ) -> float:
-    timings = torch.tensor([timed(model, example_inputs, times, device) for _ in range(repeat)])
+    timings = torch.tensor(
+        [timed(model, example_inputs, times, device) for _ in range(repeat)]
+    )
     took = torch.median(timings) / times
     print(f"{took / baseline:.6f}")
     return took.item()
