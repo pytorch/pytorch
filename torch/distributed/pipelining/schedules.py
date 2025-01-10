@@ -1684,9 +1684,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 # logger will split it into multiple log lines, but this makes it hard to read (too wide)
                 print(
                     _format_pipeline_order(
-                        self.pipeline_order_with_comms, error_step_number=time_step
+                        self.pipeline_order_with_comms,  # type: ignore[arg-type]
+                        error_step_number=time_step,
                     )
-                )  # type: ignore[arg-type]
+                )
                 raise e
 
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them

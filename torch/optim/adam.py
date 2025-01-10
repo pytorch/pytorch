@@ -428,9 +428,9 @@ def _single_tensor_adam(
             # cast to workaround https://github.com/pytorch/pytorch/issues/140601
             key = (device, dtype)
             if key not in beta1_dict:
-                beta1_dict[key] = beta1.to(
+                beta1_dict[key] = beta1.to(  # type: ignore[union-attr]
                     device=device, dtype=dtype, non_blocking=True
-                )  # type: ignore[union-attr]
+                )
 
             device_beta1: Union[float, Tensor] = beta1_dict[key]
         else:

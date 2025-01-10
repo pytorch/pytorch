@@ -376,8 +376,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit,
-                    self.store_attr_mutations[var],  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):
