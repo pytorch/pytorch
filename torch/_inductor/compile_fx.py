@@ -242,9 +242,9 @@ def _unlift_graph(
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm.meta[
-                get_cloned_parameter_buffer_name(buffer_name)
-            ] = clone_preserve_strides(state_dict[buffer_name])
+            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = (
+                clone_preserve_strides(state_dict[buffer_name])
+            )
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -488,7 +488,7 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: Optional[Union[str, Dict[str, Any]]] = None
+    config_patches: Optional[Union[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
@@ -525,8 +525,7 @@ class _CompileFxCallable(Protocol):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         **kwargs: Unpack[_CompileFxKwargs],
-    ) -> OutputCode:
-        ...
+    ) -> OutputCode: ...
 
 
 def compile_fx_inner(
@@ -605,9 +604,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(
-        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
-    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
+        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    )
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -796,8 +795,7 @@ class FxCompile(ABC):
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        ...
+    ) -> OutputCode: ...
 
 
 class _InProcessFxCompile(FxCompile):
@@ -821,9 +819,9 @@ class _InProcessFxCompile(FxCompile):
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
         aot_mode: bool = graph_kwargs.get("aot_mode", False)
         is_inference: bool = graph_kwargs.get("is_inference", False)
-        extern_node_serializer: Optional[
-            Callable[[List[ExternKernelNode]], Any]
-        ] = graph_kwargs.get("extern_node_serializer", None)
+        extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = (
+            graph_kwargs.get("extern_node_serializer", None)
+        )
         boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
             "boxed_forward_device_index", None
         )
@@ -1029,9 +1027,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert (
-                                graph.cpp_wrapper
-                            ), "AOT mode only supports C++ wrapper"
+                            assert graph.cpp_wrapper, (
+                                "AOT mode only supports C++ wrapper"
+                            )
                             code, linemap = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug("Output code: \n%s", code)
 
@@ -1790,9 +1788,9 @@ def compile_fx(
                     boxed_forward_device_index=forward_device,
                 )
 
-        fw_compiler: Callable[
-            [GraphModule, Sequence[InputType]], OutputCode
-        ] = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
+            functools.partial(fw_compiler_base, is_inference=False)
+        )
         fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
         if config.freezing and not torch.is_grad_enabled():
@@ -1844,9 +1842,11 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 fixed = count_tangents(gm)
-                with config.patch(
-                    get_cpp_wrapper_config()
-                ) if config.cpp_wrapper else contextlib.nullcontext():
+                with (
+                    config.patch(get_cpp_wrapper_config())
+                    if config.cpp_wrapper
+                    else contextlib.nullcontext()
+                ):
                     return inner_compile(
                         gm,
                         example_inputs,

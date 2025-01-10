@@ -7,6 +7,7 @@
 """
 Global flags for aot autograd
 """
+
 import os
 import sys
 from typing import Optional, TYPE_CHECKING

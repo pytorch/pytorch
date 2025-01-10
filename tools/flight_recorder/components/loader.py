@@ -86,8 +86,8 @@ def read_dir(args: argparse.Namespace) -> Tuple[Dict[str, Dict[str, Any]], str]:
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
-    assert (
-        len(details) > 0
-    ), f"no files loaded from {args.trace_dir} with prefix {prefix}"
+    assert len(details) > 0, (
+        f"no files loaded from {args.trace_dir} with prefix {prefix}"
+    )
     logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version

@@ -53,9 +53,9 @@ fx_graph_cache = (
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
 # should we bundle triton caching into fx graph cache
-bundle_triton_into_fx_graph_cache: Optional[
-    bool
-] = bundle_triton_into_fx_graph_cache_default()
+bundle_triton_into_fx_graph_cache: Optional[bool] = (
+    bundle_triton_into_fx_graph_cache_default()
+)
 
 # Enable autotune local cache.
 #
