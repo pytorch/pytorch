@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import (
-    Any,
-    Callable,
-    List,
-    Optional,
-    OrderedDict,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, List, Optional, OrderedDict, Sequence, Set, Union
 
 import torch
 from torch.export import ExportedProgram
@@ -130,7 +120,7 @@ def find_sequential_partitions(
 
 def _get_submodule(
     graph_module: torch.fx.GraphModule, node: torch.fx.Node, arg_index: int
-) -> Tuple[str, torch.nn.Module, torch.fx.Node]:
+) -> tuple[str, torch.nn.Module, torch.fx.Node]:
     submod_node = node.args[arg_index]
     assert isinstance(submod_node, torch.fx.Node)
     assert submod_node.op == "get_attr"
@@ -142,7 +132,7 @@ def _get_submodule(
 
 def _get_control_flow_submodules(
     graph_module: torch.fx.GraphModule,
-) -> List[Tuple[str, torch.nn.Module, torch.fx.Node]]:
+) -> List[tuple[str, torch.nn.Module, torch.fx.Node]]:
     """
     Returns a list of submodules used for control flow operations
     (torch.ops.higher_order.cond/map) that are in the given toplevel graph (does not look
