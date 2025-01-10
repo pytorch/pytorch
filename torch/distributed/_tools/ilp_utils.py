@@ -1,5 +1,5 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+from typing import cast, Dict, List, OrderedDict, TypedDict
 
 import numpy as np
 
@@ -257,15 +257,15 @@ def display_bytes(b: int, unit: str = "MiB") -> str:
     return a string that represent the number of bytes in a desired unit
     """
     if unit == "KiB":
-        return f"{b/2**10:.2f} KiB"
+        return f"{b / 2**10:.2f} KiB"
     if unit == "MiB":
-        return f"{b/2**20:.2f} MiB"
+        return f"{b / 2**20:.2f} MiB"
     if unit == "GiB":
-        return f"{b/2**30:.2f} GiB"
+        return f"{b / 2**30:.2f} GiB"
     return f"{b:.2f} bytes"
 
 
-def get_peak_memory_runtime_baseline(graph: Graph) -> Tuple[int, float]:
+def get_peak_memory_runtime_baseline(graph: Graph) -> tuple[int, float]:
     """
     Get the baseline peak memory and runtime.
     Baseline here means there is no FSDP or AC.
