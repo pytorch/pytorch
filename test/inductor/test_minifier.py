@@ -75,9 +75,7 @@ def inner(x):
     return x - torch.tensor(655, dtype=torch.half, device='GPU_TYPE') * 100
 
 inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
-""".replace(
-            "GPU_TYPE", GPU_TYPE
-        )
+""".replace("GPU_TYPE", GPU_TYPE)
 
         # If we disable RMSE against fp64, this triggers accuracy error,
         # as the increased precision from torch.compile changes the result

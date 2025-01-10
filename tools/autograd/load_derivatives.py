@@ -313,9 +313,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            assert (
-                f.func.kind() != SchemaKind.inplace
-            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            assert f.func.kind() != SchemaKind.inplace, (
+                f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            )
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1

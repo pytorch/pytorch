@@ -121,6 +121,7 @@ def associative_scan(
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
+
         cumsum = associative_scan(add, x, dim)
 
     """
@@ -354,9 +355,9 @@ def trace_associative_scan(
             )
 
     assert outputs is not None
-    assert len(outputs) == len(
-        xs
-    ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    assert len(outputs) == len(xs), (
+        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    )
 
     for i, o in zip(xs, outputs):
         o_meta = o.meta["tensor_meta"]

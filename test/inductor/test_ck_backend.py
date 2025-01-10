@@ -66,9 +66,9 @@ class TestCKBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

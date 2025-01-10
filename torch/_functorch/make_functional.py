@@ -384,9 +384,11 @@ def make_functional(
         model = nn.Linear(3, 3)
         func, params = make_functional(model)
 
+
         def compute_loss(params, x, t):
             y = func(params, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(params, x, t)
 
@@ -453,9 +455,11 @@ def make_functional_with_buffers(
         model = nn.Linear(3, 3)
         func, params, buffers = make_functional_with_buffers(model)
 
+
         def compute_loss(params, buffers, x, t):
             y = func(params, buffers, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(params, buffers, x, t)
 
@@ -479,7 +483,7 @@ def make_functional_with_buffers(
 
 
 def transpose_stack(
-    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...]
+    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...],
 ) -> Tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(

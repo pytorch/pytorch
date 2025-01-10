@@ -49,6 +49,7 @@ class ModuleTracker:
             def my_linear(m1, m2, bias):
                 print(f"Current modules: {tracker.parents}")
                 return torch.mm(m1, m2.t()) + bias
+
             torch.nn.functional.linear = my_linear
 
             mod(torch.rand(2, 2))

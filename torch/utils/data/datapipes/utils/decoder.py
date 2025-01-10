@@ -45,8 +45,8 @@ def basichandlers(extension: str, data):
 
     Example:
         >>> import pickle
-        >>> data = pickle.dumps('some data')
-        >>> new_data = basichandlers('pickle', data)
+        >>> data = pickle.dumps("some data")
+        >>> new_data = basichandlers("pickle", data)
         >>> new_data
         some data
 
@@ -169,9 +169,9 @@ class ImageHandler:
     """
 
     def __init__(self, imagespec):
-        assert imagespec in list(
-            imagespecs.keys()
-        ), f"unknown image specification: {imagespec}"
+        assert imagespec in list(imagespecs.keys()), (
+            f"unknown image specification: {imagespec}"
+        )
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
@@ -205,18 +205,18 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert (
-                    result.dtype == np.uint8
-                ), f"numpy image array should be type uint8, but got {result.dtype}"
+                assert result.dtype == np.uint8, (
+                    f"numpy image array should be type uint8, but got {result.dtype}"
+                )
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert (
-                    result.dtype == np.uint8
-                ), f"numpy image array should be type uint8, but got {result.dtype}"
+                assert result.dtype == np.uint8, (
+                    f"numpy image array should be type uint8, but got {result.dtype}"
+                )
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))

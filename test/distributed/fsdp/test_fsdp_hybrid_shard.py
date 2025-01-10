@@ -121,8 +121,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_save_load_state_dict(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
@@ -171,8 +172,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_sync_module_state(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
@@ -355,9 +357,9 @@ class TestFSDPHybridShard(FSDPTest):
             use_orig_params,
             hsdp_process_groups=hsdp_pgs,
         )
-        assert (
-            hsdp_model._inter_node_pg.size() > 1
-        ), "HSDP model initialized without replication"
+        assert hsdp_model._inter_node_pg.size() > 1, (
+            "HSDP model initialized without replication"
+        )
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
         hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
         torch.manual_seed(global_pg.rank() + 1)
