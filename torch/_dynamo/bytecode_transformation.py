@@ -2,10 +2,11 @@
 import copy
 import dataclasses
 import dis
+import functools
 import itertools
 import sys
 import types
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Sequence, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -435,7 +436,7 @@ def create_swap(n) -> List[Instruction]:
 
 def lnotab_writer(
     lineno: int, byteno: int = 0
-) -> Tuple[List[int], Callable[[int, int], None]]:
+) -> tuple[List[int], Callable[[int, int], None]]:
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
@@ -525,7 +526,7 @@ def linetable_311_writer(first_lineno: int):
             assert 0 < size <= 8
             # first byte - use 13 (no column info) is positions is
             # malformed, otherwise use 14 (long form)
-            other_varints: Tuple[int, ...] = ()
+            other_varints: tuple[int, ...] = ()
             if (
                 positions
                 and positions.lineno is not None
@@ -658,7 +659,7 @@ def assemble_exception_table(tab: List[ExceptionTableEntry]) -> bytes:
     return bytes(b)
 
 
-def assemble(instructions: List[Instruction], firstlineno: int) -> Tuple[bytes, bytes]:
+def assemble(instructions: List[Instruction], firstlineno: int) -> tuple[bytes, bytes]:
     """Do the opposite of dis.get_instructions()"""
     code: List[int] = []
     if sys.version_info >= (3, 11):
@@ -842,7 +843,7 @@ def compute_exception_table(
     instructions: List[Instruction],
 ) -> List[ExceptionTableEntry]:
     """Compute exception table in list format from instructions with exn_tab_entries"""
-    exn_dict: Dict[Tuple[int, int], Tuple[int, int, bool]] = {}
+    exn_dict: Dict[tuple[int, int], tuple[int, int, bool]] = {}
     indexof = get_indexof(instructions)
 
     for inst in instructions:
@@ -876,7 +877,7 @@ def compute_exception_table(
     # smallest byte that the next exception table entry can start at
     nexti = 0
     # stack of current nested keys
-    key_stack: List[Tuple[int, int]] = []
+    key_stack: List[tuple[int, int]] = []
     exn_tab: List[ExceptionTableEntry] = []
 
     def pop():
@@ -921,7 +922,7 @@ def check_inst_exn_tab_entries_nested(
     "Properly sorted" means entries are sorted by increasing starts, then
     decreasing ends.
     """
-    entry_stack: List[Tuple[int, int]] = []
+    entry_stack: List[tuple[int, int]] = []
     for entry in tab:
         key = (indexof[entry.start], indexof[entry.end])
         while entry_stack and entry_stack[-1][1] < key[0]:
@@ -937,7 +938,7 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
-    entries: Dict[Tuple[int, int], InstructionExnTabEntry] = {}
+    entries: Dict[tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
         if inst.exn_tab_entry:
             key = (
@@ -1405,7 +1406,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
 
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
-) -> Tuple[List[Instruction], types.CodeType]:
+) -> tuple[List[Instruction], types.CodeType]:
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)
 
@@ -1453,6 +1454,52 @@ def populate_kw_names_argval(instructions, consts):
 # If safe=True, we do not make any bytecode modifications.
 # Mainly used for debugging bytecode_transformation (see debug_checks)
 def cleaned_instructions(code, safe=False) -> List[Instruction]:
+    instructions = _cached_cleaned_instructions(code, safe)
+    # We have a lot of code that implicitly mutates the instruction array. We
+    # could do better here by making the copies explicit when necessary.
+    return _clone_instructions(instructions)
+
+
+# Copy an instructions array, making sure to remap the individual instruction targets.
+def _clone_instructions(instructions):
+    # This is super hot and this is the fastest way to do this (tried copy.copy
+    # and dataclasses.replace).
+    copied = [
+        Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            i.positions,
+            i.target,
+            i.exn_tab_entry,
+            i.argrepr,
+        )
+        for i in instructions
+    ]
+
+    remap = dict(zip(instructions, copied))
+    # Handle `None` in the remapper so we don't need an extra `if`.
+    remap[None] = None
+
+    for i in copied:
+        i.target = remap[i.target]
+        if entry := i.exn_tab_entry:
+            i.exn_tab_entry = InstructionExnTabEntry(
+                remap[entry.start],
+                remap[entry.end],
+                remap[entry.target],
+                entry.depth,
+                entry.lasti,
+            )
+    return copied
+
+
+@functools.lru_cache
+def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     if sys.version_info >= (3, 11):

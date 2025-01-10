@@ -29,10 +29,9 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
-    MI300_ARCH,
     parametrize,
     run_tests,
-    runOnRocmArch,
+    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -241,12 +240,13 @@ class MicroPipelineTPTest(TestCase):
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
 
-    @runOnRocmArch(MI300_ARCH)
+    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
+    @parametrize("return_A", [True, False])
     @fresh_inductor_cache()
-    def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim):
+    def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
 
@@ -266,9 +266,14 @@ class MicroPipelineTPTest(TestCase):
                 C = torch._scaled_mm(
                     A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
                 )
-                return C.view(*A.shape[:-1], -1)
+                C = C.view(*A.shape[:-1], -1)
             else:
-                return torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+                C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+
+            if return_A:
+                return A, C
+            else:
+                return None, C
 
         if A_dims == 2:
             A_shard_shape = [64, 32]
@@ -338,7 +343,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @runOnRocmArch(MI300_ARCH)
+    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])

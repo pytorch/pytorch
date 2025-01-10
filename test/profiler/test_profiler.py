@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import expecttest
@@ -950,6 +950,8 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
         called_num = [0]
 
@@ -1034,6 +1036,8 @@ class TestProfiler(TestCase):
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_multiple_steppers(self):
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -2277,7 +2281,7 @@ class MockProfilerEvent:
     start_time_ns: int
     duration_time_ns: int
     correlation_id: int = 0
-    children: List["MockProfilerEvent"] = field(default_factory=list)
+    children: list["MockProfilerEvent"] = field(default_factory=list)
     parent: Optional["MockProfilerEvent"] = None
 
     @property
@@ -2301,7 +2305,7 @@ class MockNode:
 
 @unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestExperimentalUtils(TestCase):
-    def make_tree(self) -> List[MockNode]:
+    def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
                 "1": {"2": {}},

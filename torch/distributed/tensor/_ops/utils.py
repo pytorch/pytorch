@@ -3,17 +3,7 @@
 import functools
 import itertools
 import operator
-from typing import (
-    Callable,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Callable, cast, Iterable, List, Optional, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -23,6 +13,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    OutputSharding,
     PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
@@ -46,11 +37,15 @@ _P = ParamSpec("_P")
 def register_prop_rule(
     op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+) -> Callable[
+    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
+]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
+    def wrapper(
+        impl: Callable[[OpSchema], OutputSharding]
+    ) -> Callable[[OpSchema], OutputSharding]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
@@ -196,10 +191,10 @@ def infer_broadcast_dims_map(
 
 
 def map_placements_after_broadcast(
-    placements: Tuple[Placement, ...],
+    placements: tuple[Placement, ...],
     shape: torch.Size,
     broadcast_dims_map: List[int],
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:

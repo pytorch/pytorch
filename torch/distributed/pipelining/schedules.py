@@ -17,13 +17,13 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
 
 import torch
 import torch.distributed as dist
+from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
@@ -228,9 +228,9 @@ class _PipelineSchedule(ABC):
         self,
         n_microbatches: int,
         loss_fn: Optional[Callable[..., torch.Tensor]] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
@@ -368,7 +368,7 @@ class _PipelineSchedule(ABC):
 
     def _split_inputs(
         self,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -450,9 +450,9 @@ class PipelineScheduleSingle(_PipelineSchedule):
         stage: _PipelineStageBase,
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
         # Init parent
         super().__init__(
@@ -915,7 +915,7 @@ def _add_send_recv(
             ) != stage_to_rank(action.stage_index)
         return False
 
-    def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
+    def _get_comms(action: _Action) -> tuple[_Action, _Action]:
         assert _has_comms(action), f"{action} is not a valid comm action"
         stage_idx = action.stage_index
         ctype = action.computation_type
@@ -1079,9 +1079,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
         use_full_backward: Optional[bool] = None,
     ):
@@ -1122,10 +1122,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
-    def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
+    def _initialize_stages(self, args: tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
         # or real value (if this stage and next stage are on the same device)
-        next_stage_args: Tuple[Any, ...] = tuple()
+        next_stage_args: tuple[Any, ...] = tuple()
         for stage in self._stages:
             if stage.is_first:
                 next_stage_args = stage._prepare_forward_infra(
@@ -1484,8 +1484,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         ), "Must call _load_actions() before calling _step_microbatches()"
 
         # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: Dict[Tuple[int, int], Work] = {}
-        fwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+        bwd_recv_ops: Dict[tuple[int, int], Work] = {}
+        fwd_recv_ops: Dict[tuple[int, int], Work] = {}
 
         # send ops should be waited on before step() exists, mainly for hygeine
         send_ops: List[Work] = []
@@ -1702,7 +1702,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
         super().__init__(
             stages=stages,
@@ -1909,9 +1909,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -2016,10 +2016,19 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
+        # TODO: we don't support Zero Bubble with torch.compile so we
+        # should disable it for now
+        for stage in stages:
+            if isinstance(stage.submod, OptimizedModule):
+                raise RuntimeError(
+                    "The Zero Bubble schedule is not supported with \
+stage modules that have used torch.compile"
+                )
+
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2131,7 +2140,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
                 return (stage + 1, op, microbatch) not in seen_ops
             return False
 
-        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+        seen_ops: Set[tuple[int, _ComputationType, int]] = set()
         result: Dict[int, List[Optional[_Action]]] = {}
         next_pointer: Dict[int, int] = {}
         bubbles_added: Dict[int, int] = {}
@@ -2145,7 +2154,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         while True:
             should_stop = True
 
-            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+            temp_seen_ops: Set[tuple[int, _ComputationType, int]] = set()
 
             for rank in range(self.pp_group_size):
                 timestamp = next_pointer[rank]
@@ -2206,9 +2215,9 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
     ):
         self.pp_group_size = stages[0].group_size

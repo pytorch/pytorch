@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Tuple
+from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -73,7 +73,7 @@ class Shard(Placement):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], List[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         This function uses torch.chunk to split a tensor into num_chunks shards along
         the Shard placement dimension, and return a list of shards with their pad sizes.
@@ -131,7 +131,7 @@ class Shard(Placement):
         num_chunks: int,
         rank: int,
         return_offset: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         returns the local shard size and offset on a given tensor dim
         """
@@ -154,7 +154,11 @@ class Shard(Placement):
             return local_shard_size, shard_starting_idx if return_offset else -1
 
     def _shard_tensor(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
     ) -> torch.Tensor:
         """
         shard and scatter a tensor on a mesh dimension (use coordinate
@@ -167,13 +171,25 @@ class Shard(Placement):
             # if rank is not part of mesh, we simply return an empty tensor
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
+        mesh_dim_local_rank = my_coordinate[mesh_dim]
+
+        if src_data_rank is None:
+            # src_data_rank specified as None explicitly means to skip the
+            # communications, simply split
+            scatter_list, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=False, contiguous=True
+            )
+
+            return scatter_list[mesh_dim_local_rank]
+
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-
-        mesh_dim_local_rank = my_coordinate[mesh_dim]
         output = torch.empty_like(scatter_list[mesh_dim_local_rank])
-        mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
+        # perform scatter from the src_data_rank as data source when it is not None
+        mesh_scatter(
+            output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
+        )
 
         # Only unpad if the local_tensor was padded on the dimension.
         if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
@@ -448,7 +464,7 @@ class _StridedShard(Shard):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], List[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         TODO: currently _StridedShard does not support padding
         """
@@ -553,7 +569,11 @@ class Replicate(Placement):
         return "R"
 
     def _replicate_tensor(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
@@ -565,7 +585,10 @@ class Replicate(Placement):
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
         tensor = tensor.contiguous()
-        mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim)
+
+        if src_data_rank is not None:
+            # perform broadcast from the src_data_rank as data source when it is not None
+            mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
         return tensor
 
 
