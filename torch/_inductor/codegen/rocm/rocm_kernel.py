@@ -91,6 +91,9 @@ class ROCmTemplateKernel(ROCmKernel):
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
 
+        if input_reorder == [2, 0, 1]:
+            input_reorder = [4, 0, 1, 2, 3]
+
         if input_reorder is not None:
             assert len(inputs) == len(input_reorder)
         else:

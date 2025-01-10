@@ -2,7 +2,6 @@ import ast
 import copy
 import functools
 import json
-import re
 import timeit
 from collections import namedtuple
 
@@ -269,9 +268,30 @@ class BenchmarkRunner:
         # input: 'M: 1, N: 1, K: 1, device: cpu'
         # output: {'M':'1', 'N':'1', 'K':'1', 'device': 'cpu'}
         # splitting the string on unnested commas
-        key_vals = re.split(
-            r",(?![^(){}[\]]*[)\]}])", test_case.test_config.input_config
-        )  # 'M: (32, 16), ZPB: 2' -> ['M: (32, 16)', 'ZPB: 2']
+        def split(s):
+            open_to_close = {"{": "}", "(": ")", "[": "]"}
+            break_idxs = [-1]
+            curr_brackets = []
+            for i, c in enumerate(s):
+                if c in open_to_close.keys():
+                    curr_brackets.append(c)
+                elif c in open_to_close.values():
+                    assert (
+                        curr_brackets and open_to_close[curr_brackets[-1]] == c
+                    ), "ERROR: not able to parse the string!"
+                    curr_brackets.pop()
+                elif c == "," and (not curr_brackets):
+                    break_idxs.append(i)
+            break_idxs.append(len(s))
+            out = []
+            for i in range(len(break_idxs) - 1):
+                start, end = break_idxs[i], break_idxs[i + 1]
+                out.append(s[start + 1 : end])
+            return out
+
+        key_vals = split(
+            test_case.test_config.input_config
+        )  # 'M: [(32, 16), (64, 32)], ZPB: 2' -> ['M: [(32, 16), (64, 32)]', 'ZPB: 2']
         key_vals = [
             (key.strip(), value.strip())
             for key, value in map(lambda str: str.split(":"), key_vals)  # noqa: C417
