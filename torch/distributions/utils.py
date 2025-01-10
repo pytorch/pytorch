@@ -151,12 +151,10 @@ class lazy_property(Generic[T, R]):
     @overload
     def __get__(
         self, instance: None, obj_type: Any = None
-    ) -> "_lazy_property_and_property[T, R]":
-        ...
+    ) -> "_lazy_property_and_property[T, R]": ...
 
     @overload
-    def __get__(self, instance: T, obj_type: Any = None) -> R:
-        ...
+    def __get__(self, instance: T, obj_type: Any = None) -> R: ...
 
     def __get__(
         self, instance: Union[T, None], obj_type: Any = None
