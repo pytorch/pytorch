@@ -14,7 +14,7 @@ It does so by:
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, List, Tuple, Union
 from unittest.mock import patch
 
 import torch

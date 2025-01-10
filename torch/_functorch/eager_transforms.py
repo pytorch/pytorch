@@ -8,7 +8,7 @@
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD

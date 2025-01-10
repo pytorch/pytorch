@@ -9,7 +9,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims

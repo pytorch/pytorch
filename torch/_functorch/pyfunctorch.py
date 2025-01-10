@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import torch
 import torch.utils._pytree as pytree

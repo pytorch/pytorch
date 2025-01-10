@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 from torch._C._functorch import (

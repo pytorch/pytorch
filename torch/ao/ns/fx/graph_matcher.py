@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 from torch.ao.quantization import FakeQuantizeBase, ObserverBase
@@ -181,7 +181,7 @@ def _get_subgraph_relationship_type(
     subgraph_b: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
-    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
+    type_a_related_to_b: Set[tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> SubgraphTypeRelationship:
     node_a = subgraph_a.base_op_node
     node_b = subgraph_b.base_op_node
@@ -315,7 +315,7 @@ def get_matching_subgraph_pairs(
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
-) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
+) -> Dict[str, tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
 
