@@ -674,14 +674,14 @@ struct AsIntegerType<bfloat16> {
 
 template <typename T>
 typename std::enable_if_t<
-    !std::is_reduced_floating_point_v<T>,
+    !c10::is_reduced_floating_point_v<T>,
     T> inline fetch_value(volatile T* addr) {
   return *addr;
 }
 
 template <typename T>
 typename std::enable_if_t<
-    std::is_reduced_floating_point_v<T>,
+    c10::is_reduced_floating_point_v<T>,
     T> inline fetch_value(volatile T* addr) {
   return T(addr->x, T::from_bits());
 }
