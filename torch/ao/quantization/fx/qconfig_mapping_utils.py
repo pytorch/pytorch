@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -95,7 +95,7 @@ def _generate_node_name_to_qconfig(
     modules: Dict[str, torch.nn.Module],
     input_graph: Graph,
     qconfig_mapping: QConfigMapping,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
 ) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
     node_name_to_qconfig = {}

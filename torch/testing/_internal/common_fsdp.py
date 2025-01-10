@@ -12,18 +12,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, no_type_check, Optional, Type, Union
 from unittest import mock
 
 import torch
@@ -112,7 +101,7 @@ class FSDPTestModel(nn.Module, ABC):
     FSDP unit tests."""
 
     @abstractmethod
-    def get_input(self, device) -> Tuple[torch.Tensor, ...]:
+    def get_input(self, device) -> tuple[torch.Tensor, ...]:
         """Returns an input for the model as as tuple."""
         ...
 
@@ -162,6 +151,10 @@ def _assert_module_states(
         assert state is not None  # mypy
         for (_, p1), (_, p2) in zip(rank0_states, state):
             assert_fn(p1, p2)
+
+
+def get_devtype():
+    return torch.device(DEVICE_TYPE)
 
 
 def _zero_model(
@@ -655,7 +648,7 @@ class ModuleWithDelay(FSDPTestModel):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
             if TEST_HPU:
-                time.sleep(self.delay_before_reduction_ms / 1000)
+                time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
 
@@ -972,7 +965,7 @@ class DoubleLinear(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))
@@ -1095,7 +1088,7 @@ def check_sharded_parity(
     cls,  # unit test class
     replicated_module: nn.Module,
     sharded_module: nn.Module,
-    prefixes_to_ignore: Tuple[str, ...] = (),
+    prefixes_to_ignore: tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(), sharded_module.named_parameters()
@@ -1370,7 +1363,12 @@ class FSDPTest(MultiProcessTestCase):
             **init_kwargs,
         )
         if ref_init_fn is None:
-            ref_model = DDP(model, device_ids=[rank], output_device=rank)
+            if TEST_HPU:
+                ref_model = DDP(
+                    model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
+                )
+            else:
+                ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
             ref_model = ref_init_fn(model)
         if use_pure_fp16:
@@ -1485,7 +1483,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(
@@ -1500,7 +1498,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            original_fully_shard = torch.distributed.fsdp.fully_shard
+            original_fully_shard: Any = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
