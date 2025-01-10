@@ -618,7 +618,6 @@ def register_onednn_fusion_ops():
                     and _is_act_comptaible_with_onednn()
                     and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
-                    # We would have to compute compensation
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
                     weight_compens = V.graph.add_tensor_constant(
@@ -655,7 +654,7 @@ def register_onednn_fusion_ops():
                             _x_zp = x_zp_loader(())
                             _weight_compo = weight_compens_loader(weight_compens_index)
 
-                            # Step 1: Compute int8xint8->int32 GEMM & maybe apply compensation
+                            # Step 1: Compute int8xint8->int32 GEMM & then apply compensation
 
                             temp = ops.mul(
                                 ops.mul(
