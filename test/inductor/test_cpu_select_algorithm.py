@@ -2140,9 +2140,6 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -2268,14 +2265,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-
     # We need it for the per-tensor case because Dynamo will end up specializing batch dimension,
     # which we marked as dynamic with mark_dynamic
     # This might be due to a bug in Dynamo
-    @dynamo_config.patch({"allow_ignore_mark_dynamic": True})
-    @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @inductor_config.patch({"freezing": True})
+    @dynamo_config.patch({"allow_ignore_mark_dynamic": True})
     @parametrize("has_bias", [True, False])
     # Tolerance may need to be adjusted with BFloat16
     @parametrize("dtype", [torch.float])
