@@ -3,17 +3,7 @@ import contextlib
 import logging
 import math
 import warnings
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterator,
-    List,
-    no_type_check,
-    Tuple,
-)
+from typing import Any, Callable, cast, Dict, Generator, Iterator, List, no_type_check
 
 import torch
 import torch.distributed as dist
@@ -83,7 +73,7 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
 
 def _param_name_infos(
     module: nn.Module, fsdp_state: _FSDPState
-) -> Iterator[Tuple[str, str, str]]:
+) -> Iterator[tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
     for param_name, module_name in _module_handle(
@@ -96,7 +86,7 @@ def _param_name_infos(
 
 def _shared_param_name_infos(
     module: nn.Module, fsdp_state
-) -> Iterator[Tuple[str, str, str]]:
+) -> Iterator[tuple[str, str, str]]:
     for param_name, module_name in _module_handle(
         fsdp_state, module
     ).shared_param_module_names():
@@ -855,7 +845,7 @@ def _pre_load_state_dict_hook(
 @torch.no_grad()
 def _post_load_state_dict_hook(
     module: nn.Module,
-    incompatible_keys: Tuple[List[str], List[str]],
+    incompatible_keys: tuple[List[str], List[str]],
     *args: Any,
 ) -> None:
     fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
