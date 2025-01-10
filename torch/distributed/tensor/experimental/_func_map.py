@@ -3,15 +3,10 @@
 from typing import Callable, Optional, Sequence, Union
 
 import torch
+import torch.utils.pytree as pytree
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor.placement_types import Placement
-
-
-try:
-    from torch.utils import _cxx_pytree as pytree
-except ImportError:
-    import torch.utils.pytree.python as pytree  # type: ignore[no-redef]
 
 
 __all__ = ["local_map"]

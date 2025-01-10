@@ -14,7 +14,7 @@ from typing_extensions import deprecated
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
-import torch.utils.pytree.python as pytree
+import torch.utils.pytree as pytree
 from torch._utils import _get_device_module
 from torch.distributed import distributed_c10d, rpc
 from torch.distributed._shard._utils import DEPRECATE_MSG
