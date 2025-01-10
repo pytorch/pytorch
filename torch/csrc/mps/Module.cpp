@@ -514,9 +514,7 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() {
-    at::mps::getMPSProfiler().stopCapture();
-  });
+  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
 }
 #endif /* USE_MPS */
 

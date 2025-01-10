@@ -4,7 +4,7 @@ import contextlib
 import torch
 
 
-__all__ = ["start", "stop", "profile", "metal_capture"]
+__all__ = ["start", "stop", "profile", "metal_capture", "is_metal_capture_enabled", "is_capturing_metal"]
 
 
 def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
