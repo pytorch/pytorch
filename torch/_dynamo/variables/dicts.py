@@ -825,6 +825,11 @@ class DictKeysVariable(DictViewVariable):
     def python_type(self):
         return dict_keys
 
+    def as_python_constant(self):
+        return dict.fromkeys(
+            {k.vt.as_python_constant() for k in self.set_items}, None
+        ).keys()
+
     def call_method(
         self,
         tx,

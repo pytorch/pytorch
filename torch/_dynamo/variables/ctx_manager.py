@@ -1085,6 +1085,12 @@ class StreamVariable(VariableTracker):
         self.value = value
         self.device = device
 
+    def python_type(self):
+        return torch.Stream
+
+    def as_python_constant(self):
+        return self.value
+
     def call_method(
         self,
         tx,
@@ -1093,13 +1099,6 @@ class StreamVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
@@ -1125,8 +1124,7 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy

@@ -414,12 +414,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             name == "__eq__"
             and len(args) == 1
             and self.is_python_constant()
-            and args[0].is_python_constant()
             and not kwargs
         ):
             other = args[0]
             if type(self) is not type(other):
                 return variables.ConstantVariable.create(NotImplemented)
+            if not other.is_python_constant():
+                unimplemented(f"call_method {self} {name} {args} {kwargs}")
             return variables.ConstantVariable.create(
                 self.as_python_constant() == other.as_python_constant()
             )
