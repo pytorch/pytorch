@@ -152,6 +152,20 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(None)
 
+    def test_compilation_evnum_hasattr_fail(self):
+        from enum import Enum
+        class TestEnum(Enum):
+            VALID=1
+
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(TestEnum.VALID)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
