@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
@@ -27,8 +27,8 @@ class _FunctionalRprop:
         self,
         params: List[Tensor],
         lr: float = 1e-2,
-        etas: Tuple[float, float] = (0.5, 1.2),
-        step_sizes: Tuple[float, float] = (1e-6, 50),
+        etas: tuple[float, float] = (0.5, 1.2),
+        step_sizes: tuple[float, float] = (1e-6, 50),
         foreach: bool = False,
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
