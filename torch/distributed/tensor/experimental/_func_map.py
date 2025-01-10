@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, Optional, Sequence, Tuple, Union
+from typing import Callable, Optional, Sequence, Union
 
 import torch
 import torch.utils.pytree as pytree
@@ -12,8 +12,8 @@ from torch.distributed.tensor.placement_types import Placement
 __all__ = ["local_map"]
 
 PlacementType = Optional[Sequence[Placement]]
-InputPlacements = Optional[Tuple[PlacementType, ...]]
-OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
+InputPlacements = Optional[tuple[PlacementType, ...]]
+OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
 
 
 def local_map(
