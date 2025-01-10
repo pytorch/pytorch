@@ -1214,16 +1214,6 @@ class SymNodeVariable(VariableTracker):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        if name == "__eq__":
-            proxy = tx.output.create_proxy(
-                "call_function", operator.eq, (self.as_proxy(), args[0].as_proxy()), {}
-            )
-            return SymNodeVariable.create(
-                tx,
-                proxy,
-                sym_num=None,
-            )
-
         return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(

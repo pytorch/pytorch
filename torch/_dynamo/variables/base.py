@@ -410,6 +410,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
+        elif (
+            name == "__eq__"
+            and len(args) == 1
+            and not kwargs
+        ):
+            other = args[0]
+            if type(self) is not type(other):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(self.as_python_constant() == other.as_python_constant())
         unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def set_name_hint(self, name):

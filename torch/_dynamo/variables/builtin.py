@@ -1038,10 +1038,6 @@ class BuiltinVariable(VariableTracker):
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-        if name == "__eq__":
-            if not isinstance(args[0], BuiltinVariable):
-                return variables.ConstantVariable.create(NotImplementedError)
-            return variables.ConstantVariable.create(self.fn is args[0].fn)
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
