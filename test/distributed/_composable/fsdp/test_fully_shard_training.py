@@ -6,7 +6,8 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Any, Iterable, List, Optional, Union
+from collections.abc import Iterable
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -64,7 +65,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         device = torch.device("cuda", 0)
 
         class ParamlessModule(nn.Module):
-            def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
+            def forward(self, x: torch.Tensor, ys: Tuple[torch.Tensor, ...]):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
                 assert x.device == device, f"Expects {device} but got {x.device}"
@@ -280,7 +281,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     def _test_train_parity_single_group(
-        self, lin_shapes: List[tuple[int, int]], use_shard_placement_fn: bool
+        self, lin_shapes: List[Tuple[int, int]], use_shard_placement_fn: bool
     ):
         torch.manual_seed(42)
         model = nn.Sequential(

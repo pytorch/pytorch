@@ -178,6 +178,65 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
+    def test_duplicate_search(self):
+        from typing import Callable, Iterable
+
+        import torch
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        def pattern1(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def replacement1(x: torch.Tensor) -> torch.Tensor:
+            return x - 1
+
+        def pattern2(x: torch.Tensor) -> torch.Tensor:
+            return x + 2
+
+        def replacement2(x: torch.Tensor) -> torch.Tensor:
+            return x - 2
+
+        patterns = PatternMatcherPass()
+        inputs = [torch.empty(4, 5, dtype=torch.float32, device="cuda")]
+        register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
+        register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = patterns.apply(graph)
+
+        def custom_backend(
+            graph: torch.fx.GraphModule, example_inputs: Iterable[torch.Tensor]
+        ) -> Callable:
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(backend=custom_backend)
+        def f(x: torch.Tensor) -> torch.Tensor:
+            y = x + 1
+            y2 = y.relu() + 2
+            return y2
+
+        def f_replaced(x: torch.Tensor) -> torch.Tensor:
+            y = x - 1
+            y2 = y.relu() - 2
+            return y2
+
+        inp = torch.rand(3, 5, device="cuda")
+        self.assertEqual(f(inp), f_replaced(inp))
+        self.assertEqual(count, 2)
+
     @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
