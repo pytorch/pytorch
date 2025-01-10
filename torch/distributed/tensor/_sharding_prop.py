@@ -2,7 +2,7 @@
 import threading
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._ops import OpOverload
@@ -63,7 +63,7 @@ class ShardingPropagator:
         )
         # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
         self.op_to_shape_and_stride_idx: Dict[
-            OpOverload, Union[int, Tuple[int, int]]
+            OpOverload, Union[int, tuple[int, int]]
         ] = {
             # new factory ops
             aten.new_empty.default: 1,
