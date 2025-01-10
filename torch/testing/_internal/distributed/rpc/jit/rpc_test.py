@@ -2,7 +2,7 @@
 
 import time
 import io
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
 
 import torch
 import torch.distributed as dist
@@ -309,7 +309,7 @@ class FutureTypingTest:
 
         @torch.jit.script
         def future_return_to_python(
-            dst_rank: int, inputs: Tuple[Tensor, Tensor]
+            dst_rank: int, inputs: tuple[Tensor, Tensor]
         ) -> Future[Tensor]:
             return rpc.rpc_async(
                 f"worker{dst_rank}", two_args_two_kwargs, inputs
@@ -518,7 +518,7 @@ def raise_script():
 
 @torch.jit.script
 def script_rpc_async_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
@@ -526,14 +526,14 @@ def script_rpc_async_call(
 
 @torch.jit.script
 def script_rpc_sync_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     res = rpc.rpc_sync(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return res
 
 @torch.jit.script
 def script_rpc_remote_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     rref_res = rpc.remote(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return rref_res.to_here()
