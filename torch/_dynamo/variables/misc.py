@@ -1024,6 +1024,10 @@ class GetAttrVariable(VariableTracker):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
+        # When Dynamo interprets `obj.__dict__`, it often represents the result
+        # as a `GetAttrVariable(obj_var, "__dict__")`.  To support method calls
+        # on cases where `obj.__dict__` returns a dict object or a dict view as
+        # `MappingProxyType`, we need the following logic.
         if (
             name in ("__getitem__", "get")
             and self.name == "__dict__"
@@ -1072,6 +1076,15 @@ class GetAttrVariable(VariableTracker):
                 return variables.ConstantVariable(True)
             else:
                 return variables.ConstantVariable(False)
+
+        elif (
+            name == "__setitem__"
+            and self.name == "__dict__"
+            and not kwargs
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+        ):
+            # Bypass any custom setattr as we are updating the `__dict__` itself
+            return self.obj.method_setattr_standard(tx, args[0], args[1])
 
         return super().call_method(tx, name, args, kwargs)
 
