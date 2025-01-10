@@ -3,7 +3,7 @@ import atexit
 import re
 import shutil
 import textwrap
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
@@ -59,7 +59,7 @@ def flatten(schema: Definition) -> FlatIntermediateDefinition:
     return result
 
 
-def parse_stmts(stmts: str) -> Tuple[str, str]:
+def parse_stmts(stmts: str) -> tuple[str, str]:
     """Helper function for side-by-side Python and C++ stmts.
 
     For more complex statements, it can be useful to see Python and C++ code
