@@ -131,9 +131,9 @@ def sdpa_kernel(
 
     if set_priority:
         user_priority = [
-            int(x)
+            int(x)  # type: ignore[call-overload]
             for idx, x in enumerate(backends)
-            if backends.index(x) == idx  # type: ignore[call-overload]
+            if backends.index(x) == idx
         ]
         previous_priority = torch._C._get_sdp_priority_order()
         for backend in previous_priority:
