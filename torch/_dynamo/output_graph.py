@@ -12,17 +12,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import sympy
 

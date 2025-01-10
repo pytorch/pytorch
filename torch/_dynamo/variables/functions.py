@@ -6,16 +6,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 

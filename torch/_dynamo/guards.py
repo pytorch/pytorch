@@ -21,17 +21,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
