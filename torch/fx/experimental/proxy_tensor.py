@@ -1461,9 +1461,9 @@ class DecompositionInterpreter(fx.Interpreter):
 
     def placeholder(
         self,
-        target: str,
+        target: str,  # type: ignore[override]
         args: Tuple[object, ...],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> object:
         out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
@@ -1473,9 +1473,9 @@ class DecompositionInterpreter(fx.Interpreter):
 
     def get_attr(
         self,
-        target: str,
+        target: str,  # type: ignore[override]
         args: Tuple[object, ...],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> object:
         out = super().get_attr(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.get_attr(target), self.tracer)
@@ -1486,9 +1486,9 @@ class DecompositionInterpreter(fx.Interpreter):
 
     def output(
         self,
-        target: str,
+        target: str,  # type: ignore[override]
         args: Tuple[object, ...],
-        kwargs: Dict[str, object],  # type: ignore[override]
+        kwargs: Dict[str, object],
     ) -> object:
         out = super().output(target, args, kwargs)  # type: ignore[arg-type]
 

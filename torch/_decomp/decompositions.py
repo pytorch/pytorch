@@ -1987,9 +1987,9 @@ def _get_batch_norm_reserve_tensor(
     )
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
-        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(  # type: ignore[attr-defined]
             input, training
-        )  # type: ignore[attr-defined]
+        )
     return torch.empty(
         reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
     )
@@ -4011,8 +4011,9 @@ def nll_loss_forward(
     n_classes = self.shape[-1]
 
     assert weight is None or (weight.dim() == 1 and weight.numel() == n_classes), (
-        f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"
-    )  # noqa: B950
+        f"weight tensor should be defined either for all {n_classes} classes or no classes "
+        f"but got weight tensor of shape: {weight.shape}"
+    )
 
     return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 

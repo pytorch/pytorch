@@ -691,9 +691,9 @@ def _insert_copy_of_node_a_after_input_node_c(
         node_a_shadows_c = graph_c.create_node(
             node_a.op,
             new_mod_copy_name,
-            new_args,
-            new_kwargs,
-            node_a_shadows_c_name,  # type: ignore[arg-type]
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
     else:
@@ -701,9 +701,9 @@ def _insert_copy_of_node_a_after_input_node_c(
         node_a_shadows_c = graph_c.create_node(
             node_a.op,
             node_a.target,
-            new_args,
-            new_kwargs,
-            node_a_shadows_c_name,  # type: ignore[arg-type]
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
 
