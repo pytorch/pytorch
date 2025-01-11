@@ -1,8 +1,11 @@
 # mypy: ignore-errors
 
+import io
 import json
 import sys
+import tempfile
 from pathlib import Path
+from unittest import mock
 
 from tools.linter.adapters.docstring_linter import (
     DocstringLinter,
@@ -30,7 +33,36 @@ class TestDocstringLinter(LinterTestCase):
     maxDiff = 10_240
 
     def test_python_code(self):
-        self.lint_test(TEST_FILE, ARGS)
+        args = "--max-class=3", "--max-def=4"
+        self.lint_test(TEST_FILE, args)
+
+    @mock.patch("sys.stdout", new_callable=io.StringIO)
+    def test_end_to_end(self, mock_stdout):
+        argv_base = *ARGS, str(TEST_FILE), str(TEST_FILE2)
+        report = "--report"
+        write = "--write-grandfather"
+
+        out = _next_stdout(mock_stdout)
+
+        def run(name, *argv):
+            DocstringLinter(argv_base + argv).lint_all()
+            self.assertExpected(TEST_FILE2, next(out), name)
+
+        with tempfile.TemporaryDirectory() as td:
+            grandfather_file = f"{td}/grandfather.json"
+            grandfather = f"--grandfather={grandfather_file}"
+
+            # Find some faiures
+            run("before.txt", grandfather)
+
+            # Rewrite grandfather file
+            run("before.json", grandfather, report, write)
+            actual = Path(grandfather_file).read_text()
+            self.assertExpected(TEST_FILE2, actual, "grandfather.json")
+
+            # Now there are no failures
+            run("after.txt", grandfather)
+            run("after.json", grandfather, report)
 
     def test_report(self):
         actual = _dumps(_data())
