@@ -432,7 +432,12 @@ class PackageImporter(Importer):
                         module.__dict__.setdefault(old_name, new_name)
 
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
+        return self._make_module(
+            name,
+            cur.source_file,  # type: ignore[attr-defined]
+            isinstance(cur, _PackageNode),
+            parent,
+        )
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -571,7 +576,7 @@ class PackageImporter(Importer):
                     else:
                         where = "``from list''"
                     raise TypeError(
-                        f"Item in {where} must be str, " f"not {type(x).__name__}"
+                        f"Item in {where} must be str, not {type(x).__name__}"
                     )
                 elif x == "*":
                     if not recursive and hasattr(module, "__all__"):
