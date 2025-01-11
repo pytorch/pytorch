@@ -649,6 +649,11 @@ class _PipelineStageBase(ABC):
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
+                    # it would be much better if pipelining backward invoked .backward so autograd hooks
+                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
+                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
+                    fsdp_state._root_post_backward_final_callback()
+
                 run_post_backward(self.submod)
         else:
             # Non-DP submodule, regular backward
