@@ -4,7 +4,14 @@ import contextlib
 import torch
 
 
-__all__ = ["start", "stop", "profile", "metal_capture", "is_metal_capture_enabled", "is_capturing_metal"]
+__all__ = [
+    "start",
+    "stop",
+    "profile",
+    "metal_capture",
+    "is_metal_capture_enabled",
+    "is_capturing_metal",
+]
 
 
 def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
@@ -79,6 +86,7 @@ def metal_capture(fname: str):
     try:
         torch._C._mps_startCapture(fname)
         yield
-    finally:
+        # Drain all the work that were enqueued during the context call
         torch.mps.synchronize()
+    finally:
         torch._C._mps_stopCapture()
