@@ -1,0 +1,200 @@
+{
+  "  2": {
+    "docstring_len": 44,
+    "lines": 4,
+    "name": "class ShortWithDocstring",
+    "status": "good"
+  },
+  "  7": {
+    "docstring_len": 0,
+    "lines": 3,
+    "name": "class Short",
+    "status": "good"
+  },
+  " 11": {
+    "children": {
+      "14": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "def LongWithDocstring.short1",
+        "status": "good"
+      }
+    },
+    "docstring_len": 44,
+    "lines": 6,
+    "name": "class LongWithDocstring",
+    "status": "good"
+  },
+  " 20": {
+    "children": {
+      "21": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "def LongWithoutDocstring.short1",
+        "status": "good"
+      }
+    },
+    "docstring_len": 0,
+    "lines": 4,
+    "name": "class LongWithoutDocstring",
+    "status": "good"
+  },
+  " 25": {
+    "children": {
+      "28": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "def LongWithShortDocstring.short1",
+        "status": "good"
+      }
+    },
+    "docstring_len": 10,
+    "lines": 6,
+    "name": "class LongWithShortDocstring",
+    "status": "good"
+  },
+  " 32": {
+    "children": {
+      "35": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "def _Protected.short1",
+        "status": "good"
+      }
+    },
+    "docstring_len": 10,
+    "lines": 6,
+    "name": "class _Protected",
+    "status": "good"
+  },
+  " 42": {
+    "docstring_len": 0,
+    "lines": 3,
+    "name": "def short",
+    "status": "good"
+  },
+  " 46": {
+    "docstring_len": 44,
+    "lines": 8,
+    "name": "def long",
+    "status": "good"
+  },
+  " 59": {
+    "docstring_len": 0,
+    "lines": 3,
+    "name": "def long_without_docstring",
+    "status": "good"
+  },
+  " 69": {
+    "children": {
+      "72": {
+        "children": {
+          "73": {
+            "children": {
+              "74": {
+                "docstring_len": 0,
+                "lines": 6,
+                "name": "class ImpossibleCombo.needs_docs.not_short.Long",
+                "status": "good"
+              },
+              "81": {
+                "docstring_len": 0,
+                "lines": 3,
+                "name": "class ImpossibleCombo.needs_docs.not_short.Short",
+                "status": "good"
+              }
+            },
+            "docstring_len": 0,
+            "lines": 11,
+            "name": "def ImpossibleCombo.needs_docs.not_short",
+            "status": "good"
+          },
+          "74": {
+            "docstring_len": 0,
+            "lines": 6,
+            "name": "class ImpossibleCombo.needs_docs.not_short.Long",
+            "status": "good"
+          },
+          "81": {
+            "docstring_len": 0,
+            "lines": 3,
+            "name": "class ImpossibleCombo.needs_docs.not_short.Short",
+            "status": "good"
+          }
+        },
+        "docstring_len": 0,
+        "lines": 12,
+        "name": "def ImpossibleCombo.needs_docs",
+        "status": "good"
+      },
+      "73": {
+        "children": {
+          "74": {
+            "docstring_len": 0,
+            "lines": 6,
+            "name": "class ImpossibleCombo.needs_docs.not_short.Long",
+            "status": "good"
+          },
+          "81": {
+            "docstring_len": 0,
+            "lines": 3,
+            "name": "class ImpossibleCombo.needs_docs.not_short.Short",
+            "status": "good"
+          }
+        },
+        "docstring_len": 0,
+        "lines": 11,
+        "name": "def ImpossibleCombo.needs_docs.not_short",
+        "status": "good"
+      },
+      "74": {
+        "docstring_len": 0,
+        "lines": 6,
+        "name": "class ImpossibleCombo.needs_docs.not_short.Long",
+        "status": "good"
+      },
+      "81": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "class ImpossibleCombo.needs_docs.not_short.Short",
+        "status": "good"
+      }
+    },
+    "docstring_len": 44,
+    "lines": 15,
+    "name": "class ImpossibleCombo",
+    "status": "good"
+  },
+  " 85": {
+    "children": {
+      "86": {
+        "docstring_len": 0,
+        "lines": 2,
+        "name": "def NotDocstring.short1",
+        "status": "good"
+      },
+      "91": {
+        "docstring_len": 0,
+        "lines": 2,
+        "name": "def NotDocstring.short2",
+        "status": "good"
+      },
+      "94": {
+        "docstring_len": 0,
+        "lines": 3,
+        "name": "def NotDocstring.short3",
+        "status": "good"
+      }
+    },
+    "docstring_len": 0,
+    "lines": 12,
+    "name": "class NotDocstring",
+    "status": "good"
+  },
+  "102": {
+    "docstring_len": 0,
+    "lines": 1,
+    "name": "def long_with_omit",
+    "status": "good"
+  }
+}
