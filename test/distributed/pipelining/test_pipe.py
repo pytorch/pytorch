@@ -89,9 +89,9 @@ class PipeTests(TestCase):
             mb_args=(x, y),
         )
 
-        assert (
-            pipe.num_stages == EXPECTED_N_STAGES[ModelClass]
-        ), f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
+        assert pipe.num_stages == EXPECTED_N_STAGES[ModelClass], (
+            f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
+        )
 
         ref_out = mod(x, y)
         out = pipe(x, y)[0]
@@ -109,9 +109,7 @@ class PipeTests(TestCase):
             new_names.update(stage_fqns)
 
         if CHECK_FQN_SET_EQUALITY:
-            assert (
-                old_names == new_names
-            ), f"""
+            assert old_names == new_names, f"""
             old names {old_names}
             new names {new_names}
             """

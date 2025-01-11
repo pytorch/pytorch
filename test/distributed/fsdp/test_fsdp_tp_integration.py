@@ -91,9 +91,9 @@ class TestTPFSDPIntegration(FSDPTest):
         tensor_parallel_size: int,
     ) -> Tuple[Dict[str, int], Dict[str, Tuple[torch.Size, int]]]:
         """ """
-        assert (
-            type(model) is SimpleModel
-        ), "Expects a `SimpleModel` since the sharding cases on the model definition"
+        assert type(model) is SimpleModel, (
+            "Expects a `SimpleModel` since the sharding cases on the model definition"
+        )
         param_name_to_numel = OrderedDict()
         param_name_to_sharding_info = OrderedDict()
         for param_name, param in model.named_parameters():

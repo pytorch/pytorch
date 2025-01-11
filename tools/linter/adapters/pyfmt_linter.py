@@ -38,7 +38,6 @@ USE_BLACK_FILELIST = re.compile(
                     # torchgen/**
                     # test/**
                     # test/[a-h]*/**
-                    "test/[a-h]*/**",
                     # test/[i-j]*/**
                     "test/[i-j]*/**",
                     # test/[k-m]*/**

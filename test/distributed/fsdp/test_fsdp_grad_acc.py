@@ -61,7 +61,7 @@ class _GradAccConfig:
     def __repr__(self) -> str:
         # Override to remove any spaces in the string to appease the internal
         # build's test name parser
-        return f"(use_no_sync={self.use_no_sync}," f"num_iters={self.num_iters})"
+        return f"(use_no_sync={self.use_no_sync},num_iters={self.num_iters})"
 
 
 @dataclass
@@ -153,9 +153,9 @@ class TestGradAcc(FSDPTest):
             batches.append(tuple(permute_tensor(t) for t in batch))
         for batch1, batch2 in itertools.combinations(batches, r=2):
             for t1, t2 in zip(batch1, batch2):
-                assert not torch.all(
-                    t1 == t2
-                ), "Check the test to make sure that batches are distinct"
+                assert not torch.all(t1 == t2), (
+                    "Check the test to make sure that batches are distinct"
+                )
 
         # Concatenate the batches along the given batch dimension
         concat_batch: Tuple[torch.Tensor, ...] = tuple(
