@@ -12,7 +12,6 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -1391,7 +1390,7 @@ class X86InductorQuantizer(Quantizer):
         Recipe refers to https://github.com/intel/intel-extension-for-pytorch/blob/
         90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_utils.py#L495
         """
-        edge_or_node: Tuple[Node, Node]
+        edge_or_node: tuple[Node, Node]
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
             if node.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
