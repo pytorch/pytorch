@@ -12,7 +12,7 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <torch/library.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

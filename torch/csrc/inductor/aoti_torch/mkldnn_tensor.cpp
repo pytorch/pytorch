@@ -2,7 +2,7 @@
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
 

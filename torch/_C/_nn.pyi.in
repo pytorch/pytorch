@@ -10,10 +10,10 @@ from torch.types import _bool, _device, _dtype, _int, _size
 
 ${c_nn_function_hints}
 
-# Defined in aten/src/ATen/native/mkldnn/Linear.cpp
+# Defined in aten/src/ATen/native/onednn/Linear.cpp
 def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
 
-# Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
+# Defined at aten/src/ATen/native/onednn/MKLDNNConversions.cpp
 def mkldnn_reorder_conv2d_weight(
     self: Tensor,
     padding: List,
@@ -29,7 +29,7 @@ def mkldnn_reorder_conv3d_weight(
     groups: int,
 ) -> Tensor: ...
 
-# Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
+# Defined in aten/src/ATen/native/onednn/Prelu.cpp
 def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 
 # Defined at tools/autograd/templates/python_nn_functions.cpp
