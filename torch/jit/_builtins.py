@@ -18,7 +18,15 @@ from torch.nn.modules.utils import (
 
 _builtin_table: Optional[Dict[int, str]] = None
 
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._sparse, torch._C._special)  # type: ignore[attr-defined] # noqa: B950
+_modules_containing_builtins = (
+    torch,
+    torch._C._nn,
+    torch._C._fft,  # type: ignore[attr-defined]
+    torch._C._linalg,  # type: ignore[attr-defined]
+    torch._C._nested,  # type: ignore[attr-defined]
+    torch._C._sparse,  # type: ignore[attr-defined]
+    torch._C._special,  # type: ignore[attr-defined]
+)
 
 _builtin_ops = [
     # Pairs of (function, op_name)
@@ -94,7 +102,10 @@ _builtin_ops = [
     (torch.autograd.grad, "aten::grad"),
     (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
-    (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),  # type: ignore[attr-defined]
+    (
+        torch.nn.functional._no_grad_embedding_renorm_,  # type: ignore[attr-defined]
+        "aten::_no_grad_embedding_renorm_",
+    ),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
     (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
     (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),

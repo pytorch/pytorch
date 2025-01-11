@@ -82,9 +82,7 @@ Example:
     >>> t = torch.tensor([0.+1.j, 2.+3.j, 4.+5.j, 6.+7.j])
     >>> torch.fft.fft(t)
     tensor([12.+16.j, -8.+0.j, -4.-4.j,  0.-8.j])
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ifft = _add_docstr(
@@ -125,9 +123,7 @@ Example:
     >>> t = torch.tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
     >>> torch.fft.ifft(t)
     tensor([0.+0.j, 1.+0.j, 2.+0.j, 3.+0.j])
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 fft2 = _add_docstr(
@@ -188,9 +184,7 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(fft2, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ifft2 = _add_docstr(
@@ -243,9 +237,7 @@ Example:
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(ifft2, two_iffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 fftn = _add_docstr(
@@ -305,9 +297,7 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(fftn, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ifftn = _add_docstr(
@@ -359,9 +349,7 @@ Example:
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.testing.assert_close(ifftn, two_iffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 rfft = _add_docstr(
@@ -417,9 +405,7 @@ Example:
     Notice that the symmetric element ``T[-1] == T[1].conj()`` is omitted.
     At the Nyquist frequency ``T[-2] == T[2]`` is it's own symmetric pair,
     and therefore must always be real-valued.
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 irfft = _add_docstr(
@@ -496,9 +482,7 @@ Example:
     >>> roundtrip = torch.fft.irfft(T, t.numel())
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 rfft2 = _add_docstr(
@@ -565,9 +549,7 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.testing.assert_close(rfft2, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 irfft2 = _add_docstr(
@@ -649,9 +631,7 @@ Example:
     torch.Size([10, 9])
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 rfftn = _add_docstr(
@@ -718,9 +698,7 @@ Example:
     >>> two_ffts = torch.fft.fft(torch.fft.rfft(t, dim=1), dim=0)
     >>> torch.testing.assert_close(rfftn, two_ffts, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 irfftn = _add_docstr(
@@ -801,9 +779,7 @@ Example:
     torch.Size([10, 9])
     >>> torch.testing.assert_close(roundtrip, t, check_stride=False)
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 hfft = _add_docstr(
@@ -894,9 +870,7 @@ Example:
 
     >>> torch.fft.hfft(T[:3])
     tensor([0.1250, 0.2809, 0.6250, 0.9691])
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ihfft = _add_docstr(
@@ -951,9 +925,7 @@ Example:
     >>> torch.fft.ifft(t)
     tensor([ 2.0000-0.0000j, -0.5000-0.6882j, -0.5000-0.1625j, -0.5000+0.1625j,
             -0.5000+0.6882j])
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 hfft2 = _add_docstr(
@@ -1025,9 +997,7 @@ Example:
     >>> torch.allclose(roundtrip, T)
     True
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ihfft2 = _add_docstr(
@@ -1092,9 +1062,7 @@ Example:
     >>> torch.allclose(t, two_ffts)
     True
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 hfftn = _add_docstr(
@@ -1187,9 +1155,7 @@ Example:
     >>> torch.allclose(roundtrip, T)
     True
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 ihfftn = _add_docstr(
@@ -1259,9 +1225,7 @@ Example:
     >>> torch.allclose(ihfftn, two_iffts)
     True
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 fftfreq = _add_docstr(
@@ -1310,9 +1274,7 @@ Example:
     >>> torch.fft.fftfreq(4)
     tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
-""".format(
-        **factory_common_args
-    ),
+""".format(**factory_common_args),
 )
 
 rfftfreq = _add_docstr(
@@ -1361,9 +1323,7 @@ Example:
     >>> torch.fft.fftfreq(4)
     tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
-""".format(
-        **factory_common_args
-    ),
+""".format(**factory_common_args),
 )
 
 fftshift = _add_docstr(

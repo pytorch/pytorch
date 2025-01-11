@@ -33,7 +33,7 @@ def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str])
             continue
 
         res += f"""
-        File {str_to_filename[frame['filename']]}, lineno {frame['line']}, in {frame['name']}"""
+        File {str_to_filename[frame["filename"]]}, lineno {frame["line"]}, in {frame["name"]}"""
     return res
 
 
@@ -51,7 +51,7 @@ def filter_stack(
 
 
 def hash_stack(stack: List[Dict[str, str]]) -> str:
-    return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
+    return ";".join(f"line: {s['line']} filename: {s['filename']}" for s in stack)
 
 
 class FailureReport:

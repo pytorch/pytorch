@@ -5,6 +5,7 @@ Metal is Apple's API for programming metal GPU (graphics processor unit). Using 
 performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
+
 from typing import Union
 
 import torch
