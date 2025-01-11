@@ -44,11 +44,16 @@ def _get_device_type(world_size):
     return device_type
 
 
-def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
+def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
     os.environ["MASTER_ADDR"] = addr
     os.environ["MASTER_PORT"] = port
     os.environ["WORLD_SIZE"] = f"{world_size}"
     os.environ["RANK"] = f"{rank}"
+    if local_rank != -1:
+        os.environ["LOCAL_RANK"] = f"{local_rank}"
+    else:
+        # by default assume local_rank == rank on the same host
+        os.environ["LOCAL_RANK"] = f"{rank}"
 
 
 class DeviceMeshTestGlooBackend(DTensorTestBase):
@@ -66,6 +71,69 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
             self.assertEqual(mesh_group, default_group)
+
+
+class DeviceMeshSetDeviceTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    def test_manual_set_device(self):
+        device_type = _get_device_type(self.world_size)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+
+        # Set the device on each process before DeviceMesh constructor,
+        # and device to be different than the default world rank
+        torch.cuda.set_device((self.rank + 2) % self.world_size)
+        _set_env_var(world_size=self.world_size, rank=self.rank)
+        DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(is_initialized())
+
+        # check that the device is set to the correct device
+        # and respect the previous set_device calls
+        self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
+        self.destroy_pg()
+
+    @skip_if_lt_x_gpu(4)
+    def test_auto_set_device_from_local_rank(self):
+        device_type = _get_device_type(self.world_size)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+        # set the local rank to be different than the default world rank,
+        # DeviceMesh should respect LOCAL_RANK env var if it's set
+        local_rank = (self.rank + 1) % self.world_size
+
+        _set_env_var(
+            world_size=self.world_size,
+            rank=self.rank,
+            local_rank=local_rank,
+        )
+        DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(is_initialized())
+
+        # check that the device is set to the correct device
+        # and respect the LOCAL_RANK env var
+        self.assertEqual(torch.cuda.current_device(), local_rank)
+        self.destroy_pg()
+
+    @skip_if_lt_x_gpu(4)
+    def test_auto_set_device_from_heuristic(self):
+        device_type = _get_device_type(self.world_size)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+
+        _set_env_var(
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+        DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(is_initialized())
+
+        # check that the device is set to the correct device
+        self.assertEqual(torch.cuda.current_device(), self.rank)
+        self.destroy_pg()
 
 
 class DeviceMeshTest(DTensorTestBase):
