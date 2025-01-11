@@ -65,10 +65,13 @@ class Weibull(TransformedDistribution):
 
     @property
     def mode(self) -> Tensor:
-        return (
-            self.scale
-            * ((self.concentration - 1) / self.concentration)
-            ** self.concentration.reciprocal()
+        return torch.where(
+            self.concentration > 1,
+            self.scale * torch.pow(
+                self.concentration_reciprocal * (self.concentration - 1).relu(),
+                self.concentration_reciprocal
+            ),
+            0
         )
 
     @property
