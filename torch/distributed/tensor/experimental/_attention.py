@@ -8,17 +8,7 @@ import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    List,
-    Optional,
-    Protocol,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Generator, List, Optional, Protocol, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist

@@ -2,16 +2,7 @@
 import logging
 import warnings
 from copy import deepcopy
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    List,
-    Mapping,
-    Optional,
-    overload,
-    Union,
-)
+from typing import Any, Callable, Collection, List, Mapping, Optional, overload, Union
 
 import torch
 import torch.nn as nn

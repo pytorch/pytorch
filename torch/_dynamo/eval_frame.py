@@ -27,16 +27,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import (
-    Any,
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, List, NamedTuple, Optional, Set, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy

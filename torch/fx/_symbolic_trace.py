@@ -10,17 +10,7 @@ import os
 import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import (
-    Any,
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, List, NamedTuple, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch.utils._pytree as pytree

@@ -1,15 +1,6 @@
 import copy
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, List, NamedTuple, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 

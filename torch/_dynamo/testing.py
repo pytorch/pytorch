@@ -8,16 +8,7 @@ import re
 import sys
 import types
 import unittest
-from typing import (
-    Any,
-    Callable,
-    List,
-    Optional,
-    overload,
-    Sequence,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, List, Optional, overload, Sequence, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 

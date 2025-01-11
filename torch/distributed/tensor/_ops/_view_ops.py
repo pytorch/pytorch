@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import (
-    Callable,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Callable, cast, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 from torch import Tensor

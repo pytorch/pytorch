@@ -16,16 +16,7 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import (
-    Any,
-    Callable,
-    List,
-    Optional,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, List, Optional, Type, TYPE_CHECKING, TypeVar, Union
 from unittest.mock import patch
 
 import sympy

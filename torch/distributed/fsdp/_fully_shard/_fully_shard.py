@@ -1,17 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Iterable,
-    List,
-    NoReturn,
-    Optional,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Iterable, List, NoReturn, Optional, Type, Union
 
 import torch
 import torch.nn as nn

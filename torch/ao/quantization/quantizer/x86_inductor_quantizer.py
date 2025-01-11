@@ -4,16 +4,7 @@ import itertools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, List, Optional, Sequence, Set, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch

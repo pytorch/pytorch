@@ -6,17 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    NoReturn,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Iterable, List, NoReturn, Sequence, Tuple, Type, Union
 
 import torch
 import torch.nn as nn

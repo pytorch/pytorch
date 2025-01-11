@@ -15,18 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    IO,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, IO, List, Optional, Tuple, Type, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch

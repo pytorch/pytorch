@@ -6,16 +6,7 @@ import functools
 import itertools
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Union,
-)
+from typing import Any, Callable, cast, Iterator, List, Optional, Sequence, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (

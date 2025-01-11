@@ -5,16 +5,7 @@ import math
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Deque, List, Optional, Set, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
