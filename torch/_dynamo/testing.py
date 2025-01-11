@@ -134,15 +134,13 @@ def requires_bwd_pass(out: Any) -> bool:
 
 
 @overload
-def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
-    ...
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
-) -> float:
-    ...
+    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]],
+) -> float: ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:

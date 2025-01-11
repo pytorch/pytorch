@@ -158,9 +158,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function

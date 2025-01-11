@@ -289,9 +289,9 @@ class SideEffects:
         user_cls = cls_variable.value
 
         # Find the variable class
-        variable_cls: Type[
+        variable_cls: Type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
-        ] = variables.UserDefinedObjectVariable
+        )
         if issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
@@ -376,7 +376,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var]  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):

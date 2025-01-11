@@ -236,9 +236,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert (
-                    torch._C._len_torch_function_stack() == 0
-                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                assert torch._C._len_torch_function_stack() == 0, (
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -257,9 +257,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert (
-                    guards.check()
-                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                assert guards.check(), (
+                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                )
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -360,9 +360,9 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[
-    Union[int, FrameStateSizeEntry]
-] = collections.Counter()
+FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+    collections.Counter()
+)
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -646,9 +646,9 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
-        torch.overrides.TorchFunctionMode
-    ] = torch.overrides._get_current_function_mode_stack()
+    tf_mode_stack: List[torch.overrides.TorchFunctionMode] = (
+        torch.overrides._get_current_function_mode_stack()
+    )
 
     @preserve_global_state
     def transform(
@@ -787,9 +787,9 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return None
 
-        assert (
-            distributed_state is None or distributed_state.all_states is not None
-        ), "compiler collective wasn't run before compilation completed"
+        assert distributed_state is None or distributed_state.all_states is not None, (
+            "compiler collective wasn't run before compilation completed"
+        )
 
         assert out_code is not None
         log_bytecode(
@@ -869,7 +869,10 @@ def _compile(
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
         guarded_code = GuardedCode(
-            out_code, check_fn.guard_manager, compile_id, annotation_str  # type: ignore[arg-type]
+            out_code,
+            check_fn.guard_manager,  # type: ignore[arg-type]
+            compile_id,
+            annotation_str,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -1319,8 +1322,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
-        ...
+    ) -> Optional[GuardedCode]: ...
 
 
 class CatchErrorsWrapper:
@@ -1385,7 +1387,9 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    ), (
+                        "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    )
                     hijacked_callback = (
                         self._torchdynamo_orig_callable._clone_with_backend(
                             ddp_optimizer.compile_fn,

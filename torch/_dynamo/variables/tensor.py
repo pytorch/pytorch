@@ -511,9 +511,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert (
-                len(idxes) == length
-            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            assert len(idxes) == length, (
+                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            )
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -845,10 +845,13 @@ class TensorVariable(VariableTracker):
             # Standard indexing will force specialization due to
             # __index__.  Rewrite as a regular torch op which will
             # trace fine
-            fn, args = torch.select, [
-                variables.ConstantVariable.create(0),
-                args[0],
-            ]
+            fn, args = (
+                torch.select,
+                [
+                    variables.ConstantVariable.create(0),
+                    args[0],
+                ],
+            )
         else:
             fn = operator.getitem
 
@@ -1422,7 +1425,7 @@ class UntypedStorageVariable(VariableTracker):
         example_value: torch.UntypedStorage,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        (super().__init__(**kwargs),)
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"
         self.example_value = example_value
@@ -1478,7 +1481,7 @@ class DataPtrVariable(VariableTracker):
         from_tensor: TensorVariable,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        (super().__init__(**kwargs),)
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
