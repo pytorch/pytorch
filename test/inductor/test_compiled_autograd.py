@@ -27,9 +27,9 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     scoped_load_inline,
     skipIfWindows,
-    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -2831,7 +2831,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             out.backward()
         # should not RuntimeError: Node redefined name aot0_expand!
 
-    @xfailIfS390X
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -3044,7 +3043,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
     @skipIfWindows(msg="AssertionError: Scalars are not equal!")
-    @xfailIfS390X
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -3622,6 +3620,9 @@ known_failing_tests = {
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
+
+if IS_S390X:
+    known_failing_tests.add("test_deep_reentrant")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
