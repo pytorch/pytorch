@@ -13,7 +13,7 @@ ${c_nn_function_hints}
 # Defined in aten/src/ATen/native/onednn/Linear.cpp
 def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
 
-# Defined at aten/src/ATen/native/onednn/MKLDNNConversions.cpp
+# Defined at aten/src/ATen/native/onednn/ONEDNNConversions.cpp
 def mkldnn_reorder_conv2d_weight(
     self: Tensor,
     padding: List,

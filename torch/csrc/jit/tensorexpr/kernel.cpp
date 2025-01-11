@@ -7,7 +7,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
+#include <torch/csrc/jit/passes/onednn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>

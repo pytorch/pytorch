@@ -1,4 +1,4 @@
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <torch/library.h>
