@@ -363,7 +363,7 @@ def cudart():
         >>> from torch.cuda import cudart, check_error
         >>> import os
         >>>
-        >>> os.environ['CUDA_PROFILE'] = '1'
+        >>> os.environ["CUDA_PROFILE"] = "1"
         >>>
         >>> def perform_cuda_operations_with_streams():
         >>>     stream = torch.cuda.Stream()
@@ -551,6 +551,7 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.cuda.Stream"]
 
     def __init__(self, stream: Optional["torch.cuda.Stream"]):

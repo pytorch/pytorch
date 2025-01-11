@@ -646,9 +646,9 @@ def _insert_copy_of_node_a_after_input_node_c(
             return arg
         elif isinstance(kwarg_val, (list, tuple)):
             for el in kwarg_val:
-                assert not isinstance(
-                    el, Node
-                ), "handling of Node inside list is not implemented"
+                assert not isinstance(el, Node), (
+                    "handling of Node inside list is not implemented"
+                )
             return arg
         else:
             raise AssertionError(
@@ -689,13 +689,21 @@ def _insert_copy_of_node_a_after_input_node_c(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, new_mod_copy_name, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
+            node_a.op,
+            new_mod_copy_name,
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
     else:
         assert node_a.op in ("call_function", "call_method")
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
+            node_a.op,
+            node_a.target,
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
 
