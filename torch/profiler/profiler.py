@@ -395,11 +395,11 @@ class _KinetoProfile:
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
         # Default to device 0, if unset. Fallback on cpu.
-        if device is None and self.use_device and self.use_device != "cuda":
-            device = self.use_device + ":0"
-
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if self.use_device and self.use_device != "cuda":
+                device = self.use_device + ":0"
+            else:
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
