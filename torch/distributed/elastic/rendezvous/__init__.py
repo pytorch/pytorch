@@ -120,11 +120,7 @@ of the following implementations that come with PyTorch:
      backend = C10dRendezvousBackend(store, "my_run_id")
 
      rdzv_handler = DynamicRendezvousHandler.from_backend(
-         run_id="my_run_id",
-         store=store,
-         backend=backend,
-         min_nodes=2,
-         max_nodes=4
+         run_id="my_run_id", store=store, backend=backend, min_nodes=2, max_nodes=4
      )
 """
 

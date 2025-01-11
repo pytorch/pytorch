@@ -47,21 +47,16 @@ _TState = TypeVar("_TState", bound="_State", covariant=True)
 
 
 class _ContractFn(Protocol, Generic[_P, _T, _TState]):
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        ...
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T: ...
 
-    def state(self, module: nn.Module) -> _TState:
-        ...
+    def state(self, module: nn.Module) -> _TState: ...
 
 
 @overload
-def contract() -> (
-    Callable[
-        [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
-        _ContractFn[Concatenate[nn.Module, _P], _T, _State],
-    ]
-):
-    ...
+def contract() -> Callable[
+    [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
+    _ContractFn[Concatenate[nn.Module, _P], _T, _State],
+]: ...
 
 
 @overload
@@ -70,8 +65,7 @@ def contract(
 ) -> Callable[
     [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
     _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
-]:
-    ...
+]: ...
 
 
 def contract(
@@ -129,7 +123,7 @@ def contract(
     def inner(
         func: Callable[
             Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
-        ]
+        ],
     ) -> _ContractFn[
         Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T, _TState
     ]:
@@ -269,9 +263,7 @@ def contract(
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)  # type: ignore[call-overload]
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 

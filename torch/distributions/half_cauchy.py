@@ -29,6 +29,7 @@ class HalfCauchy(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Cauchy distribution
     """
+
     arg_constraints = {"scale": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True

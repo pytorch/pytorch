@@ -77,9 +77,9 @@ def _unpack_kwargs(
     flat_args: tuple[Any, ...], kwarg_keys: tuple[str, ...]
 ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
-    assert len(kwarg_keys) <= len(
-        flat_args
-    ), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    assert len(kwarg_keys) <= len(flat_args), (
+        f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    )
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]
@@ -94,15 +94,13 @@ T = TypeVar("T", torch.Tensor, PackedSequence)
 @overload
 def _recursive_to(
     inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> List[S]:
-    ...
+) -> List[S]: ...
 
 
 @overload
 def _recursive_to(
     inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> tuple[T]:
-    ...
+) -> tuple[T]: ...
 
 
 def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
@@ -218,13 +216,13 @@ R = TypeVar("R", dict, list, tuple, set, OrderedDict, PackedSequence, Any)
 
 
 @overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Q], container: torch.Tensor) -> Q:
-    ...
+def _apply_to_tensors(
+    fn: Callable[[torch.Tensor], Q], container: torch.Tensor
+) -> Q: ...
 
 
 @overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R:
-    ...
+def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R: ...
 
 
 def _apply_to_tensors(fn, container):

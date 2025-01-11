@@ -420,7 +420,7 @@ class ShardingPropagator:
                 raise e
             except Exception as e:
                 raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}.\n" f"Error: {e}"
+                    f"Sharding propagation failed on op {op_schema}.\nError: {e}"
                 ) from e
 
             # step 2. if can't get output_spec from sharding
@@ -463,9 +463,9 @@ class ShardingPropagator:
 
         strategy_costs: List[float] = []
         for strtg in strategy.strategies:
-            assert (
-                strtg.redistribute_cost is not None
-            ), "must set redistribute cost each strategy!"
+            assert strtg.redistribute_cost is not None, (
+                "must set redistribute cost each strategy!"
+            )
             redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
             strategy_costs.append(redistribute_cost)
 
