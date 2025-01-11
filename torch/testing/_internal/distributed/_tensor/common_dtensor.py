@@ -14,7 +14,6 @@ from typing import (
     Iterator,
     List,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -381,7 +380,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
+            self, *args: tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
             if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
@@ -426,7 +425,7 @@ class DTensorConverter:
     def __init__(
         self,
         mesh: DeviceMesh,
-        args: Tuple[object, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> None:
         self.hit = 0
@@ -500,7 +499,7 @@ class DTensorConverter:
     def __iter__(self) -> "DTensorConverter":
         return self
 
-    def __next__(self) -> Tuple[Tuple[object, ...], Dict[str, object]]:
+    def __next__(self) -> tuple[tuple[object, ...], Dict[str, object]]:
         try:
             next_sharding_choices = next(self.sharding_combs)
             idx = 0
