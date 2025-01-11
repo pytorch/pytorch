@@ -68,6 +68,7 @@ jobs:
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build:
+    if: github.repository_owner == 'pytorch'
     name: rocm6_3-py3_10-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -96,7 +97,7 @@ jobs:
 
   linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-test:
     name: rocm6_3-py3_10-periodic-dynamo-benchmarks
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm6_3-py3_10-periodic-dynamo-benchmarks-build
     with:
       build-environment: linux-focal-rocm6_3-py3_10
