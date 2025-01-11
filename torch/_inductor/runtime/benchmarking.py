@@ -348,7 +348,7 @@ class InductorBenchmarker(TritonBenchmarker):
                 for start_event, end_event in event_pairs
             ]
         )
-    
+
     @cached_property
     def gpu_t_per_clock_cycle(self: Self) -> float:
         torch.cuda.synchronize()
@@ -430,7 +430,9 @@ class InductorBenchmarker(TritonBenchmarker):
         )
 
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+        torch.cuda._sleep(
+            int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle)
+        )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -578,7 +580,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             # have pruned away; it is not guaranteed that all callables have an equivalent
             # queue time, but we can assume this anyways since the value does not need to
             # be exact and a close estimate is good enough for our use case
-            queue_t_per_iter = queue_t_per_iter * (len(callables_to_benchmark) / len(callables))
+            queue_t_per_iter = queue_t_per_iter * (
+                len(callables_to_benchmark) / len(callables)
+            )
             # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
             # we're alloted `max_benchmark_duration` per-callable, and since we've
             # pruned the callables we can assume the maximum duration of any callable
@@ -600,7 +604,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             )
 
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
+        torch.cuda._sleep(
+            int((queue_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle)
+        )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -632,7 +638,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         callable_to_timing.update(
             {
                 _callable: min(callable_to_timing[_callable], benchmarked_timing)
-                for _callable, benchmarked_timing in zip(callables_to_benchmark, benchmarked_timings)
+                for _callable, benchmarked_timing in zip(
+                    callables_to_benchmark, benchmarked_timings
+                )
             }
         )
 
