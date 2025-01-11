@@ -1,3 +1,19 @@
+tools/test/docstring_linter_testdata/python_code.py.txt:1: docstring found for class 'ShortWithDocstring' (4 lines) was too short (44 characters)
+    1 | class ShortWithDocstring:
+        ^
+    2 |     """This docstring, while short, is enough"""
+    3 |     pass
+    4 |
+    5 |
+
+tools/test/docstring_linter_testdata/python_code.py.txt:10: docstring found for class 'LongWithDocstring' (6 lines) was too short (44 characters)
+    8 |
+    9 |
+   10 | class LongWithDocstring:
+        ^
+   11 |     """This docstring, while short, is enough"""
+   12 |
+
 tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (4 lines)
    15 |
    16 |
@@ -14,6 +30,22 @@ tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for 
    25 |     """TODO"""
    26 |
 
+tools/test/docstring_linter_testdata/python_code.py.txt:45: docstring found for function 'long' (8 lines) was too short (44 characters)
+   43 |
+   44 |
+   45 | def long():
+        ^
+   46 |     """This docstring, while short, is enough"""
+   47 |     #
+
+tools/test/docstring_linter_testdata/python_code.py.txt:62: docstring found for class 'ImpossibleCombo' (15 lines) was too short (44 characters)
+   60 |
+   61 |
+   62 | class ImpossibleCombo(
+        ^
+   63 |     set,
+   64 |     tuple,
+
 tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found for function 'needs_docs' (12 lines)
    69 |     """This docstring, while short, is enough"""
    70 |
@@ -21,36 +53,3 @@ tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found f
             ^
    72 |         def not_short():
    73 |             class Long:
-
-tools/test/docstring_linter_testdata/python_code.py.txt:72: No docstring found for function 'not_short' (11 lines)
-   70 |
-   71 |     def needs_docs(self):
-   72 |         def not_short():
-                ^
-   73 |             class Long:
-   74 |                 a = 1
-
-tools/test/docstring_linter_testdata/python_code.py.txt:73: No docstring found for class 'Long' (6 lines)
-   71 |     def needs_docs(self):
-   72 |         def not_short():
-   73 |             class Long:
-                    ^
-   74 |                 a = 1
-   75 |                 b = 1
-
-tools/test/docstring_linter_testdata/python_code.py.txt:84: No docstring found for class 'NotDocstring' (12 lines)
-   82 |
-   83 |
-   84 | class NotDocstring:
-        ^
-   85 |     def short1(self):
-   86 |         pass
-
-Top undocumented classes:
-    12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:NotDocstring
-    6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:LongWithShortDocstring
-    6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:Long
-
-Top undocumented functions:
-    12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:needs_docs
-    11 lines: tools/test/docstring_linter_testdata/python_code.py.txt:not_short
