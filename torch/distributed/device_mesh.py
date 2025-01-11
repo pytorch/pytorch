@@ -383,11 +383,12 @@ else:
         represented as a n-d dimension array, and each value of the n-d dimensional
         array is the global id of the default process group ranks.
 
-        DeviceMesh could be used to describe the N dimensional device connections across the cluster,
-        and manage the ProcessGroups for N dimensional parallelisms. communication could happen on each dimension of the DeviceMesh separately.
-        DeviceMesh respect the device that user select already (i.e. if user call
-        `torch.cuda.set_device` before the DeviceMesh initialization), and will select/bound the
-        device on the current process if user does not set the device before the initialization.
+        DeviceMesh could be used to setup the N dimensional device connections across the cluster,
+        and manage the ProcessGroups for N dimensional parallelisms. Communications could happen on
+        each dimension of the DeviceMesh separately. DeviceMesh respect the device that user select
+        already (i.e. if user call `torch.cuda.set_device` before the DeviceMesh initialization),
+        and will select/set the device for the current process if user does not set the device
+        beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
 
         DeviceMesh can also be used as a context manager when using together with DTensor APIs.
 
