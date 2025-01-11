@@ -174,6 +174,8 @@ def _is_clang(cpp_compiler: str) -> bool:
 def _is_gcc(cpp_compiler: str) -> bool:
     if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
         return False
+    if _is_clang(cpp_compiler): #regex for g\+\+ will match clang++
+        return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
 
