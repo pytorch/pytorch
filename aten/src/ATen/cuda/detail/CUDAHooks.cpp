@@ -148,10 +148,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
 }
 
 bool CUDAHooks::hasCUDA() const {
-  // This function determines if CUDA is built into PyTorch. It helps avoid
-  // initializing the CUDA runtime (which can poison child processes) while
-  // detecting the current accelerator.
-  return true;
+  return at::cuda::is_available();
 }
 
 bool CUDAHooks::hasMAGMA() const {
