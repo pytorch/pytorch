@@ -436,7 +436,7 @@ def timed(
 
 def print_performance(
     model: Callable[..., Any],
-    example_inputs: Sequence[Any],
+    example_inputs: Sequence[Any] = (),
     times: int = 10,
     repeat: int = 10,
     baseline: float = 1.0,
