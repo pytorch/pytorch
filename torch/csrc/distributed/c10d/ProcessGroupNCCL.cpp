@@ -347,7 +347,7 @@ static void cacheAllocatorDeregisterHook(
 static std::
     unordered_map<std::string, std::unordered_map<std::string, std::string>>
     getNCCLCommDumpMap() {
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -380,6 +380,11 @@ std::string dump_nccl_trace(
     bool includeStackTraces,
     bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
+#if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
+  for (const auto& [ncclUniqueIDStr, dump] : ncclDumpMap) {
+    printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
+  }
+#endif
   return FlightRecorder::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
@@ -789,6 +794,12 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
+  // dump before aborting for rcclexp
+#if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
+  auto dumpMap = ncclComm_->ncclCommDump();
+  printNcclCommProxyTrace("WorkNCCL::abort", dumpMap);
+#endif
+
   // Abort all communicators of this work
   ncclComm_->abort();
 

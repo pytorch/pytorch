@@ -306,6 +306,7 @@ class CommonTemplate:
         result, (triton_code,) = run_and_compare(self, foo, x, y)
 
     @parametrize("prefer_nd_tiling", [False, True])
+    @config.patch("triton.skip_l1_cache", False)
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
         """
         Test that we emit tl.broadcast_to instead of using strides of 0.
@@ -591,6 +592,7 @@ class CommonTemplate:
             ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
             ((3, 3), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
+            ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
     def test_2d_reduction_odd_shapes(
