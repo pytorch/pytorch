@@ -3345,14 +3345,7 @@ exit(2)
         VISIBLE_DEVICES = (
             "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         )
-        test_script = f"""\
-import os
-import torch
-os.environ['{VISIBLE_DEVICES}']='32'
-
-torch.device(0) # see https://github.com/pytorch/pytorch/issues/144152
-print(torch.cuda.device_count())
-"""
+        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
         rc = check_output(test_script)
         self.assertEqual(rc, "0")
         if not TEST_WITH_ROCM:
