@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from unittest.mock import patch
 
 import sympy
@@ -366,6 +366,8 @@ class LocalBufferContext:
         self.global_buffers: Dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
+        # record the global buffers that are removed by this LocalBufferContext
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -419,7 +421,12 @@ class LocalBufferContext:
                 )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
-                V.graph.removed_buffers.add(global_buffer_name)
+                if global_buffer_name not in V.graph.removed_buffers:
+                    # Record the global buffers that are removed by this LocalBufferContext
+                    # since which may need to restore. Refer to issue:
+                    # https://github.com/pytorch/pytorch/issues/144186
+                    self.removed_buffers.add(global_buffer_name)
+                    V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
@@ -483,7 +490,7 @@ class LocalBufferContext:
 
 def unify_mask_base_type(
     buffer: IndentedBuffer,
-    vars: Tuple[CSEVariable, ...],
+    vars: tuple[CSEVariable, ...],
     dtype=torch.float,
 ):
     """
@@ -746,7 +753,7 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 def template_fusion_with_epilogues_supported(
     template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
-) -> Tuple[bool, bool]:
+) -> tuple[bool, bool]:
     def _get_indexes_of_template_buf_read(
         epilogue_node: ir.Operation, template_buf_names: List[str]
     ) -> List[sympy.Expr]:
@@ -759,7 +766,7 @@ def template_fusion_with_epilogues_supported(
     def _check_supported_and_same_indexes(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
-    ) -> Tuple[bool, bool]:
+    ) -> tuple[bool, bool]:
         num_indexes = len(OrderedSet(index_of_template_buf_read))
 
         if num_indexes > 1:
@@ -781,7 +788,7 @@ def template_fusion_with_epilogues_supported(
 
     def _template_fusion_supported(
         template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
-    ) -> Tuple[bool, bool]:
+    ) -> tuple[bool, bool]:
         template_buf_names = [x.get_name() for x in template_outputs]
         indexes_of_template_buf_reads = [
             _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
