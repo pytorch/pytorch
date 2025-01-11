@@ -124,9 +124,7 @@ class ComposabilityTest(MultiProcContinousTest):
             # TODO: DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
             # https://github.com/pytorch/pytorch/issues/144530
             return
-        if dp_type == "FSDP_MP":
-            # TODO: finish implementing the mixed precision test. it's not correct (notably, the reference model)
-            return
+
         torch.cuda.set_device(self.device)
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
@@ -134,15 +132,17 @@ class ComposabilityTest(MultiProcContinousTest):
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
+        # fsdp_mixed-precision dtype
+        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+
         # create "entire model"
         total_layers = 8
         dim = 10
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
-
-        # fsdp_mixed-precision dtype
-        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+        if dp_type == "FSDP_MP":
+            ref_model.to(dtype=mp_dtype)
 
         # Prepare inputs
         num_microbatches = 8
@@ -157,15 +157,17 @@ class ComposabilityTest(MultiProcContinousTest):
             return full, local, local_mb
 
         inputs, _, input_mb = build_rand(num_microbatches, dim, dtype=mp_dtype)
-        # TODO dtype bf16 too?
-        targets, targets_local, target_mb = build_rand(num_microbatches, dim)
+        targets, targets_local, target_mb = build_rand(
+            num_microbatches, dim, dtype=mp_dtype
+        )
         # WHY do we have to format the targets list differently than the inputs list???
         target_mb = [
             targets_local[i].reshape((1, dim)) for i in range(num_microbatches)
         ]
 
-        def loss_fn(y, target):
-            return torch.nn.functional.cross_entropy(y, target)
+        def loss_fn(y, target, scale=1e-4):
+            # Scale the loss to simulate a small learning rate and avoid exploding grads
+            return torch.nn.functional.cross_entropy(y, target) * scale
 
         # Get stage module i from the entire model
         def get_stage_module(stage_idx, num_stages):
@@ -267,19 +269,10 @@ class ComposabilityTest(MultiProcContinousTest):
             loss_fn(ref_model(inputs[sim_dp_rank]), targets[sim_dp_rank]).backward()
 
         # simulate the built-in averaging done by FSDP
+        ref_model.to(torch.float32)
         for p in ref_model.parameters():
+            p.grad = p.grad.to(torch.float32)
             p.grad /= dp_mesh.size()
-
-        # for sim_dp_rank in range(dp_mesh.size()):
-        #     for sim_pp_mb in range(num_microbatches):
-        #         # simulate the accumulation of gradients as in PP where loss fn does less scaling (no scaling in this case)
-        #         # due to smaller local microbatch size
-        #         loss_fn(ref_model(inputs[sim_dp_rank][sim_pp_mb]), targets[sim_dp_rank][sim_pp_mb]).backward()
-
-        # # simulate the built-in averaging done by FSDP
-        # for p in ref_model.parameters():
-        #     p.grad /= dp_mesh.size()
-        #     p.grad /= num_microbatches
 
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
@@ -294,7 +287,7 @@ class ComposabilityTest(MultiProcContinousTest):
                 parts[0] = str(int(parts[0]) + offset)
                 name = ".".join(parts)
                 ref_p = ref_parameters[name]
-                if dp_type == "FSDP":
+                if dp_type in ("FSDP", "FSDP_MP"):
                     self.assertTrue(isinstance(p.grad, DTensor))
                     torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
                 else:
