@@ -70,6 +70,7 @@ def aoti_compile_and_package(
     aoti_file2 = torch._inductor.aot_compile(ep2, ...)
 
     from torch._inductor.package import package_aoti, load_package
+
     package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
 
     compiled_model1 = load_package("my_package.pt2", "model1")
@@ -107,7 +108,9 @@ def aoti_compile_and_package(
         package_path is None
         or isinstance(package_path, io.BytesIO)
         or (isinstance(package_path, str) and package_path.endswith(".pt2"))
-    ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+    ), (
+        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+    )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True

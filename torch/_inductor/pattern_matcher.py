@@ -106,20 +106,17 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 class SearchFn(Protocol):
     __name__: str
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class ReplaceFn(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TraceFn(Protocol):
     def __call__(
         self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
-    ) -> torch.fx.GraphModule:
-        ...
+    ) -> torch.fx.GraphModule: ...
 
 
 T = TypeVar("T")
@@ -276,7 +273,8 @@ class Match:
                     fwd_only, run_functional_passes=run_functional_passes
                 )
             replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])  # type: ignore[arg-type]
+                replacement_fn,
+                torch.fx.map_arg(args, lambda arg: arg.meta["val"]),  # type: ignore[arg-type]
             )
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
@@ -381,8 +379,7 @@ class PatternExpr(ABC):
     """
 
     @abstractmethod
-    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        ...
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult: ...
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
@@ -505,8 +502,7 @@ class _TargetExpr(PatternExpr):
 
     @property
     @abstractmethod
-    def op(self) -> str:
-        ...
+    def op(self) -> str: ...
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -662,7 +658,9 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs  # type: ignore[arg-type]
+                node.target,  # type: ignore[arg-type]
+                node.args,  # type: ignore[arg-type]
+                node.kwargs,
             )
 
             if normalized_args_and_kwargs is None:
@@ -1006,8 +1004,9 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
-        ...
+    def __getitem__(
+        self, k: tuple[str, torch.fx.node.Target]
+    ) -> List[PatternEntry]: ...
 
 
 @dataclasses.dataclass
@@ -1866,7 +1865,10 @@ class PatternMatcherPass:
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
-                        and len(OrderedSet(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                        and len(
+                            OrderedSet(map(get_mutation_region_id_partial, m.nodes))
+                        )
+                        != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
@@ -1925,7 +1927,10 @@ def fx_to_pattern(
         get_attr = _not_implemented
 
         def placeholder(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
         ) -> Union[ExclusiveKeywordArg, KeywordArg]:
             n = next(argnum)
             if n < len(argnames):
@@ -1942,7 +1947,10 @@ def fx_to_pattern(
                 return KeywordArg(name)
 
         def call_function(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
         ) -> PatternExpr:
             process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here

@@ -50,9 +50,9 @@ def try_import_cutlass() -> bool:
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
             if os.path.exists(dst_link):
-                assert os.path.islink(
-                    dst_link
-                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.islink(dst_link), (
+                    f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                )
                 assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
                     cutlass_py_full_path
                 ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"

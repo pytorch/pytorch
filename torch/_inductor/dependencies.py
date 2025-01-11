@@ -193,7 +193,9 @@ class MemoryDep(Dep):
         )
         new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
 
-        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        out = MemoryDep(
+            self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values())
+        )  # type: ignore[arg-type]
         return out
 
     @property
@@ -633,11 +635,16 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
         inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.STORE]:
         inner.store(
-            entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+            entry.buffer_name,
+            name_to_index[entry.index_name],
+            None,  # type: ignore[arg-type]
+            entry.mode,
         )
     for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
         inner.store_reduction(
-            entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+            entry.buffer_name,
+            name_to_index[entry.index_name],
+            None,  # type: ignore[arg-type]
         )
     for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
         inner.index_expr(name_to_index[entry.index_name], None)
@@ -645,7 +652,11 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
         # All that matters is that we record the buffer name, so place it in the
         # "boundaries" name position to ensure that it's recorded.
         inner.bucketize(
-            None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
+            None,
+            (entry.buffer_name, None, None, None),
+            None,
+            None,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
         )
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     return inner

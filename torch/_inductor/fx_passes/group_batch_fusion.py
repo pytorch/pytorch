@@ -270,7 +270,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                             args=(batch_biases[i],),
                             kwargs={"size": broadcast_shape},
                         )
-                        broadcast_bias.meta["val"] = aten.broadcast_to(batch_biases_meta[i]["val"], broadcast_shape)  # type: ignore[assignment]
+                        broadcast_bias.meta["val"] = aten.broadcast_to(
+                            batch_biases_meta[i]["val"], broadcast_shape
+                        )  # type: ignore[assignment]
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -802,9 +804,9 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(
-            eps == group_epss[0] for eps in group_epss
-        ), "all epsilon values must be equal"
+        assert all(eps == group_epss[0] for eps in group_epss), (
+            "all epsilon values must be equal"
+        )
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -995,7 +997,11 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             # for relu op, we also use the inplace to construct the key
             # we batch the ops with same parent to enable followup split cat
             parent = node.args[0]
-            parent = parent.target if self.graph_search_options.get("fuse_nodes_with_same_parent", False) else ""  # type: ignore[union-attr]
+            parent = (
+                parent.target  # type: ignore[union-attr]
+                if self.graph_search_options.get("fuse_nodes_with_same_parent", False)
+                else ""
+            )
             group_key = (
                 "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["val"].shape),

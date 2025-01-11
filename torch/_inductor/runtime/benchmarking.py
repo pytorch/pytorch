@@ -19,7 +19,7 @@ T = TypeVar("T")
 
 
 def maybe_time(
-    fn: Callable[Concatenate[Any, P], T]
+    fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
     """Wrapper that logs the duration of `fn`, in milliseconds, along with a representation
     of the function's args and kwargs, if logging is enabled. It is expected that `fn` is

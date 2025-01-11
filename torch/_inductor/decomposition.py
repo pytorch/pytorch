@@ -122,7 +122,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
+    ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:

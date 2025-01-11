@@ -276,9 +276,9 @@ class MetalKernel(SIMDKernel):
                         f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
                     )
                 else:
-                    assert (
-                        len(idx_var_names) < 4
-                    ), "Up to 3 index variables are supported"
+                    assert len(idx_var_names) < 4, (
+                        "Up to 3 index variables are supported"
+                    )
                     code.writeline(
                         f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
                     )

@@ -1555,9 +1555,9 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
-        self.pointer_advancements: Dict[
-            SymT, Dict[str, List[sympy.Expr]]
-        ] = collections.defaultdict(dict)
+        self.pointer_advancements: Dict[SymT, Dict[str, List[sympy.Expr]]] = (
+            collections.defaultdict(dict)
+        )
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
@@ -1951,7 +1951,9 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+        return IndexingOptions(
+            index_str, mask_vars, mask_str, expand_str, has_rindex, index
+        )  # type: ignore[arg-type]
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
@@ -1989,9 +1991,9 @@ class TritonKernel(SIMDKernel):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert (
-                    block_ptr not in advancements
-                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
+                assert block_ptr not in advancements, (
+                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
+                )
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -2396,7 +2398,7 @@ class TritonKernel(SIMDKernel):
             buffer.splice(
                 f"""\
                 {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {self.reduction_resize(f'{result_var}_idx')}
+                {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                 """
             )
 
@@ -2493,8 +2495,8 @@ class TritonKernel(SIMDKernel):
                 {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
                     {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
                 )
-                {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
-                {accumulator_index} = {where_cond(f'{accumulator_index}_next', accumulator_index)}
+                {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
+                {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
                 """
                 )
                 final_argreduce(
@@ -2666,9 +2668,9 @@ class TritonKernel(SIMDKernel):
             )
         self.compute.splice(
             f"""\
-            {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
-            {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
-            {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
+            {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
+            {accumulator_m2} = {where_cond(f"{accumulator_m2}_next", accumulator_m2)}
+            {accumulator_weight} = {where_cond(f"{accumulator_weight}_next", accumulator_weight)}
             """
         )
         result_mean = result_var
@@ -2953,9 +2955,9 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert (
-            self.persistent_reduction
-        ), "ops.sort is only supported in persistent reductions"
+        assert self.persistent_reduction, (
+            "ops.sort is only supported in persistent reductions"
+        )
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -3212,9 +3214,7 @@ class TritonKernel(SIMDKernel):
             {}
             import torch
             from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
-        """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
         )
 
     def _get_heuristic(self):
@@ -3254,19 +3254,19 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth"] = config.profile_bandwidth
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
-            inductor_meta[
-                "profile_bandwidth_with_do_bench_using_profiling"
-            ] = config.profile_bandwidth_with_do_bench_using_profiling
+            inductor_meta["profile_bandwidth_with_do_bench_using_profiling"] = (
+                config.profile_bandwidth_with_do_bench_using_profiling
+            )
         if config.coordinate_descent_tuning:
-            inductor_meta[
-                "coordinate_descent_tuning"
-            ] = config.coordinate_descent_tuning
-            inductor_meta[
-                "coordinate_descent_search_radius"
-            ] = config.coordinate_descent_search_radius
-            inductor_meta[
-                "coordinate_descent_check_all_directions"
-            ] = config.coordinate_descent_check_all_directions
+            inductor_meta["coordinate_descent_tuning"] = (
+                config.coordinate_descent_tuning
+            )
+            inductor_meta["coordinate_descent_search_radius"] = (
+                config.coordinate_descent_search_radius
+            )
+            inductor_meta["coordinate_descent_check_all_directions"] = (
+                config.coordinate_descent_check_all_directions
+            )
         return inductor_meta
 
     def codegen_kernel(self, name=None):
@@ -4196,9 +4196,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(
-            backend, (SIMDScheduling, CUDACombinedScheduling)
-        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
+            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        )
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.

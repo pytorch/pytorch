@@ -626,7 +626,8 @@ class SIMDKernel(Kernel):
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
-                    remaining[current_group], 1  # type: ignore[arg-type]
+                    remaining[current_group],
+                    1,  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
@@ -654,9 +655,9 @@ class SIMDKernel(Kernel):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
 
         return new_ranges, return_getters_groups
 
@@ -822,7 +823,8 @@ class SIMDKernel(Kernel):
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
                     self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
-                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr,
+                        replacements,  # type: ignore[index]
                     )
                 self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
