@@ -173,6 +173,9 @@ class TestConfigModule(TestCase):
         self.assertEqual(
             code,
             """torch.testing._internal.fake_config_module.e_bool = False
+torch.testing._internal.fake_config_module.e_env_default = True
+torch.testing._internal.fake_config_module.e_env_default_FALSE = False
+torch.testing._internal.fake_config_module.e_env_force = True
 torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
         )
 

@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, List, Optional, Sequence, Tuple, Union
+from typing import cast, List, Optional, Sequence, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -178,7 +178,7 @@ def _infer_reduce_dims_map(
 
 def _replicate_dims_start_at(
     placements: Sequence[Placement], start_dim: int = 0
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     new_placements: List[Placement] = []
     for p in placements:
         if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
@@ -190,8 +190,8 @@ def _replicate_dims_start_at(
 
 # return new_placements which align with placements but skip the skipped_dim
 def _skip_dim(
-    placements: Tuple[Placement, ...], skipped_dim: int
-) -> Tuple[Placement, ...]:
+    placements: tuple[Placement, ...], skipped_dim: int
+) -> tuple[Placement, ...]:
     new_placements: List[Placement] = []
     for p in placements:
         if isinstance(p, Shard) and p.dim >= skipped_dim:
@@ -202,8 +202,8 @@ def _skip_dim(
 
 
 def replicate_reduction_dims(
-    placements: Tuple[Placement, ...], reduction_dims: List[int]
-) -> Tuple[Placement, ...]:
+    placements: tuple[Placement, ...], reduction_dims: List[int]
+) -> tuple[Placement, ...]:
     # replicate the reduction dims if not reduction_linear
     new_placements: List[Placement] = []
 
@@ -219,11 +219,11 @@ def replicate_reduction_dims(
 
 
 def map_placements_after_reduction(
-    placements: Tuple[Placement, ...],
+    placements: tuple[Placement, ...],
     reduction_dims: List[int],
     reduction_dims_map: List[int],
     reduction_op: ReductionOpType,
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """
     Map each placement based on the output shape after reduction.
     """
