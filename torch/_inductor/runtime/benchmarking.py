@@ -348,7 +348,7 @@ class InductorBenchmarker(TritonBenchmarker):
                 for start_event, end_event in event_pairs
             ]
         )
-    
+
     @cached_property
     def gpu_t_per_clock_cycle(self: Self) -> float:
         torch.cuda.synchronize()
@@ -363,7 +363,7 @@ class InductorBenchmarker(TritonBenchmarker):
         end_event.record()
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / num_clock_cycles
-    
+
     @cached_property
     def queue_t_and_gpu_t_per_cache_clear(
         self: Self,
@@ -385,7 +385,7 @@ class InductorBenchmarker(TritonBenchmarker):
             buffer.zero_()
         queue_end_t = time.perf_counter()
         queue_t_per_iter = (
-            (queue_end_t() - queue_start_t) * MILLISECONDS_PER_SECOND
+            (queue_end_t - queue_start_t) * MILLISECONDS_PER_SECOND
         ) / num_iters
         end_event.record()
         torch.cuda.synchronize()
@@ -400,7 +400,7 @@ class InductorBenchmarker(TritonBenchmarker):
     @cached_property
     def queue_t_per_cache_flush(self: Self) -> float:
         return self.queue_t_and_gpu_t_per_cache_clear[0]
-    
+
     @cached_property
     def gpu_t_per_cache_flush(self: Self) -> float:
         return self.queue_t_and_gpu_t_per_cache_clear[1]
@@ -479,10 +479,10 @@ class InductorBenchmarker(TritonBenchmarker):
         queue_t_all_cache_flushes = memory_warmup_iters * self.queue_t_per_cache_flush
         queue_t_all_benchmark_iters = benchmark_iters * queue_t_per_iter
         sleep_t = (queue_t_all_cache_flushes + queue_t_all_benchmark_iters) - (
-            memory_warmup_iters * self.gpu_t_per_cache_flush 
+            memory_warmup_iters * self.gpu_t_per_cache_flush
         )
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle)), 0)
+        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle), 0))
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -633,7 +633,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
             # have pruned away; it is not guaranteed that all callables have an equivalent
             # queue time, but we can assume this anyways since the value does not need to
             # be exact and a close estimate is good enough for our use case
-            queue_t_per_iter = queue_t_per_iter * (len(callables_to_benchmark) / len(callables))
+            queue_t_per_iter = queue_t_per_iter * (
+                len(callables_to_benchmark) / len(callables)
+            )
             # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
             # we're alloted `max_benchmark_duration` per-callable, and since we've
             # pruned the callables we can assume the maximum duration of any callable
@@ -660,10 +662,10 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         queue_t_all_cache_flushes = memory_warmup_iters * self.queue_t_per_cache_flush
         queue_t_all_benchmark_iters = benchmark_iters * queue_t_per_iter
         sleep_t = (queue_t_all_cache_flushes + queue_t_all_benchmark_iters) - (
-            memory_warmup_iters * self.gpu_t_per_cache_flush 
+            memory_warmup_iters * self.gpu_t_per_cache_flush
         )
         # put the GPU to sleep to start packing the event queue
-        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle)), 0)
+        torch.cuda._sleep(max(int(sleep_t / self.gpu_t_per_clock_cycle), 0))
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
@@ -695,7 +697,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         callable_to_timing.update(
             {
                 _callable: min(callable_to_timing[_callable], benchmarked_timing)
-                for _callable, benchmarked_timing in zip(callables_to_benchmark, benchmarked_timings)
+                for _callable, benchmarked_timing in zip(
+                    callables_to_benchmark, benchmarked_timings
+                )
             }
         )
 
