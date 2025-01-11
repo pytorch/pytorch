@@ -3,7 +3,7 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 from functorch.experimental.control_flow import _unstack_pytree
@@ -161,7 +161,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def placeholder(
             self,
             target: str,  # type: ignore[override]
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
             arg = super().placeholder(target, args, kwargs)
@@ -170,7 +170,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def output(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
             return self.callback.output(args[0], NodeMetadata(self.node.meta)).data  # type: ignore[return-value]
@@ -178,7 +178,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def call_function(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
@@ -218,20 +218,20 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
         def get_attr(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
+            self, target: str, args: tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
         def call_module(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> None:
             raise ExportPassBaseError("call_module is not supported.")
 
         def call_method(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
+            self, target: str, args: tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -253,7 +253,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         self,
         kind: str,
         target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
@@ -326,7 +326,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_operator(
         self,
         op,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
@@ -335,7 +335,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_sym(
         self,
         target: Fn,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         meta: NodeMetadata,
     ) -> ProxyValue:
         return self._fx("call_function", target, args, {}, meta)
@@ -387,7 +387,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         return self._fx("output", "output", (results,), {}, meta)
 
     def call_submodule(
-        self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
+        self, graph_module: fx.GraphModule, inputs: tuple[Argument, ...]
     ) -> PassResult:
         prev_tracer, self.tracer = self.tracer, self.ExportTracer(
             self, graph_module.graph._codegen
