@@ -9,7 +9,7 @@ class TestMetricsContext(TestCase):
         super().setUp()
         self.metrics = {}
 
-    def _on_exit(self, metrics):
+    def _on_exit(self, start_ns, end_ns, metrics, exc_type, exc_value):
         # Save away the metrics to be validated in the test.
         self.metrics = metrics.copy()
 

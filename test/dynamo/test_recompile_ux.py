@@ -8,7 +8,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
-from torch._dynamo.exc import FailOnCacheLimitHit
+from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
@@ -20,7 +20,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit)
+            torch._dynamo.config.patch("recompile_limit", cls.cache_limit)
         )
 
     def test_drop_cache_on_skip(self):
@@ -84,7 +84,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         expected_recompiles = 2
         compile_counter = torch._dynamo.testing.CompileCounter()
-        with torch._dynamo.config.patch("cache_size_limit", expected_recompiles):
+        with torch._dynamo.config.patch("recompile_limit", expected_recompiles):
             with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
@@ -98,7 +98,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             logs.records[0]
             .getMessage()
-            .startswith("torch._dynamo hit config.cache_size_limit")
+            .startswith("torch._dynamo hit config.recompile_limit")
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -116,7 +116,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         c = torch.rand(3, 4, 5, device="cuda")
         compile_counter = torch._dynamo.testing.CompileCounter()
 
-        with torch._dynamo.config.patch("cache_size_limit", 2):
+        with torch._dynamo.config.patch("recompile_limit", 2):
             opt_func = torch.compile(func, backend=compile_counter)
             opt_func(a, b, c)  # warmup
             self.assertEqual(compile_counter.frame_count, 1)
@@ -204,8 +204,8 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
         )
 
-    @torch._dynamo.config.patch(cache_size_limit=1, fail_on_cache_limit_hit=True)
-    def test_fail_on_cache_limit_hit(self):
+    @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_fail_on_recompile_limit_hit(self):
         @torch.compile(backend="eager")
         def func(b, a):
             if a:
@@ -214,10 +214,10 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 return b + 1
 
         func(torch.randn(5), True)
-        with self.assertRaises(FailOnCacheLimitHit):
+        with self.assertRaises(FailOnRecompileLimitHit):
             func(torch.randn(5), False)
 
-    @torch._dynamo.config.patch("cache_size_limit", 32)
+    @torch._dynamo.config.patch("recompile_limit", 32)
     def test_multiple_guard_fails(self):
         failure_reasons = []
 
@@ -248,7 +248,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
                 failure_str,
             )
 
-    @torch._dynamo.config.patch("cache_size_limit", 32)
+    @torch._dynamo.config.patch("recompile_limit", 32)
     def test_multiple_guard_fails_report_all(self):
         with log_settings(kwargs_to_settings(recompiles_verbose=True)):
             failure_reasons = []

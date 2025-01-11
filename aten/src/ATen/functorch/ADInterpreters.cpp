@@ -17,7 +17,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->is_immutable())) {
+  if (wrapper && wrapper->level() == cur_level && !(wrapper->is_immutable())) {
     return;
   }
   TORCH_CHECK(false,
@@ -42,8 +42,9 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
   }
-  TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
-  if (wrapper->level().value() == current_level) {
+  auto level = wrapper->level();
+  TORCH_INTERNAL_ASSERT(level.has_value() && level <= current_level, "escaped?");
+  if (level == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }

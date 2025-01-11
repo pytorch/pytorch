@@ -7,6 +7,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
@@ -23,6 +24,16 @@
 #endif
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+
+@interface MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+@end
 
 // Fwd declarations
 namespace at {
@@ -80,10 +91,6 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape);
-MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
-                                                 MPSShape* mpsShape,
-                                                 const MPSDataType mpsDataType);
 MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
                                MPSGraphTensor* inputTensor,
                                const TensorBase& input,
@@ -342,67 +349,19 @@ inline bool is_dense_in_storage(const TensorBase& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
-class MetalShaderLibrary {
- public:
-  MetalShaderLibrary(const std::string& src) : shaderSource(src), nparams(0), compile_options(nullptr) {}
-  MetalShaderLibrary(const std::string& src, unsigned nparams_)
-      : shaderSource(src), nparams(nparams_), compile_options(nullptr) {}
-  MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_)
-      : shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
-  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
-  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
-    return getLibraryPipelineState(getLibrary(), fname).first;
-  }
-  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname,
-                                                      const std::initializer_list<std::string>& params) {
-    return getLibraryPipelineState(getLibrary(params), fname).first;
-  }
-  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
-    return getLibraryPipelineState(getLibrary(), fname).second;
-  }
-  id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
-    return getLibraryPipelineState(getLibrary(params), fname).second;
-  }
-  static MetalShaderLibrary& getBundledLibrary();
-
- protected:
-  virtual id<MTLLibrary> getLibrary();
-  virtual id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
-  id<MTLLibrary> library = nil;
-
- private:
-  std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib,
-                                                                                  const std::string& fname);
-
-  id<MTLLibrary> compileLibrary(const std::string& src);
-  std::string shaderSource;
-  unsigned nparams;
-  MTLCompileOptions* compile_options;
-  std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
-};
-
-namespace detail {
-template <typename T>
-class has_size_type {
-  template <typename U>
-  static constexpr std::true_type check(typename U::size_type*);
-  template <typename>
-  static constexpr std::false_type check(...);
-
- public:
-  static constexpr bool value = decltype(check<T>(nullptr))::value;
-};
-
-template <typename T>
-constexpr bool has_size_type_v = has_size_type<T>::value;
-
-} // namespace detail
-
 template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
+  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
+      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
+      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
+    } else {
+      TORCH_CHECK(false, "Passed CPU tensor to MPS op");
+    }
+    return;
+  }
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 

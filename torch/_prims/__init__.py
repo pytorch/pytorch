@@ -1831,7 +1831,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.reshape(shape).contiguous().clone()
+    return a.reshape(shape).clone(memory_format=torch.contiguous_format)
 
 
 _reshape_doc = """
@@ -1921,7 +1921,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
         # TODO: update meta objects so this can be acquired directly
         try:
             requires_grad = a.requires_grad
-        except Exception as e:
+        except Exception:
             requires_grad = False
 
     result = torch.empty_like(

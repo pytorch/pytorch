@@ -1476,15 +1476,11 @@ calc_i0(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i0e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
-  auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i0e_B<T>();
   return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
@@ -1507,16 +1503,12 @@ calc_i1(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i1e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     const T out = std::exp(x) * x * chbevl(y, A, len);
     return (_x < T{0.0}) ? -out : out;
   }
-  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i1e_B<T>();
   const T out = (std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len)) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
@@ -1541,16 +1533,12 @@ calc_i1e(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i1e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     const T out = chbevl(y, A, len) * x;
     return (_x < T{0.0}) ? -out : out;
   }
-  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i1e_B<T>();
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
@@ -3053,6 +3041,17 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
 } // chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
+constexpr auto getHermitianLimit() {
+    if constexpr (std::is_same_v<T, float>) {
+        return 128;
+    } else if constexpr (std::is_same_v<T, double>) {
+        return 512;
+    } else {
+        return 1024;
+    }
+}
+
+template<typename T>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
@@ -3064,6 +3063,10 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
 
     if (n == 1) {
         return x + x;
+    }
+
+    if (n > getHermitianLimit<T>()) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -3101,6 +3104,10 @@ inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
 
     if (n == 1) {
         return x;
+    }
+
+    if (n > getHermitianLimit<T>()) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);

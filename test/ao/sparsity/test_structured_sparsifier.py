@@ -269,7 +269,6 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _test_step_linear_on_device(self, model, device):
         model = model.to(device)
-        x = torch.ones(7, 7, device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, None)
         pruner.enable_mask_update = True
@@ -808,7 +807,7 @@ class TestBaseStructuredSparsifier(TestCase):
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
         out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        r, c = lstm_out_expected.size()
+        _, c = lstm_out_expected.size()
 
         # We cannot check that y_expected == y_pruned as usual because
         # zeros vs. missing elements yield different numerical results.
@@ -891,7 +890,7 @@ class TestBaseStructuredSparsifier(TestCase):
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
         out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        r, c = lstm_out_expected.size()
+        _, c = lstm_out_expected.size()
 
         # We cannot check that y_expected == y_pruned as usual because
         # zeros vs. missing elements yield different numerical results.

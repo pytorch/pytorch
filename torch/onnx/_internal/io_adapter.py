@@ -603,7 +603,7 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
             model.constants[fqn]  # type: ignore[union-attr,index]
-            for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,operator]
+            for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.

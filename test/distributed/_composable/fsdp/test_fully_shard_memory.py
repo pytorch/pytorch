@@ -4,11 +4,7 @@ import functools
 import gc
 
 import torch
-from torch.distributed._composable.fsdp import (
-    CPUOffloadPolicy,
-    fully_shard,
-    OffloadPolicy,
-)
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
