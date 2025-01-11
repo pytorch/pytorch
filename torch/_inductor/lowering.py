@@ -77,9 +77,9 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 lowerings: Dict[Callable[..., Any], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
-_maybe_layout_constraints: Dict[
-    torch._ops.OpOverload, Optional[Callable[..., Any]]
-] = {}
+_maybe_layout_constraints: Dict[torch._ops.OpOverload, Optional[Callable[..., Any]]] = (
+    {}
+)
 fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
@@ -2504,6 +2504,7 @@ make_fallback(aten._linalg_check_errors)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.triangular_solve)
+make_fallback(aten.linalg_cholesky)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
