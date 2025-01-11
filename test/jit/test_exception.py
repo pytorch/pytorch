@@ -36,7 +36,7 @@ class TestException(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "This op may not exist or may not be currently " "supported in TorchScript",
+            "This op may not exist or may not be currently supported in TorchScript",
         ):
 
             @torch.jit.script

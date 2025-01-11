@@ -1532,9 +1532,9 @@ main()
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverload):
-                    assert (
-                        node.target._name != "aten::_to_copy"
-                    ), "there should be no implicit copies (e.g. dtype casting)"
+                    assert node.target._name != "aten::_to_copy", (
+                        "there should be no implicit copies (e.g. dtype casting)"
+                    )
 
             def inner_compiler(gm_, example_inputs_):
                 counters["compiled_autograd"]["compiles"] += 1

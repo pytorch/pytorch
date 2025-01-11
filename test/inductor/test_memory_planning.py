@@ -61,11 +61,7 @@ class TestMemoryPlanning(TestCase):
             "pool1 = empty_strided_" + GPU_TYPE + "((4*s0*s1 + align(4*s0*s0), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
-        ).check(
-            "buf1 = alloc_from_pool(pool1, align(4*s0*s0),"
-        ).run(
-            code
-        )
+        ).check("buf1 = alloc_from_pool(pool1, align(4*s0*s0),").run(code)
         self.assertTrue(same(f(*args), result))
 
     def test_cpp_wrapper(self):
@@ -78,9 +74,7 @@ class TestMemoryPlanning(TestCase):
             "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
         ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
             "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
-        ).run(
-            code
-        )
+        ).run(code)
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
@@ -106,19 +100,11 @@ class TestMemoryPlanning(TestCase):
             "AtenTensorHandle pool1_handle;"
         ).check_next(
             "aoti_torch_empty_strided(1, int_array_2, int_array_3,"
-        ).check_next(
-            "RAIIAtenTensorHandle pool1(pool1_handle);"
-        ).check_next(
+        ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
             "int64_t int_array_4[] = {s0, 3L};"
-        ).check_next(
-            "int64_t int_array_5[] = {3L, 1L};"
-        ).check_next(
+        ).check_next("int64_t int_array_5[] = {3L, 1L};").check_next(
             "AtenTensorHandle tmp_tensor_handle_1;"
-        ).check_next(
-            "aoti_torch__alloc_from_pool(pool1, 0"
-        ).run(
-            code
-        )
+        ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
 
 

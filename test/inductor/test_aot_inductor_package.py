@@ -85,7 +85,9 @@ def compile(
         if sys.platform != "darwin"
         else []
     ),
-    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}{'Cpp' if params['package_cpp_only'] else ''}_{params['device']}",
 )
 class TestAOTInductorPackage(TestCase):
     def check_model(

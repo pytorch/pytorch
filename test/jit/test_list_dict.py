@@ -1825,7 +1825,7 @@ class TestDict(JitTestCase):
     def test_popitem(self):
         @torch.jit.script
         def popitem(
-            x: Dict[str, Tensor]
+            x: Dict[str, Tensor],
         ) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]:
             item = x.popitem()
             return item, x

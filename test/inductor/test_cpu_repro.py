@@ -1136,9 +1136,9 @@ class CPUReproTests(TestCase):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
             batch_size, seq_len, num_heads, head_dim = query.size()
-            assert (
-                seq_len % (window_overlap * 2) == 0
-            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            assert seq_len % (window_overlap * 2) == 0, (
+                f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            )
 
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
             diagonal_chunked_attention_scores = key
@@ -1150,11 +1150,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[
-                :, :3, :, window_overlap:
-            ] = diagonal_chunked_attention_scores[
-                :, :, :window_overlap, : window_overlap + 1
-            ]
+            diagonal_attention_scores[:, :3, :, window_overlap:] = (
+                diagonal_chunked_attention_scores[
+                    :, :, :window_overlap, : window_overlap + 1
+                ]
+            )
             return diagonal_attention_scores
 
         self.common(

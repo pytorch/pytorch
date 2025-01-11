@@ -365,12 +365,12 @@ class TestMaxAutotune(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert (
-                    fake_choice.thread_id is not None
-                ), "Expected all ChoiceCaller's precompile method to have been called"
-                assert (
-                    fake_choice.thread_id != main_thread_id
-                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                assert fake_choice.thread_id is not None, (
+                    "Expected all ChoiceCaller's precompile method to have been called"
+                )
+                assert fake_choice.thread_id != main_thread_id, (
+                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                )
         finally:
             V.set_debug_handler(old_debug_handler)
 
