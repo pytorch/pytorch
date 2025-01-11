@@ -313,7 +313,7 @@ class GroupNorm(Module):
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, " "affine={affine}".format(
+        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
             **self.__dict__
         )
 
@@ -358,6 +358,7 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: Tuple[int, ...]
     eps: Optional[float]
