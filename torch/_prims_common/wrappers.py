@@ -316,9 +316,15 @@ def out_wrapper(
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
-                        out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
+                        out,
+                        result.shape,  # type: ignore[union-attr]
+                        maybe_compute_memory_format(result),
                     )
-                    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                    _safe_copy_out(
+                        copy_from=result,  # type: ignore[arg-type]
+                        copy_to=out,
+                        exact_dtype=exact_dtype,
+                    )
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     torch._check_type(
@@ -353,7 +359,8 @@ def out_wrapper(
         params = sorted(params, key=lambda p: p.kind)
 
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=return_type  # type: ignore[arg-type]
+            parameters=params,
+            return_annotation=return_type,  # type: ignore[arg-type]
         )
 
         _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
@@ -368,7 +375,9 @@ def out_wrapper(
         # Add an indicator attribute that can be used in special cases
         # where having a function wrapped by `out_wrapper` is not desirable e.g.
         # jit
-        _fn._torch_decompositions_out_wrapper = f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"  # type: ignore[attr-defined]
+        _fn._torch_decompositions_out_wrapper = (  # type: ignore[attr-defined]
+            f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"
+        )
 
         return _fn
 

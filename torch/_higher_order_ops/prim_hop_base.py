@@ -34,10 +34,13 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         def __init__(self):
             return super().__init__("invoke_quant")
 
+
     invoke_quant = InvokeQuant()
+
 
     def g(x):
         return x.sin().cos()
+
 
     @torch.compile(backend="aot_eager")
     def f(x):
@@ -114,7 +117,10 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
 
         out = self(subgraph, operands, **kwargs)
         return track_tensor_tree(
-            out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
+            out,
+            out_proxy,
+            constant=None,
+            tracer=proxy_mode.tracer,  # type: ignore[arg-type]
         )
 
     def _call_FakeTensorMode(self, mode, subgraph, operands, *_, **kwargs):

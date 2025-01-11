@@ -68,9 +68,9 @@ def check_tensor_metadata_matches(nv, rv, desc):
     same_strides, idx = torch._prims_common.check_significant_strides(
         nv, rv, only_cuda=False
     )
-    assert (
-        same_strides
-    ), f"{desc()}: strides {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+    assert same_strides, (
+        f"{desc()}: strides {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+    )
 
 
 def check_metadata_matches(n, r, desc):

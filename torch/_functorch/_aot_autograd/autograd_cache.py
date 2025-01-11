@@ -2,6 +2,7 @@
 """
 Utils for caching the outputs of AOTAutograd
 """
+
 from __future__ import annotations
 
 import base64
@@ -701,9 +702,8 @@ class AOTAutogradCache:
                     # FXGraphCache and AOTAutogradCache?
                     # get_metrics_context().increment(...)
                     if (
-                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                            time_saved_ns
-                        )
+                        ephemeral_increase
+                        := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                     ) != 0:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
@@ -816,9 +816,9 @@ class AOTAutogradCache:
 
         # Prefer local cache to remote, fallback to remote if local missed
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
 
             if remote_cache is not None:
                 try:
@@ -874,9 +874,9 @@ class AOTAutogradCache:
         counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
