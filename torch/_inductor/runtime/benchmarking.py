@@ -592,7 +592,9 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         callable_to_timing.update(
             {
                 _callable: min(callable_to_timing[_callable], benchmarked_timing)
-                for _callable, benchmarked_timing in zip(callables_to_benchmark, benchmarked_timings)
+                for _callable, benchmarked_timing in zip(
+                    callables_to_benchmark, benchmarked_timings
+                )
             }
         )
 

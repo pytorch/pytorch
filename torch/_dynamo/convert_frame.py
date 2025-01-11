@@ -1112,7 +1112,7 @@ def _compile(
                 }
 
                 return {
-                    key: list(value) if isinstance(value, set) else value
+                    key: sorted(value) if isinstance(value, set) else value
                     for key, value in d.items()
                     if key not in blocklist
                 }
@@ -1142,7 +1142,7 @@ def _compile(
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
-                "dynamo_config": json.dumps(config_dict),
+                "dynamo_config": json.dumps(config_dict, sort_keys=True),
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
