@@ -1283,7 +1283,9 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
-            with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
+            with torch.cuda.device(
+                compile_pg.rank() % torch.cuda.device_count()
+            ), dynamo_timed("compiler_collective", log_pt2_compile_event=True):
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
                 ds.all_states = all_states
