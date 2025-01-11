@@ -50,8 +50,6 @@ def compile(
 
 def aoti_compile_and_package(
     exported_program: ExportedProgram,
-    _deprecated_unused_args=None,
-    _deprecated_unused_kwargs=None,
     *,
     package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
@@ -95,12 +93,6 @@ def aoti_compile_and_package(
         raise RuntimeError(
             "exported_program.example_inputs is required to be set in order "
             "for AOTInductor compilation."
-        )
-
-    if _deprecated_unused_args is not None or _deprecated_unused_kwargs is not None:
-        log.warning(
-            "You no longer need to specify args/kwargs to aoti_compile_and_package "
-            "as we can get this information from exported_program.example_inputs."
         )
 
     assert (
