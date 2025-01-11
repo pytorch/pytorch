@@ -3,9 +3,9 @@ description: Create a report to help us reproduce and fix the bug
 labels: ["oncall: pt2"]
 
 body:
-- type: markdown
-  attributes:
-    value: >
+  - type: markdown
+    attributes:
+      value: >
       #### Note: Please write your bug report in English to ensure it can be understood and addressed by the development team.
   - type: markdown
     attributes:
