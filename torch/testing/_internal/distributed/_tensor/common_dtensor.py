@@ -349,8 +349,8 @@ class DTensorTestBase(MultiProcessTestCase):
         # dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        if self.device_type == "cuda":
-            dist.barrier(device_ids=[torch.cuda.current_device()])
+        device_id = torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+        dist.barrier(device_ids=[device_id])
         dist.destroy_process_group()
 
     def setUp(self) -> None:
