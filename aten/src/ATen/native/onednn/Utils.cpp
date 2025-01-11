@@ -76,7 +76,7 @@ void check_mkldnn_binary_fusion_inputs(
   mkldnn_check_low_precision(input.scalar_type(), "mkldnn pointwise binary");
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
   [](torch::List<std::optional<at::Scalar>> scalars, \
@@ -173,5 +173,5 @@ const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
   return fusion_attr_map;
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 }

@@ -469,7 +469,7 @@ TORCH_API int register_linear_params() {
                   return std::apply(PackedLinearWeightsQnnp::prepack, std::move(state));
                 }
 #endif // USE_PYTORCH_QNNPACK
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
                 if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
                   const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
@@ -478,7 +478,7 @@ TORCH_API int register_linear_params() {
                       c10::toString(weight.scalar_type()));
                   return std::apply(PackedLinearWeightsOnednn::prepack, std::move(state));
                 }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");
               })
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {

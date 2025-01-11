@@ -1505,7 +1505,7 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   bool dispatched = false;
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_ONEDNN_ACL_ENABLED()
   // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also

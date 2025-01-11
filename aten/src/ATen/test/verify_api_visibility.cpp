@@ -8,12 +8,12 @@
 #error "AT_MKL_ENABLED should not be visible in public headers"
 #endif
 
-#ifdef AT_MKLDNN_ENABLED
-#error "AT_MKLDNN_ENABLED should not be visible in public headers"
+#ifdef AT_ONEDNN_ENABLED
+#error "AT_ONEDNN_ENABLED should not be visible in public headers"
 #endif
 
-#ifdef AT_MKLDNN_ACL_ENABLED
-#error "AT_MKLDNN_ACL_ENABLED should not be visible in public headers"
+#ifdef AT_ONEDNN_ACL_ENABLED
+#error "AT_ONEDNN_ACL_ENABLED should not be visible in public headers"
 #endif
 
 #ifdef CAFFE2_STATIC_LINK_CUDA

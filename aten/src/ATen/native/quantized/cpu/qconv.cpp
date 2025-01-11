@@ -1112,7 +1112,7 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
 
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
     const at::Tensor& input,
@@ -1735,7 +1735,7 @@ static at::Tensor _quantized_convolution_onednn(
   }
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 
@@ -1757,7 +1757,7 @@ namespace at::native {
       std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
     if (act.dim() == 3 || act.dim() == 5) {
       // Conv1D/3D post op check
@@ -1808,7 +1808,7 @@ namespace at::native {
       std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
 
@@ -1849,7 +1849,7 @@ namespace at::native {
       std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<std::string_view> unary_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
       act.dim() == 4 && binary_attr == "sum" && (
@@ -1971,10 +1971,10 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+#if AT_ONEDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
         return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add_relu(

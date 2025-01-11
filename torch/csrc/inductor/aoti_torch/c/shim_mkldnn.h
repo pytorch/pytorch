@@ -4,7 +4,7 @@
 #include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -238,5 +238,5 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
 #ifdef __cplusplus
 } // extern "C"
 #endif
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 #endif // AOTI_TORCH_SHIM_MKLDNN

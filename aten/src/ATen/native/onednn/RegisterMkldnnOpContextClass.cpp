@@ -1,6 +1,6 @@
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <ATen/Tensor.h>
 #include <ATen/native/onednn/ConvPrepack.h>
@@ -26,7 +26,7 @@ static bool is_mkldnn_fp16_supported() {
 }
 
 constexpr bool is_mkldnn_acl_supported() {
-  return AT_MKLDNN_ACL_ENABLED();
+  return AT_ONEDNN_ACL_ENABLED();
 }
 
 TORCH_LIBRARY(mkldnn, m) {
@@ -88,9 +88,9 @@ TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
 
 } // namespace at::native::mkldnn
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
-#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#if AT_MKL_ENABLED() && AT_ONEDNN_ENABLED()
 
 namespace at::native::mkl {
 
@@ -103,4 +103,4 @@ TORCH_LIBRARY(mkl, m) {
 
 } // namespace at::native::mkl
 
-#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+#endif // AT_MKL_ENABLED && AT_ONEDNN_ENABLED

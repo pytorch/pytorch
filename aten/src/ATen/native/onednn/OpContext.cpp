@@ -1,6 +1,6 @@
 #include <ATen/native/onednn/OpContext.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/ConvPrepack.h>
 
 namespace at::native::mkldnn {
@@ -40,4 +40,4 @@ void MkldnnConvOpContext::run(const Tensor& input, void* output) {
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

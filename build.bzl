@@ -21,7 +21,7 @@ def define_targets(rules):
             "CAFFE2_PERF_WITH_AVX2",
             "CAFFE2_USE_EXCEPTION_PTR",
             "CAFFE2_USE_CUDNN",
-            "USE_MKLDNN",
+            "USE_ONEDNN",
             "CAFFE2_USE_ITT",
             "USE_ROCM_KERNEL_ASSERT",
             "EIGEN_MPL2_ONLY",

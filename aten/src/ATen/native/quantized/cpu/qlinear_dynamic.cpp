@@ -491,7 +491,7 @@ void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
 
 #endif // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     at::Tensor input,
@@ -533,7 +533,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   }
 #endif
 
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_ONEDNN_ACL_ENABLED()
   // oneDNN+ACL has optimized kernels for s8s8 matmul, so input is signed
   using input_qtype = int8_t;
 #else
@@ -703,7 +703,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   primitive.execute(ideep::stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 namespace {
@@ -879,7 +879,7 @@ class LinearDynamicFp16Onednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       std::optional<Tensor> bias) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     return linear_dynamic_fp16_with_onednn_weight(
         act, onednn_weight, bias, /*relu_fused*/false);
 #endif
@@ -890,7 +890,7 @@ class LinearDynamicFp16Onednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       std::optional<Tensor> bias) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     return linear_dynamic_fp16_with_onednn_weight(
         act, onednn_weight, bias, /*relu_fused*/true);
 #endif

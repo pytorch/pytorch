@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <ideep/tensor.hpp>
 #include <utility>
@@ -40,4 +40,4 @@ struct ContextConv final {
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

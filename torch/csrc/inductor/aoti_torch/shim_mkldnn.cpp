@@ -14,7 +14,7 @@
 
 using namespace torch::aot_inductor;
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 template <typename T>
 c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
@@ -525,4 +525,4 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
 
 #endif // AT_MKL_ENABLED
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

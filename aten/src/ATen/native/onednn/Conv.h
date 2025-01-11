@@ -3,7 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -65,4 +65,4 @@ Tensor mkldnn_convolution_transpose_pointwise(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

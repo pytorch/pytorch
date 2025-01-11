@@ -1,23 +1,23 @@
-# - Try to find MKLDNN
+# - Try to find ONEDNN
 #
 # The following variables are optionally searched for defaults
 #  MKL_FOUND             : set to true if a library implementing the CBLAS interface is found
 #
 # The following are set after configuration is done:
-#  MKLDNN_FOUND          : set to true if mkl-dnn is found.
-#  MKLDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
-#  MKLDNN_LIBRARIES      : list of libraries for mkl-dnn
+#  ONEDNN_FOUND          : set to true if mkl-dnn is found.
+#  ONEDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
+#  ONEDNN_LIBRARIES      : list of libraries for mkl-dnn
 #
 # The following variables are used:
-#  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in MKLDNN. This should be turned off for
+#  ONEDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in ONEDNN. This should be turned off for
 #  general packaging to avoid incompatible CPU instructions. Default: OFF.
 
-IF(NOT MKLDNN_FOUND)
-  SET(MKLDNN_LIBRARIES)
-  SET(MKLDNN_INCLUDE_DIR)
+IF(NOT ONEDNN_FOUND)
+  SET(ONEDNN_LIBRARIES)
+  SET(ONEDNN_INCLUDE_DIR)
 
   SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
-  SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
+  SET(ONEDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
 
   if(USE_XPU) # Build oneDNN GPU library
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -47,9 +47,9 @@ IF(NOT MKLDNN_FOUND)
     else()
       set(DNNL_CXX_FLAGS "")
     endif()
-    ExternalProject_Add(xpu_mkldnn_proj
-      SOURCE_DIR ${MKLDNN_ROOT}
-      PREFIX ${XPU_MKLDNN_DIR_PREFIX}
+    ExternalProject_Add(xpu_onednn_proj
+      SOURCE_DIR ${ONEDNN_ROOT}
+      PREFIX ${XPU_ONEDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
@@ -63,21 +63,21 @@ IF(NOT MKLDNN_FOUND)
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
       BUILD_COMMAND ${DNNL_MAKE_COMMAND}
-      BUILD_BYPRODUCTS "xpu_mkldnn_proj-prefix/src/xpu_mkldnn_proj-build/src/${DNNL_LIB_NAME}"
+      BUILD_BYPRODUCTS "xpu_onednn_proj-prefix/src/xpu_onednn_proj-build/src/${DNNL_LIB_NAME}"
       INSTALL_COMMAND ""
     )
 
-    ExternalProject_Get_Property(xpu_mkldnn_proj BINARY_DIR)
-    set(__XPU_MKLDNN_BUILD_DIR ${BINARY_DIR})
-    set(XPU_MKLDNN_LIBRARIES ${__XPU_MKLDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    set(XPU_MKLDNN_INCLUDE ${__XPU_MKLDNN_BUILD_DIR}/include)
+    ExternalProject_Get_Property(xpu_onednn_proj BINARY_DIR)
+    set(__XPU_ONEDNN_BUILD_DIR ${BINARY_DIR})
+    set(XPU_ONEDNN_LIBRARIES ${__XPU_ONEDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
+    set(XPU_ONEDNN_INCLUDE ${__XPU_ONEDNN_BUILD_DIR}/include)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
-    add_library(xpu_mkldnn INTERFACE)
-    add_dependencies(xpu_mkldnn xpu_mkldnn_proj)
-    target_link_libraries(xpu_mkldnn INTERFACE ${__XPU_MKLDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
+    add_library(xpu_onednn INTERFACE)
+    add_dependencies(xpu_onednn xpu_onednn_proj)
+    target_link_libraries(xpu_onednn INTERFACE ${__XPU_ONeDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
+    target_include_directories(xpu_onednn INTERFACE ${XPU_ONEDNN_INCLUDE})
   endif()
 
   IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
@@ -87,70 +87,70 @@ IF(NOT MKLDNN_FOUND)
     SET(ONEDNN_BUILD_GRAPH ON CACHE BOOL "" FORCE)
   ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
 
-  IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
+  IF(EXISTS "${ONEDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
     MESSAGE("-- Will build oneDNN UKERNEL")
     SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
-  ENDIF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
+  ENDIF(EXISTS "${ONEDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
   FIND_PACKAGE(BLAS)
   FIND_PATH(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
-  FIND_PATH(MKLDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
-  IF(NOT MKLDNN_INCLUDE_DIR)
-    MESSAGE("MKLDNN_INCLUDE_DIR not found")
+  FIND_PATH(ONEDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${ONEDNN_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
+  IF(NOT ONEDNN_INCLUDE_DIR)
+    MESSAGE("ONEDNN_INCLUDE_DIR not found")
     EXECUTE_PROCESS(COMMAND git${CMAKE_EXECUTABLE_SUFFIX} submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
-    FIND_PATH(MKLDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-  ENDIF(NOT MKLDNN_INCLUDE_DIR)
+    FIND_PATH(ONEDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${ONEDNN_ROOT} PATH_SUFFIXES include)
+  ENDIF(NOT ONEDNN_INCLUDE_DIR)
   IF(BUILD_ONEDNN_GRAPH)
     FIND_PATH(LLGA_INCLUDE_DIR dnnl_graph.hpp PATHS ${LLGA_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
   ENDIF(BUILD_ONEDNN_GRAPH)
 
-  IF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
-    MESSAGE(STATUS "MKLDNN source files not found!")
+  IF(NOT IDEEP_INCLUDE_DIR OR NOT ONEDNN_INCLUDE_DIR)
+    MESSAGE(STATUS "ONEDNN source files not found!")
     RETURN()
-  ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
-  LIST(APPEND MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
+  ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT ONEDNN_INCLUDE_DIR)
+  LIST(APPEND ONEDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
   IF(BUILD_ONEDNN_GRAPH)
-    LIST(APPEND MKLDNN_INCLUDE_DIR ${LLGA_INCLUDE_DIR})
+    LIST(APPEND ONEDNN_INCLUDE_DIR ${LLGA_INCLUDE_DIR})
   ENDIF(BUILD_ONEDNN_GRAPH)
   IF(MKL_FOUND)
     ADD_DEFINITIONS(-DIDEEP_USE_MKL)
     # Append to mkldnn dependencies
-    LIST(APPEND MKLDNN_LIBRARIES ${MKL_LIBRARIES})
-    LIST(APPEND MKLDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
+    LIST(APPEND ONEDNN_LIBRARIES ${MKL_LIBRARIES})
+    LIST(APPEND ONEDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
   ELSE(MKL_FOUND)
-    SET(MKLDNN_USE_MKL "NONE" CACHE STRING "" FORCE)
+    SET(ONEDNN_USE_MKL "NONE" CACHE STRING "" FORCE)
   ENDIF(MKL_FOUND)
 
   SET(MKL_cmake_included TRUE)
-  IF(NOT MKLDNN_CPU_RUNTIME)
-    SET(MKLDNN_CPU_RUNTIME "OMP" CACHE STRING "")
-  ELSEIF(MKLDNN_CPU_RUNTIME STREQUAL "TBB")
+  IF(NOT ONEDNN_CPU_RUNTIME)
+    SET(ONEDNN_CPU_RUNTIME "OMP" CACHE STRING "")
+  ELSEIF(ONEDNN_CPU_RUNTIME STREQUAL "TBB")
     IF(TARGET TBB::tbb)
       MESSAGE(STATUS "MKL-DNN is using TBB")
 
       SET(TBB_cmake_included TRUE)
       SET(Threading_cmake_included TRUE)
 
-      SET(DNNL_CPU_THREADING_RUNTIME ${MKLDNN_CPU_RUNTIME})
+      SET(DNNL_CPU_THREADING_RUNTIME ${ONEDNN_CPU_RUNTIME})
       INCLUDE_DIRECTORIES(${TBB_INCLUDE_DIR})
       LIST(APPEND EXTRA_SHARED_LIBS TBB::tbb)
     ELSE()
-      MESSAGE(FATAL_ERROR "MKLDNN_CPU_RUNTIME is set to TBB but TBB is not used")
+      MESSAGE(FATAL_ERROR "ONEDNN_CPU_RUNTIME is set to TBB but TBB is not used")
     ENDIF()
   ENDIF()
-  MESSAGE(STATUS "MKLDNN_CPU_RUNTIME = ${MKLDNN_CPU_RUNTIME}")
+  MESSAGE(STATUS "ONEDNN_CPU_RUNTIME = ${ONEDNN_CPU_RUNTIME}")
 
-  SET(MKLDNN_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
+  SET(ONEDNN_CPU_RUNTIME ${ONEDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
   SET(DNNL_BUILD_TESTS FALSE CACHE BOOL "" FORCE)
   SET(DNNL_BUILD_EXAMPLES FALSE CACHE BOOL "" FORCE)
   SET(DNNL_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
   SET(DNNL_ENABLE_PRIMITIVE_CACHE TRUE CACHE BOOL "" FORCE)
-  SET(DNNL_GRAPH_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
+  SET(DNNL_GRAPH_CPU_RUNTIME ${ONEDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
 
   IF(BUILD_ONEDNN_GRAPH)
     SET(DNNL_GRAPH_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
   ENDIF(BUILD_ONEDNN_GRAPH)
-  IF(MKLDNN_USE_NATIVE_ARCH)  # Disable HostOpts in MKLDNN unless MKLDNN_USE_NATIVE_ARCH is set.
+  IF(ONEDNN_USE_NATIVE_ARCH)  # Disable HostOpts in ONEDNN unless ONEDNN_USE_NATIVE_ARCH is set.
     SET(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING "" FORCE)
   ELSE()
     IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -165,7 +165,7 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
   ENDIF()
 
-  ADD_SUBDIRECTORY(${MKLDNN_ROOT})
+  ADD_SUBDIRECTORY(${ONEDNN_ROOT})
 
   IF(NOT TARGET dnnl)
     MESSAGE("Failed to include MKL-DNN target")
@@ -177,10 +177,10 @@ IF(NOT MKLDNN_FOUND)
     TARGET_COMPILE_OPTIONS(dnnl PRIVATE -Wno-strict-overflow)
     TARGET_COMPILE_OPTIONS(dnnl PRIVATE -Wno-error=strict-overflow)
   ENDIF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
-  LIST(APPEND MKLDNN_LIBRARIES ${MKL_OPENMP_LIBRARY})
-  LIST(APPEND MKLDNN_LIBRARIES dnnl)
+  LIST(APPEND ONEDNN_LIBRARIES ${MKL_OPENMP_LIBRARY})
+  LIST(APPEND ONEDNN_LIBRARIES dnnl)
 
-  SET(MKLDNN_FOUND TRUE)
+  SET(ONEDNN_FOUND TRUE)
   MESSAGE(STATUS "Found MKL-DNN: TRUE")
 
-ENDIF(NOT MKLDNN_FOUND)
+ENDIF(NOT ONEDNN_FOUND)
