@@ -265,6 +265,11 @@ def stage_backward_weight(
                 weight.grad = dw
             else:
                 weight.grad += dw
+
+        # torch.autograd.backward(
+        #     stage_output_tensors, grad_tensors=output_grad_tensors  # type: ignore[arg-type]
+        # )
+
     # return grads in the original order weights were provided in
     return tuple(weight_grads)
 
