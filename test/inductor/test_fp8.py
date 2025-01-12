@@ -130,6 +130,11 @@ class TestFP8Types(TestCase):
         We should not pick a XBLOCK larger than xnumel
         """
 
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         def f(x):
             return x.to(dtype=float8_dtype)
 
@@ -142,6 +147,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported yet")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_eager_fallback(self, dtype: torch.dtype):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         weight_shape = (32, 16)
 
         e4m3_type = torch.float8_e4m3fn
@@ -185,6 +195,11 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
     @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         dst_types = _fix_fp8_dtype_for_rocm(dst_types, device="cuda")
         e4m3, e5m2 = dst_types
 
@@ -204,6 +219,11 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_bad_cast(self):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         def fp8_cast(x, dtype):
             return x.to(dtype=dtype)
 
@@ -232,6 +252,11 @@ class TestFP8Types(TestCase):
     def test_to_fp8_saturated(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device="cuda")
 
         def fp8_saturated(x, dtype):
@@ -252,6 +277,11 @@ class TestFP8Types(TestCase):
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -277,6 +307,11 @@ class TestFP8Types(TestCase):
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -311,6 +346,11 @@ class TestFP8Types(TestCase):
     def test_layernorm_fp8_quant(
         self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -356,6 +396,11 @@ class TestFP8Types(TestCase):
         shape: str,
         keepdim: bool,
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -430,6 +475,11 @@ class TestFP8Lowering(TestCase):
         use_fast_accum: bool,
         persistent_matmul: bool,
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         if dtype is torch.float32 and has_bias:
             self.skipTest("bias is not supported when output dtype is float32")
 
@@ -502,6 +552,11 @@ class TestFP8Lowering(TestCase):
     def test_rowwise_scaling(
         self, shape: str, has_bias: bool, use_fast_accum: bool, persistent_matmul: bool
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         # Only bf16 output type is supported for row-wise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
@@ -568,6 +623,11 @@ class TestFP8Lowering(TestCase):
     def test_tensorwise_scaling_acceptable_input_dims(
         self, M: int, K: int, N: int, persistent_matmul: bool
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         # alignment requirements: K and N divisible by 16
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
@@ -626,6 +686,11 @@ class TestFP8Lowering(TestCase):
     def test_rowwise_scaling_acceptable_input_dims(
         self, M: int, K: int, N: int, persistent_matmul: bool
     ):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
         device = "cuda"
@@ -677,6 +742,11 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_input_dims(self):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         # for compiled ops, type checking is in torch/_meta_registrations.py
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
@@ -717,6 +787,11 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_scale_dims_rowwise_scaling(self):
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn

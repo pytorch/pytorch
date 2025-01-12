@@ -701,6 +701,11 @@ class AOTInductorTestsTemplate:
         if self.device != "cuda":
             return
 
+        if torch.cuda.get_device_capability() == (8, 9):
+            import pytest
+
+            pytest.fail("Just confirming that test is run on SM89")
+
         class Model(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
