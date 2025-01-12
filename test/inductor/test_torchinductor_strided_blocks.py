@@ -550,9 +550,9 @@ class CommonTemplate:
                     3,
                     2,
                 ),
-                decorators=test_torchinductor.skip_if_triton_cpu(
-                    "Triton CPU: slow test"
-                ),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
             ),  # 4D tensor with 1 discontiguous dim (1).
             (
                 (3, 11, 13, 7),
