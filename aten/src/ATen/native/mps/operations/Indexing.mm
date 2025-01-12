@@ -655,8 +655,33 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
 
+            MPSGraphTensor* constantTensor = [mpsGraph constantWithScalar: self.size(dim)
+                                                  dataType:getMPSDataType(index)];
+                                                  // create less than mask
+      MPSGraphTensor* lessMaskTensor = [mpsGraph lessThanWithPrimaryTensor:indexTensor
+                                                  secondaryTensor:constantTensor
+                                                                name:nil];
+      MPSGraphTensor* castMask = [mpsGraph castTensor:lessMaskTensor
+                                                toType:getMPSDataType(index)
+                                                  name:nil];
+
+      MPSGraphTensor* maskedIndexTensor = [mpsGraph multiplicationWithPrimaryTensor:indexTensor
+                                                  secondaryTensor:castMask
+                                                                name:nil];
+      MPSGraphTensor* validIndices = [mpsGraph nonZeroIndicesOfTensor:maskedIndexTensor
+                                                                name:nil];
+                                                                // Before gathering, reshape if needed to ensure proper dimensions
+      MPSGraphTensor* reshapedIndices = [mpsGraph reshapeTensor:validIndices
+                                                    withShape:@[@-1]  // -1 means infer from input
+                                                        name:nil];
+      MPSGraphTensor* droppedTensor = [mpsGraph gatherWithUpdatesTensor:indexTensor
+                                                  indicesTensor:reshapedIndices
+                                                  axis:0
+                                                  batchDimensions:0
+                                                  name:nil];
+
       MPSGraphTensor* outputTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
-                                                         indicesTensor:indexTensor
+                                                         indicesTensor:droppedTensor
                                                                   axis:dim
                                                        batchDimensions:0
                                                                   name:nil];
