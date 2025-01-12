@@ -418,11 +418,18 @@ ghstack submit
 of very low signal to reviewers.
 
 ## Merging your Change
-If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
+1. **If you know the appropriate team or person to approve your PR** and you have the necessary permissions:
+   - Add them to the **Reviewers** list.
 
-If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
+2. **If you're unsure who should review your PR**:
+   - Leave the **Reviewers** section empty.  
+   - Our **triage squad** will review your PR, apply a module label, and assign it to the correct reviewer within a few business days. The assigned reviewer will then review and respond to your PR.
 
-Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
+3. **If your PR doesn't get a response**:
+   - In the rare case that your PR hasn't been assigned to a reviewer or hasn't received any feedback within **4 business days**, please:
+     - Leave a comment on the PR to follow up.
+     - Mention the assigned reviewer (if applicable) to ensure visibility.
+   - This will help bring your PR back into the queue for timely review.
 
 If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
