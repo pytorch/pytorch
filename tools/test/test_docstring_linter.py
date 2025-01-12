@@ -33,8 +33,7 @@ class TestDocstringLinter(LinterTestCase):
     maxDiff = 10_240
 
     def test_python_code(self):
-        args = "--max-class=3", "--max-def=4"
-        self.lint_test(TEST_FILE, args)
+        self.lint_test(TEST_FILE, ARGS)
 
     @mock.patch("sys.stdout", new_callable=io.StringIO)
     def test_end_to_end(self, mock_stdout):
@@ -68,26 +67,26 @@ class TestDocstringLinter(LinterTestCase):
         actual = _dumps(_data())
         self.assertExpected(TEST_FILE, actual, "report.json")
 
-    def test_recursive(self):
-        recursive = make_recursive(_data())
-        actual = _dumps(recursive)
-        self.assertExpected(TEST_FILE, actual, "recursive.json")
-
     def test_terse(self):
         terse = make_terse(_data(), index_by_line=False)
         actual = _dumps(terse)
         self.assertExpected(TEST_FILE, actual, "terse.json")
+
+    def test_terse_line(self):
+        terse = make_terse(_data(), index_by_line=True)
+        actual = _dumps(terse)
+        self.assertExpected(TEST_FILE, actual, "terse.line.json")
+
+    def test_recursive(self):
+        recursive = make_recursive(_data())
+        actual = _dumps(recursive)
+        self.assertExpected(TEST_FILE, actual, "recursive.json")
 
     def test_terse_recursive(self):
         recursive = make_recursive(_data())
         terse = make_terse(recursive, index_by_line=False)
         actual = _dumps(terse)
         self.assertExpected(TEST_FILE, actual, "recursive.terse.json")
-
-    def test_terse_line(self):
-        terse = make_terse(_data(), index_by_line=True)
-        actual = _dumps(terse)
-        self.assertExpected(TEST_FILE, actual, "terse.line.json")
 
     def test_terse_line_recursive(self):
         recursive = make_recursive(_data())
