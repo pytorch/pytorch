@@ -805,7 +805,7 @@ class PythonWrapperCodegen(CodeGen):
                     try:
                         return torch.mps._compile_shader(source)
                     except SyntaxError as err:
-                        raise SyntaxError(f"failed to compile {source}") from err
+                        raise SyntaxError(f"failed to compile {source} with {err.msg}")
 
 
                 """,
