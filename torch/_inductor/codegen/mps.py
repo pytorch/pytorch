@@ -8,7 +8,7 @@ import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
-from ..scheduler import SchedulerNode
+from ..scheduler import Scheduler, SchedulerNode
 from ..utils import get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
@@ -272,7 +272,7 @@ class MetalKernel(SIMDKernel):
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
-        code.writeline('torch.mps._compile_shader("""')
+        code.writeline('compile_mps_shader("""')
         idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
             code.writeline("kernel void generated_kernel(")
@@ -346,6 +346,13 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+
+    def __init__(self, scheduler: Scheduler) -> None:
+        super().__init__(scheduler)
+        wrapper = V.graph.wrapper_code
+        wrapper.header.splice(
+            "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+        )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
