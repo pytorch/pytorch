@@ -334,10 +334,7 @@ class SamplingMethod(Enum):
             return None
         elif is_callable_type(type_hint):
             try:
-                input_args, return_type = (
-                    list(type_hint.__args__)[:-1],
-                    list(type_hint.__args__)[-1],
-                )
+                return_type = list(type_hint.__args__)[-1]
             except AttributeError as err:
                 raise ValueError("Callable type with no args") from err
 
@@ -706,7 +703,7 @@ class ConfigFuzzer:
         # try running eager
         test_model_fn = self.test_model_fn_factory()
         try:
-            eager_results = test_model_fn()
+            test_model_fn()
         except Exception as exc:  # noqa: E722
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
@@ -986,7 +983,7 @@ if __name__ == "__main__":
             )
 
             x = torch.randn(32, 10)
-            y = model(x)
+            model(x)
             return True
 
         return test_fn
@@ -1000,7 +997,7 @@ if __name__ == "__main__":
             inp = torch.randn(batch_size, seq_length, hidden_size, device="cuda")
             weight = torch.randn(hidden_size, hidden_size, device="cuda")
             matmul_output = inp @ weight
-            final_output = torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
+            torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
             return True
 
         return test_fn

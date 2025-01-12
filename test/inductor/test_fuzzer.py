@@ -19,7 +19,7 @@ def create_simple_test_model_cpu():
         )
 
         x = torch.randn(32, 10)
-        y = model(x)
+        model(x)
         return True
 
     return test_fn
@@ -35,7 +35,7 @@ def create_simple_test_model_gpu():
 
     def test_fn() -> bool:
         matmul_output = inp @ weight
-        final_output = torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
+        torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
         return True
 
     return test_fn
