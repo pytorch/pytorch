@@ -79,7 +79,7 @@
     "HalidePrinter": 124
   },
   "torch/_inductor/codegen/mps.py": {
-    "MetalOverrides": 149
+    "MetalOverrides": 157
   },
   "torch/_inductor/codegen/simd.py": {
     "IterationRangesRoot": 118,
