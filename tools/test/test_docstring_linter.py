@@ -97,7 +97,7 @@ class TestDocstringLinter(LinterTestCase):
 
     def test_file_summary(self):
         actual = _dumps(file_summary(_data(), report_all=True))
-        self.assertExpected(TEST_FILE, actual, "recursive.single.line.json")
+        self.assertExpected(TEST_FILE, actual, "single.line.json")
 
 
 def _dumps(d: dict) -> str:

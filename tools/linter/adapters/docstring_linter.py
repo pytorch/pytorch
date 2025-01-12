@@ -25,7 +25,8 @@ if TYPE_CHECKING:
 
 
 GRANDFATHER_LIST = Path(str(_FILE).replace(".py", "-grandfather.json"))
-TOLERANCE = 5  # We tolerate a 5% increase in file size
+# We tolerate a 10% increase in block size before demanding a docstring
+TOLERANCE_PERCENT = 10
 
 MAX_LINES = {"class": 100, "def": 80}
 
@@ -414,38 +415,38 @@ def file_summary(
 
 
 def add_arguments(add: Callable[..., Any]) -> None:
-    help = "Set the grandfather list"
-    add("--grandfather", "-g", default=str(GRANDFATHER_LIST), type=str, help=help)
+    h = "Set the grandfather list"
+    add("--grandfather", "-g", default=str(GRANDFATHER_LIST), type=str, help=h)
 
-    help = "Tolerance for grandfather sizes, in percent"
-    add("--grandfather-tolerance", "-t", default=TOLERANCE, type=float, help=help)
+    h = "Tolerance for grandfather sizes, in percent"
+    add("--grandfather-tolerance", "-t", default=TOLERANCE_PERCENT, type=float, help=h)
 
-    help = "Lint __init__ and class separately"
-    add("--lint-init", "-i", action="store_true", help=help)
+    h = "Lint __init__ and class separately"
+    add("--lint-init", "-i", action="store_true", help=h)
 
-    help = "Lint definitions inside other functions"
-    add("--lint-local", "-o", action="store_true", help=help)
+    h = "Lint definitions inside other functions"
+    add("--lint-local", "-o", action="store_true", help=h)
 
-    help = "Lint functions, methods and classes that start with _"
-    add("--lint-protected", "-p", action="store_true", help=help)
+    h = "Lint functions, methods and classes that start with _"
+    add("--lint-protected", "-p", action="store_true", help=h)
 
-    help = "Maximum number of lines for an undocumented class"
-    add("--max-class", "-c", default=MAX_LINES["class"], type=int, help=help)
+    h = "Maximum number of lines for an undocumented class"
+    add("--max-class", "-c", default=MAX_LINES["class"], type=int, help=h)
 
-    help = "Maximum number of lines for an undocumented function"
-    add("--max-def", "-d", default=MAX_LINES["def"], type=int, help=help)
+    h = "Maximum number of lines for an undocumented function"
+    add("--max-def", "-d", default=MAX_LINES["def"], type=int, help=h)
 
-    help = "Minimum number of characters for a docstring"
-    add("--min-docstring", "-s", default=MIN_DOCSTRING, type=int, help=help)
+    h = "Minimum number of characters for a docstring"
+    add("--min-docstring", "-s", default=MIN_DOCSTRING, type=int, help=h)
 
-    help = "Disable the grandfather list"
-    add("--no-grandfather", "-n", action="store_true", help=help)
+    h = "Disable the grandfather list"
+    add("--no-grandfather", "-n", action="store_true", help=h)
 
-    help = "Print a report on all classes and defs"
-    add("--report", "-r", action="store_true", help=help)
+    h = "Print a report on all classes and defs"
+    add("--report", "-r", action="store_true", help=h)
 
-    help = "Rewrite the grandfather list"
-    add("--write-grandfather", "-w", action="store_true", help=help)
+    h = "Rewrite the grandfather list"
+    add("--write-grandfather", "-w", action="store_true", help=h)
 
 
 if __name__ == "__main__":
