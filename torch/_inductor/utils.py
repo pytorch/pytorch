@@ -1853,7 +1853,7 @@ def pass_execution_and_save(
 
 def is_collective(
     node: Node | Operation | None,
-    op: torch._ops.OpOverload | torch._ops.HigherOrderOperator | None = None,
+    op: torch._ops.OperatorBase | None = None,
 ) -> bool:
     if node is None:
         return False
