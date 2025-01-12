@@ -272,7 +272,7 @@ class MetalKernel(SIMDKernel):
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
-        code.writeline('torch.mps._compile_shader("""')
+        code.writeline('_compile_mps_shader("""')
         idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
             code.writeline("kernel void generated_kernel(")
