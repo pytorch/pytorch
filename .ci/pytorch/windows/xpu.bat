@@ -29,9 +29,10 @@ call "%XPU_BUNDLE_ROOT%\ocloc\latest\env\vars.bat"
 IF ERRORLEVEL 1 goto :eof
 
 :: Workaround for https://github.com/pytorch/pytorch/issues/134989
-set CMAKE_SHARED_LINKER_FLAGS=/FORCE:MULTIPLE
-set CMAKE_MODULE_LINKER_FLAGS=/FORCE:MULTIPLE
-set CMAKE_EXE_LINKER_FLAGS=/FORCE:MULTIPLE
+:: We can comment these workaround due to we have fixed it by https://github.com/pytorch/pytorch/issues/141946 
+:: set CMAKE_SHARED_LINKER_FLAGS=/FORCE:MULTIPLE
+:: set CMAKE_MODULE_LINKER_FLAGS=/FORCE:MULTIPLE
+:: set CMAKE_EXE_LINKER_FLAGS=/FORCE:MULTIPLE
 
 if exist "%NIGHTLIES_PYTORCH_ROOT%" cd %NIGHTLIES_PYTORCH_ROOT%\..
 call %~dp0\internal\copy_cpu.bat
