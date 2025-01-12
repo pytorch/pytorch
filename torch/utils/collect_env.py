@@ -435,20 +435,45 @@ def get_libc_version():
 
 
 def get_pip_packages(run_lambda, patterns=None):
-    """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
+    """
+    Return a list of installed packages, similar to the output of `pip list --format=freeze`.
+
+    Note: will also find conda-installed pytorch and numpy packages.
+    """
+    import importlib.util
+
     if patterns is None:
         patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
-    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
+    # pip might be not available if pytorch is installed by alternative means
+    pip_version = None
+    if importlib.util.find_spec('pip') is not None:
+        pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
 
-    os.environ['PIP_DISABLE_PIP_VERSION_CHECK'] = '1'
-    # People generally have pip as `pip` or `pip3`
-    # But here it is invoked as `python -mpip`
-    out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    try:
+        # Standard way since Python 3.8
+        import importlib.metadata
+
+        filtered_packages = [
+            (dist.metadata['Name'], dist.version)
+            for dist in importlib.metadata.distributions()
+            if any(pattern in dist.metadata['Name'] for pattern in patterns)
+        ]
+    except ModuleNotFoundError:
+        # For older versions (removed in Python 3.12)
+        import pkg_resources
+
+        filtered_packages = [
+            (pkg.project_name, pkg.version)
+            for pkg in pkg_resources.working_set
+            if any(pattern in pkg.project_name for pattern in patterns)
+        ]
+
+    filtered_packages.sort(key=lambda p: (p[0].lower(), p[1]))
+
     filtered_out = '\n'.join(
-        line
-        for line in out.splitlines()
-        if any(name in line for name in patterns)
+        f'{name}=={version}'
+        for name, version in filtered_packages
     )
 
     return pip_version, filtered_out
