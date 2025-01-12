@@ -145,6 +145,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::log({x})"
 
     @staticmethod
+    def exp(x: CSEVariable) -> str:
+        return f"metal::exp({x})"
+
+    @staticmethod
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
@@ -213,6 +217,10 @@ class MetalOverrides(OpOverrides):
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
+    @staticmethod
+    def trunc(x: CSEVariable) -> str:
+        return f"metal::trunc({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -238,7 +246,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{index}]"
+        line = f"{var}[{self.sexpr(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
