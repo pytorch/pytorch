@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
-#include "c10/util/Exception.h"
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <functional>
 #include <stdexcept>
+#include "c10/util/Exception.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -873,7 +873,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   library = [device newLibraryWithSource:str options:options error:&error];
   if (library == nil) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
-        throw c10::SyntaxError([[error localizedDescription] UTF8String]);
+      throw c10::SyntaxError([[error localizedDescription] UTF8String]);
     }
     TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
   }
