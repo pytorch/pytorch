@@ -246,7 +246,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{index}]"
+        line = f"{var}[{self.sexpr(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
