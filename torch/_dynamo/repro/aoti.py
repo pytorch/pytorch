@@ -9,7 +9,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -17,6 +17,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     minifier_dir,
@@ -88,7 +89,7 @@ def save_graph_repro_ep(
     *,
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
-    args: Optional[Tuple[Any]] = None,
+    args: Optional[tuple[Any]] = None,
     config_patches: Optional[Dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
@@ -193,6 +194,7 @@ def generate_compiler_repro_exported_program(
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 import torch._inductor.inductor_prims
 
@@ -455,7 +457,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify,analyze}", required=True
+        dest="command", metavar="{run,minify}", required=True
     )
 
     parser_run = subparsers.add_parser(

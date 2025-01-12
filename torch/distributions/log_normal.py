@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -40,23 +41,23 @@ class LogNormal(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def loc(self):
+    def loc(self) -> Tensor:
         return self.base_dist.loc
 
     @property
-    def scale(self):
+    def scale(self) -> Tensor:
         return self.base_dist.scale
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return (self.loc + self.scale.pow(2) / 2).exp()
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return (self.loc - self.scale.square()).exp()
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         scale_sq = self.scale.pow(2)
         return scale_sq.expm1() * (2 * self.loc + scale_sq).exp()
 
