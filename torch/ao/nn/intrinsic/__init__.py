@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .modules import *  # noqa: F403
 from .modules.fused import _FusedModule  # noqa: F403
 
@@ -32,7 +31,7 @@ __all__ = [
 # Because of possible inter-dependency, we want to avoid
 # the cyclic imports, thus implementing lazy version
 # as per https://peps.python.org/pep-0562/
-def __getattr__(name):
+def __getattr__(name: str) -> object:
     if name in __all__:
         import importlib
 
