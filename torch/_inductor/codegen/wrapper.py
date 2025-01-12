@@ -798,19 +798,6 @@ class PythonWrapperCodegen(CodeGen):
             )
         except (AttributeError, ImportError):
             pass
-        if torch.backends.mps.is_built():
-            self.header.splice(
-                """
-                def _compile_mps_shader(source):
-                    try:
-                        return torch.mps._compile_shader(source)
-                    except SyntaxError as err:
-                        raise SyntaxError(f"failed to compile {source} with {err.msg}")
-
-
-                """,
-                strip=True,
-            )
         if config.annotate_training:
             self.header.writeline("from torch.cuda import nvtx")
 
