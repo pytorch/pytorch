@@ -20,6 +20,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Set,
@@ -290,7 +291,7 @@ class _InsertPoint:
 
 
 class _node_list:
-    def __init__(self, graph: "Graph", direction: str = "_next"):
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
         assert direction in ("_next", "_prev")
         self.graph = graph
         self.direction = direction
