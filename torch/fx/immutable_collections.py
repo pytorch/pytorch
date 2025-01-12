@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, NoReturn, Tuple, Type, TypeVar
+from typing_extensions import Self
 
 from torch.utils._pytree import (
     _dict_flatten,
@@ -17,65 +17,69 @@ from ._compatibility import compatibility
 
 __all__ = ["immutable_list", "immutable_dict"]
 
-_help_mutation = """\
+
+_help_mutation = """
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:
-    new_args = ... # copy and mutate args
+
+    new_args = ...  # copy and mutate args
     node.args = new_args
-"""
+""".strip()
 
 
-def _no_mutation(self, *args, **kwargs):
-    raise NotImplementedError(
-        f"'{type(self).__name__}' object does not support mutation. {_help_mutation}",
+_T = TypeVar("_T")
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
+def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:  # type: ignore[no-untyped-def]
+    raise TypeError(
+        f"{type(self).__name__!r} object does not support mutation. {_help_mutation}",
     )
 
 
-def _create_immutable_container(base, mutable_functions):
-    container = type("immutable_" + base.__name__, (base,), {})
-    for attr in mutable_functions:
-        setattr(container, attr, _no_mutation)
-    return container
+@compatibility(is_backward_compatible=True)
+class immutable_list(List[_T]):
+    """An immutable version of :class:`list`."""
+
+    __delitem__ = _no_mutation
+    __iadd__ = _no_mutation
+    __imul__ = _no_mutation
+    __setitem__ = _no_mutation
+    append = _no_mutation
+    clear = _no_mutation
+    extend = _no_mutation
+    insert = _no_mutation
+    pop = _no_mutation
+    remove = _no_mutation
+    reverse = _no_mutation
+    sort = _no_mutation
+
+    def __hash__(self) -> int:  # type: ignore[override]
+        return hash(tuple(self))
+
+    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[_T, ...]]]:
+        return (type(self), (tuple(self),))
 
 
-immutable_list = _create_immutable_container(
-    list,
-    (
-        "__delitem__",
-        "__iadd__",
-        "__imul__",
-        "__setitem__",
-        "append",
-        "clear",
-        "extend",
-        "insert",
-        "pop",
-        "remove",
-        "reverse",
-        "sort",
-    ),
-)
-immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
+@compatibility(is_backward_compatible=True)
+class immutable_dict(Dict[_KT, _VT]):
+    """An immutable version of :class:`dict`."""
 
-compatibility(is_backward_compatible=True)(immutable_list)
+    __delitem__ = _no_mutation
+    __ior__ = _no_mutation
+    __setitem__ = _no_mutation
+    clear = _no_mutation
+    pop = _no_mutation
+    popitem = _no_mutation
+    setdefault = _no_mutation
+    update = _no_mutation  # type: ignore[assignment]
 
-immutable_dict = _create_immutable_container(
-    dict,
-    (
-        "__delitem__",
-        "__ior__",
-        "__setitem__",
-        "clear",
-        "pop",
-        "popitem",
-        "setdefault",
-        "update",
-    ),
-)
-immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-compatibility(is_backward_compatible=True)(immutable_dict)
+    def __hash__(self) -> int:  # type: ignore[override]
+        return hash(tuple(self.items()))
+
+    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[Tuple[_KT, _VT], ...]]]:
+        return (type(self), (tuple(self.items()),))
 
 
 # Register immutable collections for PyTree operations
