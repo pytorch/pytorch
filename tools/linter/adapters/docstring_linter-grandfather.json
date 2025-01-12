@@ -2,6 +2,22 @@
   "torch/_inductor/async_compile.py": {
     "AsyncCompile": 186
   },
+  "torch/_inductor/autoheuristic/artifacts/_MMRankingA100.py": {
+    "MMRankingA100": 278,
+    "MMRankingA100.fill_choices": 199
+  },
+  "torch/_inductor/autoheuristic/artifacts/_MMRankingH100.py": {
+    "MMRankingH100": 303,
+    "MMRankingH100.fill_choices": 203
+  },
+  "torch/_inductor/autoheuristic/artifacts/_MixedMMA100.py": {
+    "MixedMMA100": 132,
+    "MixedMMA100.get_best_choices": 85
+  },
+  "torch/_inductor/autoheuristic/artifacts/_MixedMMH100.py": {
+    "MixedMMH100": 131,
+    "MixedMMH100.get_best_choices": 85
+  },
   "torch/_inductor/autotune_process.py": {
     "CUDABenchmarkRequest": 115,
     "TritonBenchmarkRequest": 118,
@@ -69,6 +85,18 @@
     "CppWrapperCpuArrayRef.val_to_arg_str": 88,
     "CppWrapperCpuArrayRef.write_wrapper_decl": 202
   },
+  "torch/_inductor/codegen/cuda/cutlass_lib_extensions/gemm_operation_extensions.py": {
+    "EmitGemmUniversal3xInstanceWithEVT.emit": 94
+  },
+  "torch/_inductor/codegen/cuda/device_op_overrides.py": {
+    "CUDADeviceOpOverrides": 236,
+    "CUDADeviceOpOverrides.kernel_driver": 81,
+    "CUDADeviceOpOverrides.tma_descriptor_helpers": 102
+  },
+  "torch/_inductor/codegen/cuda/gemm_template.py": {
+    "CUTLASS2xGemmTemplate": 254,
+    "CUTLASS3xGemmTemplate": 307
+  },
   "torch/_inductor/codegen/debug_utils.py": {
     "DebugPrinterManager": 224
   },
@@ -80,6 +108,16 @@
   },
   "torch/_inductor/codegen/mps.py": {
     "MetalOverrides": 157
+  },
+  "torch/_inductor/codegen/rocm/ck_conv_template.py": {
+    "CKGroupedConvFwdTemplate": 488,
+    "CKGroupedConvFwdTemplate.globals": 143
+  },
+  "torch/_inductor/codegen/rocm/ck_universal_gemm_template.py": {
+    "CKGemmTemplate": 824
+  },
+  "torch/_inductor/codegen/rocm/rocm_benchmark_request.py": {
+    "ROCmBenchmarkRequest": 117
   },
   "torch/_inductor/codegen/simd.py": {
     "IterationRangesRoot": 118,
