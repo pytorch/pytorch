@@ -3,7 +3,6 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <functional>
 #include <stdexcept>
-#include "c10/util/Exception.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
