@@ -1,6 +1,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
+#include <regex>
 #include <unordered_map>
 
 namespace c10 {
