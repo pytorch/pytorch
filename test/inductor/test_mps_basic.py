@@ -56,6 +56,7 @@ class MPSBasicTests(TestCase):
     test_remainder = CommonTemplate.test_remainder
     test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
+    test_silu = CommonTemplate.test_silu
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_views6 = CommonTemplate.test_views6
