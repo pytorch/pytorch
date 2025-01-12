@@ -61,6 +61,7 @@ class MPSBasicTests(TestCase):
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_views6 = CommonTemplate.test_views6
+    test_views7 = CommonTemplate.test_views7
     test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
 
     @parametrize("dtype", MPS_DTYPES)

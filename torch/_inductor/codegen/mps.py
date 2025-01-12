@@ -75,6 +75,12 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+
+    @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
