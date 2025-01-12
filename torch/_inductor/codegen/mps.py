@@ -213,6 +213,10 @@ class MetalOverrides(OpOverrides):
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
+    @staticmethod
+    def trunc(x: CSEVariable) -> str:
+        return f"metal::trunc({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
