@@ -325,6 +325,21 @@ class MetalKernel(SIMDKernel):
             triton=False,
         )
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        if not (lower or upper):
+            return
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
+        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
+        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        if lower and upper:
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
+        else:
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.body, line, assignment=False)
+
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
