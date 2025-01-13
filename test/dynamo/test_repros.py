@@ -2165,34 +2165,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             f(torch.zeros(2), A())
 
-    def test_dict_list_values(self):
-        def inner_fn(args):
-            return [x[1].shape for x in args]
-
-        @torch.compile(backend="eager")
-        def fn(tensors):
-            return inner_fn(zip(itertools.count(), tensors["args"]))
-
-        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
-        fn({"args": [torch.ones(5, 5)]})
-
-    def test_dict_iter(self):
-        class MyMod(torch.nn.Module):
-            def forward(self, x):
-                z = {"my": 1, "const": 2, "dict": 3, "variable": 4}
-                tot = 0
-                for key in z:
-                    tot += z[key]
-
-                return tot
-
-        x = torch.tensor([0])
-        model = MyMod()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        y = opt_model(x)
-
-        self.assertEqual(y, 10)
-
     def test_sort_out(self):
         dtype = torch.float32
         device = "cpu"
@@ -3290,26 +3262,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x1, y), opt_f(x1, y)))
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
-
-    def test_dict_subclass_contains(self):
-        # pattern from huggingface
-        class ClassInstantier(collections.OrderedDict):
-            pass
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x, d):
-            if "key1" in d:
-                x = x + 2
-            if "key2" in d:
-                x = x + 4
-            x = x + 8
-            return x
-
-        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 11.0)))
-
-        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 13.0)))
 
     def test_hf_classinstantier(self):
         # hf activations.py
@@ -5429,29 +5381,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    def test_dict_tag_guard(self):
-        class Foo:
-            def __init__(self) -> None:
-                self.scalar = 10
-
-        def fn(d, x):
-            return d["a"] * d["b"] * d["c"].scalar * x
-
-        foo = Foo()
-
-        d = {"a": 2, "b": 3, "c": foo}
-
-        opt_fn = torch.compile(fn, backend="eager")
-        inp = torch.randn(3, 3)
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
-
-        d["a"] = 4
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
-
-        # Check that recompilation happens
-        foo.scalar = 12
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
-
     def test_nonconst_issubclass(self):
         def fn(x):
             if issubclass(x.__class__, np.ndarray):
@@ -6583,6 +6512,30 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 os.environ["MASTER_PORT"] = prior_master_port
             else:
                 del os.environ["MASTER_PORT"]
+
+    def test_dont_dce_rand(self):
+        # https://github.com/pytorch/pytorch/issues/143431
+        def f(image_latent):
+            B = 2
+            num_ref = 3
+            num_tar = 3
+            x = torch.rand(B, 12)
+            indices = torch.argsort(torch.rand(*x.shape), dim=-1)[
+                :, : num_ref + num_tar
+            ]
+            return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
+
+        torch.manual_seed(54321)
+        torch.cuda.manual_seed_all(54321)
+        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+
+        for backend in ["eager", "aot_eager"]:
+            torch.manual_seed(54321)
+            torch.cuda.manual_seed_all(54321)
+            actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                torch.randn((2, 12, 16, 32, 32))
+            ).sum()
+            self.assertEqual(actual, expected)
 
 
 instantiate_parametrized_tests(ReproTests)

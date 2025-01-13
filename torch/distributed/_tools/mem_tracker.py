@@ -5,18 +5,7 @@ import warnings
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING, Union
 from typing_extensions import Self
 
 import torch
@@ -217,7 +206,7 @@ class _WeakRefInfo:
         device: torch.device,
         reftype: _RefType,
         callback: Optional[Callable[[Self, weakref.ref], Any]] = None,
-    ) -> Tuple[Self, weakref.ref]:
+    ) -> tuple[Self, weakref.ref]:
         """
         Creates a new ``_WeakRefInfo`` instance and a weak reference to a ``torch.UntypedStorage`` object,
         optionally attaching a callback to the weak reference.
@@ -409,7 +398,7 @@ class MemTracker(TorchDispatchMode):
         self._peak_mem_snap: Dict[torch.device, Dict[str, int]] = {}
         self._param_to_grad_hook_handles = WeakIdKeyDictionary()
         self._optimizer_hook_handles: Optional[
-            Tuple[RemovableHandle, RemovableHandle]
+            tuple[RemovableHandle, RemovableHandle]
         ] = None
         # Dictionary to store the ``_WeakRefInfo`` instances corresponding to each tensor's storage.
         self._WINFO = WeakIdKeyDictionary()
@@ -600,7 +589,7 @@ class MemTracker(TorchDispatchMode):
 
     def _track_module_params_and_buffers(
         self, module: nn.Module, install_grad_hooks: bool = True
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         # Track the parameters and buffers of the module if not already tracked.
         # If the parameters have gradients, track the gradients as well.
         # If install_grad_hooks is True, install a gradient hook on the parameters
