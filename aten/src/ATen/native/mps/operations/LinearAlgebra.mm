@@ -1058,25 +1058,22 @@ Tensor& addbmm_out_mps(const Tensor& self,
 }
 
 Tensor cholesky_mps(const Tensor& self, bool upper) {
-  Tensor out = self.clone(at::MemoryFormat::Contiguous);
+  auto out = at::empty_like(self, MemoryFormat::Contiguous);
   mps::linalg_cholesky_mps_impl(self, upper, out);
   return out;
 }
 
 Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
   return mps::linalg_cholesky_mps_impl(self, upper, out);
-  ;
 }
 
 Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
   return mps::linalg_cholesky_mps_impl(self, upper, out);
-  ;
 }
 
 Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
-  Tensor out = self.clone(at::MemoryFormat::Contiguous);
+  auto out = at::empty_like(self, MemoryFormat::Contiguous);
   return mps::linalg_cholesky_mps_impl(self, upper, out);
-  ;
 }
 
 Tensor addbmm_mps(const Tensor& self,
