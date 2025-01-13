@@ -6411,6 +6411,7 @@ metadata incorrectly.
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_noncontig_nonmemformat_tangents(self):
         B = 2
         T = 8
@@ -6421,7 +6422,7 @@ metadata incorrectly.
             return x.transpose(1, 2)
 
         def _inp():
-            return torch.randn(B, T, E, requires_grad=True)
+            return torch.randn(B, T, E, device="cuda", requires_grad=True)
 
         fn(_inp())
 

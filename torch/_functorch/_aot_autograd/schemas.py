@@ -167,8 +167,8 @@ class InputAliasInfo:
 
 @dataclass
 class MemoryFormatMeta:
-    size: Sequence[int | torch.SymInt]
-    stride: Sequence[int | torch.SymInt]
+    size: Sequence[Union[int | torch.SymInt]]
+    stride: Sequence[Union[int | torch.SymInt]]
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
