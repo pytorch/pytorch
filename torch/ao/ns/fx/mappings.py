@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -357,7 +357,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # backend_config
     backend_config = get_native_backend_config()
 
-    new_connections: List[Tuple[Callable, Callable]] = [
+    new_connections: List[tuple[Callable, Callable]] = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
