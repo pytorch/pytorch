@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, List, Optional, Tuple
+from typing import Any, cast, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -29,7 +29,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
 __all__ = ["DTensorExtensions"]
 
 
-def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
@@ -45,12 +45,12 @@ def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
     return (torch.Size(offsets), tensor._local_tensor.size())
 
 
-def _get_box_for(tensor: DTensor, idx: int) -> Tuple[torch.Size, torch.Size]:
+def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
     offsets, size = _get_box(tensor)
     return (torch.Size([val * idx for val in offsets]), size)
 
 
-def _get_local_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
     assert coord is not None
@@ -284,7 +284,7 @@ def _chunk_dtensor(
 
 def _pre_load_state_dict(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, List[Shard]]:
     shards = cast(ShardedTensor, tensor).local_shards()
     if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
         inner_tensor = shards[0].tensor
@@ -333,7 +333,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Optional[Any]]:
         return _flatten_tensor(tensor)
 
     def post_unflatten_transform(
@@ -377,7 +377,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, List[Shard]]:
         return _pre_load_state_dict(tensor)
 
     def all_gather_dtensor(
