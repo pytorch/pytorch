@@ -1184,8 +1184,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
             activate_qspec = QuantizationSpec(
                 dtype=quant_dtype,
-                quant_min=int(info_fun(quant_dtype).min),
-                quant_max=int(info_fun(quant_dtype).max),
+                quant_min=info_fun(quant_dtype).min,
+                quant_max=info_fun(quant_dtype).max,
                 qscheme=torch.per_tensor_affine,
                 is_dynamic=False,
                 observer_or_fake_quant_ctr=observer.default_observer,
