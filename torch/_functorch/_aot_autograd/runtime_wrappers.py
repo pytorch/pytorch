@@ -1708,7 +1708,7 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
     expected_size = memory_format.size
     expected_stride = memory_format.stride
 
-    if x.shape == expected_size or x.stride() == expected_stride:
+    if x.shape == expected_size and x.stride() == expected_stride:
         # Runtime tangent size and stride are the same as expected, no need to coerce
         return x
 
@@ -1717,18 +1717,20 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
 
         # We can not use as_strided() when tensor has memory overlap as storage size is different
         # => use contiguous() to avoid memory overlap.
+
         if torch._debug_has_internal_overlap(x) != 0:
             x = x.contiguous()
 
         return x.as_strided(size=expected_size, stride=expected_stride)
 
     # Runtime tangent is traceable wrapper subclass with different size and stride from expected
-
     # TODO: ??? to introduce a separate method to coerce subclass to expected memory format or it can just override as_strided for that?
     try:
         x = coerce_subclass_to_expected_memory_format(x, expected_size, expected_stride)
         if x is None:
-            raise Error()
+            raise Exception(
+                f"Subclass type {type(x)} __coerce_tangent_memory_format__ could not coerce to size:{expected_size} stride:{expected_stride} and returned None"
+            )
     except Exception as e:
         raise RuntimeError(
             f"""
@@ -1739,7 +1741,7 @@ Expected size: {expected_size}, expected_stride:{expected_stride}
 
 Runtime size:{x.shape}, runtime stride {x.stride()}
 
-To fix this, your tensor subclass must implement torch.ops.aten.as_strided.
+To fix this, your tensor subclass must implement __coerce_tangent_memory_format__ or torch.ops.aten.as_strided.
 """
         ) from e
 
