@@ -2756,6 +2756,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skipCUDAIf(True, "Not implemented for CUDA")
+    def test_logaddexp(self):
+        self.common(
+            torch.logaddexp,
+            (
+                torch.randn(8, 8).to(dtype=torch.complex64),
+                torch.randn(8, 8).to(dtype=torch.complex64),
+            ),
+        )
+
     def test_sigmoid(self):
         def fn(a, b):
             return (torch.sigmoid(a), torch.sigmoid(a + b))
@@ -10957,7 +10967,8 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
-    def test_bucketize(self):
+    @parametrize("nd_tiling", (False, True))
+    def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
             return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
 
@@ -10968,7 +10979,10 @@ class CommonTemplate:
             for right in [True, False]:
                 out_int32 = True
                 right = False
-                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+                with config.patch("triton.prefer_nd_tiling", nd_tiling):
+                    self.common(
+                        fn, (input, boundaries, out_int32, right), check_lowp=False
+                    )
 
     def test_bucketize_default_kwargs(self):
         def fn(input, offsets):
