@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing_extensions import assert_never
 
 from torchgen import local
 from torchgen.api.types import (
@@ -37,7 +38,6 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never
 
 
 if TYPE_CHECKING:
