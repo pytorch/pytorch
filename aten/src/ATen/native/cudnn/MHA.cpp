@@ -619,9 +619,9 @@ auto build_graph_and_tensors_nestedtensor(
                                  .set_dim({b, h_v, s_kv, d_v})
                                  .set_stride(
                                      {INT_MAX,
-                                     v_strides[strideidx0],
-                                     v_strides[strideidx1],
-                                     v_strides[strideidx2]}));
+                                      v_strides[strideidx0],
+                                      v_strides[strideidx1],
+                                      v_strides[strideidx2]}));
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     TORCH_CHECK(
