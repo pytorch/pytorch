@@ -43,13 +43,29 @@ function install_ucc() {
   git submodule update --init --recursive
 
   ./autogen.sh
+
   # We only run distributed tests on Tesla M60 and A10G
   NVCC_GENCODE="-gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_86,code=compute_86"
+
+  if [[ -n "$ROCM_VERSION" ]]; then
+    if [[ -n "$PYTORCH_ROCM_ARCH" ]]; then
+      amdgpu_targets=`echo $PYTORCH_ROCM_ARCH | sed 's/;/ /g'`
+    else
+      amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
+    fi
+    for arch in $amdgpu_targets; do
+      HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
+    done
+  else
+    HIP_OFFLOAD="all-arch-no-native"
+  fi
+
   ./configure --prefix=$UCC_HOME          \
     --with-ucx=$UCX_HOME                  \
     --with-cuda=$with_cuda                \
+    --with-nvcc-gencode="${NVCC_GENCODE}" \
     --with-rocm=$with_rocm                \
-    --with-nvcc-gencode="${NVCC_GENCODE}"
+    --with-rocm-arch="${HIP_OFFLOAD}"
   time make -j
   sudo make install
 
