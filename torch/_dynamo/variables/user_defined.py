@@ -775,7 +775,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func_var = VariableTracker.build(tx, polyfills.object_ne)
                     return func_var.call_function(tx, [self, *args], kwargs)
 
-            if torch._dynamo.config.enable_yield_on_generator and isinstance(
+            if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
                 self.value, types.GeneratorType
             ):
                 unimplemented("Generator as graph argument is not supported")
