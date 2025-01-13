@@ -3754,7 +3754,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
 
-        size_t num_elements = output.numel();
         auto indices = input.indices();
         auto sizes = input.sizes();
         int colSize = sizes[1];
