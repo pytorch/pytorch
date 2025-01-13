@@ -1,5 +1,5 @@
 import copy
-from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
+from typing import cast, Dict, List, OrderedDict, TypedDict
 
 import numpy as np
 
@@ -265,7 +265,7 @@ def display_bytes(b: int, unit: str = "MiB") -> str:
     return f"{b:.2f} bytes"
 
 
-def get_peak_memory_runtime_baseline(graph: Graph) -> Tuple[int, float]:
+def get_peak_memory_runtime_baseline(graph: Graph) -> tuple[int, float]:
     """
     Get the baseline peak memory and runtime.
     Baseline here means there is no FSDP or AC.
