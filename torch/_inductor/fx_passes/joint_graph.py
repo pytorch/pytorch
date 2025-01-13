@@ -287,8 +287,11 @@ class UniformValueConstantFolder(ConstantFolder):
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
-            new_args = [[1], args[1]]
-            return aten.full.default(*new_args, **node.kwargs)
+            value = args[1]
+            # Don't specialize symbolic value.
+            if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                new_args = [[1], value]
+                return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
         if node.target == aten.view.dtype:
@@ -450,11 +453,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     lazy_init()
     count = 0
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
 
     from .post_grad import remove_noop_ops
 
@@ -464,6 +462,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
+
+    if config.joint_custom_pre_pass is not None:
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):

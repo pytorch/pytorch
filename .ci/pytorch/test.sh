@@ -129,7 +129,7 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1
+  export HIP_VISIBLE_DEVICES=0,1,2,3
 fi
 
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
@@ -153,6 +153,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # Disable sccache for xpu test due to flaky issue https://github.com/pytorch/pytorch/issues/143585
+  sudo rm -rf /opt/cache
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -327,7 +329,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
-  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
@@ -380,15 +382,29 @@ test_inductor_aoti() {
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
-test_inductor_cpp_wrapper() {
+test_inductor_cpp_wrapper_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
-  # unit tests with cpp wrapper.
-  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+  if [[ "$1" -eq "2" ]]; then
+    # For now, manually put the opinfo tests in shard 2, and all other tests in
+    # shard 1.  Test specific things triggering past bugs, for now.
+    python test/run_test.py \
+      --include inductor/test_torchinductor_opinfo \
+      -k 'linalg or to_sparse' \
+      --verbose
+    exit
+  fi
 
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we
+  # should be able to run all the inductor unit tests with cpp_wrapper.
+  python test/run_test.py --include inductor/test_torchinductor --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -518,7 +534,7 @@ test_perf_for_dashboard() {
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -1498,7 +1514,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchaudio cuda
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
+  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
