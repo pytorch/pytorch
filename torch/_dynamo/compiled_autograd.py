@@ -5,7 +5,7 @@ import itertools
 import operator
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -80,7 +80,6 @@ class OpNamespace:
         return result
 
     def get(self, name):
-        assert hasattr(self, name)
         return getattr(self, name)
 
 
@@ -153,7 +152,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        origins: List[List[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -428,7 +427,7 @@ class AutogradCompilerInstance:
                         isinstance(user.target, torch._ops.OpOverload)
                         and user.target.namespace in ("prims", "aten")
                     )
-                    or isinstance(user.target, torch._dynamo.compiled_autograd.Op)
+                    or isinstance(user.target, Op)
                     for user in node_users
                 ):
                     # all users are prims/aten, can move safely
@@ -472,9 +471,9 @@ class AutogradCompilerInstance:
                 or (node.op == "call_function" and node.target in _impure_targets)
             )
 
-        before = len(list(self.fx_tracer.graph.nodes))
+        before = len(self.fx_tracer.graph.nodes)
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
-        after = len(list(self.fx_tracer.graph.nodes))
+        after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
     def end_capture(self, outputs):
@@ -933,7 +932,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[List[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:
