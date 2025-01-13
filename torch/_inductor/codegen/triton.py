@@ -2099,6 +2099,26 @@ class TritonKernel(SIMDKernel):
         else:
             other = ""
 
+        """Check if the buffer we're about to load, has
+        more than one read dependency
+        NOTE: enabled with env variable TORCHINDUCTOR_SKIP_L1
+        """
+        has_read_deps = True
+        if config.triton.skip_l1_cache:
+            buffer_read_counts = self.features.buffer_read_counts()
+            has_read_deps = buffer_read_counts[name] > 1
+        """Skip L1 cache if we're (pretty?) sure the data is used only once
+        """
+        skip_l1_cache = (
+            not self.is_broadcasted(original_index)
+            and not self.inside_reduction
+            and not has_read_deps
+            and is_coalesced  # for indirect loads is_coalesced is False?
+        )
+        cachemod = ""
+        if skip_l1_cache:
+            cachemod = ", cache_modifier='.cg'"
+
         append_broadcast = None
         dtype = V.graph.get_dtype(name)
 
@@ -2107,7 +2127,7 @@ class TritonKernel(SIMDKernel):
         else:
             if isinstance(indexing, BlockPtrOptions):
                 block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
-                line = f"tl.load({block_ptr}{other}{ep})"
+                line = f"tl.load({block_ptr}{other}{ep}{cachemod})"
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
@@ -2116,7 +2136,7 @@ class TritonKernel(SIMDKernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
+                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
             if (
                 dtype in (torch.float16, torch.bfloat16)

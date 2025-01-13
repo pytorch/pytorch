@@ -102,7 +102,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_pre_pass
         )
 
-    if torch._C._has_mkldnn:
+    if (
+        config.cpp.enable_grouped_gemm_template
+        and config.max_autotune
+        and "CPP" in config.max_autotune_gemm_backends
+        and torch._C._has_mkldnn
+    ):
         from .mkldnn_fusion import grouped_gemm_pass
 
         grouped_gemm_pass(gm.graph)
