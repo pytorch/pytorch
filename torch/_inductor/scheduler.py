@@ -3607,6 +3607,15 @@ class Scheduler:
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
         # those inplace update decisions.
+
+        if (
+            isinstance(scheduler_node.node, ir.MultiOutput)
+            and len(scheduler_node.node.inputs) == 1
+            and isinstance(scheduler_node.node.inputs[0], ir.CppTemplateBuffer)
+        ):
+            # <TODO> Remove this code after Fuse MultiOutput and CppTemplateBuffer
+            return
+
         counters["inductor"]["extern_calls"] += 1
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
