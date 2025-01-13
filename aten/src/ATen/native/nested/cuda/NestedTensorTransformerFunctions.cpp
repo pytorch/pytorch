@@ -323,7 +323,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor>
-_scaled_dot_product_cudnn_attention_nestedtensor_cuda( 
+_scaled_dot_product_cudnn_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
