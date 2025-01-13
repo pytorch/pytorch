@@ -6,7 +6,7 @@ namespace at::accelerator {
 
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
 #define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
-  if (at::globalContext().has##device_name()) {    \
+  if (at::has##device_name()) {                    \
     device_type = k##device_name;                  \
     TORCH_CHECK(                                   \
         !is_accelerator_detected,                  \

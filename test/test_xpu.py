@@ -192,7 +192,6 @@ model = torch.nn.Sequential(
     torch.nn.ReLU(),
     torch.nn.MaxPool2d(2, 2),
 )
-torch.device(0) # see https://github.com/pytorch/pytorch/issues/144152
 test_multi_process(model, input)
 test_multi_process(model, input)
 print(torch.xpu.device_count())
