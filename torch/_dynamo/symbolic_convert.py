@@ -933,7 +933,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_yield_on_generator and is_generator(fn.get_code()):
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -2223,7 +2223,6 @@ class InstructionTranslatorBase(
         assert isinstance(tos, ExceptionVariable)
         if tos.exc_type is StopIteration:
             self.stack[-1] = ExceptionVariable(RuntimeError, ())
-            # exc.raise_observed_exception(RuntimeError, self)
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -3299,7 +3298,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         log.debug("DONE INLINING %s", code)
 
-        if config.enable_yield_on_generator or (
+        if config.enable_faithful_generator_behavior or (
             isinstance(self, InliningGeneratorInstructionTranslator)
             and self.is_generator_from_ctx_manager
         ):
@@ -3459,7 +3458,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
-        if config.enable_yield_on_generator or self.is_generator_from_ctx_manager:
+        if (
+            config.enable_faithful_generator_behavior
+            or self.is_generator_from_ctx_manager
+        ):
             self.symbolic_result = top
             # Stop tracing
             raise YieldValueOp
