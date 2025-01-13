@@ -218,6 +218,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_linear_backward_weights,
         torch.onednn_rnn_layer,
         torch.mkldnn_rnn_layer,
+        torch.mkldnn_reorder_conv2d_weight,
+        torch.mkldnn_reorder_conv3d_weight,
         torch.normal,
         torch.ones,
         torch.promote_types,
