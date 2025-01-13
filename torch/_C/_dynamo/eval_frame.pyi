@@ -1,10 +1,7 @@
 import types
 from typing import Dict, NewType, Tuple
-from typing_extensions import ParamSpec
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
-
-_P = ParamSpec("_P")
 
 # For typechecking
 SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
@@ -23,7 +20,7 @@ def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
-    def check_fn(self, *args: _P.args, **kwargs: _P.kwargs) -> bool: ...
+    def check_fn(self, *args: object, **kwargs: object) -> bool: ...
     code: types.CodeType
     next: _CacheEntry | None
 
