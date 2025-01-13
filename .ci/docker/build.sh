@@ -272,6 +272,10 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -283,6 +287,10 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
