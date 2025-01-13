@@ -5,6 +5,7 @@ import inspect
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._environment import is_fbcode
@@ -45,7 +46,8 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def run(fn=None):
@@ -219,13 +221,13 @@ def forbid_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
     # type that is embedded in the Python interpreter
     is_embedded_type: bool = False,  # internal use only
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -291,7 +293,7 @@ def substitute_in_graph(
         if id(original_fn) in ITERTOOLS_TYPE_IDS:
             ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
-    def wrapper(traceable_fn: _F) -> _F:
+    def wrapper(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         if not is_function(traceable_fn):
             raise TypeError(
                 f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
@@ -382,10 +384,10 @@ def substitute_in_graph(
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             return original_fn(*args, **kwargs)
 
-        def dispatch_fn(self, value: _F) -> PolyfilledFunctionVariable:
+        def dispatch_fn(self, value: Callable[_P, _R]) -> PolyfilledFunctionVariable:
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,

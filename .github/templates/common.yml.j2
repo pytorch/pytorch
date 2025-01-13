@@ -5,11 +5,6 @@
 
 {%- set timeout_minutes = 240 -%}
 
-# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
-#       the binary builds will check out
-{%- set builder_repo = "pytorch/builder" -%}
-{%- set builder_branch = "main" -%}
-
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

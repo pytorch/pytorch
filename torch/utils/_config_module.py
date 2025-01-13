@@ -187,14 +187,17 @@ def install_config_module(module: ModuleType) -> None:
                 continue
 
             name = f"{prefix}{key}"
+            annotated_type = type_hints.get(key, None)
             if isinstance(value, CONFIG_TYPES):
-                annotated_type = type_hints.get(key, None)
                 config[name] = _ConfigEntry(
                     _Config(default=value, value_type=annotated_type)
                 )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, _Config):
+                if annotated_type is not None and value.value_type is None:
+                    value.value_type = annotated_type
+
                 config[name] = _ConfigEntry(value)
 
                 if dest is module:
@@ -408,7 +411,27 @@ class ConfigModule(ModuleType):
         setattr(module, constant_name, val)
 
     def _is_default(self, name: str) -> bool:
-        return self._config[name].user_override is _UNSET_SENTINEL
+        """
+        Returns true if the config is at its default value.
+        configs overriden by the env are not considered default.
+        """
+        config_val = self._config[name]
+        # The config is not overridden by the user, and the env_value_default
+        # is different from the default value (meaning user has set the env to
+        # change the default value).
+        not_set_env_default = (
+            config_val.env_value_default is _UNSET_SENTINEL
+            or config_val.env_value_default == config_val.default
+        )
+        not_set_env_force = (
+            config_val.env_value_force is _UNSET_SENTINEL
+            or config_val.env_value_force == config_val.default
+        )
+        return (
+            config_val.user_override is _UNSET_SENTINEL
+            and not_set_env_default
+            and not_set_env_force
+        )
 
     def _get_dict(
         self,

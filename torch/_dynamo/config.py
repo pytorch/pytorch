@@ -41,19 +41,30 @@ dead_code_elimination = True
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
 # [@compile_ignored: runtime_behaviour]
-cache_size_limit = 8
+recompile_limit = 8
 
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
-accumulated_cache_size_limit = 256
+accumulated_recompile_limit = 256
 
 # [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
-skip_code_recursive_on_cache_limit_hit = True
+skip_code_recursive_on_recompile_limit_hit = True
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
-# you regress guards/specialization.  This works best when cache_size_limit = 1.
+# you regress guards/specialization.  This works best when recompile_limit = 1.
 # [@compile_ignored: runtime_behaviour]
-fail_on_cache_limit_hit = False
+fail_on_recompile_limit_hit = False
+
+cache_size_limit: int = Config(alias="torch._dynamo.config.recompile_limit")
+accumulated_cache_size_limit: int = Config(
+    alias="torch._dynamo.config.accumulated_recompile_limit"
+)
+skip_code_recursive_on_cache_limit_hit: bool = Config(
+    alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit"
+)
+fail_on_cache_limit_hit: bool = Config(
+    alias="torch._dynamo.config.fail_on_recompile_limit_hit"
+)
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
