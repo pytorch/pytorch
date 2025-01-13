@@ -28,9 +28,9 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     scoped_load_inline,
     skipIfWindows,
-    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -2835,7 +2835,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             out.backward()
         # should not RuntimeError: Node redefined name aot0_expand!
 
-    @xfailIfS390X
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -3044,7 +3043,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
     @skipIfWindows(msg="AssertionError: Scalars are not equal!")
-    @xfailIfS390X
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -3201,19 +3199,19 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 """\
 class CompiledAutograd0(torch.nn.Module):
     def forward(self, inputs, sizes, scalars, hooks):
-        getitem: "f32[]" = inputs[0]
-        getitem_1: "f32[s0, s0]" = inputs[1]
-        getitem_2: "f32[s0, s0]" = inputs[2]
-        getitem_3: "f32[s0, s0]" = inputs[3]
-        getitem_4: "f32[s0, s0]" = inputs[4];  inputs = None
+        getitem = inputs[0]
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        getitem_4 = inputs[4];  inputs = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True)]);  getitem = None
-        getitem_5: "f32[]" = validate_outputs[0];  validate_outputs = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
 
         sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], [4, 4]);  getitem_5 = None
-        getitem_6: "f32[0, 123456789]" = sum_backward0[0];  sum_backward0 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], True)]);  getitem_6 = None
-        getitem_7: "f32[0, 123456789]" = validate_outputs_1[0];  validate_outputs_1 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_8 = hooks[0];  getitem_8 = None
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], getitem_7);  getitem_1 = getitem_2 = getitem_7 = None
@@ -3222,26 +3220,26 @@ class CompiledAutograd0(torch.nn.Module):
         aot0_tangents_1 = call_aot_bwd_prologue[2]
         aot0_tangents_2 = call_aot_bwd_prologue[3];  call_aot_bwd_prologue = None
 
-        aot0_mul_2: "f32[4, 4]" = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_primals_1);  aot0_tangents_1 = aot0_primals_1 = None
-        aot0_mul_3: "f32[4, 4]" = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_primals_2);  aot0_tangents_2 = aot0_primals_2 = None
+        aot0_mul_2 = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_primals_1);  aot0_tangents_1 = aot0_primals_1 = None
+        aot0_mul_3 = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_primals_2);  aot0_tangents_2 = aot0_primals_2 = None
 
-        aot0_add_2: "f32[0, 0, 0, 0, 123]" = torch.ops.aten.add.Tensor(aot0_mul_2, aot0_mul_2);  aot0_mul_2 = None
-        aot0_add_3: "f32[0, 0, 0, 0, 123]" = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
+        aot0_add_2 = torch.ops.aten.add.Tensor(aot0_mul_2, aot0_mul_2);  aot0_mul_2 = None
+        aot0_add_3 = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
 
-        make_subclass: "f32[4, 4]" = torch__dynamo_compiled_autograd_make_subclass(aot0_add_2, aot0_add_3);  aot0_add_2 = aot0_add_3 = None
+        make_subclass = torch__dynamo_compiled_autograd_make_subclass(aot0_add_2, aot0_add_3);  aot0_add_2 = aot0_add_3 = None
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([make_subclass], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], True)]);  make_subclass = None
-        getitem_13: "f32[4, 4]" = validate_outputs_2[0];  validate_outputs_2 = None
+        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
 
         getitem_14 = hooks[1];  hooks = None
         call_backward = torch__dynamo_external_utils_call_backward(getitem_14, (), getitem_13);  getitem_14 = getitem_13 = None
-        getitem_17: "f32[4, 4]" = call_backward[0]
-        getitem_18: "f32[4, 4]" = call_backward[1];  call_backward = None
+        getitem_17 = call_backward[0]
+        getitem_18 = call_backward[1];  call_backward = None
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_17, getitem_18], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_17 = getitem_18 = None
-        getitem_20: "f32[4, 4]" = validate_outputs_3[0]
+        getitem_20 = validate_outputs_3[0]
 
         accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_20);  getitem_4 = getitem_20 = accumulate_grad__1 = None
 
-        getitem_21: "f32[4, 4]" = validate_outputs_3[1];  validate_outputs_3 = None
+        getitem_21 = validate_outputs_3[1];  validate_outputs_3 = None
 
         accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_21);  getitem_3 = getitem_21 = accumulate_grad_ = None
 
@@ -3739,6 +3737,9 @@ known_failing_tests = {
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
+
+if IS_S390X:
+    known_failing_tests.add("test_deep_reentrant")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
