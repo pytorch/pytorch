@@ -107,16 +107,8 @@ public:
     }
     return mask;
   }
-  Vectorized<BFloat16> isnan() const {
-    // NaN check
-    svbool_t mask = svcmpuo_f16(ptrue, svreinterpret_f16_bf16(values), ZERO_F16);
-    return svsel_bf16(mask, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK);
-  }
-  bool has_inf_nan() const {
-    auto vals = svreinterpret_f16_bf16(values);
-    return svptest_any(ptrue, svcmpuo_f16(ptrue, svsub_f16_x(ptrue, vals,
-    vals), ZERO_F16));
-  }
+  Vectorized<BFloat16> isnan() const;
+  bool has_inf_nan() const;
   Vectorized<BFloat16> map(BFloat16 (*f)(BFloat16)) const {
     __at_align__ BFloat16 tmp[size()];
     store(tmp);
@@ -126,7 +118,7 @@ public:
     return loadu(tmp);
   }
   Vectorized<BFloat16> abs() const {
-    auto mask = svdup_n_u16(32767);
+    auto mask = svdup_n_u16(0x7FFF);
     auto vals = svreinterpret_u16_bf16(values);
     vals = svand_u16_x(ptrue, vals, mask);
     return svreinterpret_bf16_u16(vals);
@@ -201,7 +193,7 @@ public:
   Vectorized<BFloat16> ceil() const;
   Vectorized<BFloat16> floor() const;
   Vectorized<BFloat16> neg() const {
-    auto mask = svdup_n_u16(32768);
+    auto mask = svdup_n_u16(0x8000);
     auto vals = svreinterpret_u16_bf16(values);
     vals = sveor_u16_x(ptrue, vals, mask);
     return svreinterpret_bf16_u16(vals);
@@ -218,19 +210,9 @@ public:
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vectorized<BFloat16> operator==(const Vectorized<BFloat16>& other) const {
-    auto vals = svreinterpret_f16_bf16(values);
-    auto other_vals = svreinterpret_f16_bf16(other);
-    svbool_t mask = svcmpeq_f16(ptrue, vals, other_vals);
-    return svsel_bf16(mask, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK);
-  }
+  Vectorized<BFloat16> operator==(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator!=(const Vectorized<BFloat16>& other) const {
-    auto vals = svreinterpret_f16_bf16(values);
-    auto other_vals = svreinterpret_f16_bf16(other);
-    svbool_t mask = svcmpne_f16(ptrue, vals, other_vals);
-    return svsel_bf16(mask, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK);
-  }
+  Vectorized<BFloat16> operator!=(const Vectorized<BFloat16>& other) const;
 
   Vectorized<BFloat16> operator<(const Vectorized<BFloat16>& other) const;
 
@@ -268,6 +250,14 @@ inline Vectorized<c10::BFloat16> convert_float_bfloat16(
   svbfloat16_t x1 = svcvt_bf16_f32_z(ptrue, a);
   svbfloat16_t x2 = svcvt_bf16_f32_z(ptrue, b);
   return Vectorized<c10::BFloat16>(svuzp1_bf16(x1, x2));
+}
+
+inline svfloat16_t convert_bfloat16_svfloat16(
+    const Vectorized<c10::BFloat16>& a) {
+  const auto [floats1, floats2] = convert_bfloat16_float(a);
+  auto f16_1 = svcvt_f16_f32_x(ptrue, floats1);
+  auto f16_2 = svcvt_f16_f32_x(ptrue, floats2);
+  return svtrn1_f16(f16_1, f16_2);
 }
 
 inline void load_fp32_from_bf16(const BFloat16* data, Vectorized<float>& out) {
@@ -327,237 +317,97 @@ Vectorized<c10::BFloat16> inline operator/(
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::angle() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.angle();
-  v2 = v2.angle();
-  return convert_float_bfloat16(v1, v2);
+Vectorized<BFloat16> inline Vectorized<c10::BFloat16>::isnan() const {
+  // NaN check
+  svbool_t mask = svcmpuo_f16(ptrue, convert_bfloat16_svfloat16(values), ZERO_F16);
+  return svsel_bf16(mask, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::acos() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.acos();
-  v2 = v2.acos();
-  return convert_float_bfloat16(v1, v2);
+bool inline Vectorized<c10::BFloat16>::has_inf_nan() const {
+  auto vals = convert_bfloat16_svfloat16(values);
+  return svptest_any(ptrue, svcmpuo_f16(ptrue, svsub_f16_x(ptrue, vals,
+  vals), ZERO_F16));
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::acosh() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.acosh();
-  v2 = v2.acosh();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::asin() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.asin();
-  v2 = v2.asin();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::atan() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.atan();
-  v2 = v2.atan();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::atanh() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.atanh();
-  v2 = v2.atanh();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::atan2(const Vectorized<BFloat16> &b) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(b);
-  v1 = v1.atan2(v3);
-  v2 = v2.atan2(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::copysign(const Vectorized<BFloat16> &sign) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(sign);
-  v1 = v1.copysign(v3);
-  v2 = v2.copysign(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::erf() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.erf();
-  v2 = v2.erf();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::erfc() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.erfc();
-  v2 = v2.erfc();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::exp() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.exp();
-  v2 = v2.exp();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::exp2() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.exp2();
-  v2 = v2.exp2();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::expm1() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.expm1();
-  v2 = v2.expm1();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::fmod(const Vectorized<BFloat16>& q) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(q);
-  v1 = v1.fmod(v3);
-  v2 = v2.fmod(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::hypot(const Vectorized<BFloat16> &b) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(b);
-  v1 = v1.hypot(v3);
-  v2 = v2.hypot(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::nextafter(const Vectorized<BFloat16> &b) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(b);
-  v1 = v1.nextafter(v3);
-  v2 = v2.nextafter(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::log() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.log();
-  v2 = v2.log();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::log2() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.log2();
-  v2 = v2.log2();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::log10() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.log10();
-  v2 = v2.log10();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::log1p() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.log1p();
-  v2 = v2.log1p();
-  return convert_float_bfloat16(v1, v2);
-}
-
 // frac. Implement this here so we can use subtraction
 Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
   return *this - this->trunc();
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::sin() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.sin();
-  v2 = v2.sin();
-  return convert_float_bfloat16(v1, v2);
+#define DEFINE_BF16_FUNC_VIA_FLOAT(func_name) \
+  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name() const {                                      \
+    auto [v1, v2] = convert_bfloat16_float(*this); \
+    v1 = v1.func_name(); \
+    v2 = v2.func_name(); \
+    return convert_float_bfloat16(v1, v2); \
+  }
+
+#define DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(func_name) \
+  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name(const Vectorized<BFloat16> &a) const { \
+    auto [v1, v2] = convert_bfloat16_float(*this); \
+    auto [v3, v4] = convert_bfloat16_float(a); \
+    v1 = v1.func_name(v3); \
+    v2 = v2.func_name(v4); \
+    return convert_float_bfloat16(v1, v2); \
+  }
+
+DEFINE_BF16_FUNC_VIA_FLOAT(angle);
+DEFINE_BF16_FUNC_VIA_FLOAT(acos);
+DEFINE_BF16_FUNC_VIA_FLOAT(acosh);
+DEFINE_BF16_FUNC_VIA_FLOAT(asin);
+DEFINE_BF16_FUNC_VIA_FLOAT(atan);
+DEFINE_BF16_FUNC_VIA_FLOAT(atanh);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(atan2);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(copysign);
+DEFINE_BF16_FUNC_VIA_FLOAT(erf);
+DEFINE_BF16_FUNC_VIA_FLOAT(erfc);
+DEFINE_BF16_FUNC_VIA_FLOAT(exp);
+DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
+DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
+DEFINE_BF16_FUNC_VIA_FLOAT(log);
+DEFINE_BF16_FUNC_VIA_FLOAT(log2);
+DEFINE_BF16_FUNC_VIA_FLOAT(log10);
+DEFINE_BF16_FUNC_VIA_FLOAT(log1p);
+DEFINE_BF16_FUNC_VIA_FLOAT(sin);
+DEFINE_BF16_FUNC_VIA_FLOAT(sinh);
+DEFINE_BF16_FUNC_VIA_FLOAT(cos);
+DEFINE_BF16_FUNC_VIA_FLOAT(cosh);
+DEFINE_BF16_FUNC_VIA_FLOAT(ceil);
+DEFINE_BF16_FUNC_VIA_FLOAT(floor);
+DEFINE_BF16_FUNC_VIA_FLOAT(round);
+DEFINE_BF16_FUNC_VIA_FLOAT(tan);
+DEFINE_BF16_FUNC_VIA_FLOAT(tanh);
+DEFINE_BF16_FUNC_VIA_FLOAT(trunc);
+DEFINE_BF16_FUNC_VIA_FLOAT(lgamma);
+DEFINE_BF16_FUNC_VIA_FLOAT(sqrt);
+DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal);
+DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow);
+
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BFloat16>& other) const {
+  auto [f1, f2] = convert_bfloat16_float(values);
+  auto [f3, f4] = convert_bfloat16_float(other);
+  svbool_t mask1 = svcmpeq_f32(ptrue, f1, f3);
+  svbool_t mask2 = svcmpeq_f32(ptrue, f2, f4);
+  auto res1 = svsel_f32(mask1, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  auto res2 = svsel_f32(mask2, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+
+  auto bf16_1 = svreinterpret_bf16_f32(res1);
+  auto bf16_2 = svreinterpret_bf16_f32(res2);
+  return svuzp1_bf16(bf16_1, bf16_2);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::sinh() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.sinh();
-  v2 = v2.sinh();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::cos() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.cos();
-  v2 = v2.cos();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::cosh() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.cosh();
-  v2 = v2.cosh();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::ceil() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.ceil();
-  v2 = v2.ceil();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::floor() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.floor();
-  v2 = v2.floor();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::round() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.round();
-  v2 = v2.round();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::tan() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.tan();
-  v2 = v2.tan();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::tanh() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.tanh();
-  v2 = v2.tanh();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::trunc() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.trunc();
-  v2 = v2.trunc();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::lgamma() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.lgamma();
-  v2 = v2.lgamma();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::sqrt() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.sqrt();
-  v2 = v2.sqrt();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::reciprocal() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.reciprocal();
-  v2 = v2.reciprocal();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::rsqrt() const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  v1 = v1.rsqrt();
-  v2 = v2.rsqrt();
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::pow(const Vectorized<BFloat16> &b) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(b);
-  v1 = v1.pow(v3);
-  v2 = v2.pow(v4);
-  return convert_float_bfloat16(v1, v2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 < v3, v2 < v4);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
-  auto [v1, v2] = convert_bfloat16_float(*this);
-  auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 <= v3, v2 <= v4);
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
+  auto [f1, f2] = convert_bfloat16_float(values);
+  auto [f3, f4] = convert_bfloat16_float(other);
+  svbool_t mask1 = svcmpne_f32(ptrue, f1, f3);
+  svbool_t mask2 = svcmpne_f32(ptrue, f2, f4);
+  auto res1 = svsel_f32(mask1, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  auto res2 = svsel_f32(mask2, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+
+  auto bf16_1 = svreinterpret_bf16_f32(res1);
+  auto bf16_2 = svreinterpret_bf16_f32(res2);
+  return svuzp1_bf16(bf16_1, bf16_2);
 }
 Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
@@ -568,6 +418,16 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(const Vectorized<BF
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
   return convert_float_bfloat16(v1 >= v3, v2 >= v4);
+}
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
+  auto [v1, v2] = convert_bfloat16_float(*this);
+  auto [v3, v4] = convert_bfloat16_float(other);
+  return convert_float_bfloat16(v1 < v3, v2 < v4);
+}
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
+  auto [v1, v2] = convert_bfloat16_float(*this);
+  auto [v3, v4] = convert_bfloat16_float(other);
+  return convert_float_bfloat16(v1 <= v3, v2 <= v4);
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
