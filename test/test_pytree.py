@@ -51,6 +51,10 @@ cxx_pytree.register_pytree_node(
 )
 
 
+class TestEnum(enum.Enum):
+    A = auto()
+
+
 class TestGenericPytree(TestCase):
     def test_aligned_public_apis(self):
         public_apis = py_pytree.__all__
@@ -957,10 +961,24 @@ TreeSpec(tuple, None, [*,
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
-    def test_pytree_serialize_enum(self):
-        class TestEnum(enum.Enum):
-            A = auto()
+    def test_pytree_serialize_defaultdict_enum(self):
+        spec = py_pytree.TreeSpec(
+            defaultdict,
+            [list, [TestEnum.A]],
+            [
+                py_pytree.TreeSpec(
+                    list,
+                    None,
+                    [
+                        py_pytree.LeafSpec(),
+                    ],
+                ),
+            ],
+        )
+        serialized_spec = py_pytree.treespec_dumps(spec)
+        self.assertIsInstance(serialized_spec, str)
 
+    def test_pytree_serialize_enum(self):
         spec = py_pytree.TreeSpec(dict, TestEnum.A, [py_pytree.LeafSpec()])
 
         serialized_spec = py_pytree.treespec_dumps(spec)
