@@ -902,12 +902,7 @@ class CppGemmTemplate(CppTemplate):
             )
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
-            return cls.prep_weight(
-                new_inputs,
-                new_layout,
-                micro_gemm,
-                block_weights,
-            )
+            return cls.prep_weight(new_inputs, new_layout, micro_gemm, block_weights)
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -925,10 +920,7 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes,
-                    new_layout,
-                    micro_gemm,
-                    block_weights,
+                    new_input_nodes, new_layout, micro_gemm, block_weights
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
