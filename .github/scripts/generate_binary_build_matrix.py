@@ -20,7 +20,8 @@ CUDA_ARCHES = ["11.8", "12.4", "12.6"]
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.3"}
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
 
-ROCM_ARCHES = ["6.1", "6.2.4"]
+# NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
+ROCM_ARCHES = ["6.2.4", "6.3"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -93,7 +94,7 @@ def get_nccl_submodule_version() -> str:
     from pathlib import Path
 
     nccl_version_mk = (
-        Path(__file__).absolute().parent.parent.parent
+        Path(__file__).absolute().parents[2]
         / "third_party"
         / "nccl"
         / "nccl"
