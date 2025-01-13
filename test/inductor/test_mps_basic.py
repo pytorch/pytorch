@@ -43,6 +43,7 @@ class MPSBasicTests(TestCase):
     test_addmm = CommonTemplate.test_addmm
     test_div1 = CommonTemplate.test_div1
     test_cat_empty = CommonTemplate.test_cat_empty
+    test_cat_unbacked_empty_1d = CommonTemplate.test_cat_unbacked_empty_1d
     test_floordiv = CommonTemplate.test_floordiv
     test_fmod = CommonTemplate.test_fmod
     test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
