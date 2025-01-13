@@ -126,7 +126,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
             int window_size_left,
             int window_size_right,
             const bool return_softmax,
-            std::optional<at::Generator> gen_) {
+            const std::optional<at::Generator>& gen_) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
@@ -254,7 +254,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                int window_size_left,
                int window_size_right,
                const bool return_softmax,
-               std::optional<at::Generator> gen_) {
+               const std::optional<at::Generator>& gen_) {
   TORCH_CHECK(!seqused_k.has_value(), "[ROCm] mha_varlen_fwd: seqused_k must be nullopt");
   const bool paged_KV = block_table_.has_value();
   TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
@@ -418,8 +418,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
         int window_size_left,
         int window_size_right,
         const bool deterministic,
-        const at::Tensor philox_seed,
-        const at::Tensor philox_offset) {
+        const at::Tensor& philox_seed,
+        const at::Tensor& philox_offset) {
   // Otherwise the kernel will be launched from cuda:0 device
   // Cast to char to avoid compiler warning about narrowing
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
@@ -574,8 +574,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                int window_size_left,
                int window_size_right,
                const bool deterministic,
-               const at::Tensor philox_seed,
-               const at::Tensor philox_offset)
+               const at::Tensor& philox_seed,
+               const at::Tensor& philox_offset)
 {
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 

@@ -217,6 +217,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
+            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
