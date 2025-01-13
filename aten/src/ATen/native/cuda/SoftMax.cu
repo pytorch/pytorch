@@ -493,6 +493,12 @@ ilpReduce(index_t shift,
   return threadVal;
 }
 
+int32_t potential_register_count(int32_t dim_size, int32_t thread_count){
+  // This method calculate the potential register count for ilpReduce method (it's just a rough number).
+  int reg_cnt = dim_size / thread_count;
+  return reg_cnt + 1;
+}
+
 /**
  * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
  */
@@ -694,6 +700,79 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   }
 }
 
+template <typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue, int32_t reg_cnt>
+__global__ void
+cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, int classes)
+{
+  // printf("call to cunn_SoftMaxForwardReg!\n");
+  extern __shared__ unsigned char smem[];
+  auto sdata = reinterpret_cast<accscalar_t*>(smem);
+
+  scalar_t reg[reg_cnt];
+
+  // forward pointers to batch[blockIdx.x]
+  // each block handles a sample in the mini-batch
+  input += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
+
+  accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
+  accscalar_t threadExp = static_cast<accscalar_t>(0);
+
+  // const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  // const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+
+  // Load the elements from gmem into reg, and get the max for current thread.
+  MaxFloat<scalar_t, accscalar_t> maxFunc;
+
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      reg[reg_idx] = input[offset];
+      threadMax = maxFunc(threadMax, reg[reg_idx]);
+    }
+  }
+
+  // printf("threadMax is %f\n", threadMax);
+
+  // Reduce to the max for block
+  accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
+    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+
+  // printf("max_k is %f\n", max_k);
+  // if(threadIdx.x == 0){
+  //   printf("max_k is %f\n", max_k);
+  // }
+
+  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
+  // reduce all values
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      threadExp = sumExpFunc(threadExp, reg[reg_idx]);
+    }
+  }
+  // accscalar_t threadExp = ReduceReg<SumExpFloat, scalar_t, accscalar_t, reg_cnt>(
+  //   reg, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+  // printf("threadExp is %f\n", threadExp);
+  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+    Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  // printf("sumAll is %f\n", sumAll);
+
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+
+
+  // Write back the value
+  #pragma unroll
+  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+    int offset = threadIdx.x + reg_idx * blockDim.x;
+    if(offset < classes) {
+      output[offset] = epilogue(reg[reg_idx]);
+    }
+  }
+}
+
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
   template <typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __global__ void
@@ -868,7 +947,26 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
-            if (can_use_smem) {
+            int32_t potential_reg_cnt = potential_register_count(dim_size, block.x);
+            if(potential_reg_cnt < 10){
+              TORCH_CHECK(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
+              switch (potential_reg_cnt) {
+              #define SOFTMAX_REG_N(N) case N: \
+                                        cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, N> \
+                                                              <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size); \
+                                        break
+
+                  SOFTMAX_REG_N(1);
+                  SOFTMAX_REG_N(2);
+                  SOFTMAX_REG_N(3);
+                  SOFTMAX_REG_N(4);
+                  SOFTMAX_REG_N(5);
+                  SOFTMAX_REG_N(6);
+                  SOFTMAX_REG_N(7);
+                  SOFTMAX_REG_N(8);
+                  SOFTMAX_REG_N(9);
+              }
+            } else if (can_use_smem) {
               size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
                 <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
