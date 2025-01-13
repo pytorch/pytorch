@@ -4926,7 +4926,6 @@ class CppScheduling(BaseScheduling):
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,
         )
-
         with kernel:
             if not is_multi_outputs_template(template_node.node):
                 template_node.mark_run()  # type: ignore[attr-defined]

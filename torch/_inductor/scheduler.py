@@ -1254,31 +1254,28 @@ class FusedSchedulerNode(BaseSchedulerNode):
     ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-        if node1.is_template():
-            if isinstance(node2, ExternKernelSchedulerNode):
-                # CPP Grouped GEMM Fuse with MultiOutput node
-                # * Node1 has memorydep of MultiOutput in reads
-                # * Node2 has StarDep of MultiOutput in writes
-                # Rewrite the StarDep to MemoryDep
-                assert isinstance(node2.node, MultiOutput)
-                assert len(node2.read_writes.writes) == 1
-                assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
-                name = next(iter(node2.read_writes.writes)).name
-                template_nodes = [
-                    node for node in node1.get_nodes() if node.is_template()
+        if node1.is_template() and isinstance(node2, ExternKernelSchedulerNode):
+            # Fuse multi outputs template and its outputs
+            #   * Node1 has memorydep of MultiOutput in reads
+            #   * Node2 has StarDep of MultiOutput in writes
+            # Rewrite the Node2' StarDep to MemoryDep
+            assert isinstance(node2.node, MultiOutput)
+            assert len(node2.read_writes.writes) == 1
+            assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
+            name = next(iter(node2.read_writes.writes)).name
+            template_nodes = [node for node in node1.get_nodes() if node.is_template()]
+            assert len(template_nodes) == 1
+            template_node = template_nodes[0]
+            assert len(template_node.read_writes.writes) == 1
+            write = next(iter(template_node.read_writes.writes))
+            assert isinstance(write, MemoryDep)
+            node2.read_writes.writes = OrderedSet(
+                [
+                    MemoryDep(
+                        name, write.index, write.var_names, write.size, write.mode
+                    ),
                 ]
-                assert len(template_nodes) == 1
-                template_node = template_nodes[0]
-                assert len(template_node.read_writes.writes) == 1
-                write = next(iter(template_node.read_writes.writes))
-                assert isinstance(write, MemoryDep)
-                node2.read_writes.writes = OrderedSet(
-                    [
-                        MemoryDep(
-                            name, write.index, write.var_names, write.size, write.mode
-                        ),
-                    ]
-                )
+            )
         else:
             assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
