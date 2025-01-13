@@ -1,4 +1,5 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -74,8 +75,7 @@ void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
   is_in_bad_fork[static_cast<int>(device_type)] = value;
 }
 
-// Should be called before the first device runtime call. It is mainly called in
-// lazy_init.
+// Should be called before the first device runtime call.
 void register_fork_handler_for_device_init(at::DeviceType device_type) {
 #ifndef WIN32
   auto forked_child = [device_type]() {

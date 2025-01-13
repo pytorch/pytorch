@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/TensorOptions.h>
-#include <c10/util/CallOnce.h>
 #include <torch/csrc/Export.h>
 
 // device_lazy_init() is always compiled, even for CPU-only builds.
