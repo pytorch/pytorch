@@ -61,9 +61,7 @@ BufferPool& MPSHeapAllocatorImpl::get_pool(size_t requested_size, size_t aligned
 
   if (usage & UsageFlags::SCALAR) {
     poolKind = BufferPool::Kind::SCALAR;
-  } else if (
-    (requested_size <= kMaxScalarAlloc && m_device.hasUnifiedMemory) || aligned_size <= kMaxSmallAlloc
-  ) {
+  } else if ((requested_size <= kMaxScalarAlloc && m_device.hasUnifiedMemory) || aligned_size <= kMaxSmallAlloc) {
     poolKind = BufferPool::Kind::SHARED_SMALL;
   } else {
     poolKind = (usage & UsageFlags::SHARED) ? BufferPool::Kind::SHARED_LARGE : BufferPool::Kind::PRIVATE_LARGE;
@@ -521,13 +519,9 @@ id<MTLBuffer> MPSHeapAllocatorImpl::registerCPUBackedPtr(void* cpu_ptr, size_t s
     TORCH_INTERNAL_ASSERT(buffer_block->is_cpu_backed);
     return buffer_block->buffer;
   } else {
-
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLBuffer> buffer = [device newBufferWithBytesNoCopy:cpu_ptr
-                                                     length:size
-                                                    options:options
-                                                deallocator:nil];
+    id<MTLBuffer> buffer = [device newBufferWithBytesNoCopy:cpu_ptr length:size options:options deallocator:nil];
     BufferBlock* buffer_block = new BufferBlock(size, size, buffer, nullptr);
     buffer_block->cpu_ptr = cpu_ptr;
     buffer_block->in_use = true;
@@ -539,14 +533,12 @@ id<MTLBuffer> MPSHeapAllocatorImpl::registerCPUBackedPtr(void* cpu_ptr, size_t s
   }
 }
 
-
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
   // it's OK for the buffer_block to not exist yet
-  return buffer_block && (buffer_block->is_cpu_backed ||
-                         (buffer_block->heap->pool->usage & UsageFlags::SHARED));
+  return buffer_block && (buffer_block->is_cpu_backed || (buffer_block->heap->pool->usage & UsageFlags::SHARED));
 }
 
 id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
@@ -567,8 +559,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
   return buffer_block->buffer;
 }
 
-
-template<typename T>
+template <typename T>
 std::pair<T*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtrImpl(T* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -576,8 +567,7 @@ std::pair<T*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtrImpl(T* ptr) {
   // return if buffer was not allocated/registered on MPSAllocator or isn't a Shared buffer
   if (!buffer_block ||
       !(buffer_block->is_cpu_backed ||
-        (buffer_block->heap &&
-        (buffer_block->heap->pool->usage & UsageFlags::SHARED)))) {
+        (buffer_block->heap && (buffer_block->heap->pool->usage & UsageFlags::SHARED)))) {
     return {nullptr, 0};
   }
   if (!buffer_block->cpu_ptr) {
@@ -593,7 +583,6 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
 std::pair<void*, uint32_t> MPSHeapAllocatorImpl::unsafeGetSharedBufferPtr(void* ptr) {
   return getSharedBufferPtrImpl<void>(ptr);
 }
-
 
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   bool recordedEvent = false;
@@ -622,8 +611,8 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
       // wait on event if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
-      if (buffer_block && (buffer_block->heap && buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
-          buffer_block->event) {
+      if (buffer_block && (buffer_block->heap && buffer_block->heap->pool->usage & UsageFlags::SHARED) &&
+          buffer_block->retainCount() > 1 && buffer_block->event) {
         buffer_blocks.push_back(buffer_block);
       }
     }
@@ -901,18 +890,16 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     id<MTLBuffer> src_buffer = (__bridge id<MTLBuffer>)src;
     id<MTLBuffer> dst_buffer = (__bridge id<MTLBuffer>)dest;
 
-    uint64_t profile_id =
-        getMPSProfiler().beginProfileCopy(src_buffer, dst_buffer, OptionalTensorRef(), OptionalTensorRef(), count, false);
+    uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+        src_buffer, dst_buffer, OptionalTensorRef(), OptionalTensorRef(), count, false);
 
-    stream->copy_and_sync(
-      src_buffer,
-      dst_buffer,
-      count,
-      /*srcOffset=*/0,
-      /*dstOffset=*/0,
-      /*non_blocking=*/false,
-      /*profileId=*/profile_id
-    );
+    stream->copy_and_sync(src_buffer,
+                          dst_buffer,
+                          count,
+                          /*srcOffset=*/0,
+                          /*dstOffset=*/0,
+                          /*non_blocking=*/false,
+                          /*profileId=*/profile_id);
   }
 
  private:
