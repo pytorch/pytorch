@@ -806,19 +806,17 @@ def create_mask(
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
     if mod_fn is not None:
-        assert mask_mod is None and score_mod is None, 'cannot provide both mod_fn and mask_mod/score_mod'
+        assert (
+            mask_mod is None and score_mod is None
+        ), "cannot provide both mod_fn and mask_mod/score_mod"
         if mod_type == _ModificationType.UNKNOWN:
             mod_type = _get_mod_type(mod_fn)
-        assert mod_type != _ModificationType.UNKNOWN
-    elif mask_mod is not None:
-        assert score_mod is None, 'cannot provide both mask_mod and score_mod'
-        mod_fn = mask_mod
-        mod_type = _ModificationType.MASK_MOD
-    elif score_mod is not None:
-        mod_fn = score_mod
-        mod_type = _ModificationType.SCORE_MOD
-    else:
-        raise AssertionError
+        if mod_type == _ModificationType.MASK_MOD:
+            mask_mod = mod_fn
+        elif mod_type == _ModificationType.SCORE_MOD:
+            score_mod = mod_fn
+    elif mask_mod is not None or score_mod is not None:
+        assert mask_mod is None or score_mod is None, "cannot provide both mask_mod and score_mod"
 
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
@@ -826,17 +824,17 @@ def create_mask(
     n = torch.arange(0, KV_LEN, device=device)
 
     with TransformGetItemToIndex():
-        if mod_type == _ModificationType.SCORE_MOD:
-            score_mod = mod_fn
+        if score_mod:
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
             out = score_mod(torch.zeros(B, H, Q_LEN, KV_LEN, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask
-        elif mod_type == _ModificationType.MASK_MOD:
-            mask_mod = mod_fn
+        elif mask_mod:
             mask_mod = _vmap_for_bhqkv(mask_mod, prefix=())
             mask = mask_mod(b, h, m, n)
             return mask
+        else:
+            raise AssertionError
 
 
 def create_block_mask(
