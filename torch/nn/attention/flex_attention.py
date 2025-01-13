@@ -782,10 +782,10 @@ def create_mask(
     Q_LEN: int = 4096,
     KV_LEN: int = 4096,
     device: str = "cuda",
-    mod_type: _ModificationType = _ModificationType.UNKNOWN,
     *,
     mask_mod: Optional[_mask_mod_signature] = None,
     score_mod: Optional[_score_mod_signature] = None,
+    mod_type: _ModificationType = _ModificationType.UNKNOWN,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
