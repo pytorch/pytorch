@@ -75,6 +75,12 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+
+    @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
@@ -279,6 +285,8 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
+                for outer, inner in self.args.sizevars.items():
+                    code.writeline(f"constant long& {inner},")
                 if len(idx_var_names) == 1:
                     code.writeline(
                         f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
@@ -307,6 +315,7 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        args += [str(v) for v in self.args.sizevars.keys()]
         if len(self.active_range_trees()) > 0:
             args += [
                 f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
@@ -318,6 +327,21 @@ class MetalKernel(SIMDKernel):
             gpu=False,  # TODO: Fix me, MPS does not expose streams now
             triton=False,
         )
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        if not (lower or upper):
+            return
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
+        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
+        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        if lower and upper:
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
+        else:
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.body, line, assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):

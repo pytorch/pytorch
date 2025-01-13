@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterable, List, NoReturn, Tuple, Type, TypeVar
+from collections.abc import Iterable
+from typing import Any, NoReturn, TypeVar
 from typing_extensions import Self
 
 from torch.utils._pytree import (
@@ -32,14 +33,14 @@ _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
 
 
-def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:  # type: ignore[no-untyped-def]
+def _no_mutation(self: Any, *args: Any, **kwargs: Any) -> NoReturn:
     raise TypeError(
         f"{type(self).__name__!r} object does not support mutation. {_help_mutation}",
     )
 
 
 @compatibility(is_backward_compatible=True)
-class immutable_list(List[_T]):
+class immutable_list(list[_T]):
     """An immutable version of :class:`list`."""
 
     __delitem__ = _no_mutation
@@ -58,12 +59,12 @@ class immutable_list(List[_T]):
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self))
 
-    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[_T, ...]]]:
+    def __reduce__(self) -> tuple[type[Self], tuple[tuple[_T, ...]]]:
         return (type(self), (tuple(self),))
 
 
 @compatibility(is_backward_compatible=True)
-class immutable_dict(Dict[_KT, _VT]):
+class immutable_dict(dict[_KT, _VT]):
     """An immutable version of :class:`dict`."""
 
     __delitem__ = _no_mutation
@@ -78,44 +79,44 @@ class immutable_dict(Dict[_KT, _VT]):
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self.items()))
 
-    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[Tuple[_KT, _VT], ...]]]:
+    def __reduce__(self) -> tuple[type[Self], tuple[tuple[tuple[_KT, _VT], ...]]]:
         return (type(self), (tuple(self.items()),))
 
 
 # Register immutable collections for PyTree operations
-def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    return _dict_flatten(d)
-
-
-def _immutable_dict_unflatten(
-    values: Iterable[Any],
-    context: Context,
-) -> Dict[Any, Any]:
-    return immutable_dict(_dict_unflatten(values, context))
-
-
-def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
+def _immutable_list_flatten(d: immutable_list[_T]) -> tuple[list[_T], Context]:
     return _list_flatten(d)
 
 
 def _immutable_list_unflatten(
-    values: Iterable[Any],
+    values: Iterable[_T],
     context: Context,
-) -> List[Any]:
+) -> immutable_list[_T]:
     return immutable_list(_list_unflatten(values, context))
 
 
-register_pytree_node(
-    immutable_dict,
-    _immutable_dict_flatten,
-    _immutable_dict_unflatten,
-    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
-    flatten_with_keys_fn=_dict_flatten_with_keys,
-)
+def _immutable_dict_flatten(d: immutable_dict[Any, _VT]) -> tuple[list[_VT], Context]:
+    return _dict_flatten(d)
+
+
+def _immutable_dict_unflatten(
+    values: Iterable[_VT],
+    context: Context,
+) -> immutable_dict[Any, _VT]:
+    return immutable_dict(_dict_unflatten(values, context))
+
+
 register_pytree_node(
     immutable_list,
     _immutable_list_flatten,
     _immutable_list_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_list",
     flatten_with_keys_fn=_list_flatten_with_keys,
+)
+register_pytree_node(
+    immutable_dict,
+    _immutable_dict_flatten,
+    _immutable_dict_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
+    flatten_with_keys_fn=_dict_flatten_with_keys,
 )
