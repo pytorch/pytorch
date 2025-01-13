@@ -463,7 +463,7 @@ def nonzero(fake_mode, func, arg):
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty((arg.dim(), nnz), dtype=torch.int64).T
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
