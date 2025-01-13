@@ -1662,7 +1662,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             BLOCK_SIZE=page_size,
         )
 
-        # init 4 reqeusts with different prefill length
+        # init 4 requests with different prefill length
         prefill_length = [5, 98, 47, 194]
         querys, keys, values = [], [], []
         for seq_len in prefill_length:
@@ -1763,7 +1763,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+                paged_cache.get_score_mod(score_mod), new_block_mask, enable_gqa=False
             )
         )
         paged_out = compiled_sdpa(
