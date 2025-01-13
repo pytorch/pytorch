@@ -149,9 +149,8 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
 # Used with something like dict(obj)
 def construct_dict(cls, /, *args, **kwargs):
     dst = cls.__new__(cls)
-    if not kwargs:
-        if not args:
-            args = ({},)
+
+    if args:
         src = args[0]
 
         # Ensure that the overridden __iter__ method is invoked
@@ -163,11 +162,12 @@ def construct_dict(cls, /, *args, **kwargs):
             # likely a sequence like tuple of pairs
             for key, value in src:
                 dst[key] = value
-        return dst
-    elif kwargs:
+
+    if kwargs:
         for key in kwargs:
             dst[key] = kwargs[key]
-        return dst
+
+    return dst
 
 
 def foreach_map_fn(*args):
