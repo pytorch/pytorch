@@ -68,6 +68,12 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -242,6 +248,36 @@ def _private_register_pytree_node(
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
+
+
+def is_namedtuple(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
+    return optree.is_namedtuple(obj)
+
+
+def is_namedtuple_class(cls: type) -> bool:
+    """Return whether the class is a subclass of namedtuple."""
+    return optree.is_namedtuple_class(cls)
+
+
+def is_namedtuple_instance(obj: object) -> bool:
+    """Return whether the object is an instance of namedtuple."""
+    return optree.is_namedtuple_instance(obj)
+
+
+def is_structseq(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
+    return optree.is_structseq(obj)
+
+
+def is_structseq_class(cls: type) -> bool:
+    """Return whether the class is a class of PyStructSequence."""
+    return optree.is_structseq_class(cls)
+
+
+def is_structseq_instance(obj: object) -> bool:
+    """Return whether the object is an instance of PyStructSequence."""
+    return optree.is_structseq_instance(obj)
 
 
 def tree_is_leaf(
