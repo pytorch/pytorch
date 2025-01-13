@@ -816,7 +816,9 @@ def create_mask(
         elif mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
     elif mask_mod is not None or score_mod is not None:
-        assert mask_mod is None or score_mod is None, "cannot provide both mask_mod and score_mod"
+        assert (
+            mask_mod is None or score_mod is None
+        ), "cannot provide both mask_mod and score_mod"
 
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
