@@ -156,7 +156,7 @@ class DebugPrinterManager:
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
             args_to_print_or_save_cpp = [
-                f"convert_arrayref_tensor_to_tensor({arg})"
+                f"copy_arrayref_tensor_to_tensor({arg})"
                 for arg in args_to_print_or_save
                 if arg.startswith(("buf", "arg"))
             ]

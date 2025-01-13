@@ -1,18 +1,19 @@
 # mypy: allow-untyped-defs
-# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
+from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
 from functools import wraps
 import warnings
 
-
-
 __all__ = ["FlopCounterMode", "register_flop_formula"]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
@@ -30,8 +31,8 @@ def shape_wrapper(f):
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
-def register_flop_formula(targets, get_raw=False):
-    def register_fun(flop_formula):
+def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
@@ -593,7 +594,7 @@ def _pytreeify_preserve_structure(f):
     return nf
 
 
-class FlopCounterMode(TorchDispatchMode):
+class FlopCounterMode:
     """
     ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
 
@@ -623,6 +624,7 @@ class FlopCounterMode(TorchDispatchMode):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
+        self.mode: Optional[_FlopCounterMode] = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -708,22 +710,22 @@ class FlopCounterMode(TorchDispatchMode):
 
         return tabulate.tabulate(values, headers=header, colalign=("left", "right", "right"))
 
+    # NB: This context manager is NOT reentrant
     def __enter__(self):
         self.flop_counts.clear()
         self.mod_tracker.__enter__()
-        super().__enter__()
+        self.mode = _FlopCounterMode(self)
+        self.mode.__enter__()
         return self
 
     def __exit__(self, *args):
-        super().__exit__(*args)
+        assert self.mode is not None
+        b = self.mode.__exit__(*args)
+        self.mode = None  # break cycles
         self.mod_tracker.__exit__()
         if self.display:
             print(self.get_table(self.depth))
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs if kwargs else {}
-        out = func(*args, **kwargs)
-        return self._count_flops(func._overloadpacket, out, args, kwargs)
+        return b
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
@@ -733,3 +735,40 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+
+class _FlopCounterMode(TorchDispatchMode):
+    def __init__(self, counter: FlopCounterMode):
+        self.counter = counter
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
+
+            return NotImplemented
+
+        # If we don't have func in flop_registry, see if it can decompose
+        if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
+            with self:
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
+
+        # no further decomposition; execute & count flops
+        out = func(*args, **kwargs)
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)

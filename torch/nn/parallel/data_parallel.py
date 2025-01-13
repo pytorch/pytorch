@@ -141,7 +141,7 @@ class DataParallel(Module, Generic[T]):
         super().__init__()
         torch._C._log_api_usage_once("torch.nn.parallel.DataParallel")
         device_type = _get_available_device_type()
-        if device_type is None:
+        if device_type is None or device_type == "mps":
             self.module = module
             self.device_ids = []
             return

@@ -11,6 +11,7 @@ import torch
 import torch._inductor
 import torch._inductor.cudagraph_trees
 import torch.optim.lr_scheduler
+from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.optim import (
@@ -61,6 +62,82 @@ from torch.testing._internal.inductor_utils import (
     has_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+
+
+def get_inputs(optim):
+    steps = []
+    params = []
+    grads = []
+    exp_avgs = []
+    exp_avg_sqs = []
+    for group in optim.param_groups:
+        for p in group["params"]:
+            params.append(p)
+            grads.append(p.grad)
+            state = optim.state[p]
+            exp_avgs.append(state["exp_avg"])
+            exp_avg_sqs.append(state["exp_avg_sq"])
+            steps.append(state["step"])
+
+    return steps, params, exp_avgs, exp_avg_sqs
+
+
+def update_exp_avg_sq(exp_avg_sq, grad, beta2):
+    return exp_avg_sq.mul(beta2).addcmul(grad, grad, value=1 - beta2)
+
+
+def update_param(param, step, exp_avg, exp_avg_sq, beta1, beta2, lr, eps):
+    bias_correction1 = 1 - torch.pow(beta1, step)
+    bias_correction2 = (1 - torch.pow(beta2, step)).sqrt()
+    step_size = (lr / bias_correction1).neg()
+    denom = (exp_avg_sq.sqrt() / (bias_correction2 * step_size)).add(eps / step_size)
+    return torch.add(param, torch.div(exp_avg, denom))
+
+
+def foreach_map_adam(
+    steps,
+    params,
+    exp_avgs,
+    exp_avg_sqs,
+    weight_decay=0,
+    beta1=0.9,
+    beta2=0.999,
+    lr=1e-3,
+    eps=1e-8,
+):
+    with torch.no_grad():
+        grads = [param.grad for param in params]
+        # update step
+        updated_steps = foreach_map(lambda x: x + 1, (steps,))
+        torch._foreach_copy_(steps, updated_steps)
+
+        if weight_decay != 0:
+            foreach_map(torch.add, (grads,), alpha=weight_decay)
+
+        # HOPS cannot have multiple outputs at the moment
+        # need to call foreach_map once for each output
+        exp_avgs_updated = foreach_map(torch.lerp, (exp_avgs, grads, 1 - beta1))
+        exp_avgs_sq_updated = foreach_map(
+            update_exp_avg_sq, (exp_avg_sqs, grads, beta2)
+        )
+        params_updated = foreach_map(
+            update_param,
+            (
+                params,
+                steps,
+                exp_avgs_updated,
+                exp_avgs_sq_updated,
+                beta1,
+                beta2,
+                lr,
+                eps,
+            ),
+        )
+        # No input mutation for HOPS
+        torch._foreach_copy_(exp_avgs, exp_avgs_updated)
+        torch._foreach_copy_(exp_avg_sqs, exp_avgs_sq_updated)
+        torch._foreach_copy_(params, params_updated)
+    return
 
 
 # Note: we use atypical values to amplify error
@@ -114,115 +191,67 @@ class KernelCounts(NamedTuple):
 # This maps the test name to the
 # expected kernel count
 KERNEL_COUNT_OVERRIDES = {
-    "test_adadelta_cpu": 6,
-    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
-    "test_adadelta_foreach_weight_decay_cpu": 12,
-    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
-    "test_adadelta_maximize_cpu": 6,
-    "test_adadelta_rho_weight_decay_cpu": 6,
-    "test_adadelta_tensor_lr_capturable_cuda": 6,
-    "test_adadelta_tensor_lr_capturable_xpu": 6,
-    "test_adadelta_weight_decay_cpu": 6,
-    "test_adadelta_weight_decay_maximize_cpu": 6,
-    "test_adagrad_cpu": 6,
-    "test_adagrad_cuda": 6,
-    "test_adagrad_initial_accumulator_value_weight_decay_cpu": 6,
-    "test_adagrad_initial_accumulator_value_weight_decay_cuda": 6,
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
-    "test_adagrad_lr_decay_weight_decay_cpu": 6,
-    "test_adagrad_lr_decay_weight_decay_cuda": 6,
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
-    "test_adagrad_tensor_lr_cpu": 6,
-    "test_adagrad_tensor_lr_cuda": 6,
-    "test_adagrad_tensor_lr_xpu": 6,
-    "test_adagrad_weight_decay_cpu": 6,
-    "test_adagrad_weight_decay_cuda": 6,
-    "test_adagrad_weight_decay_foreach_xpu": 2,
-    "test_adagrad_weight_decay_maximize_cpu": 6,
-    "test_adagrad_weight_decay_maximize_cuda": 6,
-    "test_adagrad_weight_decay_maximize_foreach_xpu": 2,
-    "test_adam_amsgrad_capturable_cuda": 6,
-    "test_adam_amsgrad_capturable_xpu": 6,
-    "test_adam_cpu": 6,
+    "test_rmsprop_foreach_weight_decay_cpu": 12,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
+    "test_adamw_amsgrad_capturable_foreach_cuda": 3,
+    "test_adamw_amsgrad_capturable_foreach_xpu": 3,
+    "test_adamw_amsgrad_capturable_cuda": 6,
+    "test_adamw_amsgrad_capturable_xpu": 6,
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": 6,
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
+    "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adam_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
     "test_adam_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adam_weight_decay_cpu": 6,
-    "test_adam_weight_decay_maximize_cpu": 6,
-    "test_adamax_cpu": 6,
-    "test_adamax_maximize_cpu": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
-    "test_adamax_weight_decay_cpu": 6,
-    "test_adamax_weight_decay_maximize_cpu": 6,
-    "test_adamw_amsgrad_capturable_cuda": 6,
-    "test_adamw_amsgrad_capturable_foreach_cuda": 3,
-    "test_adamw_amsgrad_capturable_foreach_xpu": 3,
-    "test_adamw_amsgrad_capturable_xpu": 6,
-    "test_adamw_cpu": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adamw_weight_decay_cpu": 6,
-    "test_adamw_weight_decay_maximize_cpu": 6,
-    "test_asgd_cpu": 3,
-    "test_asgd_lambd_cpu": 3,
-    "test_asgd_maximize_cpu": 3,
-    "test_asgd_recompile_single": 16,
-    "test_asgd_t0_cpu": 3,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
-    "test_asgd_weight_decay_cpu": 3,
-    "test_asgd_weight_decay_maximize_cpu": 3,
-    "test_nadam_cpu": 3,
-    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
-    "test_nadam_momentum_decay_cpu": 3,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_nadam_weight_decay_cpu": 5,
-    "test_nadam_weight_decay_maximize_cpu": 5,
-    "test_nadam_weight_decay_momentum_decay_cpu": 5,
-    "test_nadam_weight_decay_momentum_decay_decoupled_weight_decay_cpu": 5,
-    "test_radam_cpu": 7,
-    "test_radam_eps_cpu": 7,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_radam_weight_decay_cpu": 7,
-    "test_radam_weight_decay_decoupled_weight_decay_cpu": 7,
-    "test_radam_weight_decay_maximize_cpu": 7,
-    "test_rmsprop_cpu": 6,
-    "test_rmsprop_foreach_weight_decay_cpu": 12,
-    "test_rmsprop_maximize_cpu": 6,
-    "test_rmsprop_maximize_weight_decay_cpu": 6,
+    "test_adam_amsgrad_capturable_cuda": 6,
+    "test_adam_amsgrad_capturable_xpu": 6,
+    "test_adadelta_tensor_lr_capturable_cuda": 6,
+    "test_adadelta_tensor_lr_capturable_xpu": 6,
     "test_rmsprop_tensor_lr_capturable_cuda": 6,
     "test_rmsprop_tensor_lr_capturable_xpu": 6,
-    "test_rmsprop_weight_decay_centered_cpu": 6,
-    "test_rmsprop_weight_decay_cpu": 6,
-    "test_sgd_cpu": 4,
-    "test_sgd_cuda": 4,
-    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
+    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
+    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
+    "test_adadelta_foreach_weight_decay_cpu": 12,
     "test_sgd_foreach_momentum_weight_decay_cpu": 16,
+    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_dampening_foreach_xpu": 5,
     "test_sgd_momentum_foreach_cuda": 5,
     "test_sgd_momentum_foreach_xpu": 5,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": 2,
+    "test_sgd_weight_decay_maximize_cuda": 4,
+    "test_sgd_weight_decay_maximize_xpu": 4,
+    "test_sgd_weight_decay_maximize_cpu": 4,
+    "test_sgd_weight_decay_cpu": 4,
+    "test_sgd_weight_decay_cuda": 4,
+    "test_sgd_weight_decay_xpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_weight_decay_foreach_xpu": 2,
+    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
+    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": 2,
+    "test_sgd_cuda": 4,
+    "test_sgd_cpu": 4,
+    "test_sgd_xpu": 4,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
+    "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
+    "test_adagrad_weight_decay_foreach_xpu": 2,
+    "test_adagrad_weight_decay_maximize_foreach_xpu": 2,
+    "test_adagrad_tensor_lr_cpu": 6,
+    "test_adagrad_tensor_lr_cuda": 6,
+    "test_adagrad_tensor_lr_xpu": 6,
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
+    "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_xpu": 2,
-    "test_sgd_weight_decay_cpu": 4,
-    "test_sgd_weight_decay_cuda": 4,
-    "test_sgd_weight_decay_maximize_cpu": 4,
-    "test_sgd_weight_decay_maximize_cuda": 4,
-    "test_sgd_weight_decay_maximize_xpu": 4,
-    "test_sgd_weight_decay_xpu": 4,
-    "test_sgd_xpu": 4,
 }
 
 # also tracks currently supported optimizers
@@ -455,7 +484,7 @@ def make_test(
                 scheduler_eager.last_epoch = 1
 
             with torch.set_grad_enabled(False):
-                for i in range(2):
+                for _ in range(2):
                     compiled_step()
                     opt_eager.step()
                     if scheduler_cls:
@@ -679,7 +708,7 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=3, lr=0.01, foreach=False
+        ASGD, kernel_count=8, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
@@ -746,7 +775,7 @@ class CompiledOptimizerTests(TestCase):
 
             return step_list
 
-        compiled_training_loop = torch._dynamo.optimize("eager")(training_loop)
+        compiled_training_loop = torch.compile(training_loop, backend="eager")
         actual_steps = compiled_training_loop()
         expected_steps = training_loop()
         self.assertEqual(actual_steps, expected_steps)
@@ -842,7 +871,7 @@ class CompiledOptimizerTests(TestCase):
         def loop(opt, c):
             opt.step(c)
 
-        compiled_loop = torch._dynamo.optimize("eager")(loop)
+        compiled_loop = torch.compile(loop, backend="eager")
 
         compiled_loop(optimizer, closure)
         loop(optimizer_c, closure_c)
@@ -899,6 +928,46 @@ class CompiledOptimizerTests(TestCase):
         with fresh_inductor_cache():
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
+
+    @requires_cuda
+    def test_foreach_map_adam(self):
+        params = [
+            torch.rand(
+                1000, 1000, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            )
+            for _ in range(10)
+        ]
+
+        for param in params:
+            param.grad = torch.rand_like(param)
+
+        params_ref = [p.detach().clone().requires_grad_(True) for p in params]
+        for param, param_ref in zip(params, params_ref):
+            param_ref.grad = param.grad.detach().clone()
+
+        optimizer = torch.optim.Adam(params, capturable=True, foreach=True)
+        optimizer_ref = torch.optim.Adam(params_ref, capturable=True, foreach=True)
+
+        # warm up the optimizer state
+        optimizer.step()
+        optimizer_ref.step()
+
+        inps = get_inputs(optimizer)
+
+        @torch.compile()
+        def foreach_map_adam_step():
+            foreach_map_adam(*inps)
+
+        def loop():
+            foreach_map_adam_step()
+            optimizer_ref.step()
+
+        loop()
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        for param, param_ref in zip(params, params_ref):
+            self.assertEqual(param, param_ref)
 
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:

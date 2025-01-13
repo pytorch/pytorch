@@ -112,7 +112,7 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
-        self_ptr->opt_size(2).value() == other.size(2));
+        self_ptr->opt_size(2) == other.size(2));
     // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
     bool is_broadcastable_2d = (
         self_ptr->dim() == 2 &&

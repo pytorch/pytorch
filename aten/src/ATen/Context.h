@@ -4,6 +4,8 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/ROCmFABackend.h>
+#include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
@@ -117,6 +119,7 @@ class TORCH_API Context {
 
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -210,6 +213,9 @@ class TORCH_API Context {
   // the math SDP kernel, you can force your code to use flash kernels.
   // The math SDP kernel can be disabled by setting
   // at::globalContext().setUserEnabledMathSDP(false) flag.
+  void setSDPPriorityOrder(const std::vector<int64_t>& order);
+  std::array<at::SDPBackend, at::num_sdp_backends> sDPPriorityOrder();
+
   void setSDPUseFlash(bool);
   bool userEnabledFlashSDP() const;
 
@@ -233,6 +239,9 @@ class TORCH_API Context {
 
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
+
+  at::ROCmFABackend getROCmFAPreferredBackend() const;
+  void setROCmFAPreferredBackend(at::ROCmFABackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -309,7 +318,7 @@ class TORCH_API Context {
   //    }
 
   // Throws an error if `Context::deterministicAlgorithms()` is true
-  static void alertNotDeterministic(c10::string_view const& caller);
+  static void alertNotDeterministic(std::string_view const& caller);
 
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
@@ -343,6 +352,7 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
@@ -384,6 +394,11 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
+  std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
+      at::SDPBackend::flash_attention,
+      at::SDPBackend::efficient_attention,
+      at::SDPBackend::math,
+      at::SDPBackend::cudnn_attention};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -417,6 +432,10 @@ class TORCH_API Context {
 #endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
+  at::ROCmFABackend rocm_fa_preferred_backend =
+      c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
+      ? at::ROCmFABackend::Ck
+      : at::ROCmFABackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -527,6 +546,10 @@ inline bool hasOpenMP() {
 
 inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
 }
 
 inline bool hasLAPACK() {

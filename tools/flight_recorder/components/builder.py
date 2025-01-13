@@ -359,12 +359,18 @@ def build_collectives(
                 found_idx.clear()
                 found_ranks.clear()
                 mismatch[pg_name] += 1
-                logger.info(
-                    "We cannot decide what's wrong with this collective entry "
-                    "because we missed FR dumps from ranks (%s) so we don't have enough "
-                    "information. If you want to debug further use -j to dump all raw trace",
-                    str(expected_ranks - dumps_ranks),
-                )
+                if expected_ranks - dumps_ranks:
+                    logger.info(
+                        "We cannot decide what's wrong with this collective entry "
+                        "because we missed FR dumps from ranks (%s) so we don't have enough "
+                        "information. If you want to debug further use -j to dump all raw trace",
+                        str(expected_ranks - dumps_ranks),
+                    )
+                else:
+                    logger.info(
+                        "No errors found for this collective entry, There could be some "
+                        "other reasons why we see collective timeout."
+                    )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group

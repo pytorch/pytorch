@@ -6,17 +6,7 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, TypeVar
 
 import sympy
 
@@ -215,7 +205,7 @@ class LoopBody:
         # use the original symbol prefix
         # Can try to optimize if this is a bottleneck for compilation time
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="z"
+            iter_sizes, reduce_sizes, prefix="p"
         )
         new_body2 = LoopBody(
             new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -259,7 +249,7 @@ class LoopBody:
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="z"  # type: ignore[arg-type]
+            *new_sizes, prefix="p"  # type: ignore[arg-type]
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -500,11 +490,11 @@ class LoopBodyBlock:
             def bucketize(
                 self,
                 values: T,
-                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: T,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter: Optional[tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[T] = None,
             ) -> T:
                 """
@@ -562,7 +552,7 @@ class LoopBodyBlock:
             def scan(
                 dtype_proxy,
                 combine_fn: Callable[
-                    [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
+                    [tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]
                 ],
                 value_proxy,
             ):

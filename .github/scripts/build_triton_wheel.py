@@ -56,6 +56,7 @@ def build_triton(
     device: str = "cuda",
     py_version: Optional[str] = None,
     release: bool = False,
+    with_clang_ldd: bool = False,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
@@ -133,8 +134,9 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        if device == "cuda":
+        if with_clang_ldd:
             env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
+
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
@@ -176,18 +178,20 @@ def main() -> None:
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
+    parser.add_argument("--with-clang-ldd", action="store_true")
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
         device=args.device,
-        commit_hash=args.commit_hash
-        if args.commit_hash
-        else read_triton_pin(args.device),
+        commit_hash=(
+            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
+        ),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
         release=args.release,
+        with_clang_ldd=args.with_clang_ldd,
     )
 
 

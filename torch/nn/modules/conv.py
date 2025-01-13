@@ -89,7 +89,7 @@ class _ConvNd(Module):
         out_channels: int,
         kernel_size: Tuple[int, ...],
         stride: Tuple[int, ...],
-        padding: Tuple[int, ...],
+        padding: Union[str, Tuple[int, ...]],
         dilation: Tuple[int, ...],
         transposed: bool,
         output_padding: Tuple[int, ...],

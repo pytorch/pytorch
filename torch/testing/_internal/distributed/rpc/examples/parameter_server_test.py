@@ -112,7 +112,7 @@ def run_ps(trainers):
     torch.futures.wait_all(futs)
     stop = perf_counter()
     timed_log("Finish training")
-    timed_log(f"Time spent training: {stop-start}s")
+    timed_log(f"Time spent training: {stop - start}s")
 
 class ParameterServerTest(RpcAgentTestFixture):
 
