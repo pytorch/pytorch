@@ -2386,12 +2386,10 @@
   ],
   "torch.utils.data.datapipes.gen_pyi": [
     "Any",
-    "Dict",
-    "List",
-    "Set",
-    "Tuple",
     "Union",
-    "defaultdict"
+    "defaultdict",
+    "Path",
+    "deprecated"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",
