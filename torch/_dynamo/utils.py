@@ -515,18 +515,35 @@ class CompileEventLogger:
 
     @staticmethod
     def chromium(event_name: str, **metadata: object):
+        """
+        Add <metadata> to <event_name> in chromium. Each key/value of metadata will appear in the chromium trace.
+        <event_name> should be the name of a timed event span passed to `dynamo_timed`.
+        """
         CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.CHROMIUM, **metadata
         )
 
     @staticmethod
     def pt2_compile(event_name: str, **metadata: object):
+        """
+        Add <metadata> to <event_name> in chromium and PT2 Compile Events.
+        Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
+        a column in PT2 Compile Events, with the corresponding kwarg value.
+        <event_name> should be the name of a timed event span passed to `dynamo_timed`,
+        with log_to_pt2_compile_events=True.
+        """
         CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
         )
 
     @staticmethod
     def compilation_metric(**metadata: object):
+        """
+        Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
+        and chromium.
+        Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
+        a column in PT2 Compile Events and Dynamo Compile, with the corresponding kwarg value.
+        """
         CompileEventLogger.add_toplevel(
             CompileEventLogLevel.COMPILATION_METRIC, **metadata
         )
@@ -535,6 +552,10 @@ class CompileEventLogger:
     def instant(
         event_name: str, metadata: Dict[str, Any], time_ns: Optional[int] = None
     ):
+        """
+        Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
+        Perfetto will point to metadata. <time_ns> should be a value obtained from time.time_ns().
+        """
         CompileEventLogger.log_instant_event(
             event_name, metadata, time_ns, CompileEventLogLevel.CHROMIUM
         )
