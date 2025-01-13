@@ -1426,7 +1426,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("per_channel_quant", [True, False])
     @parametrize("reshape_a", [True, False])
-    @parametrize("dynamic", [True])
+    @parametrize("dynamic", [True, False])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
         self, has_bias, dtype, per_channel_quant, reshape_a, dynamic
     ):
