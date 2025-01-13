@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
 
 
 # using tools/ to optimize test run.
-REPO_ROOT = Path(__file__).absolute().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -182,7 +182,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/_tensor/test_attention",
+    "distributed/tensor/test_attention",
 ]
 
 # whitelist of tests for s390x
@@ -310,7 +310,6 @@ S390X_TESTLIST = [
     "inductor/test_coordinate_descent_tuner",
     "inductor/test_cpp_wrapper_hipify",
     "inductor/test_cpu_cpp_wrapper",
-    "inductor/test_cuda_cpp_wrapper",
     "inductor/test_cudagraph_trees",
     "inductor/test_cudagraph_trees_expandable_segments",
     "inductor/test_cuda_repro",
@@ -330,6 +329,7 @@ S390X_TESTLIST = [
     "inductor/test_fx_fusion",
     "inductor/test_graph_transform_observer",
     "inductor/test_group_batch_fusion",
+    "inductor/test_gpu_cpp_wrapper",
     "inductor/test_halide",
     "inductor/test_indexing",
     "inductor/test_inductor_freezing",
@@ -470,7 +470,6 @@ S390X_TESTLIST = [
     "test_type_promotion",
     "test_typing",
     "test_utils",
-    "test_utils_internal",
     "test_view_ops",
     "test_vulkan",
     "test_weak",
@@ -1782,6 +1781,7 @@ def get_selected_tests(options) -> List[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "inductor/test_mps_basic",
         ]
     else:
         # Exclude all mps tests otherwise

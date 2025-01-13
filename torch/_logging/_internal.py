@@ -7,13 +7,13 @@ import json
 import logging
 import os
 import os.path
+import pathlib
 import re
 import sys
 import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
@@ -768,7 +768,7 @@ def make_module_path_relative(abs_path):
     a relative path relative to one of the Python search paths.
     """
 
-    abs_path = Path(abs_path).absolute()
+    abs_path = pathlib.Path(abs_path).resolve()
 
     for path in sys.path:
         try:
