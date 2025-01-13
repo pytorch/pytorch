@@ -6,6 +6,7 @@ import math
 import random
 import unittest
 import warnings
+import shutil
 import subprocess
 import tempfile
 import os
@@ -8604,47 +8605,44 @@ class TestLogical(TestCaseMPS):
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
 
-    def test_min_max(self):
-        def helper(dtype):
-            for _ in range(10):
-                if dtype == torch.float32 or dtype == torch.float16:
-                    x = torch.randn((30, 15), device='mps', dtype=dtype)
-                else:
-                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
-                x_cpu = x.to("cpu")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool])
+    def test_min_max(self, dtype):
+        for _ in range(10):
+            if dtype == torch.float32 or dtype == torch.float16:
+                x = torch.randn((30, 15), device='mps', dtype=dtype)
+            else:
+                x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+            x_cpu = x.to("cpu")
 
-                y = x.max()
-                y_cpu = x_cpu.max()
-                self.assertEqual(y, y_cpu)
+            y = x.max()
+            y_cpu = x_cpu.max()
+            self.assertEqual(y, y_cpu)
 
-                z = x.min()
-                z_cpu = x_cpu.min()
-                self.assertEqual(z, z_cpu)
+            z = x.min()
+            z_cpu = x_cpu.min()
+            self.assertEqual(z, z_cpu)
 
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
+    @parametrize("dtype", [torch.float32, torch.float16] + ([torch.bfloat16] if MACOS_VERSION >= 14.0 else []))
+    def test_min_max_nan_propagation(self, dtype):
+        cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu", dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
 
-    def test_min_max_nan_propagation(self):
-        def helper(dtype):
-            cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu")
-            mps_x = cpu_x.detach().clone().to('mps')
+        cpu_max = torch.max(cpu_x)
+        mps_max = torch.max(mps_x).to('cpu')
 
-            cpu_max = torch.max(cpu_x)
-            mps_max = torch.max(mps_x).to('cpu')
+        cpu_amax = torch.amax(cpu_x)
+        mps_amax = torch.amax(mps_x).to('cpu')
 
-            cpu_amax = torch.amax(cpu_x)
-            mps_amax = torch.amax(mps_x).to('cpu')
+        cpu_min = torch.min(cpu_x)
+        mps_min = torch.min(mps_x).to('cpu')
 
-            cpu_min = torch.min(cpu_x)
-            mps_min = torch.min(mps_x).to('cpu')
+        cpu_amin = torch.amin(cpu_x)
+        mps_amin = torch.amin(mps_x).to('cpu')
 
-            cpu_amin = torch.amin(cpu_x)
-            mps_amin = torch.amin(mps_x).to('cpu')
-
-            self.assertEqual(cpu_max, mps_max)
-            self.assertEqual(cpu_amax, mps_amax)
-            self.assertEqual(cpu_min, mps_min)
-            self.assertEqual(cpu_amin, mps_amin)
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.bfloat16]]
+        self.assertEqual(cpu_max, mps_max)
+        self.assertEqual(cpu_amax, mps_amax)
+        self.assertEqual(cpu_min, mps_min)
+        self.assertEqual(cpu_amin, mps_amin)
 
     def test_isin(self):
         def helper(dtype):
@@ -8688,6 +8686,17 @@ class TestLogical(TestCaseMPS):
         D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, 'Expected elements.is_mps()*'):
             out = torch.isin(C, D)
+
+    @parametrize("dtype", [torch.int32, torch.int64, torch.int16, torch.int8, torch.uint8, torch.bool])
+    def test_shifts(self, dtype):
+        x = make_tensor(256, device="mps", dtype=dtype)
+        if dtype is not torch.bool:
+            x[3] = torch.iinfo(dtype).max
+            x[5] = torch.iinfo(dtype).min
+        x_cpu = x.cpu()
+        self.assertEqual((x >> 3).cpu(), x_cpu >> 3)
+        self.assertEqual((x << 1).cpu(), x_cpu << 1)
+
 
 class TestSmoothL1Loss(TestCaseMPS):
 
@@ -12688,6 +12697,24 @@ class TestMetalLibrary(TestCaseMPS):
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
 
+    @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
+    def test_metal_capture(self):
+        lib = torch.mps._compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
+        mps_tensor = torch.rand(32, device="mps")
+        capture_name = f"lib_full{''.join(random.choice('0123456789') for i in range(5))}"
+        capture_dirname = f"0000-{capture_name}.gputrace"
+        if os.path.exists(capture_dirname):
+            shutil.rmtree(capture_dirname)
+        with torch.mps.profiler.metal_capture(capture_name):
+            self.assertTrue(torch.mps.profiler.is_capturing_metal())
+            lib.full(mps_tensor)
+        self.assertEqual(mps_tensor.sum().item(), 32.0)
+        self.assertTrue(os.path.exists(capture_dirname), f"Capture file {capture_dirname} has not been generated")
+        capture_listdir = os.listdir(capture_dirname)
+        shutil.rmtree(capture_dirname)
+        self.assertGreater(len(capture_listdir), 3,
+                           f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
@@ -12697,6 +12724,7 @@ instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 
 if __name__ == "__main__":

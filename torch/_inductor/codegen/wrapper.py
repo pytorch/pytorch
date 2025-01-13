@@ -21,7 +21,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -75,7 +74,7 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = Tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
@@ -187,7 +186,7 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 # TODO: Move to a well known place
 TritonMetaParams = Dict[str, int]
 TritonGrid = Union[
-    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+    tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], tuple[int, ...]]
 ]
 
 
@@ -196,7 +195,7 @@ def user_defined_kernel_grid_fn_code(
     configs: List[triton.Config],  # type: ignore[name-defined]
     grids: List[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     output = IndentedBuffer()
 
     def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
@@ -663,7 +662,7 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: OrderedSet[Tuple[str, GraphLowering]] = OrderedSet()
+        self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -674,7 +673,7 @@ class PythonWrapperCodegen(CodeGen):
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
+        self.user_defined_kernel_cache: Dict[tuple[Any, ...], tuple[str, Any]] = {}
         self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
