@@ -136,6 +136,16 @@ class BaseListVariable(VariableTracker):
                 [self] + list(args),
                 kwargs,
             )
+        elif name == "__eq__":
+            left = self
+            right = args[0]
+            if not isinstance(left, BaseListVariable) and not isinstance(
+                right, BaseListVariable
+            ):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
+                tx, [variables.BuiltinVariable(operator.eq), left, right], {}
+            )
 
         return super().call_method(tx, name, args, kwargs)
 

@@ -208,13 +208,6 @@ def object_ne(self, other):
 
 
 def cmp_eq(a, b):
-    if isinstance(a, (list, tuple)):
-        if type(a) is not type(b):
-            return NotImplemented
-        if len(a) != len(b):
-            return False
-        return all(cmp_eq(x, y) for x, y in zip(a, b))
-
     # Note that the commented `is` check should ideally be removed. This is a
     # CPython optimization that skips the __eq__ checks it the obj id's are
     # same. But, these lines adds many `is` nodes in the Fx graph for

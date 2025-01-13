@@ -414,12 +414,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             name == "__eq__"
             and len(args) == 1
             and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
             and not kwargs
         ):
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
             other = args[0]
-            if type(self) is not type(other):
+            if not issubclass(type(self), type(other)) and not issubclass(
+                type(other), type(self)
+            ):
                 return variables.ConstantVariable.create(NotImplemented)
-            if not other.is_python_constant():
+            if (
+                not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
                 unimplemented(f"call_method {self} {name} {args} {kwargs}")
             return variables.ConstantVariable.create(
                 self.as_python_constant() == other.as_python_constant()
