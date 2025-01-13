@@ -984,7 +984,7 @@ def main() -> None:
             )
 
     if options.output_dependencies:
-        depfile_path = Path(options.output_dependencies).absolute()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 
