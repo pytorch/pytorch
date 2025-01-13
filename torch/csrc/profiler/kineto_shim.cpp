@@ -214,7 +214,7 @@ class ExperimentalConfigWrapper {
 } // namespace
 
 bool collectivesProfilerExists() {
-#ifdef KINETO_HAS_NCCL_PROFILER
+#if defined(KINETO_HAS_NCCL_PROFILER) || defined(KINETO_HAS_HCCL_PROFILER)
   return true;
 #else
   return false;
