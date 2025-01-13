@@ -119,8 +119,8 @@ class TORCH_API CppFunction final {
       : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f)),
         cpp_signature_(c10::impl::CppSignature::make<Func>()),
         schema_(
-            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>()),
-        debug_() {}
+            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
+        {}
 
   /// This overload accepts compile time function pointers, e.g.,
   /// `CppFunction(TORCH_FN(add_impl))`
@@ -134,8 +134,8 @@ class TORCH_API CppFunction final {
         cpp_signature_(
             c10::impl::CppSignature::make<typename FuncPtr::FuncType>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                typename FuncPtr::FuncType>()),
-        debug_() {}
+                typename FuncPtr::FuncType>())
+        {}
 
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) {
   /// ... })`
@@ -149,8 +149,8 @@ class TORCH_API CppFunction final {
             std::forward<Lambda>(f))),
         cpp_signature_(c10::impl::CppSignature::make<Lambda>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                std::decay_t<Lambda>>()),
-        debug_() {}
+                std::decay_t<Lambda>>())
+        {}
 
 #if defined C10_MOBILE
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl,

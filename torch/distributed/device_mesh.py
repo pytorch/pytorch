@@ -5,7 +5,7 @@ import math
 import threading
 from functools import reduce
 from itertools import chain
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -68,12 +68,12 @@ else:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[C10dBackend.Options]]
+                int, tuple[str, Optional[C10dBackend.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
             self.flatten_name_to_root_dims: Dict[
-                DeviceMesh, Dict[str, Tuple[int, ...]]
+                DeviceMesh, Dict[str, tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
@@ -84,8 +84,8 @@ else:
         def create_sub_mesh(
             self,
             device_mesh: "DeviceMesh",
-            submesh_dim_names: Tuple[str, ...],
-            submesh_dims: List[Tuple[int, ...]],
+            submesh_dim_names: tuple[str, ...],
+            submesh_dims: List[tuple[int, ...]],
         ) -> "DeviceMesh":
             # Get the submesh dim size from the submesh_dims.
             # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
@@ -286,7 +286,7 @@ else:
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
-        ) -> List[Tuple[int, ...]]:
+        ) -> List[tuple[int, ...]]:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -418,14 +418,14 @@ else:
 
         device_type: str
         mesh: torch.Tensor
-        mesh_dim_names: Optional[Tuple[str, ...]]
+        mesh_dim_names: Optional[tuple[str, ...]]
 
         def __init__(
             self,
             device_type: str,
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
             _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
@@ -498,7 +498,7 @@ else:
             # TODO(yifu): remove tag and ranks once we fully migrate to native
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: List[Tuple[str, List[int], str]] = []
+            dim_group_infos: List[tuple[str, List[int], str]] = []
             default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
@@ -657,7 +657,7 @@ else:
                 )
 
         def __getitem__(
-            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+            self, mesh_dim_names: Union[str, tuple[str, ...]]
         ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
@@ -790,7 +790,7 @@ else:
             device_type: str,
             mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
-            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            mesh_dim_names: Optional[tuple[str, ...]] = None,
         ) -> "DeviceMesh":
             """
             Constructs a :class:`DeviceMesh` with ``device_type`` from an
@@ -859,7 +859,7 @@ else:
             return self.mesh.ndim
 
         @property
-        def shape(self) -> Tuple[int, ...]:
+        def shape(self) -> tuple[int, ...]:
             return tuple(self.mesh.shape)
 
         def get_rank(self) -> int:
@@ -939,9 +939,9 @@ else:
 
     def init_device_mesh(
         device_type: str,
-        mesh_shape: Tuple[int, ...],
+        mesh_shape: tuple[int, ...],
         *,
-        mesh_dim_names: Optional[Tuple[str, ...]] = None,
+        mesh_dim_names: Optional[tuple[str, ...]] = None,
     ) -> DeviceMesh:
         """
         Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.

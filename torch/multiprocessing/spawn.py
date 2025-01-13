@@ -194,7 +194,7 @@ class ProcessContext:
                 except ValueError:
                     name = f"<Unknown signal {-exitcode}>"
                 raise ProcessExitedException(
-                    "process %d terminated with signal %s" % (error_index, name),
+                    f"process {error_index:d} terminated with signal {name}",
                     error_index=error_index,
                     error_pid=failed_process.pid,
                     exit_code=exitcode,
@@ -202,7 +202,7 @@ class ProcessContext:
                 )
             else:
                 raise ProcessExitedException(
-                    "process %d terminated with exit code %d" % (error_index, exitcode),
+                    f"process {error_index:d} terminated with exit code {exitcode:d}",
                     error_index=error_index,
                     error_pid=failed_process.pid,
                     exit_code=exitcode,
@@ -210,7 +210,7 @@ class ProcessContext:
 
         with open(self.error_files[error_index], "rb") as fh:
             original_trace = pickle.load(fh)
-        msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
+        msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
 

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
+from torch.utils._ordered_set import OrderedSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -52,7 +53,7 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
+    constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
 
@@ -205,7 +206,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
 
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
-        unique_idxs = set(static_input_idxs)
+        unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
         mutation_indices = [
             idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs
@@ -291,7 +292,7 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    fn_cache: Dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1

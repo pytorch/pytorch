@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import atexit
 import functools
 import logging
 import os
@@ -8,7 +9,7 @@ import sys
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -31,6 +32,7 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -90,9 +92,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
-
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[SubprocPool] = set()
+_pool_set = OrderedSet[SubprocPool]()
 
 
 def shutdown_compile_workers() -> None:
@@ -167,7 +168,7 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def _use_process_pool(self):
+    def use_process_pool(self):
         return (
             get_compile_threads() > 1
             and self.process_pool().ready_future.done()  # type: ignore[attr-defined]
@@ -184,10 +185,8 @@ class AsyncCompile:
             )
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self._use_process_pool():
-            set_feature_use(
-                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", True
-            )
+        if self.use_process_pool():
+            set_feature_use("parallel_compile_post_warmup", True)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -201,9 +200,7 @@ class AsyncCompile:
                 ),
             )
         else:
-            set_feature_use(
-                "pytorch/inductor:enable_parallel_compile_version (post_warmup)", False
-            )
+            set_feature_use("parallel_compile_post_warmup", False)
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
@@ -327,3 +324,10 @@ if (
     pass
 else:
     AsyncCompile.warm_pool()
+
+# On exit give the workers a chance to clean themselves up. Without this the
+# resource_tracker can complain about leaked semaphores coming from the
+# ProcessPoolExecutor:
+#   UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects
+#   to clean up at shutdown
+atexit.register(shutdown_compile_workers)
