@@ -2324,7 +2324,7 @@ def gen_source_files(
 
         def register_dispatch_key_env_callable(
             gnf: NativeFunction | NativeFunctionsGroup,
-        ) -> Dict[str, list[str]]:
+        ) -> dict[str, list[str]]:
             return {
                 "dispatch_definitions": get_native_function_definitions(
                     fm=fm,  # noqa: F821
