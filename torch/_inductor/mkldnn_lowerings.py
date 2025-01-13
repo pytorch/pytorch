@@ -549,13 +549,26 @@ def register_onednn_fusion_ops():
             choices: List[ChoiceCaller] = []
 
             if use_max_autotune():
+                # NOTE: since vector weight scale is supported with oneDNN qlinear in PyTorch,
+                # we are able to support the case of per-token quantized activation & per-channel quantized weights
+                # if x_zp is not present in a pattern, since in that case, we can apply the actual scale of x
+                # after oneDNN qlinear in a replacement pattern. This is being done for a smoothquant pattern.
+                # Inductor codegen is able to make it an epilogue fusion.
+                # We don't support the case of per-token quantized activation with oneDNN qlinear if
+                # the activation is quantized asymmetrically, or if the per-token quantized activation is
+                # quantized symmetrically but still has a corresponding zero-points tensor,
+                # which would be all zeros in case of int8).
+
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
 
                 def _is_sym_quantized_wgt():
                     # weight zero point may not be a ConstantBuffer, but a computeBuffer instead.
-                    # but it is empty/dummy, which means the weight is symmetrically quantized.
+                    # That may happen if it's dummy.
+                    # In some Inductor pattern, we may insert a dummy weight zero-point even if it doesn't exist
+                    # just because oneDNN qlinear has a w_zp parameter.
+                    # If it is empty/dummy, then we can be sure that the weight is symmetrically quantized.
                     # We've already established by now that packed weights are int8, so if w_zp is not dummy,
                     # then all its values must be zeros if weights are int8 symmetrically quantized.
                     nonlocal w_zp
@@ -585,15 +598,6 @@ def register_onednn_fusion_ops():
                     # We can support the provided activation if:
                     # 1. if x_zp is dummy (empty tensor) created to match an Inductor pattern
                     # 2. If the activation is per-tensor quantized (x may even be uint8 in that case).
-                    # NOTE: since vector weight scale is supported with oneDNN qlinear in PyTorch,
-                    # we are able to support the case of per-token quantized activation & per-channel quantized weights
-                    # if x_zp is not present in a pattern, since in that case, we can apply the actual scale of x
-                    # after oneDNN qlinear in a replacement pattern. This is being done for a smoothquant pattern.
-                    # Inductor codegen is able to make it an epilogue fusion.
-                    # We don't support the case of per-token quantized activation with oneDNN qlinear if
-                    # the activation is quantized asymmetrically, or if the per-token quantized activation is
-                    # quantized symmetrically but still has a corresponding zero-points tensor,
-                    # which would be all zeros in case of int8).
                     nonlocal x_zp
                     if (
                         isinstance(
@@ -634,9 +638,9 @@ def register_onednn_fusion_ops():
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
-                        x_zp_loader = x_zp.make_loader()
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
+                        x_zp_loader = x_zp.make_loader()
                         nonlocal bias
                         bias_loader = None
                         if bias is not None:
@@ -650,8 +654,8 @@ def register_onednn_fusion_ops():
                             input = ops.to_dtype(input, torch.float32)
                             weight_compens_index = (index[-1],)
                             _x_scale = x_scale_loader(())
-                            _w_scale = w_scale_loader(weight_compens_index)
                             _x_zp = x_zp_loader(())
+                            _w_scale = w_scale_loader(weight_compens_index)
                             _weight_compo = weight_compens_loader(weight_compens_index)
 
                             # Step 1: Compute int8xint8->int32 GEMM & then apply compensation
