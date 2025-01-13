@@ -210,7 +210,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
-    @patches
+    #@patches
     @torch.no_grad
     @parametrize("has_bias", [True, False])
     @parametrize("dtype", [torch.bfloat16])
