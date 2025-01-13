@@ -70,6 +70,10 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
+class EmptyGraph(SkipFrame):
+    pass
+
+
 class TorchRuntimeError(TorchDynamoException):
     pass
 
@@ -210,6 +214,10 @@ class SkipCodeRecursiveException(TorchDynamoException):
 
 
 class RecompileLimitExceeded(Unsupported):
+    pass
+
+
+class SkipFrameRecursiveException(TorchDynamoException):
     pass
 
 

@@ -559,6 +559,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static PyObject* skip_code_recursive_flag;
 static PyObject* cache_limit_hit_flag;
+static PyObject* skip_frame_recursive_flag;
 bool is_skip_guard_eval_unsafe = false;
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
@@ -766,6 +767,18 @@ static PyObject* dynamo__custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
     set_extra_state_cache_limit_hit(extra, true);
+    PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
+    return r;
+  } else if (result == skip_frame_recursive_flag) {
+    // Dynamo returned skip_frame_recursive_flag, so we should recursively skip
+    // frame, but only for this frame, NOT the code object.
+    // The difference from skip_code_recursive_flag is that when we attempt to
+    // trace the code object again, skip_code_recursive_flag will cause Dynamo
+    // to skip tracing, whereas with skip_frame_recursive_flag, we will attempt
+    // to trace again.
+    DEBUG_TRACE("skip frame recursive %s", get_frame_name(frame));
     PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -1039,6 +1052,16 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   }
   if (PyModule_AddObject(
           module, "cache_limit_hit_flag", cache_limit_hit_flag) != 0) {
+    return NULL;
+  }
+
+  skip_frame_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (skip_frame_recursive_flag == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(
+          module, "skip_frame_recursive_flag", skip_frame_recursive_flag) !=
+      0) {
     return NULL;
   }
 

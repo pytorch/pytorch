@@ -83,6 +83,7 @@ from .exc import (
     RecompileLimitExceeded,
     ShortenTraceback,
     SkipCodeRecursiveException,
+    SkipFrameRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -785,6 +786,10 @@ def _compile(
                 )
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
+                if isinstance(e, exc.EmptyGraph):
+                    # Signal to Dynamo eval frame to skip the current frame and any recursive calls.
+                    # Future invocations of the code object will still be traced.
+                    raise SkipFrameRecursiveException from e
                 return None
 
         assert (
@@ -1040,6 +1045,8 @@ def _compile(
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
                     ShortenTraceback,
+                    SkipCodeRecursiveException,
+                    SkipFrameRecursiveException,
                 ),
             ):
                 raise
@@ -1172,13 +1179,7 @@ class ConvertFrame:
         hooks: Hooks,
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
-    ) -> Optional[
-        Union[
-            GuardedCode,
-            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
-            torch._C._dynamo.eval_frame.CacheLimitHitFlag,
-        ]
-    ]:
+    ) -> Optional[GuardedCode]:
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1251,15 +1252,6 @@ class ConvertFrame:
                 log.info(error_msg, exc_info=True)
             else:
                 log.warning(error_msg, exc_info=True)
-
-            # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
-            # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
-            if isinstance(e, SkipCodeRecursiveException):
-                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
-            elif isinstance(e, RecompileLimitExceeded):
-                # signal to Dynamo to run this frame on run-only mode, skipping recursively if
-                # no valid cache entry is found.
-                return torch._C._dynamo.eval_frame.cache_limit_hit_flag
 
         return None
 
@@ -1334,7 +1326,14 @@ class CatchErrorsWrapper:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
-    ) -> Optional[GuardedCode]:
+    ) -> Optional[
+        Union[
+            GuardedCode,
+            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
+            torch._C._dynamo.eval_frame.CacheLimitHitFlag,
+            torch._C._dynamo.eval_frame.SkipFrameRecursiveFlag,
+        ]
+    ]:
         assert frame_state is not None
 
         is_skipfile = trace_rules.check(frame.f_code)
@@ -1395,11 +1394,30 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
-        with compile_lock, _disable_current_modes():
-            # skip=1: skip this frame
-            return self._torchdynamo_orig_callable(
-                frame, cache_entry, self.hooks, frame_state, skip=1
-            )
+        try:
+            with compile_lock, _disable_current_modes():
+                # skip=1: skip this frame
+                return self._torchdynamo_orig_callable(
+                    frame, cache_entry, self.hooks, frame_state, skip=1
+                )
+        except Exception as e:
+            # top-level convert_frame exception handler to handle flags to pass back to
+            # Dynamo eval frame
+            if isinstance(e, SkipCodeRecursiveException):
+                # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
+                # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+                # Future invocations of the code object will also be skipped recursively
+                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+            elif isinstance(e, RecompileLimitExceeded):
+                # signal to Dynamo to run this frame on run-only mode, skipping recursively if
+                # no valid cache entry is found.
+                return torch._C._dynamo.eval_frame.cache_limit_hit_flag
+            elif isinstance(e, SkipFrameRecursiveException):
+                # If we encounter SkipFrameRecursive, return skip_frame_recursive_flag
+                # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+                # Future invocations of the code object will still be traced.
+                return torch._C._dynamo.eval_frame.skip_frame_recursive_flag
+            raise
 
 
 def catch_errors_wrapper(
