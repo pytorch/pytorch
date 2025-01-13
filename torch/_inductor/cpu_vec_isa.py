@@ -184,7 +184,7 @@ class VecSVE256(VecISA):
 
 
 @dataclasses.dataclass
-class VecSVE_BF16(VecSVE):
+class VecSVE_BF16(VecSVE256):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
     _macro = [
