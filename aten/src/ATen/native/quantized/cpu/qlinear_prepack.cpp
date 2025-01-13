@@ -302,7 +302,7 @@ inline at::Tensor pack_weight_to_onednn_tensor(
       wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_itensor_onednn(
       std::move(expected_weight),
       c10::optTypeMetaToScalarType(weight.options().dtype_opt()),
       weight.options().device_opt());
@@ -320,7 +320,7 @@ inline at::Tensor pack_weight_to_fp16_onednn_tensor(
   auto expected_weight = wei.transpose(0, 1); // oneDNN requires transposed weight
   // Onednn does not support f32f16f32 matmul, so we need to convert weight to f32 before compute
   // Therefore, we just return weight in plain format
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_itensor_onednn(
       std::move(expected_weight),
       c10::kHalf,
       weight.options().device_opt());

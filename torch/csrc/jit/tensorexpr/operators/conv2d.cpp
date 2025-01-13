@@ -335,12 +335,12 @@ bool mkldnnPrepackedConvIsSupported(
   }
 
   // Do not rewrite for cases where native is faster than mkldnn
-  // Conditions are from: aten/src/ATen/native/Convolution.cpp:use_mkldnn
-  bool use_mkldnn = groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
+  // Conditions are from: aten/src/ATen/native/Convolution.cpp:use_onednn
+  bool use_onednn = groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
       input.dims[0] > 1 ||
       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480;
-  GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_mkldnn);
-  return use_mkldnn;
+  GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_onednn);
+  return use_onednn;
 #endif
   return false;
 }

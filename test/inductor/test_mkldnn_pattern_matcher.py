@@ -152,13 +152,13 @@ class TestPatternMatcherBase(TestCase):
         torch._dynamo.reset()
         if (
             check_autocast == torch.bfloat16
-            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            and torch.ops.mkldnn._is_onednn_bf16_supported()
         ):
             maybe_autocast = torch.cpu.amp.autocast(dtype=torch.bfloat16)
             atol, rtol = 1e-2, 1e-2
         elif (
             check_autocast == torch.float16
-            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            and torch.ops.mkldnn._is_onednn_fp16_supported()
         ):
             maybe_autocast = torch.cpu.amp.autocast(dtype=torch.float16)
             atol, rtol = 1e-2, 1e-2
@@ -244,9 +244,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
@@ -336,9 +336,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.unary_fn(x)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
@@ -404,9 +404,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         v = torch.randn(4, 32, 1, 128)
 
         dtypes = [torch.float]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
 
         for dtype in dtypes:
@@ -449,9 +449,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.unary_fn(a), self.unary_fn(b)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, dtypes)
         for unary_fn, dtype in options:
@@ -524,9 +524,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
 
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
@@ -613,9 +613,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
@@ -704,9 +704,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
@@ -786,9 +786,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return x
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
@@ -843,9 +843,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return x
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
@@ -905,9 +905,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
 
         def matcher_check_fn():
@@ -3130,7 +3130,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
         dtypes = [torch.float32]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
         for dtype in dtypes:
             linear_op = (
@@ -3335,9 +3335,9 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
 
         def matcher_check_fn():

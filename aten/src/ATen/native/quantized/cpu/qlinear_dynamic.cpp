@@ -635,7 +635,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
   auto src = at::native::itensor_from_tensor(input_contig);
-  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  auto packed_weight = at::native::itensor_from_onednn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
 
   auto output_size = input.sizes().vec();

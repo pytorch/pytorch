@@ -9,30 +9,30 @@
 namespace at {
 namespace native {
 
-void mkldnn_matmul(
+void onednn_matmul(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result,
     float beta,
     float alpha) {
-  TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_matmul: ATen not compiled with MKLDNN support");
 }
 
-bool use_mkldnn_bf16_matmul(
+bool use_onednn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt){
   return false;
 }
 
-bool use_mkldnn_fp16_matmul(
+bool use_onednn_fp16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt){
   return false;
 }
 
-bool mkldnn_bf16_gemm(
+bool onednn_bf16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -43,7 +43,7 @@ bool mkldnn_bf16_gemm(
   return false;
 }
 
-bool mkldnn_fp16_gemm(
+bool onednn_fp16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -53,7 +53,7 @@ bool mkldnn_fp16_gemm(
     c10::Half *c, int64_t ldc) {
   return false;
 }
-bool mkldnn_bf32_gemm(
+bool onednn_bf32_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -64,21 +64,21 @@ bool mkldnn_bf32_gemm(
       return false;
     }
 
-bool use_mkldnn_bf32_matmul(
+bool use_onednn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
     return false;
 }
 
-bool use_mkldnn_matmul(
+bool use_onednn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
     return false;
 }
 
-void mkldnn_matmul_i8i8i32(
+void onednn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -95,16 +95,16 @@ void mkldnn_matmul_i8i8i32(
 
 namespace at::native {
 
-static bool use_mkldnn_bf16_matmul() {
-  return at::globalContext().userEnabledMkldnn() && mkldnn_bf16_device_check();
+static bool use_onednn_bf16_matmul() {
+  return at::globalContext().userEnabledOnednn() && onednn_bf16_device_check();
 }
 
-static bool use_mkldnn_fp16_matmul() {
-  return at::globalContext().userEnabledMkldnn() && mkldnn_fp16_device_check();
+static bool use_onednn_fp16_matmul() {
+  return at::globalContext().userEnabledOnednn() && onednn_fp16_device_check();
 }
 
-static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32MatmulPrecision() == at::Float32MatmulPrecision::MEDIUM;
+static bool use_onednn_bf32_matmul() {
+  return use_onednn_bf16_matmul() && at::globalContext().float32MatmulPrecision() == at::Float32MatmulPrecision::MEDIUM;
 }
 
 
@@ -114,7 +114,7 @@ inline typename std::enable_if_t<
     std::is_same_v<scalar_t, c10::Half> ||
     std::is_same_v<scalar_t, c10::BFloat16>,
     bool>
-mkldnn_gemm(
+onednn_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -122,9 +122,9 @@ mkldnn_gemm(
     const scalar_t *b_data, int64_t ldb,
     float beta,
     scalar_t *c_data, int64_t ldc) {
-  bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
-  bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
-  bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
+  bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_onednn_bf16_matmul();
+  bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_onednn_fp16_matmul();
+  bool bf32_usable = std::is_same_v<scalar_t, float> && use_onednn_bf32_matmul();
   if ( !(bf16_usable || fp16_usable || bf32_usable) ||
       (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
@@ -190,7 +190,7 @@ mkldnn_gemm(
   return true;
 }
 
-bool mkldnn_bf16_gemm(
+bool onednn_bf16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -198,10 +198,10 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
-  return mkldnn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return onednn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-bool mkldnn_fp16_gemm(
+bool onednn_fp16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -209,10 +209,10 @@ bool mkldnn_fp16_gemm(
     const c10::Half *b, int64_t ldb,
     float beta,
     c10::Half *c, int64_t ldc) {
-  return mkldnn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return onednn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-bool mkldnn_bf32_gemm(
+bool onednn_bf32_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -220,10 +220,10 @@ bool mkldnn_bf32_gemm(
     const float *b, int64_t ldb,
     float beta,
     float *c, int64_t ldc){
-      return mkldnn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      return onednn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
     }
 
-void mkldnn_matmul(
+void onednn_matmul(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result,
@@ -233,18 +233,18 @@ void mkldnn_matmul(
               (mat1.dim() == 3 && mat2.dim() == 3) || // aten::bmm, aten::baddbmm
               (mat1.dim() == 2 && mat2.dim() == 1) || // aten::mv
               (mat1.dim() == 1 && mat2.dim() == 1),  // aten::dot
-              "mkldnn_matmul:  unsupported dims for mat and mat2");
+              "onednn_matmul:  unsupported dims for mat and mat2");
 
 #if defined(__aarch64__)
   // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
   // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
   TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
               ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+              "onednn_matmul:  only enabled for fp32 and bf16 path");
   // device needs to support bf16 if the inputs are of bf16 type
   if (mat1.scalar_type() == at::kBFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
-                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+    TORCH_CHECK(onednn_bf16_device_check_arm(),
+                "onednn_matmul: onednn_matmul bf16 path needs a cpu with bf16 support");
   }
 #else
   TORCH_CHECK(
@@ -253,23 +253,23 @@ void mkldnn_matmul(
        mat1.scalar_type() == at::kFloat) &&
           mat2.scalar_type() == mat1.scalar_type() &&
           result.scalar_type() == mat1.scalar_type(),
-      "mkldnn_matmul:  only enabled for bf16 and fp16 path");
+      "onednn_matmul:  only enabled for bf16 and fp16 path");
   if (mat1.scalar_type() == at::kBFloat16 || mat1.scalar_type() == at::kFloat) {
     TORCH_CHECK(
-        mkldnn_bf16_device_check(),
-        "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
+        onednn_bf16_device_check(),
+        "onednn_matmul: onednn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
   } else {
     TORCH_INTERNAL_ASSERT(mat1.scalar_type() == at::kHalf);
     TORCH_CHECK(
-        mkldnn_fp16_device_check(),
-        "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
+        onednn_fp16_device_check(),
+        "onednn_matmul: onednn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 #endif
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
-  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_onednn_bf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
@@ -281,7 +281,7 @@ void mkldnn_matmul(
   if (alpha == 0)
     return;
 
-  auto is_mkldnn_optimized_format = [&](const Tensor& t) {
+  auto is_onednn_optimized_format = [&](const Tensor& t) {
     if (t.is_contiguous()) return true;
     const auto sizes = t.sizes();
     const auto strides = t.strides();
@@ -295,13 +295,13 @@ void mkldnn_matmul(
 
   // Mkldnn only optimized for contiguous or transposed (transpose last 2 dim if 3-D tensor) format now
   // Will remove this "contiguous" after mkldnn have fully supported
-  Tensor mat1_ = is_mkldnn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
-  Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
+  Tensor mat1_ = is_onednn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
+  Tensor mat2_ = is_onednn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
   // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
   mat1_ = may_convert_to_default_contiguous_strides(mat1_);
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
-  // mkldnn_matmul only proceed CPU tensor
+  // onednn_matmul only proceed CPU tensor
   const ideep::tensor x = itensor_view_from_dense(mat1_);
   const ideep::tensor w = itensor_view_from_dense(mat2_);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
@@ -327,32 +327,32 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
-  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  static const int64_t onednn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
-    return mat1.size(0) > mkldnn_gemm_min_size;
+    return mat1.size(0) > onednn_gemm_min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 1) {
     // aten::mv
-    return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) > onednn_gemm_min_size;
   } else if (mat2.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
-    return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat2.size(1) > onednn_gemm_min_size;
   } else {
     // aten::bmm, aten::baddbmm
-    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > onednn_gemm_min_size;
   }
 }
 
-bool use_mkldnn_bf16_matmul(
+bool use_onednn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
 #if defined(__aarch64__)
-  if (mkldnn_bf16_device_check_arm()) {
+  if (onednn_bf16_device_check_arm()) {
      //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+     //so, don't restrict the onednn_matmul only for bf16 inputs, allow it for float as well
      return (
-        use_mkldnn_bf16_matmul() &&
+        use_onednn_bf16_matmul() &&
         (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
         ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
         mat1.numel() != 0 &&
@@ -362,7 +362,7 @@ bool use_mkldnn_bf16_matmul(
 #endif
   {
      return (
-        use_mkldnn_bf16_matmul() &&
+        use_onednn_bf16_matmul() &&
         mat1.scalar_type() == kBFloat16 &&
         mat2.scalar_type() == kBFloat16 &&
         (!result.defined() || result.scalar_type() == kBFloat16) &&
@@ -372,13 +372,13 @@ bool use_mkldnn_bf16_matmul(
   }
 }
 
-bool use_mkldnn_fp16_matmul(
+bool use_onednn_fp16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
 
     return (
-      use_mkldnn_fp16_matmul() &&
+      use_onednn_fp16_matmul() &&
       mat1.scalar_type() == kHalf &&
       mat2.scalar_type() == kHalf &&
       (!result.defined() || result.scalar_type() == kHalf) &&
@@ -387,13 +387,13 @@ bool use_mkldnn_fp16_matmul(
       checksize(mat1, mat2));
 }
 
-bool use_mkldnn_bf32_matmul(
+bool use_onednn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
 
     return (
-      use_mkldnn_bf32_matmul() &&
+      use_onednn_bf32_matmul() &&
       mat1.scalar_type() == kFloat &&
       mat2.scalar_type() == kFloat &&
       (!result.defined() || result.scalar_type() == kFloat) &&
@@ -402,14 +402,14 @@ bool use_mkldnn_bf32_matmul(
       checksize(mat1, mat2));
 }
 
-bool use_mkldnn_matmul(
+bool use_onednn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-  return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result));
+  return (use_onednn_bf16_matmul(mat1, mat2, result) || use_onednn_fp16_matmul(mat1, mat2, result) || use_onednn_bf32_matmul(mat1, mat2, result));
 }
 
-static void _mkldnn_matmul_i8i8i32_with_primitive(
+static void _onednn_matmul_i8i8i32_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -452,7 +452,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   primitive.execute(ideep::stream::default_stream(), args);
 }
 
-static void _mkldnn_gemm_i8i8i32_with_blas(
+static void _onednn_gemm_i8i8i32_with_blas(
   const Tensor& self,
   const Tensor& mat2,
   const Tensor& result) {
@@ -495,7 +495,7 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         &co);
   }
 
-void mkldnn_matmul_i8i8i32(
+void onednn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -506,9 +506,9 @@ void mkldnn_matmul_i8i8i32(
   bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
 
   if (a_is_contigous && b_is_contigous) {
-    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+    _onednn_gemm_i8i8i32_with_blas(mat1, mat2, result);
   } else {
-    _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
+    _onednn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }
 }
 

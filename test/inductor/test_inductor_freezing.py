@@ -321,7 +321,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
             )
             if self.device == "cpu" and mkldnn_weight_pack_init:
-                if torch.ops.mkldnn._is_mkldnn_acl_supported():
+                if torch.ops.mkldnn._is_onednn_acl_supported():
                     # for aarch64 with acl supported, use mkldnn weight prepack
                     # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1176-L1184
                     mm_invoke = "mkldnn._linear_pointwise.default("

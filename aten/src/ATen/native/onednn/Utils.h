@@ -16,7 +16,7 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+std::tuple<Tensor, Tensor, Tensor> onednn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace = false);
@@ -30,7 +30,7 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef dilation,
     bool ceil_mode);
 
-void check_mkldnn_binary_fusion_inputs(
+void check_onednn_binary_fusion_inputs(
     const Tensor& input,
     const Tensor& other,
     const Tensor& weight,
@@ -86,7 +86,7 @@ const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 }
 
 #if defined(__aarch64__)
-inline bool mkldnn_bf16_device_check_arm() {
+inline bool onednn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
 
@@ -98,7 +98,7 @@ inline bool is_arm_neoverse() {
            cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_n2));
 }
 #else
-constexpr bool mkldnn_bf16_device_check_arm() {
+constexpr bool onednn_bf16_device_check_arm() {
   return false;
 }
 
@@ -108,16 +108,16 @@ constexpr bool is_arm_neoverse() {
 #endif
 
 #if AT_ONEDNN_ENABLED()
-inline bool mkldnn_bf16_device_check() {
+inline bool onednn_bf16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
   return ideep::has_bf16_type_support();
 #else
-  return mkldnn_bf16_device_check_arm();
+  return onednn_bf16_device_check_arm();
 #endif
 }
 
-inline bool mkldnn_fp16_device_check() {
+inline bool onednn_fp16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   return ideep::has_fp16_type_support();
 #else
@@ -126,23 +126,23 @@ inline bool mkldnn_fp16_device_check() {
 }
 
 #else
-inline bool mkldnn_bf16_device_check() {
+inline bool onednn_bf16_device_check() {
   return false;
 }
-inline bool mkldnn_fp16_device_check() {
+inline bool onednn_fp16_device_check() {
   return false;
 }
 #endif
 
-inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
+inline void onednn_check_low_precision(ScalarType input_t, std::string name) {
   if (input_t == ScalarType::BFloat16) {
     TORCH_CHECK(
-        mkldnn_bf16_device_check(),
+        onednn_bf16_device_check(),
         name,
         ": bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
   } else if (input_t == ScalarType::Half) {
     TORCH_CHECK(
-        mkldnn_fp16_device_check(),
+        onednn_fp16_device_check(),
         name,
         ": fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }

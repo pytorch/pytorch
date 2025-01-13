@@ -693,7 +693,7 @@ constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
 constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
-constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
+constexpr DispatchKeySet onednn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd

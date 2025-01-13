@@ -608,7 +608,7 @@ at::Tensor _qconv_prepack_onednn(
   exp_wgt.set_scale(weights_scales); // Also for feed_from()
   exp_wgt.feed_from(wgt, /*transposed*/false); // expect wgt to be in [OC IC KH KW] format
 
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_itensor_onednn(
       std::move(exp_wgt),
       c10::optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
       weight_copy.options().device_opt());

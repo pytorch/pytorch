@@ -602,7 +602,7 @@ class TestProfiler(TestCase):
         def create_cuda_tensor():
             return torch.rand(10, 10).cuda()
 
-        def create_mkldnn_tensor():
+        def create_onednn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
 
         stats = run_profiler(create_cpu_tensor)
@@ -673,8 +673,8 @@ class TestProfiler(TestCase):
             )
 
         if torch.backends.mkldnn.is_available():
-            create_mkldnn_tensor()
-            stats = run_profiler(create_mkldnn_tensor)
+            create_onednn_tensor()
+            stats = run_profiler(create_onednn_tensor)
             check_metrics(
                 stats,
                 "cpu_memory_usage",
