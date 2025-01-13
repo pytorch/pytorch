@@ -330,19 +330,6 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on aarch64, windows
-            if (
-                os
-                not in [
-                    "linux",
-                    "linux-s390x",
-                    "linux-aarch64",
-                    "macos-arm64",
-                    "windows",
-                ]
-            ) and python_version in ["3.13", "3.13t"]:
-                continue
-
             # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS or Windows
             if (
                 gpu_arch_type in ["xpu", "cpu-s390x"]
