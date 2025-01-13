@@ -1,5 +1,6 @@
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/utils/device_lazy_init.h>
+
 namespace torch::accelerator {
 
 void initModule(PyObject* module) {
