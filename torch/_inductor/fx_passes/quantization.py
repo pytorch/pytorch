@@ -2731,7 +2731,7 @@ def _register_qconv_post_op_fusion_pass(
         out_node = match.output_node()
         with match.graph.inserting_before(out_node):
             if not has_binary_post_op:
-                computation_args: Tuple[Any, ...] = (
+                computation_args: tuple[Any, ...] = (
                     x,
                     x_scale,
                     x_zp,
