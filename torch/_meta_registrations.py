@@ -2304,10 +2304,10 @@ def meta_conv(
 
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
-        "mkldnn", "IMPL", "Meta"
+        "onednn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
+    @register_meta(torch.ops.onednn._convolution_pointwise.default)
     def meta_mkldnn_convolution_default(
         input_tensor,
         weight,
@@ -2330,7 +2330,7 @@ if torch._C._has_mkldnn:
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
-    @register_meta(torch.ops.mkldnn._linear_pointwise.default)
+    @register_meta(torch.ops.onednn._linear_pointwise.default)
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
@@ -6732,7 +6732,7 @@ def activate_meta():
         ):
             pass
         else:
-            if "mkldnn::" in op_overload.name():
+            if "onednn::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)

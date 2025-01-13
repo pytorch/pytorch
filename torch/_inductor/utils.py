@@ -2277,7 +2277,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
         and data.size() == value.size()
         and data.dtype == value.dtype
         and data.device == value.device
-        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+        and torch.ops.onednn.data_ptr(data) == torch.ops.onednn.data_ptr(value)
     )
 
 

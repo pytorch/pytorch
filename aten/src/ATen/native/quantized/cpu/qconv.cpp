@@ -2074,7 +2074,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
-TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   // Conv1D/2D/3D with unary postop
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), at::native::QConvoneDNN::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), at::native::QConvoneDNN::run_pointwise);

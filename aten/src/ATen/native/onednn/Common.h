@@ -8,7 +8,7 @@
 #include <ideep/tensor.hpp>
 #include <utility>
 
-namespace at::native::mkldnn {
+namespace at::native::onednn {
 
 struct ContextConv final {
   ideep::tensor weight_packed_;

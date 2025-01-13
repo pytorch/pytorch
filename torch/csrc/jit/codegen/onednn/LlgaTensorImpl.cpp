@@ -46,7 +46,7 @@ LlgaTensorImpl::LlgaTensorImpl(
     const LlgaTensorDesc& desc)
     : at::TensorImpl(
           std::move(storage),
-          c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
+          c10::DispatchKeySet(c10::DispatchKey::OnednnCPU),
           data_type),
       desc_(desc) {
   set_sizes_and_strides(desc.sizes(), desc.strides());

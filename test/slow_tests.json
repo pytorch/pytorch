@@ -228,7 +228,7 @@
   "test_linear_packed_dynamic_shapes_cpp_wrapper (__main__.DynamicShapesCppWrapperCpuTests)": 79.2270024617513,
   "test_linear_relu (__main__.TestStaticQuantizedModule)": 60.32511181301541,
   "test_lobpcg_ortho_cuda_float64 (__main__.TestLinalgCUDA)": 72.1783332824707,
-  "test_lstm_cpu (__main__.TestMkldnnCPU)": 69.95388910505507,
+  "test_lstm_cpu (__main__.TestOnednnCPU)": 69.95388910505507,
   "test_many_overlapping_inputs_does_not_explode_guards_dynamic_shapes (__main__.DynamicShapesReproTests)": 109.84462547302246,
   "test_max_autotune_cutlass_backend_addmm_dynamic_False_max_autotune_gemm_backends_ATen,Triton,CUTLASS (__main__.TestCutlassBackend)": 85.27133178710938,
   "test_max_pool2d_with_indices_backward4_dynamic_shapes_cpu (__main__.DynamicShapesCodegenCpuTests)": 63.74255498250326,

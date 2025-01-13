@@ -1346,7 +1346,7 @@ void nnc_aten_triangular_solve(
 
 #if AT_ONEDNN_ENABLED()
 
-void nnc_mkldnn_prepacked_conv_run(
+void nnc_onednn_prepacked_conv_run(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1355,7 +1355,7 @@ void nnc_mkldnn_prepacked_conv_run(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  using namespace at::native::mkldnn;
+  using namespace at::native::onednn;
 
   auto tensors = constructTensors(
       bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
@@ -1551,9 +1551,9 @@ const static RegisterNNCExternalFunction nnc_embedding(
     nnc_aten_embedding);
 
 #if AT_ONEDNN_ENABLED()
-const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
-    "nnc_mkldnn_prepacked_conv_run",
-    nnc_mkldnn_prepacked_conv_run);
+const static RegisterNNCExternalFunction reg_nnc_onednn_prepacked_conv_run(
+    "nnc_onednn_prepacked_conv_run",
+    nnc_onednn_prepacked_conv_run);
 #endif // AT_ONEDNN_ENABLED()
 
 #ifdef USE_XNNPACK

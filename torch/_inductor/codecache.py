@@ -1626,8 +1626,8 @@ class AotCodeCompiler:
                     return b""
 
                 if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
+                    data_ptr = torch.ops.onednn.data_ptr(t)
+                    nbytes = torch.ops.onednn._nbytes(t)
                 else:
                     t_cpu = t.untyped_storage().cpu()
                     data_ptr = t_cpu.data_ptr()

@@ -1045,39 +1045,39 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose)
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward)
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
+TORCH_LIBRARY_IMPL(onednn, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
 }
 }  // namespace at::native
