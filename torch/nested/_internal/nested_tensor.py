@@ -7,12 +7,6 @@ from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 from torch.nested._internal.cached_tensor import CachedTensor
 from torch.nested._internal.nested_int import get_metadata, NestedIntNode
-from torch.nested._internal.tensor_registry import register_tensor, try_get_int
-from torch.nested._internal.utils import _try_get_fake_mode
-
-
-def update_tensor_registry_hook(host_tensor, device_tensor):
-    register_tensor(host_tensor, try_get_int(device_tensor))
 
 
 # Fully represents raggedness
@@ -23,11 +17,12 @@ EXTRA_FIELDS = (
     "_min_seqlen_tensor",
     "_inverse_indices",
 )
-# UnpackResult = namedtuple("UnpackResult", SOURCE_FIELDS + EXTRA_FIELDS)
 
 
 def get_tensor_symint(metadata_tensor, *, coeff=1):
-    if fake_mode := _try_get_fake_mode(metadata_tensor):
+    from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
+    if fake_mode := maybe_get_fake_mode(metadata_tensor):
         return fake_mode.get_nested_int(cache=metadata_tensor, coeff=coeff)
 
     return torch.SymInt(NestedIntNode(metadata_tensor, coeff))
@@ -155,28 +150,29 @@ class NestedTensor(torch.Tensor):
     def lengths(self) -> Optional[torch.Tensor]:
         return self._lengths
 
+    @property
+    def _offsets(self) -> Optional[torch.Tensor]:
+        if self._non_contig_offsets is not None:
+            # non-contig case
+            return self._non_contig_offsets
+        # contig case
+        if self.is_cpu:
+            return self._host_offsets
+        else:
+            return self._device_offsets
+
+    @property
+    def _lengths(self) -> Optional[torch.Tensor]:
+        if self.is_cpu:
+            return self._host_lengths
+        else:
+            return self._device_lengths
+
     def __getattr__(self, name) -> Optional[torch.Tensor]:
-        if name not in SOURCE_FIELDS + EXTRA_FIELDS + ("_lengths", "_offsets"):
+        if name not in SOURCE_FIELDS + EXTRA_FIELDS:
             raise AttributeError(
                 f"{type(self).__name__} object has no attribute '{name}'"
             )
-
-        if name == "_offsets":
-            if self._non_contig_offsets is not None:
-                # non-contig case
-                return self._non_contig_offsets
-            # contig case
-            if self.is_cpu:
-                return self._host_offsets
-            else:
-                return self._device_offsets
-
-        elif name == "_lengths":
-            if self.is_cpu:
-                return self._host_lengths
-            else:
-                return self._device_lengths
-
         return getattr(self._metadata, name)
 
     @property
@@ -363,7 +359,7 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return _construct_nested_tensor_compat(
+        return _DO_NOT_USE_nested_tensor_ctor_compat(
             values=gO,
             offsets=offsets,
             _metadata_cache=ctx.metadata_cache,
@@ -382,7 +378,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
     ):  # type: ignore[override]
         # This maintains BC with this usages of this where the seqlens are stuffed
         # directly into the metadata cache as non-Tensors / ints
-        return _construct_nested_tensor_compat(
+        return _DO_NOT_USE_nested_tensor_ctor_compat(
             values=values.detach(),
             offsets=offsets,
             lengths=None,
@@ -655,7 +651,7 @@ def _make_nested_meta(
 # the raw constructor.
 # kwargs that are not _metadata_cache or _ragged_idx are ignored.
 # Fields in _metadata_cache that are not _metadata_cache are ignored.
-def _construct_nested_tensor_compat(
+def _DO_NOT_USE_nested_tensor_ctor_compat(
     values: torch.Tensor,
     offsets: torch.Tensor,
     lengths: Optional[torch.Tensor] = None,

@@ -3,7 +3,7 @@ from typing import *  # noqa: F403
 import torch
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.tensor_registry import register_tensor, try_get_int
-from torch.nested._internal.utils import apply_func
+from torch.nested._internal.utils import nested_metadata_apply_func
 
 
 __all__ = ["NestedIntNode"]
@@ -45,7 +45,12 @@ def _get_tensor_id(t: torch.Tensor) -> int:
         else:
             ret[0] = try_get_int(t)
 
-    apply_func(t, func, only_source_fields=True)
+    nested_metadata_apply_func(
+        t,
+        func,
+        only_source_fields=True,
+        unpack_functional_tensor=True,
+    )
     assert ret[0] is not None
     return ret[0]
 

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import _construct_nested_tensor_compat, NestedTensor
+from .nested_tensor import NestedTensor
 
 
 __all__: List[Any] = []
@@ -921,10 +921,11 @@ def narrow(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
+    from torch.nested._internal.nested_tensor import _make_nested_meta
+
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
 
     new_kwargs["dim"], operating_on_batch = _wrap_jagged_dim(
@@ -933,31 +934,36 @@ def chunk_default(func, *args, **kwargs):
 
     if operating_on_batch:
         chunks = new_kwargs["chunks"]
-        dim0_size = inp._size[0]
-        chunk_size = math.ceil(dim0_size / chunks)
 
         # get _offsets of the chunks
         lengths = inp._offsets.diff()
         chunked_lengths = lengths.chunk(chunks)
         chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
         chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]  # type: ignore[arg-type]
-        nested_kwargs = [
-            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
-            for per_offsets in chunked_offsets
-        ]
 
         # get _values of the chunks
         split_sizes = [x.sum().item() for x in chunked_lengths]
         chunk_values = inp._values.split(split_sizes)
+        ragged_idx = getattr(inp, "_ragged_idx", 1)
 
-        # Note that the actual number of chunks returned is not necessarily the same as
-        # the input number; it can be counter-intuitive, but it matches dense behavior.
-        return [
-            _construct_nested_tensor_compat(
-                values=chunk_values[i], **(nested_kwargs[i])
+        result = []
+        for off, vals in zip(chunked_offsets, chunk_values):
+            metadata, non_contig_offsets = _make_nested_meta(
+                offsets=off,
+                lengths=None,
+                max_seqlen=None,
+                min_seqlen=None,
             )
-            for i in range(0, len(chunk_values))
-        ]
+            # The result is always contiguous
+            assert non_contig_offsets is None
+            nt = NestedTensor(
+                values=vals,
+                metadata=metadata,
+                non_contig_offsets=None,
+                _ragged_idx=ragged_idx,
+            )
+            result.append(nt)
+        return result
     else:
         return [
             NestedTensor(values=x, **extract_kwargs(inp))
@@ -2355,17 +2361,22 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
 def record_stream_default(func, *args, **kwargs):
-    from torch.nested._internal.utils import apply_func
+    from torch.nested._internal.utils import nested_metadata_apply_func
 
     inp = args[0]
     stream = args[1]
 
     # ensure all components live until stream computation completes
-    def _apply_fn(x: torch.Tensor) -> None:
+    def func(x: torch.Tensor) -> None:
         if not x.is_cpu:
             x.record_stream(stream)
 
-    apply_func(inp._metadata, _apply_fn, only_source_fields=False)
+    nested_metadata_apply_func(
+        inp._metadata,
+        func,
+        only_source_fields=False,
+        unpack_functional_tensor=False,
+    )
     inp._non_contig_offsets.record_stream(stream)
     inp._values.record_stream(stream)
 

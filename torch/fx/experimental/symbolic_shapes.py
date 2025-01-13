@@ -4052,8 +4052,8 @@ class ShapeEnv:
             out = int(sym)
         elif hint is not None and is_nested_int(hint) and nested_int_desc is not None:
             from torch._dynamo.source import SymNodePropertySource
+            from torch._subclasses.fake_tensor import maybe_get_fake_mode
             from torch.nested._internal.nested_int import NestedIntNode
-            from torch.nested._internal.utils import _try_get_fake_mode
 
             assert metafy_fn is not None
             assert source is not None
@@ -4074,7 +4074,7 @@ class ShapeEnv:
             )
             if coeff == 1:
                 # Don't participate in caching when coeff != 1
-                fake_mode = _try_get_fake_mode(cache)
+                fake_mode = maybe_get_fake_mode(cache)
                 assert fake_mode is not None
                 # See [ Best effort SymInt association ]
                 fake_mode.nt_cache_to_nested_int[cache] = weakref.ref(out)

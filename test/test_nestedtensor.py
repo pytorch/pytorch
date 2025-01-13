@@ -19,7 +19,7 @@ import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
-    _construct_nested_tensor_compat,
+    _DO_NOT_USE_nested_tensor_ctor_compat,
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
@@ -5921,7 +5921,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 1
-        nt = _construct_nested_tensor_compat(
+        nt = _DO_NOT_USE_nested_tensor_ctor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5940,7 +5940,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 2
-        nt = _construct_nested_tensor_compat(
+        nt = _DO_NOT_USE_nested_tensor_ctor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5955,7 +5955,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 2, 4, 8], device=device)
         lengths = torch.tensor([2, 1, 3], device=device)
         ragged_idx = 2
-        nt = _construct_nested_tensor_compat(
+        nt = _DO_NOT_USE_nested_tensor_ctor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5974,7 +5974,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 100, 128], device=device)
         lengths = torch.tensor([50, 28], device=device)
         ragged_idx = 3
-        nt = _construct_nested_tensor_compat(
+        nt = _DO_NOT_USE_nested_tensor_ctor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5987,29 +5987,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(len(out), len(tensor_list))
         for i, t in enumerate(out):
             self.assertEqual(t, tensor_list[i])
-
-    # What does ragged_idx mean here?
-    # @skipIfTorchDynamo(
-    #     "TorchDynamo raises an error for ragged_idx == 0 earlier than Torch"
-    # )
-    # def test_unbind_lengths_ragged_idx_0(self, device):
-    #     values = torch.randn(16, 8, 128, device=device)
-    #     offsets = torch.tensor([0, 100, 128], device=device)
-    #     lengths = torch.tensor([50, 28], device=device)
-    #     ragged_idx = 0
-    #     nt = _construct_nested_tensor_compat(
-    #         values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
-    #     )  # 4D nested tensor
-
-    #     tensor_list = []
-    #     for i in range(offsets.shape[0] - 1):
-    #         tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
-
-    #     self.assertRaisesRegex(
-    #         RuntimeError,
-    #         r"unbind\(\): nested tensor.*out of bounds",
-    #         lambda: nt.unbind(),
-    #     )
 
     def test_narrow(self, device):
         starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
