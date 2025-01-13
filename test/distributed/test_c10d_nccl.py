@@ -440,7 +440,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_cuda_event_cache(self):
+    def test_cuda_event_cache_mthd_race(self):
+        # This unit test is to test the case when the collective is launched in
+        # a side thread and the thread dies before the cache has been fully recycled.
+        # More details can be found in this issue: https://github.com/pytorch/pytorch/issues/143470.
         import threading
 
         # initiate collectives here
