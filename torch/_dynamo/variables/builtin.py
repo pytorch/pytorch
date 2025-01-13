@@ -272,7 +272,7 @@ class BuiltinVariable(VariableTracker):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
-        from .dicts import DictKeysVariable, SetVariable
+        from .dicts import SetVariable
         from .functions import BaseUserFunctionVariable, UserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
@@ -459,21 +459,25 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
         size_or_tuple = (SizeVariable, TupleVariable)
-        has_set_items = (SetVariable, DictKeysVariable)
+        has_set_items = (SetVariable,)
 
         def create_cmp_op_handlers(op):
+            def compare_by_value(tx: "InstructionTranslator", a, b):
+                return ConstantVariable(op(a.value, b.value))
+
             if op is operator.eq:
+                # For constants, speedup the comparison instead of using
+                # polyfill. Removing this line causes major regression for pr
+                # time benchmark - add_loop_eager.
+                result = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
                 def handler(tx, a, b):
                     return tx.inline_user_function_return(
                         VariableTracker.build(tx, polyfills.cmp_eq), [a, b], {}
                     )
 
-                result = [((VariableTracker, VariableTracker), handler)]
+                result.append(((VariableTracker, VariableTracker), handler))
                 return result
-
-            def compare_by_value(tx: "InstructionTranslator", a, b):
-                return ConstantVariable(op(a.value, b.value))
 
             result = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
