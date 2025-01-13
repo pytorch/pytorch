@@ -204,6 +204,29 @@ class FileManager:
         base_env: dict[str, Any] | None = None,
         sharded_keys: set[str],
     ) -> None:
+        self.write_sharded_with_template(
+            filename,
+            filename,
+            items,
+            key_fn=key_fn,
+            env_callable=env_callable,
+            num_shards=num_shards,
+            base_env=base_env,
+            sharded_keys=sharded_keys,
+        )
+
+    def write_sharded_with_template(
+        self,
+        filename: str | Path,
+        template_fn: str | Path,
+        items: Iterable[T],
+        *,
+        key_fn: Callable[[T], str],
+        env_callable: Callable[[T], dict[str, list[str]]],
+        num_shards: int,
+        base_env: dict[str, Any] | None = None,
+        sharded_keys: set[str],
+    ) -> None:
         file = Path(filename)
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
@@ -246,7 +269,7 @@ class FileManager:
             shard_id = shard["shard_id"]
             self.write_with_template(
                 file.with_stem(f"{file.stem}{shard_id}"),
-                file,
+                template_fn,
                 lambda: shard,
             )
 
