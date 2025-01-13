@@ -613,6 +613,7 @@ inline void manual_seed(uint64_t seed) {
         std::lock_guard<std::mutex> lock(xpu_gen.mutex());
         xpu_gen.set_current_seed(seed);
       }
+    }
   }
 
   if (hasMPS()) {
