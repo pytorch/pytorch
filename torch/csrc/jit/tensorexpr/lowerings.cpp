@@ -45,7 +45,7 @@ int nnc_lowerings_lazy_registration() {
 #if AT_ONEDNN_ENABLED()
   RegisterNNCLoweringsFunction onednn_prepacked_conv2d_run(
       {"onednn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.onednn.ConvOpContext W_prepack) -> (Tensor Y)"},
-      computeMkldnnPrepackedConvRun);
+      computeOnednnPrepackedConvRun);
 #endif // AT_ONEDNN_ENABLED()
 
   RegisterNNCLoweringsFunction aten_sub(

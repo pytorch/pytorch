@@ -273,7 +273,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
-    } else if (tensor_.is_mkldnn()) {
+    } else if (tensor_.is_onednn()) {
       stream << "MKLDNN Tensor: ";
       tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
     } else if (tensor_.is_mps()) {

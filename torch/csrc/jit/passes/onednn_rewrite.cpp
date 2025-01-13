@@ -103,12 +103,12 @@ static void insertPrePackedConvOp(Block* b) {
   EliminateDeadCode(b);
 }
 
-static void insertMkldnnPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
+static void insertOnednnPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   insertPrePackedConvOp(graph->block());
 }
 
-static void insertMkldnnPrePackedOps(std::shared_ptr<Graph>& graph) {
-  insertMkldnnPrePackedConv2dOp(graph);
+static void insertOnednnPrePackedOps(std::shared_ptr<Graph>& graph) {
+  insertOnednnPrePackedConv2dOp(graph);
 }
 
 static void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -196,11 +196,11 @@ static void FoldPrePackingOps(std::shared_ptr<Graph>& graph) {
 
 void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
-      "Before insertMkldnnPrePackedOps. Beginning of FuseConvWithEltwise\n",
+      "Before insertOnednnPrePackedOps. Beginning of FuseConvWithEltwise\n",
       *graph);
-  insertMkldnnPrePackedOps(graph);
+  insertOnednnPrePackedOps(graph);
   GRAPH_DEBUG(
-      "After insertMkldnnPrePackedOps, before FuseReluWithPackedOps\n", *graph);
+      "After insertOnednnPrePackedOps, before FuseReluWithPackedOps\n", *graph);
   FuseReluWithPackedOps(graph);
   GRAPH_DEBUG(
       "After FuseReluWithPackedOps, before FoldPrePackingOps\n", *graph);

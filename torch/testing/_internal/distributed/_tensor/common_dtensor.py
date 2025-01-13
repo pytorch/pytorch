@@ -465,7 +465,7 @@ class DTensorConverter:
             [
                 t.is_sparse_csr,
                 t.is_sparse,
-                t.is_mkldnn,
+                t.is_onednn,
                 t.is_quantized,
                 t.is_nested,
                 torch._is_functional_tensor(t),

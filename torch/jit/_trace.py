@@ -159,7 +159,7 @@ def _clone_inputs(args):
             # TODO: figure out one liner to .clone() and set requires_grad
             v = (
                 a.detach()
-                .clone(memory_format=None if a.is_mkldnn else torch.preserve_format)
+                .clone(memory_format=None if a.is_onednn else torch.preserve_format)
                 .requires_grad_(a.requires_grad)
             )
             if a.grad is not None:
@@ -517,9 +517,9 @@ def _check_trace(
                         orig = orig.dequantize()
                     if ref.is_quantized:
                         ref = ref.dequantize()
-                    if orig.is_mkldnn:
+                    if orig.is_onednn:
                         orig = orig.to_dense()
-                    if ref.is_mkldnn:
+                    if ref.is_onednn:
                         ref = ref.to_dense()
                     if ref.is_complex() or orig.is_complex():
                         torch.testing.assert_close(

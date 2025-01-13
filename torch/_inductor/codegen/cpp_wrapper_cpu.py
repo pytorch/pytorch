@@ -651,7 +651,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # not the data_size so there won't be correctness issue.
                 data_size = (
                     torch.ops.onednn._nbytes(tensor)
-                    if tensor.is_mkldnn
+                    if tensor.is_onednn
                     else tensor.untyped_storage().nbytes()
                 )
                 self.prefix.writeline(
@@ -694,7 +694,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"constants_info_[{idx}].layout = static_cast<int32_t>({self.codegen_layout(tensor.layout)});"
                 )
 
-                if tensor.is_mkldnn:
+                if tensor.is_onednn:
                     opaque_metadata_tensor = torch.ops.onednn._get_onednn_serialized_md(
                         tensor
                     )

@@ -267,7 +267,7 @@ class MetaTensorDescriber:
         is_nested = t.is_nested
         is_traceable_wrapper_subclass_v = is_traceable_wrapper_subclass(t)
         is_functorch_wrapped = is_functorch_wrapped_tensor(t)
-        is_mkldnn = t.is_mkldnn
+        is_onednn = t.is_onednn
         is_batchedtensor_v = is_batchedtensor(t)
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
@@ -282,7 +282,7 @@ class MetaTensorDescriber:
             is_sparse
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
-            or is_mkldnn
+            or is_onednn
             # TODO: TBH, functorch wrapped tensors probably should have
             # storage associated with them
             or is_functorch_wrapped
@@ -374,7 +374,7 @@ class MetaTensorDescriber:
             ndim=t.dim(),
             dtype=t.dtype,
             is_sparse=is_sparse,
-            is_mkldnn=is_mkldnn,
+            is_onednn=is_onednn,
             is_functorch_wrapped=is_functorch_wrapped,
             is_batchedtensor=is_batchedtensor_v,
             is_legacy_batchedtensor=is_legacy_batchedtensor_v,
@@ -587,7 +587,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_leaf: bool = False
     requires_grad: bool = False
     is_sparse: bool = False
-    is_mkldnn: bool = False
+    is_onednn: bool = False
     is_functorch_wrapped: bool = False
     is_batchedtensor: bool = False
     is_legacy_batchedtensor: bool = False
@@ -1363,7 +1363,7 @@ class MetaConverter(Generic[_TensorT]):
                     unimplemented(
                         "strided nested tensors are not supported by meta conversion"
                     )
-                elif t.is_mkldnn:
+                elif t.is_onednn:
                     is_leaf = t.is_leaf
                     (
                         sizes,

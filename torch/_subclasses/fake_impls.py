@@ -736,7 +736,7 @@ def conv(fake_mode, func, *args, **kwargs):
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
-        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+        elif k == 3 and not kwargs["input"].is_onednn and not kwargs["input"].is_xpu:
             mem_fmt = None
         else:
             if func is aten.convolution.default:

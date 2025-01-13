@@ -1113,7 +1113,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
 
 
-class MkldnnRnnLayer(ExternKernelAlloc):
+class OnednnRnnLayer(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -1184,7 +1184,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             train,
         ]
 
-        packed = MkldnnRnnLayer(
+        packed = OnednnRnnLayer(
             MultiOutputLayout(device=x.get_device()),
             inputs=inputs,
             constant_args=constant_args,

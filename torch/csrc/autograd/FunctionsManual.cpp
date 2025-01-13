@@ -1402,7 +1402,7 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    if (input.is_mkldnn())
+    if (input.is_onednn())
       return {};
     if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
