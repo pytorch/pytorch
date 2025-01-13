@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 This module implements Paged Attention on top of flex_attention.
