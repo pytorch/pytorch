@@ -12,18 +12,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import sympy
 
@@ -427,7 +416,7 @@ class OutputGraph:
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: List[
-            Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
+            tuple[Callable[..., object], tuple[object, ...], Dict[str, object]]
         ] = []
         self.random_values_var = None
 
@@ -638,7 +627,7 @@ class OutputGraph:
         Saves to out if it is provided. Else saves to the tracing context's global_state.
         """
         global_state = cast(
-            Dict[str, Tuple[Callable[..., Any], bool]],
+            Dict[str, tuple[Callable[..., Any], bool]],
             out
             if out is not None
             else self.tracing_context.global_context.global_state,
@@ -1270,7 +1259,7 @@ class OutputGraph:
         Momentarily restores the global state to what it was prior to tracing the current output
         """
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
-        current_global_state: Dict[str, Tuple[Any, bool]] = {}
+        current_global_state: Dict[str, tuple[Any, bool]] = {}
         self.save_global_state(out=current_global_state)
         try:
             # Set to state prior to tracing the graph
@@ -1294,7 +1283,9 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
-            with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
+            with torch.cuda.device(
+                compile_pg.rank() % torch.cuda.device_count()
+            ), dynamo_timed("compiler_collective", log_pt2_compile_event=True):
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
                 ds.all_states = all_states
