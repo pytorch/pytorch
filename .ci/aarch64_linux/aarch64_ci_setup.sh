@@ -5,7 +5,7 @@ set -eux -o pipefail
 # By creating symlinks from desired /opt/python to /usr/local/bin/
 
 NUMPY_VERSION=2.0.2
-if [[ "$DESIRED_PYTHON"  == "3.13" ]]; then
+if [[ "$DESIRED_PYTHON"  == "3.13" || "$DESIRED_PYTHON" == "3.13t" ]]; then
     NUMPY_VERSION=2.1.2
 fi
 
