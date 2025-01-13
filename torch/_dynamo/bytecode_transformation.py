@@ -6,18 +6,7 @@ import functools
 import itertools
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Sequence, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -447,7 +436,7 @@ def create_swap(n) -> List[Instruction]:
 
 def lnotab_writer(
     lineno: int, byteno: int = 0
-) -> Tuple[List[int], Callable[[int, int], None]]:
+) -> tuple[List[int], Callable[[int, int], None]]:
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
@@ -537,7 +526,7 @@ def linetable_311_writer(first_lineno: int):
             assert 0 < size <= 8
             # first byte - use 13 (no column info) is positions is
             # malformed, otherwise use 14 (long form)
-            other_varints: Tuple[int, ...] = ()
+            other_varints: tuple[int, ...] = ()
             if (
                 positions
                 and positions.lineno is not None
@@ -670,7 +659,7 @@ def assemble_exception_table(tab: List[ExceptionTableEntry]) -> bytes:
     return bytes(b)
 
 
-def assemble(instructions: List[Instruction], firstlineno: int) -> Tuple[bytes, bytes]:
+def assemble(instructions: List[Instruction], firstlineno: int) -> tuple[bytes, bytes]:
     """Do the opposite of dis.get_instructions()"""
     code: List[int] = []
     if sys.version_info >= (3, 11):
@@ -854,7 +843,7 @@ def compute_exception_table(
     instructions: List[Instruction],
 ) -> List[ExceptionTableEntry]:
     """Compute exception table in list format from instructions with exn_tab_entries"""
-    exn_dict: Dict[Tuple[int, int], Tuple[int, int, bool]] = {}
+    exn_dict: Dict[tuple[int, int], tuple[int, int, bool]] = {}
     indexof = get_indexof(instructions)
 
     for inst in instructions:
@@ -888,7 +877,7 @@ def compute_exception_table(
     # smallest byte that the next exception table entry can start at
     nexti = 0
     # stack of current nested keys
-    key_stack: List[Tuple[int, int]] = []
+    key_stack: List[tuple[int, int]] = []
     exn_tab: List[ExceptionTableEntry] = []
 
     def pop():
@@ -933,7 +922,7 @@ def check_inst_exn_tab_entries_nested(
     "Properly sorted" means entries are sorted by increasing starts, then
     decreasing ends.
     """
-    entry_stack: List[Tuple[int, int]] = []
+    entry_stack: List[tuple[int, int]] = []
     for entry in tab:
         key = (indexof[entry.start], indexof[entry.end])
         while entry_stack and entry_stack[-1][1] < key[0]:
@@ -949,7 +938,7 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
-    entries: Dict[Tuple[int, int], InstructionExnTabEntry] = {}
+    entries: Dict[tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
         if inst.exn_tab_entry:
             key = (
@@ -1417,7 +1406,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
 
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
-) -> Tuple[List[Instruction], types.CodeType]:
+) -> tuple[List[Instruction], types.CodeType]:
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)
 
