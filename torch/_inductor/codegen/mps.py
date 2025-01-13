@@ -227,6 +227,14 @@ class MetalOverrides(OpOverrides):
     def trunc(x: CSEVariable) -> str:
         return f"metal::trunc({x})"
 
+    @staticmethod
+    def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
+        # Upcast to float otherwise the generated code doesn't typecheck.
+        # TODO (dcci): remove this workaround
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"metal::trunc({float_a}/{float_b})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
