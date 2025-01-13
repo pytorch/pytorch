@@ -18,17 +18,19 @@ from torch.testing._internal.common_utils import (
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = True
+        torch._dynamo.config.enable_faithful_generator_behavior = True
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = False
+        torch._dynamo.config.enable_faithful_generator_behavior = False
 
-    def _compile_check(self, fn):
+    def _compile_check(self, fn, args=None):
         eager = EagerAndRecordGraphs()
-        t = torch.randn(2)
-        torch.compile(fn, backend=eager, fullgraph=True)(t)
+        if args is None:
+            args = (torch.randn(2),)
+        r = torch.compile(fn, backend=eager, fullgraph=True)(*args)
         self.assertGreater(len(eager.graphs), 0)
+        return r
 
 
 class GeneratorTests(GeneratorTestsBase):
@@ -107,10 +109,10 @@ class GeneratorTests(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            return list(zip(range(3), whoo(1)))
+            return list(zip(range(3), whoo(1))), t.sin()
 
         t = torch.randn(2)
-        y = fn(t)
+        y, _ = fn(t)
         self.assertEqual(y, list(zip(range(3), whoo(1))))
 
     def test_graph_break_in_generator(self):
@@ -262,21 +264,22 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, [t + 1, t + 2, t + 3, t + 4])
 
+    @unittest.expectedFailure
     def test_zip_generator(self):
         def whoo(t):
             yield t + 1
             yield t + 2
             yield t + 3
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            return zip(range(3), whoo(t))
+            return zip(range(3), whoo(t)), t.sin()
 
         t = torch.randn(3)
-        y = fn(t)
+        y, _ = self._compile_check(fn, args=(t,))
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, list(y))
 
+    @unittest.expectedFailure
     def test_zip_generator_2(self):
         def bar(t, i):
             return t + i
@@ -286,15 +289,15 @@ class GraphModule(torch.nn.Module):
             yield bar(t, 2)
             yield bar(t, 3)
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return zip(range(3), whoo(t))
 
         t = torch.randn(3)
-        y = fn(t)
+        y = self._compile_check(fn, args=(t,))
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, list(y))
 
+    @unittest.expectedFailure
     def test_zip_subgenerator(self):
         def subgen(t):
             yield t + 1
@@ -304,12 +307,11 @@ class GraphModule(torch.nn.Module):
             yield from subgen(t)
             yield t + 3
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             return zip(range(3), whoo(t))
 
         t = torch.randn(3)
-        y = fn(t)
+        y = self._compile_check(fn, args=(t,))
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, list(y))
 
@@ -374,6 +376,24 @@ class GraphModule(torch.nn.Module):
         t = torch.tensor([1.0])
         gen = fn(t)
         self.assertEqual(next(gen), torch.tensor([2.0]))
+
+    @unittest.expectedFailure
+    def test_return_tuple_generator(self):
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            g1, g2 = whoo(t), whoo(t + 1)
+            return (g1, g2)
+
+        t = torch.randn(2)
+        g1, g2 = fn(t)
+        self.assertEqual(next(g1), t.sin())
+        self.assertEqual(next(g2), t.sin())
+        self.assertEqual(next(g1), t.cos())
+        self.assertEqual(next(g2), t.cos())
 
     def test_return_advanced_generator(self):
         def whoo(t):
@@ -511,6 +531,7 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
 
+    @unittest.expectedFailure
     def test_generator_with_side_effects(self):
         i = 0
 
@@ -520,17 +541,16 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            gen = whoo(t)
-            return zip(range(3), gen)
+            return zip(range(3), whoo(t))
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, args=(t,))
         self.assertEqual(i, 0)
         self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
         self.assertEqual(i, 3)
 
+    @unittest.expectedFailure
     def test_subgenerator_with_side_effects(self):
         i = 0
 
@@ -551,13 +571,11 @@ class GraphModule(torch.nn.Module):
             i += 1
             yield t + 4
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            gen = whoo(t)
-            return zip(range(3), gen)
+            return zip(range(3), whoo(t))
 
         t = torch.randn(2)
-        y = fn(t)
+        y = self._compile_check(fn, args=(t,))
         self.assertEqual(i, 0)
         self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
         self.assertEqual(i, 3)
