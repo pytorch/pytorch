@@ -41,17 +41,28 @@ class MPSBasicTests(TestCase):
     test_add_const_int = CommonTemplate.test_add_const_int
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
+    test_div1 = CommonTemplate.test_div1
     test_cat_empty = CommonTemplate.test_cat_empty
     test_floordiv = CommonTemplate.test_floordiv
+    test_fmod = CommonTemplate.test_fmod
+    test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
     test_inf = CommonTemplate.test_inf
+    test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
+    test_low_memory_max_pool = CommonTemplate.test_low_memory_max_pool
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
     test_remainder = CommonTemplate.test_remainder
+    test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
+    test_silu = CommonTemplate.test_silu
+    test_slice_scatter4 = CommonTemplate.test_slice_scatter4
+    test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
+    test_views3 = CommonTemplate.test_views3
     test_views6 = CommonTemplate.test_views6
+    test_views7 = CommonTemplate.test_views7
     test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
 
     @parametrize("dtype", MPS_DTYPES)

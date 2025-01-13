@@ -86,14 +86,18 @@ aot_eager_graph = aot_autograd(
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        super().setUp()
+        super(
+            type(self), self
+        ).setUp()  # use explicit params for compiled autograd test wrapping
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
-        super().tearDown()
+        super(
+            type(self), self
+        ).tearDown()  # use explicit params for compiled autograd test wrapping
         dist.destroy_process_group()
 
     @property
@@ -103,6 +107,19 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     @property
     def world_size(self) -> int:
         return 2
+
+    def test_dtensor_basic(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x * x + 2
+
+        param = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        res = fn(x)
+        res.to_local().sum().backward()
 
     def test_placement_compile(self):
         def fn(x):

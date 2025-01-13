@@ -1,7 +1,7 @@
 set -euo pipefail
 
-readonly version=v24.09
-readonly src_host=https://review.mlplatform.org/ml
+readonly version=v24.12
+readonly src_host=https://github.com/ARM-software
 readonly src_repo=ComputeLibrary
 
 # Clone ACL
