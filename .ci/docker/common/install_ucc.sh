@@ -8,6 +8,12 @@ else
   with_cuda=no
 fi
 
+if [[ -d "/opt/rocm" ]]; then
+  with_rocm=/opt/rocm
+else
+  with_rocm=no
+fi
+
 function install_ucx() {
   set -ex
   git clone --recursive https://github.com/openucx/ucx.git
@@ -19,6 +25,7 @@ function install_ucx() {
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
       --with-cuda=$with_cuda          \
+      --with-rocm=$with_rocm          \
       --enable-profiling              \
       --enable-stats
   time make -j
@@ -41,6 +48,7 @@ function install_ucc() {
   ./configure --prefix=$UCC_HOME          \
     --with-ucx=$UCX_HOME                  \
     --with-cuda=$with_cuda                \
+    --with-rocm=$with_rocm                \
     --with-nvcc-gencode="${NVCC_GENCODE}"
   time make -j
   sudo make install
