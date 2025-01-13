@@ -75,6 +75,12 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+
+    @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
@@ -246,7 +252,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{index}]"
+        line = f"{var}[{self.sexpr(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
@@ -318,6 +324,21 @@ class MetalKernel(SIMDKernel):
             gpu=False,  # TODO: Fix me, MPS does not expose streams now
             triton=False,
         )
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        if not (lower or upper):
+            return
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
+        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
+        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        if lower and upper:
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
+        else:
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.body, line, assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
