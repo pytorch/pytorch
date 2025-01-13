@@ -20,7 +20,8 @@ CUDA_ARCHES = ["11.8", "12.4", "12.6"]
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.3"}
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
 
-ROCM_ARCHES = ["6.1", "6.2.4"]
+# NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
+ROCM_ARCHES = ["6.2.4", "6.3"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -93,7 +94,7 @@ def get_nccl_submodule_version() -> str:
     from pathlib import Path
 
     nccl_version_mk = (
-        Path(__file__).absolute().parent.parent.parent
+        Path(__file__).absolute().parents[2]
         / "third_party"
         / "nccl"
         / "nccl"
@@ -158,15 +159,16 @@ def arch_type(arch_version: str) -> str:
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
-    "11.8": f"pytorch/manylinux-builder:cuda11.8-{DEFAULT_TAG}",
-    "12.4": f"pytorch/manylinux-builder:cuda12.4-{DEFAULT_TAG}",
-    "12.6": f"pytorch/manylinux2_28-builder:cuda12.6-{DEFAULT_TAG}",
+    **{
+        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        for gpu_arch in CUDA_ARCHES
+    },
     **{
         gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
@@ -375,13 +377,7 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "use_split_build": "True" if use_split_build else "False",
-                        "devtoolset": (
-                            "cxx11-abi"
-                            if (
-                                arch_version == "cuda-aarch64" or arch_version == "12.6"
-                            )
-                            else ""
-                        ),
+                        "devtoolset": "cxx11-abi",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
@@ -426,8 +422,8 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64", "xpu"])
-                            or gpu_arch_type == "rocm"
+                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64"])
+                            or os == "linux"
                             else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],

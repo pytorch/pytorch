@@ -8,6 +8,7 @@ import platform
 import sys
 import sysconfig
 from distutils.version import LooseVersion
+from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
 from typing import Any, cast
 
@@ -173,9 +174,7 @@ class CMake:
                 toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
-        base_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
+        base_dir = str(Path(__file__).absolute().parents[2])
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)
