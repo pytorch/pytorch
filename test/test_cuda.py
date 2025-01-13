@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    MI300_ARCH,
     NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
@@ -68,6 +69,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -484,7 +486,33 @@ class TestCuda(TestCase):
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @contextlib.contextmanager
+    def _hip_allow_tf32(self):
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+
+        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+        try:
+            yield
+        finally:
+            if hip_allow_tf32 is not None:
+                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+            else:
+                del os.environ["HIPBLASLT_ALLOW_TF32"]
+
     def test_cublas_allow_tf32_get_set(self):
+        """
+        We only turn on TF32 for MI300 with a special env var. This is because TF32
+        is only available in MI300+ and is in experimental mode (hipblaslt support
+        is current WIP)
+        """
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_cublas_allow_tf32_get_set_inner()
+
+    def _test_cublas_allow_tf32_get_set_inner(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
@@ -499,6 +527,12 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_float32_matmul_precision_get_set_inner()
+
+    def _test_float32_matmul_precision_get_set_inner(self):
         orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
@@ -510,6 +544,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.get_float32_matmul_precision(), "highest")
         else:
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+
         for p in ("medium", "high"):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
@@ -540,6 +575,13 @@ class TestCuda(TestCase):
             torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
+
+    def test_cublas_allow_fp16_accumulation_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_accumulation
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_accumulation(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_accumulation = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(
@@ -805,6 +847,27 @@ class TestCuda(TestCase):
             try_realloc = torch.cuda.FloatTensor([10, 10])
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
+    def test_stream_context_manager(self):
+        prev_stream = torch.cuda.current_stream()
+        with torch.cuda.Stream() as stream:
+            self.assertEqual(stream, torch.cuda.current_stream())
+        self.assertEqual(prev_stream, torch.cuda.current_stream())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.cuda.set_device(src_device)
+        src_prev_stream = torch.cuda.current_stream(src_device)
+        dst_prev_stream = torch.cuda.current_stream(dst_device)
+        with torch.cuda.Stream(dst_device) as dst_stream:
+            self.assertEqual(dst_device, torch.cuda.current_device())
+            self.assertEqual(dst_stream, torch.cuda.current_stream())
+            self.assertEqual(src_prev_stream, torch.cuda.current_stream(src_device))
+        self.assertEqual(src_device, torch.cuda.current_device())
+        self.assertEqual(src_prev_stream, torch.cuda.current_stream())
+        self.assertEqual(dst_prev_stream, torch.cuda.current_stream(dst_device))
 
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
@@ -4022,10 +4085,12 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -4054,11 +4119,7 @@ class TestCudaMallocAsync(TestCase):
         that the pytorch call is returning a correct list of UUIDs.
         """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
-        uuids = (
-            subprocess.check_output(cmd, shell=True, universal_newlines=True)
-            .strip()
-            .split("\n")
-        )
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
         for uuid in uuids:
@@ -4082,11 +4143,7 @@ import os
 print(f"{torch.cuda.device_count()}")
         """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
-        uuids = (
-            subprocess.check_output(cmd, shell=True, universal_newlines=True)
-            .strip()
-            .split("\n")
-        )
+        uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
 
         custom_envs = []

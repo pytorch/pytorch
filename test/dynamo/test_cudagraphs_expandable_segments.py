@@ -2,8 +2,8 @@
 # run time cuda tests, but with the allocator using expandable segments
 
 import os
+import pathlib
 import sys
-from pathlib import Path
 
 import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
@@ -16,10 +16,9 @@ sys.path.append(pytorch_test_dir)
 from dynamo.test_cudagraphs import TestAotCudagraphs  # noqa: F401
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(REPO_ROOT))
-
 from tools.stats.import_test_stats import get_disabled_tests
 
 

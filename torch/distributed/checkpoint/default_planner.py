@@ -7,7 +7,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -107,7 +107,7 @@ class DefaultSavePlanner(SavePlanner):
 
     def create_global_plan(
         self, all_plans: List[SavePlan]
-    ) -> Tuple[List[SavePlan], Metadata]:
+    ) -> tuple[List[SavePlan], Metadata]:
         all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
@@ -417,7 +417,7 @@ def create_default_local_save_plan(
 def create_default_global_save_plan(
     all_plans: List[SavePlan],
     rewrite_index_hints: bool = True,
-) -> Tuple[List[SavePlan], Metadata]:
+) -> tuple[List[SavePlan], Metadata]:
     """
     Create the global plan and metadata used by DefaultSavePlanner.
 
