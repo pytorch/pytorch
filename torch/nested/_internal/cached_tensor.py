@@ -2,7 +2,6 @@ from contextlib import contextmanager
 from typing import *  # noqa: F403
 
 import torch
-from torch.utils import _pytree as pytree
 
 
 class CachedTensor(torch.Tensor):
@@ -13,9 +12,7 @@ class CachedTensor(torch.Tensor):
     # is determined by a "source" tensor in the dict (specified by the user
     # during construction).
     #
-    # This class is not super useful on its own because by default, performing any
-    # operations on it will be as if you first unwrapped the CachedTensor and then
-    # performed the operation on the plain source tensor (a plain tensor is also returned).
+    # This tensor does not support any operations on it by default.
     # To leverage the extra metadata, you must register an op to perform the special logic
     # you want via register_cached_tensor_func.
     #
@@ -83,22 +80,15 @@ class CachedTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        if op is torch.ops.aten.detach.default:
+            # detach is needed for torch.compile
+            return args[0]
+
         if op in _func_registry:
             return _func_registry[op](op, *args, **kwargs)
 
-        # By default, doing any operation on a CachedTensor automatically unwraps and
-        # returns a non-CachedTensor
-        unwrapped_args = pytree.tree_map_only(
-            CachedTensor,
-            lambda x: x.metadata[x.source_field],
-            args,
-        )
-        unwrapped_kwargs = pytree.tree_map_only(
-            CachedTensor,
-            lambda x: x.metadata[x.source_field],
-            kwargs,
-        )
-        return op(*unwrapped_args, **unwrapped_kwargs)
+        # By default, doing any operation on a CachedTensor errors
+        raise NotImplementedError(f"CachedTensor does not support for {op}")
 
 
 torch.serialization.add_safe_globals([CachedTensor])
@@ -125,6 +115,10 @@ def set_func_registry(registry: Dict[Any, Callable]) -> Generator:
 # For NestedTensor we rely on this behavior for factory functions.
 def register_cached_tensor_func(aten_op: Any) -> Callable:
     def wrapper(func: Callable) -> Callable:
+        if aten_op in _func_registry:
+            raise RuntimeError(
+                f"Attempted to register {func} for {aten_op}, but {aten_op} is already registered to {_func_registry[aten_op]}"
+            )
         _func_registry[aten_op] = func
         return func
 
