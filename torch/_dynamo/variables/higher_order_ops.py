@@ -2546,8 +2546,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
             else:
                 fwd_proxy_of_bwd_freevars.append(k)
 
+        def unwrap_proxy(x):
+            if isinstance(x, torch.fx.Proxy):
+                return x.node
+            else:
+                assert variables.ConstantVariable.is_literal(
+                    x
+                ), f"Only constant is allowed. Got {x}"
+                return x
+
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
-        new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
+        new_fwd_graph_outputs = pytree.tree_map(unwrap_proxy, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
         fwd_graph.lint()
 
