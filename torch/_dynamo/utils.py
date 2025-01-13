@@ -466,6 +466,9 @@ class CompileEventLogger:
     def add_to_set(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
     ):
+        """
+        Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
+        """
         chromium_log = get_chromium_event_logger()
         if (
             log_level == CompileEventLogLevel.CHROMIUM
@@ -496,6 +499,10 @@ class CompileEventLogger:
         value: Any,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ):
+        """
+        Same as add to set, just does it automatically to the toplevel event instead of having to explicitly name it.
+        Defaults to COMPILATION_METRIC log level.
+        """
         chromium_log = get_chromium_event_logger()
         top_event = chromium_log.get_top()
         if top_event is None:
@@ -1545,7 +1552,7 @@ class ChromiumEventLogger:
         value: Any,
     ):
         """
-        Increment an integer event data field if it exists
+        Add a value to a set within a event_name's metadata if it exists
         """
         if event_name not in self.get_stack():
             raise RuntimeError(
