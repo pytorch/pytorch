@@ -39,7 +39,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
     : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.is_onednn()) {
-    return at::mkldnn_linear(input, weight, *bias);
+    return at::onednn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
   if (at::native::xnnpack::use_linear(input, weight, *bias)) {

@@ -210,6 +210,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_convolution,
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
+        torch.onednn_linear_backward_weights,
         torch.mkldnn_linear_backward_weights,
         torch.onednn_rnn_layer,
         torch.mkldnn_rnn_layer,

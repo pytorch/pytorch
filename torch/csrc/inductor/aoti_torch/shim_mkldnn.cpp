@@ -252,7 +252,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_linear_pointwise(
+    auto tmp_result = at::native::onednn_linear_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
@@ -271,7 +271,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     const char* attr,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::mkldnn_linear_pointwise_binary(
+    auto tmp_result = at::native::onednn_linear_pointwise_binary(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(W),

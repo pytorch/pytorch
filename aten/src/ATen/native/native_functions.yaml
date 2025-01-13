@@ -3346,26 +3346,35 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
-- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: onednn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_linear
-  autogen: mkldnn_linear.out
+    OnednnCPU: onednn_linear
+  autogen: onednn_linear.out
+
+- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: onednn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+  dispatch:
+    OnednnCPU: onednn_linear_backward_input
+  autogen: onednn_linear_backward_input.out
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+
+- func: onednn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_input
-  autogen: mkldnn_linear_backward_input.out
+    OnednnCPU: onednn_linear_backward_weights
+  autogen: onednn_linear_backward_weights.out
 
 - func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
+
+- func: onednn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_weights
-  autogen: mkldnn_linear_backward_weights.out
+    OnednnCPU: onednn_linear_backward
+  autogen: onednn_linear_backward.out
 
 - func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    OnednnCPU: mkldnn_linear_backward
-  autogen: mkldnn_linear_backward.out
 
 - func: _cslt_compress(Tensor input) -> Tensor
   dispatch:

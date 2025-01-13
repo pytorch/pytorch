@@ -12,11 +12,17 @@
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/linear.h>
+#include <ATen/ops/onednn_linear_backward_input.h>
 #include <ATen/ops/mkldnn_linear_backward_input.h>
+#include <ATen/ops/onednn_linear_backward_input_native.h>
 #include <ATen/ops/mkldnn_linear_backward_input_native.h>
+#include <ATen/ops/onednn_linear_backward_native.h>
 #include <ATen/ops/mkldnn_linear_backward_native.h>
+#include <ATen/ops/onednn_linear_backward_weights.h>
 #include <ATen/ops/mkldnn_linear_backward_weights.h>
+#include <ATen/ops/onednn_linear_backward_weights_native.h>
 #include <ATen/ops/mkldnn_linear_backward_weights_native.h>
+#include <ATen/ops/onednn_linear_native.h>
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
@@ -25,19 +31,42 @@
 namespace at {
 namespace native {
 
+Tensor onednn_linear(
+    const Tensor& self,
+    const Tensor& weight, const std::optional<Tensor>& bias_opt) {
+  TORCH_CHECK(false, "onednn_linear: ATen not compiled with ONEDNN support");
+}
+
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with ONEDNN support");
 }
+
+Tensor onednn_linear_backward_input(
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
+  TORCH_CHECK(false, "onednn_linear_backward_input: ATen not compiled with ONEDNN support");
+}
+
 Tensor mkldnn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
   TORCH_CHECK(false, "mkldnn_linear_backward_input: ATen not compiled with ONEDNN support");
 }
 
+std::tuple<Tensor, Tensor> onednn_linear_backward_weights(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
+  TORCH_CHECK(false, "onednn_linear_backward_weights: ATen not compiled with ONEDNN support");
+}
+
 std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
   TORCH_CHECK(false, "mkldnn_linear_backward_weights: ATen not compiled with ONEDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> onednn_linear_backward(
+    const Tensor& input, const Tensor& grad_output_t,
+    const Tensor& weight, std::array<bool,3> output_mask) {
+  TORCH_CHECK(false, "onednn_linear_backward: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
@@ -56,7 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 
 namespace at::native {
 
-Tensor mkldnn_linear(
+Tensor onednn_linear(
     const Tensor& self,
     const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -66,16 +95,16 @@ Tensor mkldnn_linear(
   const int64_t dim = self.dim();
   TORCH_CHECK(
       self.dim() != 0,
-      "mkldnn_linear: input needs to has dim at least 1, input dim ",
+      "onednn_linear: input needs to has dim at least 1, input dim ",
       self.dim());
   TORCH_CHECK(self.is_onednn(),
-      "mkldnn_linear: input needs to be onednn layout");
+      "onednn_linear: input needs to be onednn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_linear: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+        "onednn_linear: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
   } else if (self.scalar_type() == ScalarType::Half) {
     TORCH_CHECK(onednn_fp16_device_check(),
-        "mkldnn_linear: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
+        "onednn_linear: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   // reshape first if input dim != 2 and the reshape will cost a memory copy.
@@ -107,13 +136,18 @@ Tensor mkldnn_linear(
                                  self.options().device_opt());
 }
 
+Tensor mkldnn_linear(
+    const Tensor& self,
+    const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
+  return at::native::onednn_linear(self, weight_t, bias_opt);
+}
 
-Tensor mkldnn_linear_backward_input(
+Tensor onednn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight_t){
   TORCH_CHECK(grad_output.is_onednn(),
-      "mkldnn_linear_backward: grad_output needs to be onednn layout");
+      "onednn_linear_backward: grad_output needs to be onednn layout");
   TORCH_CHECK(weight_t.device().is_cpu() && weight_t.scalar_type() == kFloat,
-      "mkldnn_linear_backward: weight_t needs to be a dense tensor");
+      "onednn_linear_backward: weight_t needs to be a dense tensor");
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
 
@@ -138,12 +172,17 @@ Tensor mkldnn_linear_backward_input(
                                  grad_output.options().device_opt());
 }
 
-std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
+Tensor mkldnn_linear_backward_input(
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight_t){
+  return at::native::onednn_linear_backward_input(input_size, grad_output, weight_t);
+}
+
+std::tuple<Tensor, Tensor> onednn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
   TORCH_CHECK(grad_output.is_onednn() && input.is_onednn(),
-      "mkldnn_linear_backward: grad_output and input needs to be onednn layout");
+      "onednn_linear_backward: grad_output and input needs to be onednn layout");
   TORCH_CHECK(weight.device().is_cpu() && weight.scalar_type() == kFloat,
-      "mkldnn_linear_backward: weight needs to be a dense tensor");
+      "onednn_linear_backward: weight needs to be a dense tensor");
 
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
@@ -167,20 +206,31 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
                     weight.options().device_opt()))};
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
+std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
+  return at::native::onednn_linear_backward_weights(grad_output, input, weight, bias_defined);
+}
+
+std::tuple<Tensor, Tensor, Tensor> onednn_linear_backward(
     const Tensor& input, const Tensor& grad_output,
     const Tensor& weight, std::array<bool,3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::mkldnn_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = at::onednn_linear_backward_input(input.sizes(), grad_output, weight);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = at::onednn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-Tensor mkldnn_linear_pointwise(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
+    const Tensor& input, const Tensor& grad_output,
+    const Tensor& weight, std::array<bool,3> output_mask) {
+  return at::native::onednn_linear_backward(input, grad_output, weight, output_mask);
+}
+
+Tensor onednn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
@@ -254,7 +304,7 @@ Tensor mkldnn_linear_pointwise(
   return output;
 }
 
-Tensor mkldnn_linear_pointwise_binary(
+Tensor onednn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -429,19 +479,19 @@ TORCH_LIBRARY_IMPL(mkl, OnednnCPU, m) {
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_linear_pointwise"),
-      TORCH_FN(mkldnn_linear_pointwise));
+      TORCH_FN(onednn_linear_pointwise));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_linear_pointwise.binary"),
-      TORCH_FN(mkldnn_linear_pointwise_binary));
+      TORCH_FN(onednn_linear_pointwise_binary));
 }
 
 TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_linear_pointwise"),
-      TORCH_FN(mkldnn_linear_pointwise));
+      TORCH_FN(onednn_linear_pointwise));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_linear_pointwise.binary"),
-      TORCH_FN(mkldnn_linear_pointwise_binary));
+      TORCH_FN(onednn_linear_pointwise_binary));
 }
 
 } // namespace at
