@@ -692,7 +692,7 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -700,11 +700,6 @@ class AOTInductorTestsTemplate:
         # cuda only
         if self.device != "cuda":
             return
-
-        if torch.cuda.get_device_capability() == (8, 9):
-            import pytest
-
-            pytest.fail("Just confirming that test is run on SM89")
 
         class Model(torch.nn.Module):
             def __init__(self, dtype):

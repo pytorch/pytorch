@@ -1224,11 +1224,6 @@ class TestPrologueFusion(TestCase):
         "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
     )
     def test_low_precision(self):
-        if torch.cuda.get_device_capability() == (8, 9):
-            import pytest
-
-            pytest.fail("Just confirming that test is run on SM89")
-
         M = K = N = 128
 
         x = torch.rand([M, K], device=GPU_TYPE).to(torch.float8_e4m3fn)
