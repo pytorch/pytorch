@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Set
 
 import torch
 import torch.ao.nn.qat as nnqat
@@ -205,7 +205,7 @@ class DetectorBase(ABC):
             )
 
     @abstractmethod
-    def generate_detector_report(self, model) -> Tuple[str, Dict[str, Any]]:
+    def generate_detector_report(self, model) -> tuple[str, Dict[str, Any]]:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -393,7 +393,7 @@ class PerChannelDetector(DetectorBase):
 
         return per_channel_info
 
-    def generate_detector_report(self, model: nn.Module) -> Tuple[str, Dict[str, Any]]:
+    def generate_detector_report(self, model: nn.Module) -> tuple[str, Dict[str, Any]]:
         r"""Checks if any Linear or Conv layers in the model utilize per_channel quantization.
         Only Linear and Conv layers can use per_channel as of now so only these two are currently checked.
 
@@ -686,7 +686,7 @@ class DynamicStaticDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, Dict[str, Any]]:
         r"""
         Determines whether dynamic or static quantization is more appropriate for a given module.
 
@@ -1233,7 +1233,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, Dict[str, Any]]:
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
@@ -1631,7 +1631,7 @@ class OutlierDetector(DetectorBase):
 
     def generate_detector_report(
         self, model: GraphModule
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, Dict[str, Any]]:
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
