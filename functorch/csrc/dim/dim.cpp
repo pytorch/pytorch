@@ -1610,11 +1610,10 @@ static PyObject* _dims(PyObject *self,
     if (decoder.opcode() == PRECALL) {
         decoder.next();
     }
+    if (decoder.opcode() != CALL) {
+      std::cout << " not CALL, got: " << (uint8_t) decoder.opcode() << std::endl;
+    }
     // note that this opcode was removed in 3.12
-    #endif
-    // ???
-    #if !(IS_PYTHON_3_13_PLUS)
-    decoder.next();
     #endif
 
     if (relevant_op(decoder.opcode())) {
