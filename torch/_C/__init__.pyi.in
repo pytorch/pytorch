@@ -1166,14 +1166,14 @@ def _get_sdp_priority_order() -> List[_int]: ... #THPModule_getSDPPriorityOrder
 def _set_sdp_priority_order(arg: List[_int]) -> None: ... #THPModule_setSDPPriorityOrder
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
-def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledOnednn
-def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledOnednn
+def _get_onednn_enabled() -> _bool: ...  # THPModule_userEnabledOnednn
+def _set_onednn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledOnednn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
-def _get_mkldnn_deterministic() -> _bool: ...  # THPModule_deterministicOnednn
-def _set_mkldnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicOnednn
+def _get_onednn_deterministic() -> _bool: ...  # THPModule_deterministicOnednn
+def _set_onednn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicOnednn
 def _get_deterministic_algorithms() -> _bool: ...  # THPModule_deterministicAlgorithms
 def _get_deterministic_algorithms_warn_only() -> _bool: ...  # THPModule_deterministicAlgorithmsWarnOnly
 def _set_deterministic_algorithms(

@@ -3526,5 +3526,5 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 instantiate_parametrized_tests(TestPatternMatcher)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
+    if IS_LINUX and HAS_CPU and torch.backends.onednn.is_available():
         run_tests()

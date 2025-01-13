@@ -147,12 +147,12 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 
 @contextmanager
 def _ignore_backend_decomps():
-    orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
+    orig_mkldnn_flag = torch.backends.onednn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
     try:
         yield
     finally:
-        torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
+        torch.backends.onednn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
