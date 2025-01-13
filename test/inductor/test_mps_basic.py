@@ -41,6 +41,7 @@ class MPSBasicTests(TestCase):
     test_add_const_int = CommonTemplate.test_add_const_int
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
+    test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
     test_div1 = CommonTemplate.test_div1
     test_div3 = CommonTemplate.test_div3
     test_cat_empty = CommonTemplate.test_cat_empty
