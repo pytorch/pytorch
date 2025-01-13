@@ -61,6 +61,7 @@ from .utils import (
     is_collective,
     is_gpu,
     is_multi_outputs_template,
+    is_output_of_multi_outputs_template,
     is_wait,
     sympy_product,
 )
@@ -3213,11 +3214,7 @@ class Scheduler:
         return (
             isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node.is_template()
-            and not (
-                isinstance(node.node, MultiOutput)
-                and len(node.node.inputs) == 1
-                and isinstance(node.node.inputs[0], ir.CppTemplateBuffer)
-            )
+            and not is_output_of_multi_outputs_template(node.node)
         )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:

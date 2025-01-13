@@ -1823,10 +1823,27 @@ def pass_execution_and_save(func, gm, inp, msg):
 
 
 def is_multi_outputs_template(template_buf) -> bool:
+    """
+    Check if input buffer is a multi-outputs template buffer
+    """
     from . import ir
 
     return isinstance(template_buf, ir.CppTemplateBuffer) and isinstance(
         template_buf.layout, ir.MultiOutputLayout
+    )
+
+
+def is_output_of_multi_outputs_template(input_buf) -> bool:
+    """
+    Check if input buffer is a output of multi-outputs template buffer
+    """
+    from . import ir
+
+    return (
+        isinstance(input_buf, ir.MultiOutput)
+        and len(input_buf.inputs) == 1
+        and isinstance(input_buf.inputs[0], ir.CppTemplateBuffer)
+        and isinstance(input_buf.inputs[0].layout, ir.MultiOutputLayout)
     )
 
 
