@@ -364,8 +364,19 @@ class GeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
+    # def reconstruct(self, codegen):
+    #     from torch._dynamo.symbolic_convert import InstructionTranslator
+    #     tx = InstructionTranslator.current_tx()
+    #     try:
+    #         prev = tx.output.should_exit
+    #         tx.output.should_exit = False
+    #         items = self.force_unpack_var_sequence(tx)
+    #         variables.ListIteratorVariable(items, mutation_type=ValueMutationNew()).reconstruct(codegen)
+    #     finally:
+    #         tx.output.should_exit = prev
+
     def bind_args(self, tx, args, kwargs):
-        return {}
+        return self.fn.bind_args(tx, args, kwargs)
 
     def get_globals(self):
         return self.f_globals
@@ -530,7 +541,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVaria
 
     def _build_inline_tracer(self, tx, args, kwargs):
         # NOTE: This only exists to not break support for context manager when
-        # config.enable_yield_on_generator is False. We can safely remove this
+        # config.enable_faithful_generator_behavior is False. We can safely remove this
         # once generators are fully supported
         tracer = super()._build_inline_tracer(tx, args, kwargs)
         assert isinstance(
