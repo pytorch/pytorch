@@ -579,7 +579,7 @@ static void _rrelu_with_noise_train(
     Tensor& noise,
     const Scalar& lower_,
     const Scalar& upper_,
-    std::optional<Generator> generator) {
+    const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
