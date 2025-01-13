@@ -1782,6 +1782,88 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("input_3d", (True, False))
+    @parametrize(
+        "bias",
+        (
+            [True, True],
+            [True, False],
+            [False, True],
+            [False, False],
+        ),
+    )
+    @parametrize(
+        "epilogue",
+        (
+            ["none", "none"],
+            ["relu", "none"],
+            ["none", "relu"],
+            ["relu", "relu"],
+            ["silu", "mul"],
+        ),
+    )
+    def test_grouped_linear_epilogue(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        input_3d,
+        bias,
+        epilogue,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias, epilogue):
+                super().__init__()
+                self.linear0 = torch.nn.Linear(in_feature, out_feature, bias=bias[0])
+                self.linear1 = torch.nn.Linear(in_feature, out_feature, bias=bias[1])
+                self.epilogue0 = epilogue[0]
+                self.epilogue1 = epilogue[1]
+
+            def forward(self, x):
+                res0 = self.linear0(x)
+                res1 = self.linear1(x)
+                if self.epilogue0 == "silu" and self.epilogue1 == "mul":
+                    return torch.nn.functional.silu(res0) * res1
+                else:
+                    if self.epilogue0 == "relu":
+                        res0 = torch.nn.functional.relu(res0)
+                    if self.epilogue1 == "relu":
+                        res1 = torch.nn.functional.relu(res1)
+                    return res0, res1
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            if input_3d and dtype == torch.float16:
+                # Reduce the number of test cases
+                continue
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, bias, epilogue).eval()
+            B = (2, batch_size) if input_3d else (batch_size,)
+            v = torch.randn(*B, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+            if any(e != "none" for e in epilogue):
+                self.assertGreater(
+                    counters["inductor"]["cpp_epilogue_fusion_counter"], 0
+                )
+
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
@@ -2131,6 +2213,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_quantized_linear_amx
     )
     test_grouped_linear_dynamic_shapes = TestSelectAlgorithm.test_grouped_linear
+    test_grouped_linear_epilogue_dynamic_shapes = (
+        TestSelectAlgorithm.test_grouped_linear_epilogue
+    )
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_cache_blocking
