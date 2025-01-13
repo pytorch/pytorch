@@ -7,9 +7,11 @@ from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 # For typechecking
 SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
 CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
+SkipFrameRecursiveFlag = NewType("SkipFrameRecursiveFlag", object)
 # Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
 skip_code_recursive_flag: SkipCodeRecursiveFlag
 cache_limit_hit_flag: CacheLimitHitFlag
+skip_frame_recursive_flag: SkipFrameRecursiveFlag
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...

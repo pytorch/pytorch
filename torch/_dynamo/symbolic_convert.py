@@ -3061,7 +3061,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
-            raise exc.SkipFrame("because no content in function call")
+            raise exc.EmptyGraph("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,

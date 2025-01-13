@@ -6432,6 +6432,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
 
+    @parametrize("fullgraph", [True, False])
+    def test_skip_frame_recursive_on_empty_graph(self, fullgraph):
+        def k(x):
+            return x
+
+        def g(x):
+            return k(x)
+
+        def f(x):
+            return g(x)
+
+        # TODO clear this on all tests
+        torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos.clear()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph)
+        opt_f(torch.randn(3))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 1)
+        opt_f(torch.randn(3))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 2)
+
     def test_torchname(self):
         def fn(obj):
             return torch.typename(obj)
