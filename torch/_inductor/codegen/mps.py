@@ -28,6 +28,20 @@ DTYPE_TO_METAL = {
 }
 
 
+def value_to_metal(val: CSEVariable) -> str:
+    if isinstance(val, float):
+        if val == torch.inf:
+            return "HUGE_VALF"
+        elif val == -torch.inf:
+            return "-HUGE_VALF"
+        elif val != val:  # Only float that not equal to self is nan
+            return "NAN"
+        return str(val)
+    elif isinstance(val, bool):
+        return "true" if val else "false"
+    return str(val)
+
+
 class MetalExprPrinter(ExprPrinter_):
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
@@ -61,18 +75,14 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+
+    @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
-        if isinstance(val, float):
-            if val == torch.inf:
-                return "HUGE_VALF"
-            elif val == -torch.inf:
-                return "-HUGE_VALF"
-            elif val != val:  # Only float that not equal to self is nan
-                return "NAN"
-            return str(val)
-        elif isinstance(val, bool):
-            return "true" if val else "false"
-        return str(val)
+        return value_to_metal(val)
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
@@ -84,6 +94,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        # TODO: Type annotation for other is wrong, it's often float or int
         with V.kernel.mask_loads(mask, other) as new_mask:
             result = body()
 
@@ -94,7 +105,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
-        return f"{a} ? {b} : {c}"
+        return f"{a} ? {b} : {value_to_metal(c)}"
 
     @staticmethod
     def remainder(a: CSEVariable, b: CSEVariable) -> str:
@@ -109,19 +120,15 @@ class MetalOverrides(OpOverrides):
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
-        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
         max_res = f"metal::max({typecast_a}, {typecast_b})"
-        return f"{nan_check} ? {nan_value} : {max_res}"
+        return f"metal::isnan({a} + {b}) ? {a} + {b} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
-        nan_check = f"metal::any(metal::isnan({typecast_a})) | metal::any(metal::isnan({typecast_b}))"
         min_res = f"metal::min({typecast_a}, {typecast_b})"
-        return f"{nan_check} ? {nan_value} : {min_res}"
+        return f"metal::isnan({a} + {b})  ? {a} + {b} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -142,6 +149,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def log(x: CSEVariable) -> str:
         return f"metal::log({x})"
+
+    @staticmethod
+    def exp(x: CSEVariable) -> str:
+        return f"metal::exp({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -180,6 +191,14 @@ class MetalOverrides(OpOverrides):
         return f"metal::sqrt({x})"
 
     @staticmethod
+    def rsqrt(x: CSEVariable) -> str:
+        return f"metal::rsqrt({x})"
+
+    @staticmethod
+    def tanh(x: CSEVariable) -> str:
+        return f"metal::tanh({x})"
+
+    @staticmethod
     def atanh(x: CSEVariable) -> str:
         return f"metal::atanh({x})"
 
@@ -197,6 +216,16 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sign(x: CSEVariable) -> str:
         return f"metal::sign({x})"
+
+    @staticmethod
+    def fmod(a: CSEVariable, b: CSEVariable) -> str:
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::fmod({typecast_a}, {typecast_b})"
+
+    @staticmethod
+    def trunc(x: CSEVariable) -> str:
+        return f"metal::trunc({x})"
 
 
 class MetalKernel(SIMDKernel):
@@ -223,7 +252,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{index}]"
+        line = f"{var}[{self.sexpr(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
@@ -256,6 +285,8 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
+                for outer, inner in self.args.sizevars.items():
+                    code.writeline(f"constant long& {inner},")
                 if len(idx_var_names) == 1:
                     code.writeline(
                         f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
@@ -284,6 +315,7 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        args += [str(v) for v in self.args.sizevars.keys()]
         if len(self.active_range_trees()) > 0:
             args += [
                 f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
@@ -295,6 +327,21 @@ class MetalKernel(SIMDKernel):
             gpu=False,  # TODO: Fix me, MPS does not expose streams now
             triton=False,
         )
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        if not (lower or upper):
+            return
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
+        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
+        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        if lower and upper:
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
+        else:
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.body, line, assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
