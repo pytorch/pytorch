@@ -380,7 +380,7 @@ class ConstDictVariable(VariableTracker):
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
-            return DictKeysVariable(self)
+            return DictKeySetVariable(self.items.keys())
         elif name == "values":
             self.install_dict_keys_match_guard()
             if self.source:
@@ -804,33 +804,6 @@ class DictViewVariable(VariableTracker):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__len__":
-            return self.dv_dict.call_method(tx, name, args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
-
-
-class DictKeysVariable(DictViewVariable):
-    kv = "keys"
-
-    @property
-    def set_items(self):
-        return set(self.view_items)
-
-    @property
-    def view_items_vt(self):
-        # Returns an iterable of the unpacked items
-        return [x.vt for x in self.view_items]
-
-    def python_type(self):
-        return dict_keys
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
