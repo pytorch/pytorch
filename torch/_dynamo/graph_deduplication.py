@@ -1,6 +1,6 @@
 import logging
 import operator
-from typing import Any, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Set
 
 import torch.fx
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
@@ -76,11 +76,35 @@ when they are created in output_graph.
     return output_replacements
 
 
+# flattens with support for slices
+# Note: a better way to do this would
+# be register/unregister slices as pytree nodes
+# but there is no unregister API in the pytorch
+# pytree impl
+def _flatten_args_kwargs(args: Any) -> List[Node]:
+    fully_flattened = []
+
+    def flatten(args: Any) -> None:
+        flattened, _ = tree_flatten(args)
+        for arg in flattened:
+            if isinstance(arg, slice):
+                start = arg.start
+                stop = arg.stop
+                step = arg.step
+                flatten((start, stop, step))
+            else:
+                fully_flattened.append(arg)
+
+    flatten(args)
+
+    return fully_flattened
+
+
 def _replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
     get_subgraph_node: Node,
-    node_ind_arg_ind: Iterable[Tuple[int, int]],
+    node_ind_arg_ind: Iterable[tuple[int, int]],
     inds_with_external_users: List[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
@@ -89,7 +113,7 @@ def _replace_region_with_subgraph(
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
@@ -123,16 +147,16 @@ def _replace_region_with_subgraph(
 
 def _get_external_inputs(
     region: Region,
-) -> Dict[Node, Tuple[int, int]]:
+) -> Dict[Node, tuple[int, int]]:
     external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
-                in_node not in region_unique
+                isinstance(in_node, Node)
+                and in_node not in region_unique
                 and in_node not in external_node_to_indices
-                and isinstance(in_node, Node)
             ):
                 external_node_to_indices[in_node] = (node_ind, arg_ind)
 
@@ -159,9 +183,9 @@ def _get_inds_with_external_users(region: Region, inds_unique: Set[int]) -> None
 
 def _copy_nodes_and_remap_inputs(
     subgraph: torch.fx.Graph, region: Region
-) -> Dict[Tuple[int, int], Any]:
+) -> Dict[tuple[int, int], Any]:
     external_inputs_to_indices = _get_external_inputs(region)
-    indices_to_placeholder_ind: Dict[Tuple[int, int], Any] = {}
+    indices_to_placeholder_ind: Dict[tuple[int, int], Any] = {}
     region_to_subgraph_node = {}
     for node in external_inputs_to_indices.keys():
         placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
@@ -195,7 +219,7 @@ def _create_subgraph_outputs(
 def _create_subgraph(
     region: Region,
     inds_with_external_users: List[int],
-) -> Tuple[torch.fx.Graph, Dict[Tuple[int, int], Any]]:
+) -> tuple[torch.fx.Graph, Dict[tuple[int, int], Any]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
     node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)

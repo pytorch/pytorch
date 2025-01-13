@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -357,7 +357,7 @@ def _is_dequantize(n: Node) -> bool:
     ]
 
 
-def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Node]]:
+def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Node]]:
     """
     Helper function to extract the nodes in the conv-bn fusion pattern after
     subgraph rewriting, in the form of a map:
@@ -374,7 +374,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
         "conv_bias_q", "conv_bias_dq"
     """
 
-    def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Optional[Node]]:
+    def _get_nodes(nodes: List[Node]) -> tuple[Node, Node, Optional[Node]]:
         """
         Return a 3-tuple of (conv_node, bn_node, getitem_node).
         This asserts that the match contains exactly one of each node.
@@ -394,10 +394,9 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
                 getitem_node = n
         assert conv_node is not None
         assert bn_node is not None
-        # getitem_node might be None in new training IR
         return (conv_node, bn_node, getitem_node)
 
-    def _get_q_dq_nodes(n: Node) -> Tuple[Node, Node, Node]:
+    def _get_q_dq_nodes(n: Node) -> tuple[Node, Node, Node]:
         """
         Return a 3-tuple of (orig_node, q_node, dq_node).
         """
@@ -414,24 +413,12 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
     r_conv, r_bn, r_getitem = _get_nodes(r.replacements)
 
     # Create the mapping from original node to replacement node
-    if o_getitem is None:
-        # getitem is None is new training IR
-        assert r_getitem is None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-        }
-    else:
-        # TODO: This branch is going through a deprecated branch and should be deleted soon,
-        # after capture_pre_autograd_graph fully migrate to training IR
-        # T199018392
-        assert r_getitem is not None
-        assert o_getitem is not None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-            "getitem": (o_getitem, r_getitem),
-        }
+    assert o_getitem is None
+    assert r_getitem is None
+    mapping = {
+        "conv": (o_conv, r_conv),
+        "bn": (o_bn, r_bn),
+    }
 
     # Extract conv input and weight
     # Note: here we extract the original nodes indirectly through the pattern nodes
@@ -653,7 +640,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
 def _fuse_conv_bn_qat_helper(
     m: GraphModule,
     conv_fn: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool,
 ) -> GraphModule:
     """
@@ -909,7 +896,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
 def _fold_conv_bn_qat_helper(
     m: GraphModule,
     conv_fn: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool,
 ) -> GraphModule:
     """

@@ -1,7 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
@@ -18,10 +23,13 @@ __all__ = [
     "is_compiling",
     "is_dynamo_compiling",
     "is_exporting",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def compile(*args, **kwargs):
@@ -124,11 +132,11 @@ def allow_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -422,3 +430,34 @@ def is_exporting() -> bool:
         >>>     # ...rest of the function...
     """
     return _is_exporting_flag
+
+
+def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
+    """
+    Serializes all the cache artifacts that were created during the compilation
+
+    Example:
+
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+    """
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
+
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)

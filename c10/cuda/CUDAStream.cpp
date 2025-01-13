@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 
 namespace c10::cuda {
 
@@ -174,12 +175,16 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  TORCH_CHECK(
-      num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
-      "Number of CUDA devices on the machine is larger than the compiled "
-      "max number of gpus expected (",
-      C10_COMPILE_TIME_MAX_GPUS,
-      "). Increase that and recompile.");
+  if constexpr (
+      C10_COMPILE_TIME_MAX_GPUS <
+      std::numeric_limits<decltype(num_gpus)>::max()) {
+    TORCH_CHECK(
+        num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
+        "Number of CUDA devices on the machine is larger than the compiled "
+        "max number of gpus expected (",
+        C10_COMPILE_TIME_MAX_GPUS,
+        "). Increase that and recompile.");
+  }
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
       cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
@@ -318,10 +323,6 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
     device_index = current_device();
     c10::cuda::SetTargetDevice();
   }
-  TORCH_CHECK(
-      priority <= 0,
-      "Expected cuda stream priority to be less than or equal to 0, got ",
-      priority);
   check_gpu(device_index);
 #if !defined(USE_ROCM)
   // See Note [HIP Lazy Streams]
@@ -329,9 +330,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
 #endif
-  auto pri_idx = -priority;
-  pri_idx =
-      std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
+  auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
   StreamIdType id_type = StreamIdType(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
