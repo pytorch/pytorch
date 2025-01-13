@@ -43,6 +43,7 @@ class MPSBasicTests(TestCase):
     test_addmm = CommonTemplate.test_addmm
     test_div1 = CommonTemplate.test_div1
     test_cat_empty = CommonTemplate.test_cat_empty
+    test_cat_unbacked_empty_1d = CommonTemplate.test_cat_unbacked_empty_1d
     test_floordiv = CommonTemplate.test_floordiv
     test_fmod = CommonTemplate.test_fmod
     test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
@@ -60,7 +61,9 @@ class MPSBasicTests(TestCase):
     test_slice_scatter4 = CommonTemplate.test_slice_scatter4
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
+    test_views3 = CommonTemplate.test_views3
     test_views6 = CommonTemplate.test_views6
+    test_views7 = CommonTemplate.test_views7
     test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
 
     @parametrize("dtype", MPS_DTYPES)
