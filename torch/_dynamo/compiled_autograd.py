@@ -4,8 +4,8 @@ import functools
 import itertools
 import operator
 import time
-from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from collections import Counter, defaultdict
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -73,16 +73,14 @@ def maybe_clone(x):
 # all of this upfront (perhaps at import time) via codegen changes.
 class OpNamespace:
     def __init__(self):
-        self.custom_function_name_counter = {}
+        self.custom_function_name_counter: Counter[str] = Counter()
 
     def add(self, name, fn, is_custom_function=False):
         if is_custom_function:
             name = "CppNode" + name
-            if name not in self.custom_function_name_counter:
-                self.custom_function_name_counter[name] = 0
             count = self.custom_function_name_counter[name]
             self.custom_function_name_counter[name] += 1
-            name = name + str(count)
+            name = f"{name}{count}"
         else:
             assert not hasattr(self, name)
 
@@ -92,7 +90,6 @@ class OpNamespace:
         return name
 
     def get(self, name):
-        assert hasattr(self, name)
         return getattr(self, name)
 
 
@@ -166,7 +163,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        origins: List[List[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -603,7 +600,7 @@ class AutogradCompilerInstance:
                         and user.target.namespace in ("prims", "aten")
                     )
                     or (
-                        isinstance(user.target, torch._dynamo.compiled_autograd.Op)
+                        isinstance(user.target, Op)
                         and not user.target.is_custom_function
                     )
                     for user in node_users
@@ -649,9 +646,9 @@ class AutogradCompilerInstance:
                 or (node.op == "call_function" and node.target in _impure_targets)
             )
 
-        before = len(list(self.fx_tracer.graph.nodes))
+        before = len(self.fx_tracer.graph.nodes)
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
-        after = len(list(self.fx_tracer.graph.nodes))
+        after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
     def end_capture(self, outputs):
@@ -677,8 +674,9 @@ class AutogradCompilerInstance:
         # It's probably better to refactor this class to use a different tracer
         # than the make_fx tracer, but that is a larger change.
         for node in self.fx_tracer.graph.nodes:
-            if "tensor_meta" in node.meta:
-                del node.meta["tensor_meta"]
+            for field in ["tensor_meta", "example_value", "val"]:
+                if field in node.meta:
+                    del node.meta[field]
 
         self.rename_aot_dispatcher_nodes()
         self.remove_unnecessary_validate_outputs()
@@ -1118,7 +1116,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[List[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:

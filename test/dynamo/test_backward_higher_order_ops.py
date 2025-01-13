@@ -121,7 +121,7 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            if backend == ["aot_eager", "inductor"]:
+            if backend in ["aot_eager", "inductor"]:
                 self.assertExpectedInline(
                     actual,
                     """\
@@ -197,30 +197,29 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
             self.assertEqual(x.grad, grad_out + grad_out)
-            if backend == ["aot_eager", "inductor"]:
+            if backend in ["aot_eager", "inductor"]:
                 self.assertExpectedInline(
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s1)"):
+    def forward(self, L_inputs_ : list, L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s1)"):
         l_inputs_ = L_inputs_
-        l_hooks_0_keywords_fn_keywords_obj_counter = L_hooks_0_keywords_fn_keywords_obj_counter
+        l_hooks_1_keywords_fn_keywords_obj_counter = L_hooks_1_keywords_fn_keywords_obj_counter
 
         getitem: "f32[2]" = l_inputs_[0];  l_inputs_ = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem = None
         getitem_3: "f32[2]" = validate_outputs[0];  validate_outputs = None
 
-        add_backward0 = torch__dynamo_compiled_autograd_ops_AddBackward0([getitem_3], [True, True], 1, 6, 6);  getitem_3 = None
-        getitem_4: "f32[2]" = add_backward0[0]
-        getitem_5: "f32[2]" = add_backward0[1];  add_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_4, getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [2], False), ((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem_4 = getitem_5 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_3);  getitem_3 = None
+        getitem_5: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_5, getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [2], False), ((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem_5 = None
         getitem_6: "f32[2]" = validate_outputs_1[0]
         getitem_7: "f32[2]" = validate_outputs_1[1];  validate_outputs_1 = None
 
         new_grad: "f32[2]" = torch.clone(getitem_7);  getitem_7 = None
 
-        add: "Sym(s1 + 1)" = l_hooks_0_keywords_fn_keywords_obj_counter + 1;  l_hooks_0_keywords_fn_keywords_obj_counter = None
+        add: "Sym(s1 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
         result: "f32[2]" = getitem_6 * getitem_6;  getitem_6 = None
 

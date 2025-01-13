@@ -3,7 +3,7 @@
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch.ao.quantization.observer import (
@@ -40,7 +40,7 @@ _SUB_BYTE_UINT_BOUNDS = {
 Map from dtype to the bound value of integers
 TODO: maybe can replace this with call to torch.iinfo
 """
-_DTYPE_TO_QVALUE_BOUNDS: Dict[Union[torch.dtype, TorchAODType], Tuple[int, int]] = {
+_DTYPE_TO_QVALUE_BOUNDS: Dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
     torch.int16: (-(2**15), 2**15 - 1),
@@ -193,7 +193,7 @@ def choose_qparams_affine_with_min_max(
     min_val: torch.Tensor,
     max_val: torch.Tensor,
     mapping_type: MappingType,
-    block_size: Tuple[int, ...],
+    block_size: tuple[int, ...],
     target_dtype: torch.dtype,
     quant_min: Optional[int] = None,
     quant_max: Optional[int] = None,
@@ -202,7 +202,7 @@ def choose_qparams_affine_with_min_max(
     zero_point_dtype: Optional[torch.dtype] = None,
     preserve_zero: bool = True,
     zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """A variant of :func:`~torchao.quantization.quant_primitives.choose_qparams_affine`
     operator that pass in min_val and max_val directly instead of deriving these from a single input.
     This is used for observers in static quantization where min_val and max_val may be obtained through
@@ -245,7 +245,7 @@ def _choose_qparams_affine(
     zero_point_domain: Optional[str] = "INT",
     min_val: Optional[torch.Tensor] = None,
     max_val: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """op definition that has compatible signatures with custom op library
 
     The op does the following:
@@ -365,7 +365,7 @@ def _choose_qparams_affine(
 @torch.no_grad()
 def quantize_affine(
     input: torch.Tensor,
-    block_size: Tuple[int, ...],
+    block_size: tuple[int, ...],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     output_dtype: torch.dtype,
@@ -522,7 +522,7 @@ def _quantize_affine_no_dtype_cast(
 
 def dequantize_affine(
     input: torch.Tensor,
-    block_size: Tuple[int, ...],
+    block_size: tuple[int, ...],
     scale: torch.Tensor,
     zero_point: Optional[torch.Tensor],
     input_dtype: torch.dtype,
@@ -710,7 +710,7 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
         # returning original input
         return input
 
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         assert hasattr(self, "min_val") and hasattr(
             self, "max_val"
         ), "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
