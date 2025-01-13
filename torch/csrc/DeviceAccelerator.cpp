@@ -1,10 +1,5 @@
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/utils/device_lazy_init.h>
-
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
 namespace torch::accelerator {
 
 void initModule(PyObject* module) {
