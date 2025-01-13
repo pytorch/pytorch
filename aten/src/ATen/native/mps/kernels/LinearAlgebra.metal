@@ -32,41 +32,6 @@ kernel void naive_matmul(
   outputData[x * strides[2].x + y * strides[2].y] = rc;
 }
 
-// ------------------------------------
-// Helper structs to pack N, NB and similar vars
-// ------------------------------------
-struct BlockParams {
-  uint N; // Full matrix size
-  uint NB; // block size
-  uint k; // block index
-  uint activeNB; // block size for partial blocks
-  uint batch_size; // total number of batches
-  uint batch_stride; // stride between matrices in batch
-};
-
-struct TRSMParams {
-  uint N;
-  uint NB;
-  uint k; // current diagonal block
-  uint startJ; // first block to process, i.e. k+1
-  uint nBlocksJ; // total number of j blocks in this step
-  uint activeNB_k;
-  uint batch_size;
-  uint batch_stride;
-};
-
-struct SYRKBatchedParams {
-  uint N;
-  uint NB;
-  uint k; // current diagonal block index
-  uint startJ; // typically k+1
-  uint nBlocksJ; // how many j-blocks total in [startJ..numBlocks)
-  uint activeNB_k; // size of block 'k'
-  uint batch_size;
-  uint batch_stride;
-  uint nPairs; // total # of (j, h) pairs
-};
-
 inline float blockReduceSum(
     threadgroup float* sharedScratch,
     float val,
@@ -87,19 +52,18 @@ inline float blockReduceSum(
 
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
-    constant BlockParams& sizes [[buffer(1)]],
+    device uint32_t* sizes [[buffer(1)]],
     device int* success [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
     uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
-  if (bid >= sizes.batch_size)
+  if (bid >= sizes[4])
     return;
-
-  const uint N = sizes.N;
-  const uint NB = sizes.NB;
-  const uint k = sizes.k;
-  const uint actSize = sizes.activeNB;
-  const uint batch_offset = bid * sizes.batch_stride;
+  const uint N = sizes[0];
+  const uint NB = sizes[1];
+  const uint k = sizes[2];
+  const uint actSize = sizes[3];
+  const uint batch_offset = bid * sizes[5];
 
   const uint row0 = k * NB;
   const uint col0 = k * NB;
@@ -162,23 +126,20 @@ kernel void factorDiagonalBlock(
 
 kernel void applyTRSM(
     device float* A [[buffer(0)]],
-    constant TRSMParams& sizes [[buffer(1)]],
+    device uint32_t* sizes [[buffer(1)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]]) {
   uint b = tgid.x;
   uint idxJ = tgid.y;
-  if (b >= sizes.batch_size) {
-    return;
-  }
 
-  uint j = sizes.startJ + idxJ;
+  uint j = sizes[6] + idxJ;
 
-  const uint N = sizes.N;
-  const uint NB = sizes.NB;
-  const uint k = sizes.k;
-  const uint actSize_k = sizes.activeNB_k;
-  const uint batch_offset = b * sizes.batch_stride;
+  const uint N = sizes[0];
+  const uint NB = sizes[1];
+  const uint k = sizes[2];
+  const uint actSize_k = sizes[3];
+  const uint batch_offset = b * sizes[5];
 
   uint row0 = j * NB;
   uint col0 = k * NB;
@@ -238,51 +199,51 @@ kernel void applyTRSM(
 
 kernel void applySYRK(
     device float* A [[buffer(0)]],
-    constant SYRKBatchedParams& sizes [[buffer(1)]],
+    device uint32_t* sizes [[buffer(1)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]]) {
   uint b = tgid.x;
   uint pairID = tgid.y;
-  if (b >= sizes.batch_size)
-    return;
 
   uint jRel = (-1 + sqrt(1 + 8 * float(pairID))) / 2;
   uint hRel = pairID - (jRel * (jRel + 1) >> 1);
 
-  uint j = sizes.startJ + jRel;
-  uint h = sizes.startJ + hRel;
-  uint row0 = j * sizes.NB;
-  uint col0 = h * sizes.NB;
+  const uint startJ = sizes[6];
 
-  const uint N = sizes.N;
-  const uint NB = sizes.NB;
-  const uint actSize_k = sizes.activeNB_k;
+  const uint k = sizes[2];
+  uint j = startJ + jRel;
+  uint h = startJ + hRel;
+  const uint NB = sizes[1];
+  uint row0 = j * NB;
+  uint col0 = h * NB;
+
+  const uint N = sizes[0];
+  const uint actSize_k = sizes[3];
   const uint actSize_j = min((uint)(N - row0), NB);
   const uint actSize_h = min((uint)(N - col0), NB);
-  const uint batch_offset = b * sizes.batch_stride;
+  const uint batch_offset = b * sizes[5];
 
   if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0)
     return;
 
-  threadgroup float left[32 * 32];
-  threadgroup float right_t[32 * 32];
-  threadgroup float tile[32 * 32];
+  threadgroup float left[32 * 33];
+  threadgroup float right_t[32 * 33];
+  threadgroup float tile[32 * 33];
 
   const uint threads = min(tpg.x, actSize_j * actSize_k);
 
   for (uint i = tid.x; i < actSize_j * actSize_k; i += threads) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    left[r * actSize_k + c] =
-        A[batch_offset + (j * NB + r) * N + (sizes.k * NB + c)];
+    left[r * actSize_k + c] = A[batch_offset + (j * NB + r) * N + (k * NB + c)];
   }
 
   for (uint i = tid.x; i < actSize_h * actSize_k; i += threads) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     right_t[c * actSize_h + r] =
-        A[batch_offset + (h * NB + r) * N + (sizes.k * NB + c)];
+        A[batch_offset + (h * NB + r) * N + (k * NB + c)];
   }
 
   for (uint i = tid.x; i < actSize_j * actSize_h; i += threads) {
