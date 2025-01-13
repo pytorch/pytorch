@@ -343,7 +343,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(_convolution, deprecated, lower_precision_fp)
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
-  KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(onednn_rnn_layer, lower_precision_fp)
   KERNEL_CPU(conv_transpose1d, lower_precision_fp)
   KERNEL_CPU(conv_transpose2d, input, lower_precision_fp)
   KERNEL_CPU(conv_transpose3d, input, lower_precision_fp)

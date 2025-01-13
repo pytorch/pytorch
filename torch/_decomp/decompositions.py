@@ -3172,7 +3172,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     inp = inp.contiguous()
     hx = hx.contiguous()
     cx = cx.contiguous()
-    outputs = torch.ops.aten.mkldnn_rnn_layer.default(
+    outputs = torch.ops.aten.onednn_rnn_layer.default(
         inp,
         w0,
         w1,
@@ -3472,7 +3472,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
 
 def select_one_layer_lstm_function(input, hx, params):
-    r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
+    r"""Check whether we could use decompose lstm with onednn_rnn_layer.
     All the below conditions need to be met:
         * ``torch._C._get_onednn_enabled()`` returns ``True``.
         * All the input args are on CPU.

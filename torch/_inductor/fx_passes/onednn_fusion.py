@@ -873,7 +873,7 @@ if torch._C._has_mkldnn:
             counters["inductor"]["mkldnn_linear_bias_matcher_count"] += 1
             counters["inductor"]["mkldnn_linear_bias_matcher_nodes"] += len(match.nodes)
 
-    def _is_packable_mkldnn_rnn_layer(match):
+    def _is_packable_onednn_rnn_layer(match):
         lstm_node = match.output_node()
         POS_WEIGHTS = [1, 2]
         POS_INPUTS = [0, 5, 6]
@@ -1050,7 +1050,7 @@ if torch._C._has_mkldnn:
         Arg(),
     )
 
-    _aten_mkldnn_rnn_layer_args = (
+    _aten_onednn_rnn_layer_args = (
         Arg(),  # input
         Arg(),  # weight0
         Arg(),  # weight1
@@ -1116,10 +1116,10 @@ if torch._C._has_mkldnn:
             )
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
-            extra_check=_is_packable_mkldnn_rnn_layer,
+            CallFunction(aten.onednn_rnn_layer.default, *_aten_onednn_rnn_layer_args),
+            extra_check=_is_packable_onednn_rnn_layer,
         )
-        def mkldnn_rnn_layer(match, *args, **kwargs):
+        def onednn_rnn_layer(match, *args, **kwargs):
             def get_item(graph, node, index):
                 return graph.call_function(operator.getitem, (node, index))
 
@@ -1127,7 +1127,7 @@ if torch._C._has_mkldnn:
             lstm_node = match.output_node()
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
-            packed_lstm_op = aten.mkldnn_rnn_layer.default
+            packed_lstm_op = aten.onednn_rnn_layer.default
             hidden_size = args[9]
             has_biases = args[11]
             batch_first = args[13]

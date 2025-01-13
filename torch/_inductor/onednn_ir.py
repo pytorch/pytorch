@@ -1125,7 +1125,7 @@ class OnednnRnnLayer(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.aten.mkldnn_rnn_layer.default,
+            op_overload=torch.ops.aten.onednn_rnn_layer.default,
         )
 
     @classmethod
@@ -1149,7 +1149,7 @@ class OnednnRnnLayer(ExternKernelAlloc):
         train: bool,
     ):
         x = cls.require_stride1(cls.realize_input(x))
-        # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
+        # If batch_first, x has been permuted in lstm before entering the onednn_rnn_layer.
         # Make sure x is contiguous in batch_first case.
         x.freeze_layout()
         w0 = cls.require_stride1(cls.realize_input(w0))

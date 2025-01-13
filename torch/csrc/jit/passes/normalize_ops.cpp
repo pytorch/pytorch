@@ -158,7 +158,9 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_softmax, aten::softmax},
       {aten::special_gammainc, aten::igamma},
       {aten::special_gammaincc, aten::igammac},
-      {aten::special_gammaln, aten::lgamma}};
+      {aten::special_gammaln, aten::lgamma},
+      {aten::mkldnn_rnn_layer, aten::onednn_rnn_layer},
+      {aten::mkldnn_rnn_layer_backward, aten::onednn_rnn_layer_backward}};
   return alias_map;
 }
 
