@@ -26,6 +26,7 @@ from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
+    ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     Scheduler,
@@ -4905,7 +4906,24 @@ class CppScheduling(BaseScheduling):
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
+            if isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
+                template_node.node.layout, ir.MultiOutputLayout
+            ):
+                # For Grouped GEMM, allocate buffers for each GEMM
+                assert (
+                    len(template_node.outputs) == 1
+                ), "Grouped GEMM has 1 output template buffer"
+                for user in template_node.outputs[0].users:
+                    assert isinstance(
+                        user.node, ExternKernelSchedulerNode
+                    ), "Grouped GEMM should be with ExternKernelSchedulerNode"
+                    assert isinstance(
+                        user.node.node, ir.MultiOutput
+                    ), "Grouped GEMM has multi users with MultiOutput"
+                    user.node.mark_run()
+            else:
+                template_node.mark_run()  # type: ignore[attr-defined]
+            for node in epilogue_nodes:
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
