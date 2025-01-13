@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -56,7 +56,7 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    GetItemSource,
+    DictGetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
@@ -141,6 +141,16 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
+
+
+@functools.cache
+def _import_module(name: str) -> types.ModuleType:
+    """
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
+    """
+    return importlib.import_module(name)
 
 
 @dataclasses.dataclass
@@ -1189,7 +1199,7 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
@@ -1225,7 +1235,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = importlib.import_module(module_name)
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
@@ -1334,7 +1344,7 @@ class InstructionTranslatorBase(
             builtins_source = GlobalSource(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
-            var_source = GetItemSource(builtins_source, argval)
+            var_source = DictGetItemSource(builtins_source, argval)
             self.push(VariableTracker.build(self, val, var_source))
         else:
             assert is_builtin_constant(val)
@@ -2624,7 +2634,7 @@ class InstructionTranslatorBase(
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        closure: Optional[Tuple[types.CellType]] = None,
+        closure: Optional[tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2668,7 +2678,7 @@ class InstructionTranslatorBase(
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
-        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
+        self.nn_module_stack: Dict[str, tuple[str, Type[Any]]] = {}
         self.num_calls: Dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
@@ -2851,7 +2861,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 torch_function_mode_stack
             )
 
-            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
+            self.debug_locals: List[tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -3229,7 +3239,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(self):
         parent = self.parent
         code = self.f_code
-        func = self.funcvar
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
@@ -3349,7 +3358,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if "torch_package" in module_name:
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
@@ -3359,7 +3368,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
-            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+            global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
     def _load_global(self, inst):

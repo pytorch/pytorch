@@ -4,7 +4,7 @@ import functools
 import logging
 import sys
 from importlib.metadata import EntryPoint
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Sequence
 
 import torch
 from torch import fx
@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 
 class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]:
         ...
 
 
