@@ -6236,7 +6236,7 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {opt_dim}
+    {dim}
     {keepdim}
 
 Keyword args:
