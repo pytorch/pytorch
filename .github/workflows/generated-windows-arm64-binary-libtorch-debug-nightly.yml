@@ -29,6 +29,7 @@ env:
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
   MSVC_VERSION : '14.36'
+  AWS_DEFAULT_REGION: us-east-1
 
 jobs:
   get-label-type:
@@ -47,7 +48,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -135,7 +135,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -207,7 +206,6 @@ jobs:
     needs: libtorch-cpu-shared-with-deps-debug-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
