@@ -204,7 +204,8 @@ static void matmul_groupwise(
 struct ThreadDivision {
   int64_t num_threads_x;
   int64_t num_threads_y;
-  bool use_gemm; // True if GEMM is selected, false if GEMV is used
+  bool can_gemm; // True if GEMM is selected, false if GEMV is used. For Certain
+                 // Configurations, GEMV Kernel might be used even if M>1
 };
 
 inline static unsigned int round_down_to_power_of_2(unsigned int n) {
@@ -316,7 +317,7 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
       gemv_n_step);
   // Select appropriate kernel packet based on the chosen kernel type
   auto& kernel_packet =
-      division.use_gemm ? gemm_kernel_packet : gemv_kernel_packet;
+      division.can_gemm ? gemm_kernel_packet : gemv_kernel_packet;
 
   // Thread blocking parameters
   const size_t mr = kernel_packet.ukernel.get_mr();
@@ -339,34 +340,35 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size * num_threads);
   uint8_t* lhs_packed_base = lhs_packed.get();
 
-  at::parallel_for(0, num_threads, 0, [&](int64_t begin, int64_t end) {
-    for (const auto i : c10::irange(begin, end)) {
-      size_t y = i / division.num_threads_x;
-      size_t x = i % division.num_threads_x;
-      uint8_t* lhs_packed_ptr =
-          lhs_packed_base + (x + y * division.num_threads_x) * lhs_packed_size;
-      matmul_groupwise(
-          std::ref(kernel_packet),
-          m_increment,
-          y * m_per_thread,
-          m_per_thread,
-          x * n_per_thread,
-          n_per_thread,
-          n,
-          k,
-          bl,
-          mr,
-          nr,
-          kr,
-          sr,
-          dst_stride,
-          lhs_stride,
-          lhs_native_mtx_f32,
-          lhs_packed_ptr,
-          rhs_packed_mtx_qs4cx,
-          dst_act_mtx_f32);
-    }
-  });
+  at::parallel_for(
+      0, num_threads, /*grain_size=*/0, [&](int64_t begin, int64_t end) {
+        for (const auto thread_id : c10::irange(begin, end)) {
+          size_t y = thread_id / division.num_threads_x;
+          size_t x = thread_id % division.num_threads_x;
+          uint8_t* lhs_packed_ptr = lhs_packed_base +
+              (x + y * division.num_threads_x) * lhs_packed_size;
+          matmul_groupwise(
+              std::ref(kernel_packet),
+              m_increment,
+              /*m_start=*/y * m_per_thread,
+              m_per_thread,
+              x * n_per_thread,
+              n_per_thread,
+              n,
+              k,
+              bl,
+              mr,
+              nr,
+              kr,
+              sr,
+              dst_stride,
+              lhs_stride,
+              lhs_native_mtx_f32,
+              lhs_packed_ptr,
+              rhs_packed_mtx_qs4cx,
+              dst_act_mtx_f32);
+        }
+      });
 }
 
 static void kai_quant_pack_lhs_int4_mm_channelwise(
@@ -407,7 +409,7 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
       gemv_n_step);
   // Select appropriate kernel packet based on the chosen kernel type
   auto& kernel_packet =
-      division.use_gemm ? gemm_kernel_packet : gemv_kernel_packet;
+      division.can_gemm ? gemm_kernel_packet : gemv_kernel_packet;
 
   // Thread blocking parameters
   const size_t mr = kernel_packet.ukernel.get_mr();
@@ -429,33 +431,34 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size * num_threads);
   uint8_t* lhs_packed_base = lhs_packed.get();
 
-  at::parallel_for(0, num_threads, 0, [&](int64_t begin, int64_t end) {
-    for (const auto i : c10::irange(begin, end)) {
-      size_t y = i / division.num_threads_x;
-      size_t x = i % division.num_threads_x;
-      uint8_t* lhs_packed_ptr =
-          lhs_packed_base + (x + y * division.num_threads_x) * lhs_packed_size;
-      matmul_channelwise(
-          std::ref(kernel_packet),
-          m_increment,
-          y * m_per_thread,
-          m_per_thread,
-          x * n_per_thread,
-          n_per_thread,
-          n,
-          k,
-          mr,
-          nr,
-          kr,
-          sr,
-          dst_stride,
-          lhs_stride,
-          lhs_native_mtx_f32,
-          lhs_packed_ptr,
-          rhs_packed_mtx_qs4cx,
-          dst_act_mtx_f32);
-    }
-  });
+  at::parallel_for(
+      0, num_threads, /*grain_size=*/0, [&](int64_t begin, int64_t end) {
+        for (const auto thread_id : c10::irange(begin, end)) {
+          size_t y = thread_id / division.num_threads_x;
+          size_t x = thread_id % division.num_threads_x;
+          uint8_t* lhs_packed_ptr = lhs_packed_base +
+              (x + y * division.num_threads_x) * lhs_packed_size;
+          matmul_channelwise(
+              std::ref(kernel_packet),
+              m_increment,
+              /*m_start=*/y * m_per_thread,
+              m_per_thread,
+              x * n_per_thread,
+              n_per_thread,
+              n,
+              k,
+              mr,
+              nr,
+              kr,
+              sr,
+              dst_stride,
+              lhs_stride,
+              lhs_native_mtx_f32,
+              lhs_packed_ptr,
+              rhs_packed_mtx_qs4cx,
+              dst_act_mtx_f32);
+        }
+      });
 }
 
 void kai_quant_pack_lhs_int4_mm(
