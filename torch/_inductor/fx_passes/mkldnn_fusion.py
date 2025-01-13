@@ -44,27 +44,19 @@ if torch._C._has_mkldnn:
         1. More than 1 GEMM nodes has been found.
         2. All the GEMM nodes share the same activation.
         3. All the GEMM nodes have same weight size but different wgt node.
-        4. Inductor Group GEMM config has been turned on.
         """
         computation_op = mkldnn._linear_pointwise.default
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
         wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
-        if len(computation_nodes) < 2 or any(
+        return len(computation_nodes) >= 2 and all(
             (
-                node.target != computation_op
-                or node.args[0] != act
-                or (node.args[1].meta.get("val").size() != wgt_size)
-                or (node.args[1] == wgt and gemm_idx != 0)
+                node.target == computation_op
+                and node.args[0] == act
+                and (node.args[1].meta.get("val").size() == wgt_size)
+                and (node.args[1] != wgt or gemm_idx == 0)
             )
             for gemm_idx, node in enumerate(computation_nodes)
-        ):
-            return False
-        # Ensure max autotune used with CPP backend
-        return (
-            torch._inductor.config.max_autotune
-            and "CPP" in torch._inductor.config.max_autotune_gemm_backends
-            and torch._inductor.config.cpp.enable_grouped_gemm_template
         )
 
     def grouped_gemm_pass(graph: torch.fx.Graph):

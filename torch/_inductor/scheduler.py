@@ -60,6 +60,7 @@ from .utils import (
     IndentedBuffer,
     is_collective,
     is_gpu,
+    is_multi_outputs_template,
     is_wait,
     sympy_product,
 )
@@ -69,15 +70,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
-
-
-def is_grouped_gemm_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
-    return (
-        node1.is_template()
-        and isinstance(node2.node, MultiOutput)
-        and len(node2.node.inputs) == 1
-        and node2.node.inputs[0].get_name() in node1.get_buffer_names()
-    )
 
 
 @dataclasses.dataclass
@@ -152,9 +144,8 @@ class SchedulerBuffer:
     def can_free(self) -> bool:
         # There's no real allocated buffer, no need to free it
         assert self.node is not None
-        if isinstance(self.node.layout, ir.NoneLayout) or (
-            isinstance(self.node, ir.CppTemplateBuffer)
-            and isinstance(self.node.layout, ir.MultiOutputLayout)
+        if isinstance(self.node.layout, ir.NoneLayout) or is_multi_outputs_template(
+            self.node
         ):
             return False
         for use in self.users:
@@ -2829,10 +2820,9 @@ class Scheduler:
         for node1, node2 in self.get_possible_fusions(nodes):
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
-            if (
-                self.can_fuse(node1, node2)
-                and not self.will_fusion_create_cycle(node1, node2)
-            ) or is_grouped_gemm_fusion(node1, node2):
+            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
+                node1, node2
+            ):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
                 fusion_log.debug(
@@ -2929,8 +2919,6 @@ class Scheduler:
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
-                    elif is_grouped_gemm_fusion(node1, node2):
-                        possible_fusions.append((node1, node2))
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
@@ -3242,6 +3230,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+
+        if node1.get_device() == node2.get_device() and self.get_backend(
+            node1.get_device()
+        ).can_fuse_multi_outputs_template(node1, node2):
+            return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
@@ -3955,6 +3948,18 @@ class BaseScheduling:
         Check whether node1 and node2 can be horizontally fused or not.
         """
         raise NotImplementedError
+
+    def can_fuse_multi_outputs_template(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
+        A Multi-Output Template (referenced in #144012) is a template node
+        with MultiOutputLayout, and its output buffers are instances of MultiOutput.
+        In this context, we verify whether node1 represents the Multi-Output Template
+        and node2 corresponds to one of its outputs. If so, we further check if
+        backend supports this fusion.
+        """
+        return False
 
     def fuse(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

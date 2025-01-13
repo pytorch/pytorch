@@ -422,7 +422,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
 
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_grouped_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(

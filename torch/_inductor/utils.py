@@ -1822,6 +1822,14 @@ def pass_execution_and_save(func, gm, inp, msg):
         )
 
 
+def is_multi_outputs_template(template_buf) -> bool:
+    from . import ir
+
+    return isinstance(template_buf, ir.CppTemplateBuffer) and isinstance(
+        template_buf.layout, ir.MultiOutputLayout
+    )
+
+
 def is_collective(node, op=None):
     from . import ir
 

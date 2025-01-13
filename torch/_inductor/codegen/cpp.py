@@ -37,6 +37,7 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     has_free_symbols,
+    is_multi_outputs_template,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
@@ -4441,6 +4442,18 @@ class CppScheduling(BaseScheduling):
 
         return self._can_fuse_horizontal_impl(node1, node2)
 
+    def can_fuse_multi_outputs_template(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        if template_buf := node1.get_template_node():
+            return (
+                isinstance(template_buf.layout, ir.MultiOutputLayout)
+                and isinstance(node2.node, ir.MultiOutput)
+                and len(node2.node.inputs) == 1
+                and node2.node.inputs[0].get_name() == template_buf.name
+            )
+        return False
+
     def _get_outer_loop_fusion_depth(self, node1, node2):
         DISABLE_OUTER_LOOP_FUSION = 0
         if not all(
@@ -4869,7 +4882,7 @@ class CppScheduling(BaseScheduling):
         """
         assert not prologue_nodes
 
-        # Remove the MultiOutput Node
+        # remove MultiOutput from epilogue_nodes
         epilogue_nodes = [
             epilogue_node
             for epilogue_node in epilogue_nodes
@@ -4914,13 +4927,8 @@ class CppScheduling(BaseScheduling):
             epilogue_nodes=epilogue_ir_nodes,
         )
 
-        def _is_grouped_gemm(template_node):
-            return isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
-                template_node.node.layout, ir.MultiOutputLayout
-            )
-
         with kernel:
-            if not _is_grouped_gemm(template_node):
+            if not is_multi_outputs_template(template_node.node):
                 template_node.mark_run()  # type: ignore[attr-defined]
             for node in epilogue_nodes:
                 node.mark_run()  # type: ignore[attr-defined]
@@ -4930,19 +4938,19 @@ class CppScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
 
-        if _is_grouped_gemm(template_node):
-            # For Grouped GEMM, allocate buffers for each GEMM after the epilogue
-            # codegen to determine whether the GEMM output buffer has been removed.
+        if is_multi_outputs_template(template_node.node):
+            # For multi outputs template, allocate buffers for each output after the epilogue
+            # codegen to which determines if the buffer has been removed.
             assert (
                 len(template_node.outputs) == 1
-            ), "Grouped GEMM has 1 output template buffer"
+            ), "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
             for user in template_node.outputs[0].users:
                 assert isinstance(
                     user.node, ExternKernelSchedulerNode
-                ), "Grouped GEMM should be with ExternKernelSchedulerNode"
+                ), "Multi outputs template should be with ExternKernelSchedulerNode"
                 assert isinstance(
                     user.node.node, ir.MultiOutput
-                ), "Grouped GEMM has multi users with MultiOutput"
+                ), "Multi outputs template has multi users with MultiOutput"
                 user.node.mark_run()
 
         kernel.call_kernel(kernel_name, ctb)
