@@ -1258,7 +1258,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
             # Fuse multi outputs template and its outputs
             #   * Node1 has memorydep of MultiOutput in reads
             #   * Node2 has StarDep of MultiOutput in writes
-            # Rewrite the Node2' StarDep to MemoryDep
+            # Rewrite the Node2' StarDep to MemoryDep, because calculate score_fusion_memory
+            # of the template node and its epilogue requrires the same type of dependencies
             assert isinstance(node2.node, MultiOutput)
             assert len(node2.read_writes.writes) == 1
             assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
@@ -3225,7 +3226,7 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
-        if node1.get_device() == node2.get_device() and self.get_backend(
+        if node1.is_template() and self.get_backend(
             node1.get_device()
         ).can_fuse_multi_outputs_template(node1, node2):
             return True
