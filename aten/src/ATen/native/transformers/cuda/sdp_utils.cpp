@@ -12,10 +12,11 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/util/Array.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/Exception.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -27,7 +28,7 @@
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
 #include <aotriton/flash.h>
-#define USE_AOTRITON 1
+#define USE_ROCM_ATTENTION 1
 #endif
 #endif
 
@@ -218,15 +219,21 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
-#if USE_AOTRITON
-  auto stream = at::cuda::getCurrentCUDAStream().stream();
-  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
-      auto dprops = at::cuda::getCurrentDeviceProperties();
-      if (debug) {
-          TORCH_WARN(
-                  "Flash attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
-      }
-      return false;
+#if USE_ROCM_ATTENTION
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    // User explicitly set CK as the flash attention backend. Return true for now
+    // TODO: Flesh out sanity checks
+    return true;
+  } else {
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+        auto dprops = at::cuda::getCurrentDeviceProperties();
+        if (debug) {
+            TORCH_WARN(
+                    "Flash attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+        }
+        return false;
+    }
   }
 #else
   return false;
@@ -253,7 +260,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
-#if USE_AOTRITON
+#if USE_ROCM_ATTENTION
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -512,10 +519,10 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
     constexpr auto sm80_dtypes =
-        array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+        c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
     return check_tensor_dtype(params, sm80_dtypes, debug);
   } else {
-    constexpr auto default_dtypes = array_of<at::ScalarType>(at::kHalf);
+    constexpr auto default_dtypes = c10::array_of<at::ScalarType>(at::kHalf);
     return check_tensor_dtype(params, default_dtypes, debug);
   }
 }
@@ -563,7 +570,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
-      array_of<bool (*)(sdp_params const&, bool)>(
+      c10::array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_nonzero_sequence_lengths_dense,
@@ -601,7 +608,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #else // defined(USE_FLASH_ATTENTION)
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
-  constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
       check_all_tensors_on_device,
       check_tensor_shapes,
@@ -618,7 +625,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_nested,
         check_head_dim_size_flash_nested<false /*caller_is_meff*/>,
         check_for_seq_len_0_nested_tensor);
@@ -630,7 +637,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
   constexpr bool backend_supports_grouped_query_attention = true;
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
@@ -651,17 +658,17 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #endif
   // Constraints specific to mem efficient attention
   constexpr auto less_than_sm80_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kFloat);
+      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat);
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+      c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
-  constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
@@ -679,7 +686,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
 #ifndef USE_ROCM  // ME and FA shares backend on ROCM and thus supports training
         check_requires_grad_and_nested,
 #else // Meanwhile ME on ROCM share the limits of FA about head dimensions
@@ -694,7 +701,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
         check_batch_size_and_num_heads_dense<false /*supports_grouped_query_attention=*/>);
@@ -706,6 +713,14 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
 #ifdef USE_ROCM
+  if (params.attn_mask.has_value()) {
+    const auto q_dtype = params.query.dtype();
+    const auto bias_dtype = params.attn_mask.value().dtype();
+    if (bias_dtype != at::kBool && bias_dtype != q_dtype) {
+      TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
+      return false;
+    }
+  }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else
   auto dprop = at::cuda::getCurrentDeviceProperties();
