@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -278,6 +278,82 @@ class CppTemplateKernel(CppKernel):
         kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
+    def store_grouped_gemm_pointwise_nodes(
+        self,
+        dst: tuple[ir.Buffer],
+        nodes: List[List[ir.IRNode]],
+        offsets: Optional[List[sympy.Expr]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+    ) -> str:
+        ref_dst = dst[0]
+        var_sizes = (tuple(ref_dst.get_size()), ())
+        var_ranges = {
+            sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
+            for i, sz in enumerate(var_sizes[0])
+        }
+        if not offsets:
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
+        if not reindexers:
+            reindexers = [None] * len(nodes)
+        assert len(offsets) == len(var_sizes[0])
+        output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
+        kernel_group = KernelGroup()
+        kernel_group.args = self.args
+        cpp_kernel_proxy = CppKernelProxy(kernel_group)
+        bodies = []
+        var_sizes_list = []
+        assert isinstance(nodes[0], Iterable)
+        grouped_gemm_number = len(nodes)
+        epilogue_nodes = nodes[0]
+        assert isinstance(epilogue_nodes, Iterable)
+        for i, _ in enumerate(epilogue_nodes):
+            output_names = []
+            gemm_nodes = []
+            for gemm_idx in range(grouped_gemm_number):
+                single_gemm_nodes = nodes[gemm_idx]
+                assert isinstance(dst, Iterable)
+                single_gemm_dst = dst[gemm_idx]
+                assert isinstance(single_gemm_nodes, Iterable)
+                assert isinstance(single_gemm_dst, ir.IRNode)
+                gemm_nodes.append(single_gemm_nodes[i])
+                output_names.append(
+                    single_gemm_nodes[i].get_name()
+                    if i < len(single_gemm_nodes) - 1
+                    else single_gemm_dst.get_name()
+                )
+                _node = gemm_nodes[gemm_idx]
+                gemm_nodes[gemm_idx] = (
+                    _node.data if isinstance(_node, ir.ComputedBuffer) else _node
+                )
+
+            def fn(*args):
+                assert len(args) == 2
+                assert len(args[0]) == len(var_sizes[0])
+                assert len(args[1]) == 0
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                if reindexers[i] is not None:
+                    new_args = reindexers[i](new_args)  # type: ignore[misc]
+                for gemm_idx in range(grouped_gemm_number):
+                    V.ops.store(
+                        output_names[gemm_idx],
+                        output_index,
+                        gemm_nodes[gemm_idx].make_loader()(new_args).value,
+                    )
+
+            body = LoopBody(
+                fn,
+                (list(var_ranges.keys()), ()),
+                var_ranges,
+                list(var_ranges.keys()),
+                tuple(),
+            )
+            bodies.append(body)
+            var_sizes_list.append(var_sizes)
+
+        cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+        return kernel_group.loops_code.getvalue()
+
     def store_output(
         self,
         dst: ir.Buffer,
@@ -333,6 +409,43 @@ class CppTemplateKernel(CppKernel):
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
+                return ""
+
+    def store_outputs(
+        self,
+        dst: tuple[ir.Buffer],
+        src: tuple[ir.IRNode],
+        orig_src: Optional[tuple[ir.IRNode]] = None,
+        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        offsets: Optional[List[Any]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+    ):
+        # Grouped GEMM may have multi outputs to be localized
+        assert isinstance(src, Iterable)
+        assert isinstance(dst, Iterable)
+        assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
+        if offsets:
+            offsets = parse_expr_with_index_symbols(offsets)
+        if epilogue_nodes:
+            assert (
+                not epilogue_nodes
+            ), "epilogue_nodes not supported for Grouped GEMM yet"
+        else:
+            if dst[0].get_name() != src[0].get_name():
+                copy_list = []
+                with LocalBufferContext(self.args) as scope:
+                    for _src, _dst in zip(src, dst):
+                        copy_list.append([L.copy(_dst, _src).data.data])
+                        scope.add_local_buffer(_src)
+                    return self.store_grouped_gemm_pointwise_nodes(dst, copy_list)
+            else:
+                assert all(
+                    _src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst)
+                )
+                assert all(
+                    _src.get_layout() == _dst.get_layout()
+                    for _src, _dst in zip(src, dst)
+                )
                 return ""
 
 
