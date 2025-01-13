@@ -285,6 +285,8 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
+                for outer, inner in self.args.sizevars.items():
+                    code.writeline(f"constant long& {inner},")
                 if len(idx_var_names) == 1:
                     code.writeline(
                         f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
@@ -313,6 +315,7 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        args += [str(v) for v in self.args.sizevars.keys()]
         if len(self.active_range_trees()) > 0:
             args += [
                 f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
