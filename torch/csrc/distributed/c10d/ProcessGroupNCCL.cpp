@@ -477,10 +477,10 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
         ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
-              .create(enableTiming)
+              ->create(enableTiming)
         : nullptr;
     ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
-                        .create(enableTiming);
+                        ->create(enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -830,8 +830,8 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
-ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
-    at::DeviceIndex device) {
+std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> ProcessGroupNCCL::
+    CUDAEventCache::get(at::DeviceIndex device) {
   // A per-thread singleton of device-to-CUDAEventCache map.
   // Map is needed because events cannot be reused across devices.
   // Per-thread ownership is needed to support multi-threaded case (instead of
