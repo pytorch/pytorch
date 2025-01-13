@@ -349,7 +349,7 @@ class TestLiteScriptModule(TestCase):
             def forward(self):
                 raise RuntimeError("foo")
 
-        _, lineno = inspect.getsourcelines(FooTest2)
+        _, _ = inspect.getsourcelines(FooTest2)
 
         # In C++ code, the type of exception thrown is torch::jit::JITException
         # which does not extend c10::Error, and hence it isn't possible to add
@@ -426,7 +426,7 @@ class TestLiteScriptModule(TestCase):
 
         ft = FooTest5(42)
         loaded = self.getScriptExportImportCopy(ft)
-        _, lineno = inspect.getsourcelines(FooTest5)
+        _, _ = inspect.getsourcelines(FooTest5)
 
         try:
             loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))

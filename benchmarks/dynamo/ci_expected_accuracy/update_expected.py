@@ -71,7 +71,7 @@ ARTIFACTS_QUERY_URL = (
     "c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
 )
 CSV_LINTER = str(
-    Path(__file__).absolute().parent.parent.parent.parent
+    Path(__file__).absolute().parents[3]
     / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
 )
 

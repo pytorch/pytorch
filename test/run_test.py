@@ -182,7 +182,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/_tensor/test_attention",
+    "distributed/tensor/test_attention",
 ]
 
 # whitelist of tests for s390x
@@ -1782,6 +1782,7 @@ def get_selected_tests(options) -> List[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "inductor/test_mps_basic",
         ]
     else:
         # Exclude all mps tests otherwise
