@@ -2308,7 +2308,7 @@ if torch._C._has_mkldnn:
     )
 
     @register_meta(torch.ops.onednn._convolution_pointwise.default)
-    def meta_mkldnn_convolution_default(
+    def meta_onednn_convolution_default(
         input_tensor,
         weight,
         bias,

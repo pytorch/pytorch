@@ -406,6 +406,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(mkldnn_max_pool3d_backward);
   OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d);
   OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d_backward);
+  m.impl("mkldnn_convolution", native::onednn_convolution);
 }
 
 } // namespace at::functorch

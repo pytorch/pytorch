@@ -1984,7 +1984,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.miopen_depthwise_convolution",
         "torch.miopen_rnn",
         "torch.onednn_adaptive_avg_pool2d",
-        "torch.mkldnn_convolution",
+        "torch.onednn_convolution",
         "torch.onednn_linear_backward_weights",
         "torch.onednn_max_pool2d",
         "torch.onednn_max_pool3d",

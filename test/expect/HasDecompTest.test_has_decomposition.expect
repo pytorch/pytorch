@@ -956,8 +956,6 @@ aten::miopen_rnn
 aten::miopen_rnn.out
 aten::miopen_rnn_backward
 aten::miopen_rnn_backward.out
-aten::mkldnn_convolution
-aten::mkldnn_convolution.out
 aten::mkldnn_reorder_conv2d_weight
 aten::mkldnn_reorder_conv2d_weight.out
 aten::mkldnn_reorder_conv3d_weight
@@ -994,6 +992,8 @@ aten::onednn_adaptive_avg_pool2d
 aten::onednn_adaptive_avg_pool2d.out
 aten::onednn_adaptive_avg_pool2d_backward
 aten::onednn_adaptive_avg_pool2d_backward.out
+aten::onednn_convolution
+aten::onednn_convolution.out
 aten::onednn_linear
 aten::onednn_linear.out
 aten::onednn_linear_backward
