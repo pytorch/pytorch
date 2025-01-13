@@ -151,7 +151,7 @@ class ScheduleTest(MultiProcContinousTest):
                 schedule.step(x)
             elif self.rank == self.world_size - 1:
                 losses = []
-                out = schedule.step(target=target, losses=losses)
+                schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
 
@@ -412,7 +412,6 @@ class ScheduleTest(MultiProcContinousTest):
             if hasattr(ScheduleClass, "num_microbatches")
             else 8
         )
-        input_args = x.chunk(num_microbatches)[0]
         stages = [
             PipelineStage(
                 stage_module,
@@ -548,7 +547,6 @@ class ScheduleTest(MultiProcContinousTest):
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         # Create a pipeline stage to wrap that submodule
-        input_args = x.chunk(num_microbatches)[0]
         stage_indices = rank_stages[self.rank]
         print(f"Rank {self.rank} stages: {stage_indices}")
         submod_names = [f"layers.{i}" for i in stage_indices]
@@ -582,7 +580,7 @@ class ScheduleTest(MultiProcContinousTest):
                     schedule.step(x)
                 elif self.rank == self.world_size - 1:
                     losses = []
-                    out = schedule.step(target=target, losses=losses)
+                    schedule.step(target=target, losses=losses)
                 else:
                     schedule.step()
         self.assertEqual(
@@ -887,7 +885,6 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Create a pipeline stage to wrap that submodule
         chunks = 2
-        input_args = x.chunk(chunks)[0]
         stages = [
             PipelineStage(
                 stage_module,

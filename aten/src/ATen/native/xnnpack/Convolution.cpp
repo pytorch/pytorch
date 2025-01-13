@@ -203,8 +203,7 @@ ContextConv2D create(
   xnn_operator_t convolution_op{};
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status create_status;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int64_t, 4> weight_sizes;
+  std::array<int64_t, 4> weight_sizes{};
 
   if (transposed) {
     const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, groups);
