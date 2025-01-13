@@ -62,7 +62,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
 
   callers.reserve(config.num_calling_threads);
 
-  static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DTYPES;
+  static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DEVICES;
   std::array<bool, DEVICES.size()> autocast_enabled;
   std::array<at::ScalarType, DEVICES.size()> autocast_dtype;
   for (size_t i = 0; i < DEVICES.size(); i++) {
