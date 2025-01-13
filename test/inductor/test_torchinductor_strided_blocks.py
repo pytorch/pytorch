@@ -3,7 +3,7 @@
 import contextlib
 import importlib
 import unittest
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -91,7 +91,7 @@ def run_and_compare(
 
 class BlockPointerTestBase(InductorTestCase):
     def _discontiguous_tensor(
-        self, view_size: Tuple[int, ...], device: torch.device | str
+        self, view_size: Tuple[int, ...], device: Union[torch.device, str]
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
