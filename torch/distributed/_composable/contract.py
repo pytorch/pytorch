@@ -2,12 +2,29 @@
 import uuid
 from collections import OrderedDict
 from functools import wraps
-from typing import Callable, Dict, List, Optional, Sequence, Type, Union
+from typing import (
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    overload,
+    Protocol,
+    Sequence,
+    Type,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable_state import _State
 from torch.distributed.utils import _get_root_modules
+
+
+_T = TypeVar("_T", covariant=True)
+_P = ParamSpec("_P")
 
 
 def generate_state_key(string="__composable_api_state_key"):
@@ -26,7 +43,47 @@ class RegistryItem:
     pass
 
 
-def contract(state_cls: Type[_State] = _State):
+_TState = TypeVar("_TState", bound="_State", covariant=True)
+
+
+class _ContractFn(Protocol, Generic[_P, _T, _TState]):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        ...
+
+    def state(self, module: nn.Module) -> _TState:
+        ...
+
+
+@overload
+def contract() -> (
+    Callable[
+        [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
+        _ContractFn[Concatenate[nn.Module, _P], _T, _State],
+    ]
+):
+    ...
+
+
+@overload
+def contract(
+    state_cls: Type[_TState],
+) -> Callable[
+    [Callable[Concatenate[nn.Module, _P], Optional[nn.Module]]],
+    _ContractFn[Concatenate[nn.Module, _P], _T, _TState],
+]:
+    ...
+
+
+def contract(
+    state_cls: Type = _State,
+) -> Callable[
+    [
+        Callable[
+            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
+        ]
+    ],
+    _ContractFn,
+]:
     r"""
     Decorate a function as a composable distributed API, where the first
     argument of the function must be an :class:`nn.Module` instance or sequence
@@ -68,11 +125,19 @@ def contract(state_cls: Type[_State] = _State):
     """
 
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
-    @wraps(state_cls)
-    def inner(func):
+    @wraps(state_cls)  # type: ignore[arg-type]
+    def inner(
+        func: Callable[
+            Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], Optional[nn.Module]
+        ]
+    ) -> _ContractFn[
+        Concatenate[Union[nn.Module, Sequence[nn.Module]], _P], _T, _TState
+    ]:
         @wraps(func)
         def wrapper(
-            module: Union[nn.Module, Sequence[nn.Module]], *args, **kwargs
+            module: Union[nn.Module, Sequence[nn.Module]],
+            *args: _P.args,
+            **kwargs: _P.kwargs,
         ) -> Optional[nn.Module]:
             inp_module = module
             if isinstance(module, nn.Module):
@@ -124,7 +189,7 @@ def contract(state_cls: Type[_State] = _State):
 
             updated = func(inp_module, *args, **kwargs)
             if updated is None:
-                updated = inp_module
+                updated = inp_module  # type: ignore[assignment]
             if isinstance(updated, nn.Module):
                 updated_modules = [updated]
             else:
@@ -200,7 +265,7 @@ def contract(state_cls: Type[_State] = _State):
 
             return updated
 
-        def get_state(module: nn.Module) -> Optional[_State]:
+        def get_state(module: nn.Module) -> _State:
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
@@ -210,7 +275,7 @@ def contract(state_cls: Type[_State] = _State):
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return inner
 

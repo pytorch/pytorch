@@ -14,6 +14,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
@@ -419,7 +420,7 @@ TORCH_API int register_conv_params<3>();
 
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
-  static auto register_linear_params =
+  [[maybe_unused]] static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
@@ -494,7 +495,7 @@ int register_embedding_params() {
     std::vector<double>,
     std::vector<int64_t>>;
 
-  static auto register_embedding_params =
+  [[maybe_unused]] static auto register_embedding_params =
     torch::selective_class_<EmbeddingPackedParamsBase>(
       "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import sympy
 
@@ -438,7 +438,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
         f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
     )
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
@@ -520,7 +519,7 @@ def tuned_scaled_mm(
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
-    input_nodes: Tuple[Any, ...]
+    input_nodes: tuple[Any, ...]
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
