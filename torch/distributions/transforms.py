@@ -481,7 +481,7 @@ class ReshapeTransform(Transform):
         in_shape (torch.Size): The input event shape.
         out_shape (torch.Size): The output event shape.
         cache_size (int): Size of cache. If zero, no caching is done. If one,
-            the latest single value is cached. Only 0 and 1 are supported.
+            the latest single value is cached. Only 0 and 1 are supported. (Default 0.)
     """
 
     bijective = True
