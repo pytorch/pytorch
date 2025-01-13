@@ -150,7 +150,7 @@ class TestConvolutionNN(NNTestCase):
             self.assertFalse(weight.is_contiguous())
             y = torch.nn.functional.conv2d(x, weight, None)
             if torch.backends.onednn.is_available():
-                # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+                # Disable ONEDNN explicitly, so that either NNPACK or THCNN will be used
                 with torch.backends.onednn.flags(enabled=False):
                     y_ = torch.nn.functional.conv2d(x, weight, None)
                     self.assertEqual(y, y_)
@@ -1291,7 +1291,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             dummy_out, device=device, dtype=dtype, requires_grad=True
         )
 
-        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
+        # Issue #15353: test onednn double backward, don't run gradgradcheck due
         # to imprecision issues
         if dtype == torch.float:
             (g,) = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
@@ -2628,7 +2628,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 decorators=[onlyCUDA, skipCUDAIfNoMiopen],
                 name="miopen_depthwise3d",
             ),
-            # === mkldnn ===
+            # === onednn ===
             subtest(
                 (
                     (2, 6, 7),
@@ -2665,7 +2665,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 decorators=[onlyCPU, skipCPUIfNoOnednn],
                 name="mkldnn3d",
             ),
-            # Transposed convolution is broken for mkldnn. See https://github.com/pytorch/pytorch/issues/68775.
+            # Transposed convolution is broken for onednn. See https://github.com/pytorch/pytorch/issues/68775.
             subtest(
                 (
                     (2, 6, 7),
@@ -2903,7 +2903,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         if layout is torch._mkldnn:
             x = x.to_mkldnn()
-            # Note that weight and bias are not supported as mkldnn tensors during training.
+            # Note that weight and bias are not supported as onednn tensors during training.
 
         stride = (2,) * dim if strided else (1,) * dim
         padding = (0,) * dim
@@ -2935,7 +2935,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             grad_output = grad_output.to_mkldnn()
         output.backward(grad_output)
 
-        # mkldnn doesn't support gradcheck :(
+        # onednn doesn't support gradcheck :(
         if layout is torch._mkldnn:
             return
 
@@ -3026,7 +3026,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             ]
             if torch.backends.onednn.is_available():
                 y = conv(x2)
-                # Disable MKLDNN explicitly
+                # Disable ONEDNN explicitly
                 with torch.backends.onednn.flags(enabled=False):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
@@ -3042,7 +3042,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
             if torch.backends.onednn.is_available():
                 y = conv(x)
-                # Disable MKLDNN explicitly
+                # Disable ONEDNN explicitly
                 with torch.backends.onednn.flags(enabled=False):
                     y_ = conv(x)
                     self.assertEqual(y, y_)

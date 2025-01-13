@@ -454,8 +454,8 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
       c10::IntArrayRef sizes(sizes_ptr, ndim);
       c10::IntArrayRef strides(strides_ptr, ndim);
       c10::Device device = c10_device(device_type, device_index);
-      // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
-      // which used by later mkldnn op.
+      // get a onednn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
+      // which used by later onednn op.
       *ret_new_tensor = new_tensor_handle(onednn_tensor_from_data_ptr(
           data,
           sizes,

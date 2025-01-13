@@ -49,7 +49,7 @@ void check_onednn_binary_fusion_inputs(
   } else {
     TORCH_CHECK(
         input.scalar_type() == input.scalar_type(),
-        "mkldnn pointwise binary: input dtype and weight dtype should be the same");
+        "onednn pointwise binary: input dtype and weight dtype should be the same");
   }
   TORCH_CHECK(
       input.options().type_equal(other.options()),
@@ -67,13 +67,13 @@ void check_onednn_binary_fusion_inputs(
       ") should be the same");
   TORCH_CHECK(
       input.device().is_cpu(),
-      "mkldnn pointwise binary fusion: input's device should be CPU");
+      "onednn pointwise binary fusion: input's device should be CPU");
   TORCH_CHECK(
       input.scalar_type() == ScalarType::Float ||
           input.scalar_type() == ScalarType::BFloat16 ||
           input.scalar_type() == ScalarType::Half,
-      "mkldnn pointwise binary: input's dtype should be float, bfloat16 or half");
-  onednn_check_low_precision(input.scalar_type(), "mkldnn pointwise binary");
+      "onednn pointwise binary: input's dtype should be float, bfloat16 or half");
+  onednn_check_low_precision(input.scalar_type(), "onednn pointwise binary");
 }
 
 #if AT_ONEDNN_ENABLED()

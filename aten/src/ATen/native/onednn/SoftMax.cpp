@@ -5,7 +5,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_softmax_native.h>         // for mkldnn_softmax
+#include <ATen/ops/_softmax_native.h>         // for onednn_softmax
 #endif
 
 #if !AT_ONEDNN_ENABLED()
@@ -13,11 +13,11 @@
 namespace at {
 namespace native {
 
-Tensor mkldnn_softmax(
+Tensor onednn_softmax(
     const Tensor& self,
     const int64_t dim,
     const bool half_to_float) {
-  TORCH_CHECK(false, "mkldnn_softmax: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_softmax: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
@@ -29,7 +29,7 @@ Tensor mkldnn_softmax(
 
 namespace at::native {
 
-Tensor mkldnn_softmax(
+Tensor onednn_softmax(
     const Tensor& self,
     const int64_t dim,
     const bool half_to_float) {

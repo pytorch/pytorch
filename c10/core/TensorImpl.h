@@ -933,7 +933,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Can override: nothing
     Default = 0,
     // Customizable strides behavior, e.g., sparse tensor,
-    // mkldnn tensor.
+    // onednn tensor.
     //
     // Can override: strides(), is_contiguous()
     CustomStrides = 1,

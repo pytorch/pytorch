@@ -696,7 +696,7 @@ inline DispatchKey computeDispatchKey(
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
-              "Unsupported device type for mkldnn layout: ",
+              "Unsupported device type for onednn layout: ",
               device_.type());
       }
     case Layout::SparseCsr:

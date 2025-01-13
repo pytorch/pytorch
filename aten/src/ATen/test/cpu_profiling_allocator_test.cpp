@@ -199,7 +199,7 @@ int main(int argc, char* argv[]) {
   c10::SetCPUAllocator(c10::GetDefaultCPUAllocator(), /*priority*/ 100);
 
   #ifdef C10_MOBILE
-  // Need to disable mkldnn for this test since it allocated memory
+  // Need to disable onednn for this test since it allocated memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setuserEnabledOnednn(false);

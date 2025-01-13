@@ -379,7 +379,7 @@ static bool use_onednn(const Tensor& input) {
   if (!input.is_contiguous() || input.numel() <= 1) {
     return false;
   }
-  return (input.is_onednn()) || // input is mkldnn Tensor
+  return (input.is_onednn()) || // input is onednn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && onednn_bf16_device_check()) ||
     (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
@@ -714,7 +714,7 @@ Tensor prelu(const Tensor& self, const Tensor& weight_) {
       dim_w[1] = weight_.sym_numel();
     }
     // This will always be a view in CPU/CUDA, but some backends
-    // like MKLDNN do not support views
+    // like ONEDNN do not support views
     weight = weight.reshape_symint(dim_w);
   }
   return at::_prelu_kernel(self, weight);

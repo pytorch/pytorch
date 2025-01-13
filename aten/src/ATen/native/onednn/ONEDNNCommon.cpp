@@ -38,8 +38,8 @@ public:
 
 using IDeepTensorWrapper = IntrusivePtrTargetWrapper<ideep::tensor>;
 using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
-using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
-using MKLDNNTensor = Tensor;
+using ONEDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
+using ONEDNNTensor = Tensor;
 
 ideep::tensor::data_type get_onednn_dtype(ScalarType type) {
   switch (type) {
@@ -63,7 +63,7 @@ ideep::tensor::data_type get_onednn_dtype(ScalarType type) {
 }
 
 int64_t data_ptr_from_onednn(const Tensor& onednn_tensor) {
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
+  ONEDNNTensorImpl *mklimpl = static_cast<ONEDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
   void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
   return reinterpret_cast<int64_t>(data_ptr);
 }
@@ -96,16 +96,16 @@ Tensor new_with_itensor_onednn(ideep::tensor&& it, std::optional<ScalarType> dty
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
   Device device_ = device_or_default(device);
-  return detail::make_tensor<MKLDNNTensorImpl>(
+  return detail::make_tensor<ONEDNNTensorImpl>(
     DispatchKeySet(DispatchKey::OnednnCPU),
     dtype_, device_, handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
-ideep::tensor& itensor_from_onednn(const MKLDNNTensor& onednn_tensor) {
+ideep::tensor& itensor_from_onednn(const ONEDNNTensor& onednn_tensor) {
   TORCH_CHECK(onednn_tensor.is_onednn(),
              "itensor_from_onednn expects MKL-DNN tensor input");
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
+  ONEDNNTensorImpl *mklimpl = static_cast<ONEDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 

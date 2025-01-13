@@ -305,7 +305,7 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
     return false;
   }
 
-  // Weights and bias should be Constant when using mkldnn backend
+  // Weights and bias should be Constant when using onednn backend
   if (node->input(1)->node()->kind() != prim::Constant ||
       node->input(2)->node()->kind() != prim::Constant) {
     GRAPH_DEBUG(

@@ -932,9 +932,9 @@ static at::Tensor linear_int8_with_onednn_weight(
   using ideep::tensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
-      "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
+      "qlinear with onednn tensor: data type of input should be uint8 (unsigned char).");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
-      "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
+      "qlinear with onednn tensor: data type of weight should be int8 (char).");
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(

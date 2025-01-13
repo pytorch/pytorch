@@ -59,7 +59,7 @@ TORCH_API ideep::tensor itensor_view_from_dense(
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr=false);
 
-// Set MKLDNN verbose level
+// Set ONEDNN verbose level
 TORCH_API int set_verbose(int level);
 
 }}

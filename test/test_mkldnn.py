@@ -27,7 +27,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
 )
 
-# batched grad doesn't support mkldnn
+# batched grad doesn't support onednn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
@@ -46,14 +46,14 @@ class TestMkldnn(TestCase):
             convert_dtypes = {torch.half: [torch.half, torch.float],
                               torch.bfloat16: [torch.bfloat16, torch.float],
                               torch.float: [torch.bfloat16, torch.half]}
-            # float/bfloat16/half cpu tensor to mkldnn tensortensor.
+            # float/bfloat16/half cpu tensor to onednn tensortensor.
             for dtype1 in types:
                 onednn_tensor = cpu_tensor.to_mkldnn(dtype1)
                 self.assertEqual(onednn_tensor.dtype, dtype1)
                 cpu_tensor_1 = onednn_tensor.to_dense()
-                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                # not given dtype for to_dense, onednn tensor has same dtype with cpu tensor
                 self.assertEqual(onednn_tensor.dtype, cpu_tensor_1.dtype)
-                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
+                # onednn float/bfloat tensor to cpu float or bfloat tensor
                 for dtype2 in convert_dtypes[dtype1]:
                     cpu_tensor_2 = onednn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
@@ -71,16 +71,16 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: onednn_tensor.data_ptr() != 0)
 
-            # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
+            # bfloat cpu tensor to onednn float tensor or bfloat tensor.
             for orig_dtype in [torch.half, torch.bfloat16]:
                 cpu_tensor_lower = cpu_tensor.to(dtype=orig_dtype)
                 for dtype1 in convert_dtypes[orig_dtype]:
                     onednn_tensor = cpu_tensor_lower.to_mkldnn(dtype1)
                     self.assertEqual(onednn_tensor.dtype, dtype1)
                     cpu_tensor_1 = onednn_tensor.to_dense()
-                    # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                    # not given dtype for to_dense, onednn tensor has same dtype with cpu tensor
                     self.assertEqual(onednn_tensor.dtype, cpu_tensor_1.dtype)
-                    # mkldnn float/bfloat/half tensor to cpu float/bfloat/half tensor
+                    # onednn float/bfloat/half tensor to cpu float/bfloat/half tensor
                     for dtype2 in convert_dtypes[cpu_tensor_lower.dtype]:
                         cpu_tensor_2 = onednn_tensor.to_dense(dtype2)
                         self.assertEqual(cpu_tensor_2.dtype, dtype2)
@@ -138,14 +138,14 @@ class TestMkldnn(TestCase):
         mkldnn_y.copy_(mkldnn_x)
         self.assertEqual(x, mkldnn_y.to_dense())
         self.assertRaisesRegex(RuntimeError,
-                               "copy_mkldnn_: only support same size tensor.",
+                               "copy_onednn_: only support same size tensor.",
                                lambda: mkldnn_z.copy_(mkldnn_x))
         self.assertRaisesRegex(RuntimeError,
-                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "copy_onednn_: between onednn layout and dense Tensors is not implemented! "
                                "Found self type = torch.FloatTensor and src type = Onednntorch.FloatTensor",
                                lambda: x.copy_(mkldnn_x))
         self.assertRaisesRegex(RuntimeError,
-                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "copy_onednn_: between onednn layout and dense Tensors is not implemented! "
                                "Found self type = Onednntorch.FloatTensor and src type = torch.FloatTensor",
                                lambda: mkldnn_x.copy_(x))
 
@@ -184,13 +184,13 @@ class TestMkldnn(TestCase):
                 torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
 
     def test_autograd_to_mkldnn(self):
-        # MKLDNN only supports float32
+        # ONEDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
 
         def func(root):
             return root.to_mkldnn().to_dense()
 
-        # because MKLDNN only supports float32, we need to lessen the precision.
+        # because ONEDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
@@ -200,13 +200,13 @@ class TestMkldnn(TestCase):
                               lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_autograd_from_mkldnn(self):
-        # MKLDNN only supports float32
+        # ONEDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
 
         def func(root):
             return root.to_dense()
 
-        # because MKLDNN only supports float32, we need to lessen the precision.
+        # because ONEDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
@@ -367,8 +367,8 @@ class TestMkldnn(TestCase):
             x_shape = (N, C) + input_shape
             x = torch.randn(x_shape, dtype=dtype)
 
-            # conv1: mkldnn conv/deconv in contiguous memory format (nchw)
-            # conv2: mkldnn conv/deconv in channels last memory format (nhwc)
+            # conv1: onednn conv/deconv in contiguous memory format (nchw)
+            # conv2: onednn conv/deconv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
@@ -482,7 +482,7 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes[dim]
             data = torch.randn(x_shape, dtype=torch.float32)
-            # conv: mkldnn tranpose conv fp32
+            # conv: onednn tranpose conv fp32
             # conv_ref: thnn transpose conv fp32
             conv = conv_module[dim](in_channels=C,
                                     out_channels=M,
@@ -529,7 +529,7 @@ class TestMkldnn(TestCase):
 
     def test_conv2d_legacy_jit_model(self):
         """
-        MKLDNN integration used to serialize models with 5d weight for grouped
+        ONEDNN integration used to serialize models with 5d weight for grouped
         convolutions, we'd like to preserve this behavior
         """
         g = 4
@@ -553,7 +553,7 @@ class TestMkldnn(TestCase):
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
 
-    # This test is to check whether 1D conv is supported for mkldnn tensor,
+    # This test is to check whether 1D conv is supported for onednn tensor,
     # which is exposed by Issue https://github.com/pytorch/pytorch/issues/68034.
     def test_conv1d_functional(self):
         input = torch.randn(2, 3, 10).to_mkldnn()
@@ -654,7 +654,7 @@ class TestMkldnn(TestCase):
         m3 = copy.deepcopy(m1)
         y1 = m1(x1)
         y2 = m2(x2).to_dense()
-        y3 = m3(x3).to_dense()  # Only convert data to mkldnn, weight is Aten tensor
+        y3 = m3(x3).to_dense()  # Only convert data to onednn, weight is Aten tensor
         loss1 = y1.sum()
         loss1.backward()
         loss2 = y2.sum()
@@ -883,7 +883,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                msg = "onednn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: avg_pool(x_bf16.to_mkldnn()))
@@ -1022,7 +1022,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = "onednn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: bn(x_bf16.to_mkldnn()))
@@ -1186,12 +1186,12 @@ class TestMkldnn(TestCase):
         )
 
     def test_reshape_blocked_format(self):
-        # construct an mkldnn blocked tensor with mkldnn conv2d
+        # construct an onednn blocked tensor with onednn conv2d
         C = 7
         m = mkldnn_utils.to_mkldnn(torch.nn.Conv2d(C, C, 3))
         x = torch.randn(1, C, 8, 8).to_mkldnn()
 
-        # mkldnn tensor w/ blocked format
+        # onednn tensor w/ blocked format
         y_block = m(x)
         # aten tensor w/ plain format
         y_plain = y_block.to_dense()
@@ -1408,7 +1408,7 @@ class TestMkldnn(TestCase):
         self.assertFalse(x.is_onednn)
         self.assertTrue(x.to_mkldnn().is_onednn)
 
-    # legacy constructor/new doesn't support mkldnn tensors
+    # legacy constructor/new doesn't support onednn tensors
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     def test_legacy_new_failure(self):
         x = torch.randn(1, dtype=torch.float32)
