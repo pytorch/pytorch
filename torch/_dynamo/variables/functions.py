@@ -6,17 +6,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -1095,7 +1085,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def get_value(self, val: Any) -> Any:
         return val.value
 
-    def check_grid(self, grid) -> Tuple[torch.fx.proxy.Proxy, ...]:
+    def check_grid(self, grid) -> tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
         if isinstance(grid, BaseListVariable):
@@ -1133,6 +1123,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         return configs
 
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+        if not result.is_python_constant():
+            self.raise_unsupported(
+                "@triton.heuristics must return constant values because configs can only contain constant values."
+            )
+
+        return result.guard_as_python_constant()
+
     # We need to override call_getitem here so that we can add the source in the case
     # where we call the triton kernel with a grid
     def call_getitem(
@@ -1146,7 +1144,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
             self.raise_unsupported(
                 "Triton kernels should be called with only a single grid"
             )
-
         return type(variable)(
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
