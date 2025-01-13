@@ -75,7 +75,7 @@ class BlockPatternMatcher:
         # are met before attempting an expensive full match. see triton.py:match_mod_div_block
         # for more details. In short, here we check that each subexpression in sympy.Add contains
         # only FloorDiv or ModularIndexing expressions.
-        if num_dims > 5:
+        if num_dims >= 5:
             stride, denom, other = sympy.symbols("stride denominator other", cls=wild)
             mod_div_pattern = stride * ModularIndexing(index_var, denom, other)
             floor_div_pattern = stride * FloorDiv(index_var, denom)
