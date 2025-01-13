@@ -1259,7 +1259,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             #   * Node1 has memorydep of MultiOutput in reads
             #   * Node2 has StarDep of MultiOutput in writes
             # Rewrite the Node2' StarDep to MemoryDep, because calculate score_fusion_memory
-            # of the template node and its epilogue requrires the same type of dependencies
+            # of the template node and its epilogue requires the same type of dependencies
             assert isinstance(node2.node, MultiOutput)
             assert len(node2.read_writes.writes) == 1
             assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
