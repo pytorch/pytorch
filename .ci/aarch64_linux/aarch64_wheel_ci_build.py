@@ -6,6 +6,7 @@ import shutil
 from subprocess import check_call, check_output
 from typing import List
 
+
 def list_dir(path: str) -> List[str]:
     """'
     Helper for getting paths for Python
@@ -168,7 +169,9 @@ if __name__ == "__main__":
     args = parse_arguments()
     enable_mkldnn = args.enable_mkldnn
     enable_cuda = args.enable_cuda
-    branch = check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"].decode()
+    branch = check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd="/pytorch"
+    ).decode()
 
     print("Building PyTorch wheel")
     build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
