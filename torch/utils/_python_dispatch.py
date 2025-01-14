@@ -448,6 +448,38 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     return sub
 
 
+def _apply_to_subclass(
+    t: torch.Tensor,
+    callback,
+    *,
+    filter_fn,
+    unwrap_functional_tensor: bool,
+) -> None:
+    """
+    Given a traceable, wrapper tensor subclass ``t`` that implements
+    ``__torch_dispatch__`` and holds some inner tensors,
+    and a callback of type ``Callable[[torch.Tensor], None]``,
+    transform_subclass will grab each inner tensor attribute from the wrapper,
+    passing them into ``callback``.
+    """
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    def recurse(t):
+        if is_traceable_wrapper_subclass(t):
+            inner_tensor_names, _ = t.__tensor_flatten__()
+            for t_name in inner_tensor_names:
+                if filter_fn(t_name, type(t)):
+                    recurse(getattr(t, t_name))
+        elif isinstance(t, FunctionalTensor):
+            if unwrap_functional_tensor:
+                t = torch._from_functional_tensor(t.elem)
+            recurse(t)
+        else:
+            assert isinstance(t, torch.Tensor)
+            callback(t)
+    recurse(t)
+
+
 def _correct_storage_aliasing(func, schema_info, args, outs):
     """
     Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),

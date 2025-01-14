@@ -2361,7 +2361,7 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
 def record_stream_default(func, *args, **kwargs):
-    from torch.nested._internal.utils import nested_metadata_apply_func
+    from torch.nested._internal.utils import apply_to_nested_metadata
 
     inp = args[0]
     stream = args[1]
@@ -2371,11 +2371,11 @@ def record_stream_default(func, *args, **kwargs):
         if not x.is_cpu:
             x.record_stream(stream)
 
-    nested_metadata_apply_func(
+    apply_to_nested_metadata(
         inp._metadata,
         apply_func,
         only_source_fields=False,
-        unpack_functional_tensor=False,
+        unwrap_functional_tensor=False,
     )
     inp._non_contig_offsets.record_stream(stream)
     inp._values.record_stream(stream)
