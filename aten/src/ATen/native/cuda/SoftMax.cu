@@ -925,7 +925,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         if (!half_to_float) {
           auto output_ptr = output.mutable_data_ptr<scalar_t>();
           auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+          if (dim_size <= 2048 && dim_size*sizeof(scalar_t) <= 8192) {
             int64_t remaining = outer_size;
             int64_t chunk_size = (1L << 30L) / dim_size;
             while(remaining > 0) {
