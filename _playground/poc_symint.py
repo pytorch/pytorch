@@ -1,5 +1,5 @@
 import contextlib
-from typing import Callable, cast, Generator, Optional
+from typing import Callable, cast, Generator, Mapping, Optional, Sequence, Type
 
 import torch
 import torch.fx
@@ -8,10 +8,14 @@ from torch import Tensor
 from torch._C import _disabled_torch_function_impl
 from torch._decomp import decomposition_table
 from torch._guards import Source
+
+from torch._ops import OpOverload
 from torch._subclasses.fake_impls import stride_incorrect_op
 from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+from torch.fx.immutable_collections import immutable_dict
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
 
 pytree = torch.utils._pytree
 
@@ -43,34 +47,33 @@ class FakeSymbolicTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-
-        print(
-            "Dispatching %s with args shapes %s"
-            % (
-                func,
-                str([a.shape for a in flat_args if isinstance(a, FakeSymbolicTensor)]),
-            )
-        )
-
-        if handler := _DISPATCH_META_HANDLERS.get(func):
-            return handler(args)
-
-        if func in decomposition_table:
-            print("Decomposing %s" % func)
-            out = decomposition_table[func](*args, **kwargs)
-            print(out)
-            return out
-
-        if (
-            "prims::" in func._schema.name
-            and hasattr(func, "prim_meta_impl")
-            and not stride_incorrect_op(func)
-        ):
-            return func.prim_meta_impl(*args, **kwargs)
+        # Avoid infinite recursion
+        if func == torch.ops.prim.device.default:
+            return torch.device("meta")
 
         with in_kernel_invocation_manager():
             return func(*args, **kwargs)
+
+
+class FakeSymbolicTensorMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: Sequence[Type],
+        args: Sequence[object] = (),
+        kwargs: Mapping[str, object] = immutable_dict(),
+    ) -> object:
+        if handler := _DISPATCH_META_HANDLERS.get(func):
+            return handler(args)
+
+        from torch._decomp import decomposition_table
+
+        if func in decomposition_table:
+            return decomposition_table[func](*args, **kwargs)
+
+        with in_kernel_invocation_manager():
+            r = func(*args, **kwargs)
+        return r
 
 
 def from_real_tensor(
@@ -128,39 +131,40 @@ _DISPATCH_META_HANDLERS = {
 shape_env = ShapeEnv()
 conv = MetaConverter(copy_data=False)
 
-a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-b = from_real_tensor(torch.randn(5, 6), conv, shape_env)
+with FakeSymbolicTensorMode():
+    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
+    b = from_real_tensor(torch.randn(5, 6), conv, shape_env)
 
-z = a + b
-print(z.shape)
+    z = a + b
+    print(z.shape)
 
-z = torch.concat([a, b], dim=1)
-print(z.shape)
+    z = torch.concat([a, b], dim=1)
+    print(z.shape)
 
-z = torch.sum(z, dim=1)
-print(z.shape)
+    z = torch.sum(z, dim=1)
+    print(z.shape)
 
-a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
+    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
+    b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
 
-z = torch.ops.aten.mm.default(a, b)
-print(z.shape)
+    z = torch.ops.aten.mm.default(a, b)
+    print(z.shape)
 
-a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
+    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
+    b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
 
-z = torch.ops.aten.mm.default(a, b)
-print(z.shape)
+    z = torch.ops.aten.mm.default(a, b)
+    print(z.shape)
 
-a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
-z = a.view(30, 7)
-print(z.shape)
+    a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
+    z = a.view(30, 7)
+    print(z.shape)
 
-a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
-b = from_real_tensor(torch.randn(7, 8), conv, shape_env)
+    a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
+    b = from_real_tensor(torch.randn(7, 8), conv, shape_env)
 
-# z = a.view(a.shape[0] * a.shape[1], 7)
-# z = torch.ops.aten.mm(z, b)
-# z = z.view(a.shape[0], a.shape[1], b.shape[1])
-#
-# print(z.shape)
+    z = a.view(a.shape[0] * a.shape[1], a.shape[2])
+    z = torch.ops.aten.mm(z, b)
+    z = z.view(a.shape[0], a.shape[1], b.shape[1])
+
+    print(z.shape)
