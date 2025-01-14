@@ -19,6 +19,39 @@ name: !{{ build_environment }}
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
 {%- endmacro %}
 
+{%- macro setup_ec2_windows() -%}
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
+      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
+          # Let's both exclude the path and disable Windows Defender completely just to be sure
+          # that it doesn't interfere
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+{%- endmacro -%}
+
 on:
   push:
     {%- if branches == "nightly" %}
@@ -76,7 +109,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ common.setup_ec2_windows() }}
+      !{{ setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       - name: Git checkout Builder
         uses: actions/checkout@v4
