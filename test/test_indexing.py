@@ -991,7 +991,6 @@ class TestIndexing(TestCase):
 
         num_indices = 401988
         max_index_range = 2000
-        results = []
         target_index_range = [16, 256, 2000]
         for generated_index_range in target_index_range:
             # create CPU tensors

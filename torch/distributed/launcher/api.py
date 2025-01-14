@@ -9,7 +9,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -64,7 +64,8 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
-    ..note:
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
@@ -162,7 +163,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint

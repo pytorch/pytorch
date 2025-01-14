@@ -91,12 +91,9 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
       result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    const std::vector<at::Tensor>& inputs,
-    AOTInductorStreamHandle cuda_stream_handle) {
-  auto input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-
+std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
+    std::vector<AtenTensorHandle>& input_handles,
+    void* stream_handle) {
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;
@@ -110,11 +107,28 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
-      cuda_stream_handle,
+      reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
       proxy_executor_handle_));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::run(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  return run_impl(input_handles, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  std::move(inputs).clear();
+  return run_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::

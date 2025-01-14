@@ -71,6 +71,7 @@ Features described in this documentation are classified by release status:
    mps
    xpu
    mtia
+   mtia.memory
    meta
    torch.backends <backends>
    torch.export <export>

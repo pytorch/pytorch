@@ -307,7 +307,7 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0,
-    c10::string_view padding_side = "right") {
+    std::string_view padding_side = "right") {
   return at::pad_sequence(sequences, batch_first, padding_value, padding_side);
 }
 

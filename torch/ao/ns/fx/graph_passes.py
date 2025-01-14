@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -89,8 +89,8 @@ def _insert_logger_after_node(
 
 def add_loggers_to_model(
     gm: GraphModule,
-    node_to_instrument_inputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
-    node_to_instrument_outputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
+    node_to_instrument_inputs_to_ref_node_name: Dict[Node, tuple[str, str]],
+    node_to_instrument_outputs_to_ref_node_name: Dict[Node, tuple[str, str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -102,7 +102,6 @@ def add_loggers_to_model(
 
     new_graph = Graph()
     env: Dict[str, Any] = {}
-    modules = dict(gm.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -537,11 +536,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     """
     TODO(before land): real docblock
     """
-    if isinstance(input_node_c, Node):
-        graph_c = input_node_c.graph
-    else:
-        assert isinstance(input_node_c, list)
-        graph_c = input_node_c[0].graph
+    assert isinstance(input_node_c, (Node, list))
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -710,7 +705,7 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
+    matched_subgraph_pairs: Dict[str, tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
     node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
@@ -748,7 +743,6 @@ def create_a_shadows_b(
     # the shadows with the nodes copied from graph_a
     graph_c = Graph()
     env_c: Dict[str, Any] = {}
-    modules = dict(gm_b.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])

@@ -15,7 +15,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -90,6 +90,7 @@ __all__ = [
     "is_nccl_available",
     "is_torchelastic_launched",
     "is_ucc_available",
+    "is_xccl_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -133,6 +134,7 @@ _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
+_XCCL_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -196,6 +198,14 @@ try:
 except ImportError:
     _UCC_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupXCCL
+
+    ProcessGroupXCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupXCCL"]
+except ImportError:
+    _XCCL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
@@ -225,7 +235,7 @@ class Backend(str):
     """
     An enum-like class for backends.
 
-    Available backends: GLOO, NCCL, UCC, MPI, and other registered backends.
+    Available backends: GLOO, NCCL, UCC, MPI, XCCL, and other registered backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -245,22 +255,25 @@ class Backend(str):
     NCCL = "nccl"
     UCC = "ucc"
     MPI = "mpi"
+    XCCL = "xccl"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: Dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: Dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
+        "xpu": XCCL,
     }
 
     backend_capability: Dict[str, List[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
+        XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
     }
@@ -269,6 +282,7 @@ class Backend(str):
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
+        XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
     }
@@ -361,16 +375,18 @@ class BackendConfig:
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
-            # default config when backend is not specified
-            # supported since PyTorch 2.0
-            for device, default_backend in Backend.default_device_backend_map.items():
-                if is_backend_available(default_backend):
-                    if (
-                        default_backend == Backend.NCCL
-                        and not torch.cuda.is_available()
-                    ):
-                        continue
-                    self.device_backend_map[device] = Backend(default_backend)
+            # Detect the accelerator on the machine. If no accelerator is
+            # available, it returns CPU.
+            device_type = torch._C._get_accelerator().type
+            try:
+                backend_str = Backend.default_device_backend_map[device_type]
+                self.device_backend_map[device_type] = Backend(backend_str)
+            except KeyError:
+                raise ValueError(
+                    f"We detected accelerator {device_type} on your machine. "
+                    f"But we don't know which communication backend to use for this accelerator. "
+                    f"Please specify the `backend` argument in the `init_process_group` call."
+                ) from None
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -556,7 +572,7 @@ class _CollOp:
 
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
-_pg_map: Dict[ProcessGroup, Tuple[str, Store]] = {}
+_pg_map: Dict[ProcessGroup, tuple[str, Store]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
@@ -596,7 +612,7 @@ class _World:
         self._default_pg = value
 
     @property
-    def pg_map(self) -> Dict[ProcessGroup, Tuple[str, Store]]:
+    def pg_map(self) -> Dict[ProcessGroup, tuple[str, Store]]:
         """
         Provide Mapping from ProcessGroup to backend name and store.
 
@@ -1229,6 +1245,11 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
+def is_xccl_available() -> bool:
+    """Check if the XCCL backend is available."""
+    return _XCCL_AVAILABLE
+
+
 def is_backend_available(backend: str) -> bool:
     """
     Check backend availability.
@@ -1540,15 +1561,22 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
-            and ``nccl`` backend will be created, see notes below for how multiple
-            backends are managed. This field can be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
-            multiple processes per machine with ``nccl`` backend, each process
-            must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks. ``ucc`` backend is
-            experimental.
+            ``nccl``, ``ucc``, or one that is registered by a third-party
+            plugin.
+            Since 2.6, if ``backend`` is not provided, c10d will use a backend
+            registered for the device type indicated by the `device_id` kwarg
+            (if provided). The known default registrations today are: ``nccl``
+            for ``cuda``, ``gloo`` for ``cpu``.
+            If neither ``backend`` nor ``device_id`` is provided, c10d will
+            detect the accelerator on the run-time machine and use a backend
+            registered for that detected accelerator (or ``cpu``).
+            This field can be given as a lowercase string (e.g., ``"gloo"``),
+            which can also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``).
+            If using multiple processes per machine with ``nccl`` backend, each
+            process must have exclusive access to every GPU it uses, as sharing
+            GPUs between processes can result in deadlock or NCCL invalid usage.
+            ``ucc`` backend is experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -1831,10 +1859,9 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type != "cuda"):
+    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
         raise ValueError(
-            "init_process_group device_id parameter must be a cuda device with an "
-            "id, e.g. cuda:0, not just cuda or cpu"
+            "init_process_group device_id parameter must be an accelerator with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -1964,6 +1991,13 @@ def _new_process_group_helper(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
             backend_type = ProcessGroup.BackendType.UCC
+        elif backend_str == Backend.XCCL:
+            if not is_xccl_available():
+                raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_class = ProcessGroupXCCL(
+                backend_prefix_store, group_rank, group_size
+            )
+            backend_type = ProcessGroup.BackendType.XCCL
         else:
             assert (
                 backend_str.upper() in Backend._plugins

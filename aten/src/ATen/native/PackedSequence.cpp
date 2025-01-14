@@ -202,7 +202,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   return std::make_tuple(output, lengths_t);
 }
 
-Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const c10::string_view padding_side) {
+Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const std::string_view padding_side) {
   const int64_t sequences_size = sequences.size();
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
   TORCH_CHECK(padding_side == "left" || padding_side == "right",
