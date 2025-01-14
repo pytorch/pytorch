@@ -2,8 +2,7 @@
 
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-arm64-binary-libtorch-debug
-on:
+name: windows-arm64-binary-libtorch-debugon:
   push:
     branches:
       - main
@@ -52,21 +51,6 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
-        shell: bash
-        run: |
-          git config --global core.longpaths true
-          git config --global core.symlinks true
-
-          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
-          # the directory on Windows and prevent GHA from checking out as reported
-          # in https://github.com/actions/checkout/issues/1018
-          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -148,20 +132,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:

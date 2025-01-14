@@ -20,21 +20,6 @@ name: !{{ build_environment }}
 {%- endmacro %}
 
 {%- macro setup_ec2_windows() -%}
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
-        shell: bash
-        run: |
-          git config --global core.longpaths true
-          git config --global core.symlinks true
-
-          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
-          # the directory on Windows and prevent GHA from checking out as reported
-          # in https://github.com/actions/checkout/issues/1018
-          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -168,8 +153,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
-
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
