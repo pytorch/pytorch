@@ -138,7 +138,9 @@ class ScheduleTest(TestCase):
             # Add a small perturbation
             target = y + torch.randn(batch_size, d_hid, device=device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
         # Run reference
         for _ in range(2):
             ref_mod.zero_grad()
@@ -179,9 +181,9 @@ class ScheduleTest(TestCase):
         # Check output
         torch.testing.assert_close(out, ref_out)
         # Check loss
-        # Since the reduction used in the loss function above is "sum", we use
-        # "sum" here to reduce microbatch losses into a single value too.
-        pipe_loss = sum(losses)
+        # Since the reduction used in the loss function above is "mean", we use
+        # "mean" here to reduce microbatch losses into a single value too.
+        pipe_loss = torch.stack(losses).mean()
         torch.testing.assert_close(pipe_loss, ref_loss)
 
         # Check gradients
@@ -717,6 +719,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
+            scale_grads=False,
         )
         schedule._load_actions(
             {
