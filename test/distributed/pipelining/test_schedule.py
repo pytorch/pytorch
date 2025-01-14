@@ -222,6 +222,8 @@ class ScheduleTest(TestCase):
         with self.assertRaises(RuntimeError):
             ScheduleInterleavedZeroBubble([stage], 2)
 
+        torch.distributed.destroy_process_group()
+
 
 instantiate_parametrized_tests(ScheduleTest)
 
