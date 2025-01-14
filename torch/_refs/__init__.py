@@ -3216,19 +3216,23 @@ def native_group_norm(
     )
     rstd = torch.rsqrt(biased_var + eps)
     if weight is not None:
-        weight_reshaped = torch.reshape(weight, [1, num_groups, num_channels // num_groups, 1])
+        weight_reshaped = torch.reshape(
+            weight, [1, num_groups, num_channels // num_groups, 1]
+        )
         w = rstd * weight_reshaped
-        b = - w * mean
+        b = -mean * w
     else:
         w = rstd
-        b = - rstd * mean
+        b = -mean * rstd
     if bias is not None:
-        bias_reshaped = torch.reshape(bias, [1, num_groups, num_channels // num_groups, 1])
+        bias_reshaped = torch.reshape(
+            bias, [1, num_groups, num_channels // num_groups, 1]
+        )
         b = b + bias_reshaped
 
-    w = w.as_strided([num_channels], [1])
-    b = b.as_strided([num_channels], [1])
-    broadcast_dims = [0] + list(range(2, input.ndim))
+    w = w.as_strided([batch_size, num_channels], [num_channels, 1])
+    b = b.as_strided([batch_size, num_channels], [num_channels, 1])
+    broadcast_dims = list(range(2, input.ndim))
     unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
     unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
     out = input_acc * unsqueeze_w + unsqueeze_b
@@ -3240,6 +3244,9 @@ def native_group_norm(
     # remove broadcast dimensions from mean and rstd
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
+    print("out", out)
+    print("mean", mean)
+    print("rstd", rstd)
     return (out, mean, rstd)
 
 
