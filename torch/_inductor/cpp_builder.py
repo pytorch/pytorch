@@ -19,7 +19,7 @@ import warnings
 from ctypes import cdll
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Union
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -578,7 +578,7 @@ def get_cpp_options(
     compile_only: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -697,7 +697,7 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_absolute_path: bool,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str]]:
     from torch._inductor.codecache import _LINKER_SCRIPT
 
     cflags: List[str] = []
@@ -737,7 +737,7 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthrough_args
 
 
-def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
+def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[List[str], List[str]]:
     macros: List[str] = []
     build_flags: List[str] = []
     if vec_isa != invalid_vec_isa:
@@ -759,7 +759,7 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]
 
 def _get_torch_related_args(
     include_pytorch: bool, aot_mode: bool
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str]]:
     from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
 
     include_dirs = [
@@ -796,7 +796,7 @@ def _get_python_include_dirs() -> List[str]:
     return [str(include_dir)]
 
 
-def _get_python_related_args() -> Tuple[List[str], List[str]]:
+def _get_python_related_args() -> tuple[List[str], List[str]]:
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -827,7 +827,7 @@ def is_conda_llvm_openmp_installed() -> bool:
 
 
 @functools.lru_cache(None)
-def homebrew_libomp() -> Tuple[bool, str]:
+def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
         subprocess.check_output(["which", "brew"])
@@ -893,7 +893,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
 
 def _get_openmp_args(
     cpp_compiler: str,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
     cflags: List[str] = []
     ldflags: List[str] = []
     include_dir_paths: List[str] = []
@@ -1013,7 +1013,7 @@ def get_cpp_torch_options(
     compile_only: bool,
     use_absolute_path: bool,
     use_mmap_weights: bool,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -1186,7 +1186,7 @@ def get_cpp_torch_device_options(
     device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
+) -> tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -1329,7 +1329,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
 
 def get_name_and_dir_from_output_file_path(
     file_path: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     This function help prepare parameters to new cpp_builder.
     Example:
