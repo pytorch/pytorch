@@ -3520,6 +3520,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @tf32_on_and_off
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -4219,6 +4220,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self._test_RNN_cpu_vs_cudnn(1)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @tf32_on_and_off
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
         hidden_size = 6
