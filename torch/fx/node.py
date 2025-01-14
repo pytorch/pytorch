@@ -3,7 +3,19 @@ import builtins
 import inspect
 import types
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch._C import _NodeBase
@@ -45,9 +57,9 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
+        Tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "Node",
@@ -731,8 +743,9 @@ class Node(_NodeBase):
                 else:
                     return n
 
-            if getattr(m, "_replace_hook", None):
-                m._replace_hook(old=self, new=replace_with.name, user=use_node)
+            if getattr(m, "_replace_hooks", None):
+                for replace_hook in m._replace_hooks:
+                    replace_hook(old=self, new=replace_with.name, user=use_node)
 
             new_args = map_arg(use_node.args, maybe_replace_node)
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
@@ -756,11 +769,18 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function based on schema.
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            if schema is not None and schema.is_mutable:
+                # impure since it mutates inputs
+                return True
+
+            tags: Optional[List[torch.Tag]] = getattr(self.target, "_tags", None)
+            if tags is not None and torch.Tag.nondeterministic_seeded in tags:
+                # impure since it mutates RNG state
+                return True
+
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -836,8 +856,9 @@ class Node(_NodeBase):
             return new_input if n == old_input else n
 
         m = self.graph.owning_module
-        if getattr(m, "_replace_hook", None):
-            m._replace_hook(old=old_input, new=new_input.name, user=self)
+        if getattr(m, "_replace_hooks", None):
+            for replace_hook in m._replace_hooks:
+                replace_hook(old=old_input, new=new_input.name, user=self)
 
         new_args = map_arg(self.args, maybe_replace_node)
         new_kwargs = map_arg(self.kwargs, maybe_replace_node)
@@ -855,10 +876,11 @@ class Node(_NodeBase):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "name" and hasattr(self, "name"):
             m = self.graph.owning_module
-            if getattr(m, "_replace_hook", None):
+            if getattr(m, "_replace_hooks", None):
                 assert isinstance(value, str)
                 for user in self.users:
-                    m._replace_hook(old=self, new=value, user=user)
+                    for replace_hook in m._replace_hooks:
+                        replace_hook(old=self, new=value, user=user)
         update = False
         if (
             hasattr(self, name)

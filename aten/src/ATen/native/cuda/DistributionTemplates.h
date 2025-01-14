@@ -67,13 +67,10 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
   int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
@@ -283,11 +280,7 @@ namespace cuda {
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
-    if ((
-      std::is_same_v<scalar_t, int64_t> ||
-      std::is_same_v<scalar_t, double> ||
-      std::is_same_v<scalar_t, float> ||
-      std::is_same_v<scalar_t, at::BFloat16>) && range >= 1ULL << 32)
+    if (range >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
     {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {

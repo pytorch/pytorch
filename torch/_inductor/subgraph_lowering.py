@@ -4,21 +4,11 @@ import functools
 import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .exc import SubgraphLoweringException
@@ -44,16 +34,16 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     root_graph: torch._inductor.graph.GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
-    allowed_mutations: Optional[Set[OpOverload]]
+    allowed_mutations: Optional[OrderedSet[OpOverload]]
     additional_lowerings: Optional[LoweringDict]
     buffers: List[ir.Buffer]
-    mutated_buffers: Set[str]
+    mutated_buffers: OrderedSet[str]
 
     def __init__(
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: torch._inductor.graph.GraphLowering,
-        allowed_mutations: Optional[Set[OpOverload]] = None,
+        allowed_mutations: Optional[OrderedSet[OpOverload]] = None,
         additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:
         super().__init__(gm)
@@ -64,7 +54,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self._current_op = None
 
         # Used to track buffers created during lowering
-        self.mutated_buffers = set()
+        self.mutated_buffers = OrderedSet()
         self.buffers = []
 
     @contextmanager
@@ -133,7 +123,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
             return lowerings[target](*args, **kwargs)
 
-    def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
+    def output(self, target: str, args: tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 
@@ -158,7 +148,7 @@ class TracingOpsHandler(WrapperHandler[T]):
     def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args: Tuple[object]) -> torch.fx.Node:
+    def output(self, *args: tuple[object]) -> torch.fx.Node:
         return self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )

@@ -96,7 +96,7 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
       attr, pkey, cert, caFile, caPath);
 }
 
-C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice)
 #endif
 
 #if GLOO_HAVE_TRANSPORT_UV
@@ -120,9 +120,9 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
 // Registry priority is per key identifier. We register UV to `APPLE` for
 // the flexibility of other application to override by priority. Register
 // UV to `UV` for env "GLOO_DEVICE_TRANSPORT" override.
-C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice)
 #endif
 
 namespace {

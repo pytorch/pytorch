@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, Tuple
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
@@ -61,7 +61,7 @@ def _compress_hook(
     world_size = group_to_use.size()
 
     buffer = (
-        cast(Tuple[torch.Tensor, ...], bucket)[0]
+        cast(tuple[torch.Tensor, ...], bucket)[0]
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )
@@ -75,7 +75,7 @@ def _compress_hook(
         decompressed_tensor.copy_(value)
         return decompressed_tensor
 
-    if torch._utils.is_compiling():
+    if torch.compiler.is_compiling():
         grad = dist._functional_collectives.all_reduce(
             compressed_tensor, "sum", group_to_use
         )

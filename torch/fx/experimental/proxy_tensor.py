@@ -409,7 +409,11 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
             # approach would be to maintain a per-trace FakeTensorMode and
             # from_real_tensor to create fake values (don't forget to
             # snapshot_fake)
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            from torch._guards import detect_fake_mode
+
+            fake_tensor_mode = detect_fake_mode(val)
+            if not fake_tensor_mode:
+                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 return torch.empty_strided(
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
@@ -1190,7 +1194,7 @@ def wrap_key(
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
-        out = f(*tensors)
+        out = f(*tensors)  # type:ignore[call-arg]
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
@@ -2126,7 +2130,7 @@ class _MakefxTracer:
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None
-            t.shape_env = self.fake_tensor_mode.shape_env
+            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:

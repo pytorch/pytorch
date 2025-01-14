@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 #include <memory>
 #include <typeinfo>
@@ -104,6 +105,6 @@ PyTypeObject* createForwardFunctionPyTypeObject(
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
 
-bool THPCppFunction_Check(PyObject* obj);
+TORCH_PYTHON_API bool THPCppFunction_Check(PyObject* obj);
 
 } // namespace torch::autograd
