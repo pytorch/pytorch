@@ -1894,7 +1894,7 @@ def safe_expand(r: _SympyT) -> _SympyT:
         return r
 
 
-class SymbolInfo(NamedTuple):
+class _SymbolInfo(NamedTuple):
     k: sympy.Symbol
     vr: ValueRanges
     val: sympy.Integer
@@ -1906,7 +1906,7 @@ class SymbolInfo(NamedTuple):
 def _maybe_evaluate_static_worker(
     expr: _SympyT,
     # NB: this is a tuple to ensure it can be LRU cached
-    symbol_info: Tuple[SymbolInfo, ...],
+    symbol_info: Tuple[_SymbolInfo, ...],
     unbacked_only: bool,
     size_oblivious: bool,
 ) -> Optional[_SympyT]:
@@ -5543,7 +5543,7 @@ class ShapeEnv:
             var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            SymbolInfo(
+            _SymbolInfo(
                 s,
                 var_ranges.get(s),
                 self.var_to_val.get(s),
