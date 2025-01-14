@@ -19,12 +19,15 @@ _e_ignored = True
 magic_cache_config_ignored = True
 # [@compile_ignored: debug]
 e_compile_ignored = True
-e_config = Config(default=True)
-e_jk = Config(justknob="does_not_exist", default=True)
-e_jk_false = Config(justknob="does_not_exist", default=False)
-e_env_default = Config(env_name_default="ENV_TRUE", default=False)
-e_env_default_FALSE = Config(env_name_default="ENV_FALSE", default=True)
-e_env_force = Config(env_name_force="ENV_TRUE", default=False)
+e_config: bool = Config(default=True)
+e_jk: bool = Config(justknob="does_not_exist", default=True)
+e_jk_false: bool = Config(justknob="does_not_exist", default=False)
+e_env_default: bool = Config(env_name_default="ENV_TRUE", default=False)
+e_env_default_FALSE: bool = Config(env_name_default="ENV_FALSE", default=True)
+e_env_force: bool = Config(env_name_force="ENV_TRUE", default=False)
+e_aliased_bool: bool = Config(
+    alias="torch.testing._internal.fake_config_module2.e_aliasing_bool"
+)
 
 
 class nested:

@@ -946,6 +946,8 @@ inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
     return dnnl::memory::data_type::bf16;
   } else if (dtype == ScalarType::Half) {
     return dnnl::memory::data_type::f16;
+  } else if (dtype == ScalarType::Int) {
+    return dnnl::memory::data_type::s32;
   } else if (dtype == ScalarType::Byte) {
     return dnnl::memory::data_type::u8;
   } else if (dtype == ScalarType::Char) {
@@ -1091,7 +1093,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           M,
           N,
           K,
-          1,
+          int64_t(1),
           ld_a,
           ld_b,
           ld_c,
@@ -1131,6 +1133,12 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
+    } else if (dtype == ScalarType::Byte) {
+      static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return u8_support;
+    } else if (dtype == ScalarType::Char) {
+      static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
+      return s8_support;
     }
     return false;
   }
@@ -1181,6 +1189,9 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
       return bf16_pack;
+    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
+      static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return bit8_pack;
     }
     return false;
   }
@@ -1280,6 +1291,54 @@ void brgemm(
     N, M, K, 1,
     B, ld_b, A, ld_a,
     beta, C, ld_c);
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const unsigned char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Byte)) {
+    Brgemm::call<unsigned char, unsigned char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "U8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
+    Brgemm::call<unsigned char, signed char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
 void brgemm_release(bool is_vnni) {

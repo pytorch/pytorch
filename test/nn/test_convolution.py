@@ -479,7 +479,6 @@ class TestConvolutionNN(NNTestCase):
 
     def test_Conv2d_1x1(self):
         in_channels = 2
-        out_channels = 2
         mod = torch.nn.Conv2d(2, 2, 1, bias=False).to(dtype=torch.double)
         input = torch.randn(
             1, in_channels, 5, 5, requires_grad=True, dtype=torch.double
@@ -528,7 +527,7 @@ class TestConvolutionNN(NNTestCase):
         m = torch.nn.Conv1d(
             in_channels=16, out_channels=32, kernel_size=2, bias=True
         ).cuda()
-        result = m(x)
+        m(x)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
@@ -700,7 +699,7 @@ class TestConvolutionNN(NNTestCase):
         # Check that ConvTranspose3d can take a 5d output_size.
         m = nn.ConvTranspose3d(2, 2, 2)
         i = torch.rand(1, 2, 1, 1, 1)
-        out = m(i, output_size=(1, 2, 2, 2, 2))
+        m(i, output_size=(1, 2, 2, 2, 2))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_ConvTranspose2d_half_cublas_gemm(self):
@@ -909,15 +908,11 @@ class TestConvolutionNN(NNTestCase):
         weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        out = torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
         input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        out_transpose = torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
 
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -3013,17 +3008,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
             x = torch.transpose(x, 1, 4)
             x2 = x[..., 0]
-            inputs = [
-                x2,
-                conv.weight,
-                conv.bias,
-                (2, 1),
-                (0, 1),
-                (1, 1),
-                False,
-                (0, 1),
-                1,
-            ]
             if torch.backends.mkldnn.is_available():
                 y = conv(x2)
                 # Disable MKLDNN explicitly
@@ -3262,7 +3246,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             .half()
         )
         output = model(input_tensor)
-        model_cpu = model.cpu().float()
         output_cpu = model(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
