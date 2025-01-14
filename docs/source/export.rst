@@ -1065,6 +1065,7 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
+   export.programming_model
    export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir
@@ -1131,6 +1132,7 @@ API Reference
 .. autoclass:: OutputSpec
 .. autoclass:: SymIntArgument
 .. autoclass:: SymBoolArgument
+.. autoclass:: SymFloatArgument
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses

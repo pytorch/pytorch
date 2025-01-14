@@ -137,6 +137,7 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",
@@ -287,6 +288,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         candidate_lib_paths = glob.glob(
             os.path.join(nvidia_path, lib_folder, "lib", lib_name)
         )
+        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
+        if not candidate_lib_paths:
+            candidate_lib_paths = glob.glob(
+                os.path.join(path, lib_folder, "lib", lib_name)
+            )
+
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
@@ -309,6 +316,24 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        # Workaround slim-wheel CUDA-12.4+ dependency bug in libcusparse by preloading nvjitlink
+        # In those versions of cuda cusparse depends on nvjitlink, but does not have rpath when
+        # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
+        # if `LD_LIBRARY_PATH` is defined
+        # See https://github.com/pytorch/pytorch/issues/138460
+        if version.cuda not in ["12.4", "12.6"]:  # type: ignore[name-defined]
+            return
+        try:
+            with open("/proc/self/maps") as f:
+                _maps = f.read()
+            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
+            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+                return
+            # If all abovementioned conditions are met, preload nvjitlink
+            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+        except Exception:
+            pass
+
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -322,6 +347,7 @@ def _load_global_deps() -> None:
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
@@ -943,6 +969,11 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
+
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
 
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -2424,7 +2455,7 @@ def compile(
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
+    ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2498,9 +2529,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
-        raise RuntimeError("Dynamo is not supported on Python 3.14+")
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:

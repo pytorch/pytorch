@@ -424,14 +424,10 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
     const Tensor& target, const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   auto output = at::empty({0}, self.options());
   auto total_weight = at::empty({0}, self.options());
   at::native::nll_loss2d_forward_out_cpu(
-      self, target, weight, reduction, ignore_index, output, total_weight);
+      self, target, weight_opt, reduction, ignore_index, output, total_weight);
   return std::make_tuple(output, total_weight);
 }
 
@@ -465,16 +461,12 @@ Tensor nll_loss2d_backward_cpu(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   auto grad_input = at::zeros_like(self);
   at::native::nll_loss2d_backward_out_cpu(
       grad_output,
       self,
       target,
-      weight,
+      weight_opt,
       reduction,
       ignore_index,
       total_weight,
@@ -483,20 +475,12 @@ Tensor nll_loss2d_backward_cpu(
 }
 
 Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   Tensor total_weight = at::empty({0}, self.options());
-  return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight_opt, reduction, ignore_index));
 }
 
 Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight_opt, reduction, std::move(ignore_index)));
 }
 
 } // namespace at::native

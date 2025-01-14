@@ -541,7 +541,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       }
     }
     if (config.introspectOutputs) {
-      const auto outputs = fn.outputs();
+      const auto& outputs = fn.outputs();
       auto num_outputs = fn.num_outputs();
       if (checkFunctionOutputsForLogging(fn)) {
         // need to account for Stack mode where the outputs are at the end.

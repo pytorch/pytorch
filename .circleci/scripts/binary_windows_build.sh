@@ -14,12 +14,13 @@ if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
     export VC_YEAR=2022
     export USE_SCCACHE=0
     export XPU_VERSION=2025.0
+    export XPU_ENABLE_KINETO=1
 fi
 
 echo "Free space on filesystem before build:"
 df -h
 
-pushd "$BUILDER_ROOT"
+pushd "$PYTORCH_ROOT/.ci/pytorch/"
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 ./windows/internal/build_wheels.bat
 
