@@ -24,8 +24,6 @@ from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
 
-import einops
-
 import numpy as np
 
 import torch
@@ -12262,9 +12260,12 @@ class CommonTemplate:
 
             tar_latent = image_latent[torch.arange(2).unsqueeze(-1), indices[:, :3]]
 
-            tar_latent_rearranged = einops.rearrange(
-                tar_latent, "b n c h w -> (b n) c h w"
-            )
+            # The original model uses einops. In this unit test, we use view op directly
+            # to avoid importing einops
+            #   tar_latent_rearranged = einops.rearrange(
+            #     tar_latent, "b n c h w -> (b n) c h w"
+            #   )
+            tar_latent_rearranged = tar_latent.view(-1, *tar_latent.size()[2:])
 
             return tar_latent_rearranged
 
