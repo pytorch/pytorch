@@ -5,7 +5,8 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -55,6 +56,9 @@ from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -97,6 +101,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
         )
+
+    if (
+        config.cpp.enable_grouped_gemm_template
+        and config.max_autotune
+        and "CPP" in config.max_autotune_gemm_backends
+        and torch._C._has_mkldnn
+    ):
+        from .mkldnn_fusion import grouped_gemm_pass
+
+        grouped_gemm_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -213,7 +227,9 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+def register_lowering_pattern(
+    pattern, extra_check=_return_true, pass_number=1
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
     """
@@ -1035,7 +1051,7 @@ def register_partial_reduction_pattern():
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 
-            def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def replacement(inp: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 partial = partial_red.target(inp, reduced_dims, keepdim)
                 complete = full_red.target(partial)
                 return (partial, complete)
