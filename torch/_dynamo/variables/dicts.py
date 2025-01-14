@@ -834,6 +834,10 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        if name == "__eq__":
+            if not isinstance(args[0], DictKeysVariable):
+                return ConstantVariable.create(NotImplementedError)
+            return ConstantVariable.create(self.set_items == args[0].set_items)
         return super().call_method(tx, name, args, kwargs)
 
 
