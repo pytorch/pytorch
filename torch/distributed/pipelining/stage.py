@@ -574,12 +574,27 @@ class _PipelineStageBase(ABC):
             out_val = self.submod(*args, **kwargs)
         return out_val
 
+    def scale_grads(self, grad_scale_factor: int) -> None:
+        """Scale gradients model gradients by `grad_scale_factor`, which should be specified in coordination with the
+        loss function used with pipelining.  For loss functions which perform 'mean' loss reduction, `grad_scale_factor`
+        should be set to num_microbatches.  For loss functions that use `sum` reduction, `grad_scale_factor` should
+        be set to 1.
+
+        Should only be called once per pipeline schedule step, after all backwards passes have completed.
+        """
+
+        # PP scales only for its own contribution (microbatches), but relies on DP to scale further
+        # for DP degree.
+        if grad_scale_factor != 1:
+            for name, p in self.submod.named_parameters():
+                assert p.grad is not None, name
+                p.grad.div_(grad_scale_factor)
+
     def backward_maybe_with_nosync(
         self,
         backward_type,
         bwd_kwargs: Dict,
         last_backward: bool = False,
-        grad_scale_factor: int = 1,
     ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
@@ -619,15 +634,6 @@ class _PipelineStageBase(ABC):
                 )
             else:
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
-
-        def perform_pp_grad_scaling():
-            # Scale gradients after performing last backward.
-            # PP scales only for its own contribution (microbatches), but relies on DP to scale further
-            # for DP degree.
-            if grad_scale_factor != 1:
-                for name, p in self.submod.named_parameters():
-                    assert p.grad is not None, name
-                    p.grad.div_(grad_scale_factor)
 
         # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
@@ -672,9 +678,6 @@ class _PipelineStageBase(ABC):
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
-
-        if last_backward:
-            perform_pp_grad_scaling()
 
         grads, param_groups = result
         return grads, param_groups
@@ -751,7 +754,6 @@ class _PipelineStageBase(ABC):
         loss=None,
         full_backward: bool = True,
         last_backward=False,
-        grad_scale_factor: int = 1,
     ):
         """
         Perform backward pass on the module.
@@ -765,11 +767,6 @@ class _PipelineStageBase(ABC):
 
         last_backward is controlled by the schedule and signals synchronization of gradients across DP groups
         after the last backward.
-
-        grad_scale_factor should be set to a value matching the number of microbatches, assuming the loss function is
-        one using mean reduction, or 1 otherwise. Pipelining will reduce the parameter gradients by this amount.
-        note: Data parallelism APIs already take care of reducing the gradient by the data-parallel world size, so this
-        should be excluded from `grad_scale_factor`.
         """
         self._check_chunk_id(bwd_chunk_id)
 
@@ -809,7 +806,6 @@ class _PipelineStageBase(ABC):
                 "full",
                 bwd_kwargs,
                 last_backward=last_backward,
-                grad_scale_factor=grad_scale_factor,
             )
             if full_backward:
                 self.dw_builder()()
@@ -821,7 +817,6 @@ class _PipelineStageBase(ABC):
                     "full",
                     bwd_kwargs,
                     last_backward=last_backward,
-                    grad_scale_factor=grad_scale_factor,
                 )
             else:
                 param_groups: List[Dict[str, Any]] | None = None
@@ -837,7 +832,6 @@ class _PipelineStageBase(ABC):
                         "input",
                         bwd_kwargs,
                         last_backward=last_backward,
-                        grad_scale_factor=grad_scale_factor,
                     )
 
                 # TODO: we dont need to save this, add to dw_runner?
@@ -864,9 +858,7 @@ class _PipelineStageBase(ABC):
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
-    def backward_weight_one_chunk(
-        self, bwd_chunk_id: int, last_backward=False, grad_scale_factor: int = 1
-    ):
+    def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
         assert bwd_chunk_id in self.dw_runner, (
             f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
             " without first calling `backward_one_chunk(full_backward=False)`"
@@ -891,7 +883,6 @@ class _PipelineStageBase(ABC):
                     "weight",
                     bwd_kwargs,
                     last_backward=last_backward,
-                    grad_scale_factor=grad_scale_factor,
                 )
             else:
                 # TODO: figure out a better way to do this:
@@ -908,7 +899,6 @@ class _PipelineStageBase(ABC):
                     "full",
                     bwd_kwargs,
                     last_backward=last_backward,
-                    grad_scale_factor=grad_scale_factor,
                 )
 
     def _validate_fwd_input(self, args, kwargs):
