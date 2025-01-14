@@ -49,6 +49,7 @@ class MPSBasicTests(TestCase):
     test_floordiv = CommonTemplate.test_floordiv
     test_fmod = CommonTemplate.test_fmod
     test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
+    test_index_dynamic_shapes = CommonTemplate.test_index_dynamic_shapes
     test_inf = CommonTemplate.test_inf
     test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
