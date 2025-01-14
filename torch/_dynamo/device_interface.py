@@ -369,7 +369,6 @@ class MpsInterface(DeviceInterface):
     def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
-
     @staticmethod
     def synchronize(device: _device_t = None):
         torch.mps.synchronize()
