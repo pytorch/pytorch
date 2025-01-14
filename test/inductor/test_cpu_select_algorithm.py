@@ -127,6 +127,14 @@ def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
         return lambda x: x / other
 
 
+class SliceMaker:
+    def __getitem__(self, item):
+        return item
+
+
+slice_maker = SliceMaker()
+
+
 class BaseTestSelectAlgorithm(TestCase):
     def _check_amx_counter(self, vec_amx):
         if vec_amx:
@@ -2302,17 +2310,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize(
+        "slices",
+        (
+            ((3, 4, 64, 64), slice_maker[2, :3]),  # Contiguous slice of weights
+            ((3, 4, 64, 64), slice_maker[2, 1:]),  # Contiguous slice of weights
+            ((3, 4, 64, 64), slice_maker[:, 2]),  # Non-contigous slice of weights
+        ),
+    )
     @dtypes(torch.float)
-    def test_weight_offset(self, dtype):
-        try:
-            try:
-                from . import test_aot_inductor_utils
-            except ImportError:
-                import test_aot_inductor_utils
-        except Exception:
-            # skip this UT if import failed
-            return
-
+    def test_weight_offset(self, slices, dtype):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2320,26 +2327,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.weight = torch.nn.Parameter(w, requires_grad=False)
 
             def forward(self, x, w):
-                # Test contiguous slice of weights
-                y = x @ w[2]
-                # Test non-contiguous slice of weights (will be copied)
-                y = y @ w[:, 2]
-                # Test mm slice of weight
-                return torch.mm(y[2], self.weight[2])
+                return x @ w[slices[-1]]
 
         counters.clear()
-        x = torch.randn(3, 64, 64).to(dtype=dtype)
-        w = torch.randn(3, 3, 64, 64).to(dtype=dtype)
+        x_shape = (3, 64, 64)
+        x = torch.randn(x_shape).to(dtype=dtype)
+        w = torch.randn(slices[-2]).to(dtype=dtype)
+        if isinstance(self, _DynamicShapesTestBase):
+            torch._dynamo.mark_dynamic(w, 0)
+            torch._dynamo.mark_dynamic(w, 1)
+            torch._dynamo.mark_static(w, 2)
+            torch._dynamo.mark_static(w, 3)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_static(x, 1)
+            torch._dynamo.mark_static(x, 2)
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol), torch.no_grad():
-            expected = mod(x, w)
-            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
-                mod,
-                (x, w),
-            )
-            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
+            self.common(mod, (x, w), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -2383,6 +2388,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_linear_thread_factors_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_thread_factors
     )
+    test_weight_offset_dynamic_shapes = TestSelectAlgorithm.test_weight_offset
 
     @patches
     @torch.no_grad
