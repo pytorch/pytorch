@@ -19669,8 +19669,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
         check_batched_forward_grad=False,
-        dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16,
-                                         torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         skips=(
             # JIT has issue when op is passed as lambda
