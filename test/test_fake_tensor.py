@@ -161,7 +161,7 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     @parametrize(
         "dtype",
-        [    
+        [
             torch.float32,
             torch.float64,
             torch.float16,
