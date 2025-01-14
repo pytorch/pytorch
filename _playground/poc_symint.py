@@ -14,6 +14,7 @@ from torch._subclasses.fake_impls import stride_incorrect_op
 from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 from torch.fx.immutable_collections import immutable_dict
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -28,7 +29,7 @@ def in_kernel_invocation_manager() -> Generator[None, None, None]:
             yield
 
 
-class FakeSymbolicTensor(torch.Tensor):
+class FakeSymTensor(torch.Tensor):
     def __new__(
         cls,
         elem: Tensor,
@@ -57,7 +58,13 @@ class FakeSymbolicTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
-class FakeSymbolicTensorMode(TorchDispatchMode):
+class FakeSymTensorMode(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+
+        self.shape_env = ShapeEnv()
+        self.conv = MetaConverter(copy_data=False)
+
     def __torch_dispatch__(
         self,
         func: OpOverload,
@@ -65,6 +72,24 @@ class FakeSymbolicTensorMode(TorchDispatchMode):
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
+        print(func)
+
+        # Covert args if they are Tensors
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+        args_new = []
+        for arg in flat_args:
+            if (
+                isinstance(arg, torch.Tensor)
+                and not isinstance(arg, FakeSymTensor)
+                and not arg.device == torch.device("meta")
+            ):
+                args_new.append(from_real_tensor(arg, self.conv, self.shape_env))
+            else:
+                args_new.append(arg)
+        args = args_new
+
+        args, kwargs = pytree.tree_unflatten(args, args_spec)
+
         if handler := _DISPATCH_META_HANDLERS.get(func):
             return handler(args)
 
@@ -87,7 +112,7 @@ def from_real_tensor(
     source: Optional[Source] = None,
     symbolic_context: Optional[SymbolicContext] = None,
     trace: bool = True,
-) -> FakeSymbolicTensor:
+) -> FakeSymTensor:
 
     if type(t) is torch.nn.Parameter:
         assert not make_constant
@@ -96,10 +121,10 @@ def from_real_tensor(
 
     def mk_fake_tensor(
         make_meta_t: Callable[[], object], device: torch.device
-    ) -> FakeSymbolicTensor:
+    ) -> FakeSymTensor:
         make_meta_t(),
         with no_dispatch():
-            return FakeSymbolicTensor(
+            return FakeSymTensor(
                 make_meta_t(),
                 device,
                 constant=constant,
@@ -131,43 +156,97 @@ _DISPATCH_META_HANDLERS = {
 }
 
 
-shape_env = ShapeEnv()
-conv = MetaConverter(copy_data=False)
+class FakeSymTensorTest(TestCase):
+    def setUp(self):
+        self.shape_env = ShapeEnv()
+        self.conv = MetaConverter(copy_data=False)
 
-with FakeSymbolicTensorMode():
-    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-    b = from_real_tensor(torch.randn(5, 6), conv, shape_env)
+    def test_elementwise(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
+            b = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
 
-    z = a + b
-    print(z.shape)
+            # Perform op
+            z = a + b
 
-    z = torch.concat([a, b], dim=1)
-    print(z.shape)
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertIsInstance(z.shape[1], torch.SymInt)
+            self.assertEqual(z.shape, a.shape)
 
-    z = torch.sum(z, dim=1)
-    print(z.shape)
+    def test_concat(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
+            b = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
 
-    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-    b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
+            # Perform op
+            z = torch.concat([a, b], dim=1)
 
-    z = torch.ops.aten.mm.default(a, b)
-    print(z.shape)
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertIsInstance(z.shape[1], torch.SymInt)
+            self.assertEqual(z.shape[0], a.shape[0])
+            self.assertEqual(z.shape[1], 2 * a.shape[1])
 
-    a = from_real_tensor(torch.randn(5, 6), conv, shape_env)
-    b = from_real_tensor(torch.randn(6, 8), conv, shape_env)
+    def test_sum(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
 
-    z = torch.ops.aten.mm.default(a, b)
-    print(z.shape)
+            # Perform op
+            z = torch.sum(a, dim=1)
 
-    a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
-    z = a.view(30, 7)
-    print(z.shape)
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertEqual(z.shape[0], a.shape[0])
 
-    a = from_real_tensor(torch.randn(5, 6, 7), conv, shape_env)
-    b = from_real_tensor(torch.randn(7, 8), conv, shape_env)
+    def test_mm(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(torch.randn(5, 6), self.conv, self.shape_env)
+            b = from_real_tensor(torch.randn(6, 8), self.conv, self.shape_env)
 
-    z = a.view(a.shape[0] * a.shape[1], a.shape[2])
-    z = torch.ops.aten.mm(z, b)
-    z = z.view(a.shape[0], a.shape[1], b.shape[1])
+            # Perform op
+            z = torch.ops.aten.mm.default(a, b)
 
-    print(z.shape)
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertIsInstance(z.shape[1], torch.SymInt)
+            self.assertEqual(z.shape[0], a.shape[0])
+            self.assertEqual(z.shape[1], b.shape[1])
+
+    def test_view(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(torch.randn(5, 6, 7), self.conv, self.shape_env)
+
+            # Perform op
+            z = a.view(a.shape[0] * a.shape[1], a.shape[2])
+
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertIsInstance(z.shape[1], torch.SymInt)
+            self.assertEqual(z.shape[0], a.shape[0] * a.shape[1])
+            self.assertEqual(z.shape[1], a.shape[2])
+
+    def test_embedding(self):
+        with FakeSymTensorMode():
+            # Create inputs
+            a = from_real_tensor(
+                torch.randn(5, 8).to(dtype=torch.int), self.conv, self.shape_env
+            )
+
+            # Perform op
+            emb = torch.nn.Embedding(8, 32)
+            z = emb(a)
+
+            # Verify
+            self.assertIsInstance(z.shape[0], torch.SymInt)
+            self.assertIsInstance(z.shape[1], torch.SymInt)
+            self.assertIsInstance(z.shape[2], torch.SymInt)
+
+
+if __name__ == "__main__":
+    run_tests()
