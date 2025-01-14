@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 import unittest
-from typing import Any, Dict, Optional, OrderedDict, Tuple
+from collections import OrderedDict
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from torch._export.passes.lift_constants_pass import (

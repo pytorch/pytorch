@@ -2,7 +2,7 @@
 
 import time
 import io
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
 
 import torch
 import torch.distributed as dist
@@ -309,7 +309,7 @@ class FutureTypingTest:
 
         @torch.jit.script
         def future_return_to_python(
-            dst_rank: int, inputs: Tuple[Tensor, Tensor]
+            dst_rank: int, inputs: tuple[Tensor, Tensor]
         ) -> Future[Tensor]:
             return rpc.rpc_async(
                 f"worker{dst_rank}", two_args_two_kwargs, inputs
@@ -518,7 +518,7 @@ def raise_script():
 
 @torch.jit.script
 def script_rpc_async_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
@@ -526,14 +526,14 @@ def script_rpc_async_call(
 
 @torch.jit.script
 def script_rpc_sync_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     res = rpc.rpc_sync(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return res
 
 @torch.jit.script
 def script_rpc_remote_call(
-    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+    dst_worker_name: str, args: tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     rref_res = rpc.remote(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return rref_res.to_here()
@@ -1356,13 +1356,13 @@ class JitRpcTest(
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         num = 20
-        rrefs = []
-        for i in range(num):
-            rrefs.append(
-                rpc.remote(
-                    dst1, async_add, args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
-                )
-            )
+        rrefs = [
+            rpc.remote(
+                dst1,
+                async_add,
+                args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
+            ) for i in range(num)
+        ]
 
         for i in range(num):
             self.assertEqual(rrefs[i].to_here(), torch.ones(2, 2) + i)

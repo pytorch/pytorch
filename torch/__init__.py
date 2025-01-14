@@ -137,6 +137,7 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",
@@ -287,6 +288,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         candidate_lib_paths = glob.glob(
             os.path.join(nvidia_path, lib_folder, "lib", lib_name)
         )
+        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
+        if not candidate_lib_paths:
+            candidate_lib_paths = glob.glob(
+                os.path.join(path, lib_folder, "lib", lib_name)
+            )
+
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
@@ -322,6 +329,7 @@ def _load_global_deps() -> None:
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
@@ -534,6 +542,12 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __rsub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __and__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __or__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
@@ -922,6 +936,7 @@ for __name in (
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
 
+
 del __fn, __name, __sym_name, _get_sym_math_fn
 
 # Adding temporary shortcut
@@ -936,6 +951,11 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
+
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
 
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -1128,7 +1148,7 @@ def set_default_device(
     .. note::
 
         This doesn't affect functions that create tensors that share the same memory as the input, like:
-        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`. Using :func:`torch.Tensor.to` move tensor to desired device.
 
     Args:
         device (device or string): the device to set as default
@@ -2404,7 +2424,7 @@ def compile(
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
+    ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2478,9 +2498,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Dynamo is not supported on Python 3.13+")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:

@@ -37,8 +37,7 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
@@ -72,7 +71,6 @@ Tensor& mkldnn_tanh_(Tensor& self) {
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
