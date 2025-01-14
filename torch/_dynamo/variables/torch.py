@@ -153,6 +153,12 @@ tracing_state_functions = {
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
+dispatch_key_set_functions = {
+    torch._C._dispatch_keys,
+    torch._C._dispatch_tls_local_include_set,
+    torch._C._dispatch_tls_local_exclude_set,
+}
+
 
 @functools.lru_cache(None)
 def get_overridable_functions():
@@ -415,6 +421,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
+
+        @register(*dispatch_key_set_functions)
+        def handle_dispatch_key_set_functions(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not kwargs
+            if self.value in (torch._C._dispatch_keys,):
+                assert len(args) == 1
+                assert isinstance(args[0], variables.TensorVariable)
+                fake_tensor = args[0].proxy.node.meta["example_value"]
+                return DispatchKeySetVariable.create(self.value(fake_tensor))
+            else:
+                assert not args
+                return DispatchKeySetVariable.create(self.value())
 
         @register(torch.overrides.get_default_nowrap_functions.__wrapped__)
         def handle_get_default_nowrap_functions(
@@ -1191,8 +1211,12 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         ) and can_dispatch_torch_function(tx, args, kwargs)
 
 
-class TorchDispatchKeySetVariable(BaseTorchVariable):
+class DispatchKeySetVariable(BaseTorchVariable):
     """represents torch.DispatchKeySet"""
+
+    @staticmethod
+    def create(value, **kwargs):
+        return DispatchKeySetVariable(value, **kwargs)
 
     @classmethod
     def create_with_source(cls, value, source):
