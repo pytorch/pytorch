@@ -5,7 +5,7 @@ body:
 - type: markdown
   attributes:
     value: >
-      #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/pytorch/pytorch/issues?q=is%3Aissue+sort%3Acreated-desc+).
+      #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/pytorch/pytorch/issues?q=is%3Aissue+sort%3Acreated-desc+). Note: Please write your bug report in English to ensure it can be understood and addressed by the development team.
 - type: textarea
   attributes:
     label: 🐛 Describe the bug
