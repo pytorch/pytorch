@@ -35,14 +35,13 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
 from typing_extensions import TypeAlias
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -309,7 +308,7 @@ class CompiledFxGraph(OutputCode):
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[Tuple[int, str]]]
+    cache_linemap: Optional[List[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -324,7 +323,7 @@ class CompiledFxGraph(OutputCode):
     allocated_constant_name: Optional[Dict[str, str]]
     constants: Optional[Dict[str, torch.Tensor]]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
+    output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     counter_deltas: Counter[str]
@@ -348,7 +347,7 @@ class CompiledFxGraph(OutputCode):
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
         gm: torch.fx.GraphModule,
-        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
+        output_strides: List[Optional[tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
@@ -464,6 +463,7 @@ class CompiledFxGraph(OutputCode):
         try:
             return self.current_callable(inputs)
         finally:
+            get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
 
     def post_compile(

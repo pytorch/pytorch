@@ -44,7 +44,7 @@ __global__ void replication_pad_forward_kernel1d(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t outputPointId = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
   const int64_t plane = blockIdx.y + y_shift;
   const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= output.size(2)) {
@@ -68,7 +68,7 @@ __global__ void replication_pad_backward_kernel(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t outputPointId = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
   const int64_t plane = blockIdx.y + y_shift;
   const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2)) {

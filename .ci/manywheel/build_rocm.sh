@@ -118,7 +118,7 @@ if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     fi
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBSUITESPARSE_CONFIG_PATH="/lib64/libsuitesparseconfig.so.4"
         if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
@@ -151,7 +151,7 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     fi
     LIBDRM_PATH="/usr/lib/x86_64-linux-gnu/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBCHOLMOD_PATH="/lib/x86_64-linux-gnu/libcholmod.so.3"
         # Below libs are direct dependencies of libcholmod
@@ -185,15 +185,6 @@ do
     file_name="${lib##*/}" # Substring removal of path to get filename
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
-
-# FIXME: Temporary until https://github.com/pytorch/pytorch/pull/137443 lands
-# Install AOTriton
-if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
-    cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
-    bash ${PYTORCH_ROOT}/.ci/docker/common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
-    export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
-    ROCM_SO_FILES+=("libaotriton_v2.so")
-fi
 
 # rocBLAS library files
 ROCBLAS_LIB_SRC=$ROCM_HOME/lib/rocblas/library
@@ -265,20 +256,6 @@ RCCL_SHARE_DST=share/rccl/msccl-algorithms
 RCCL_SHARE_FILES=($(ls $RCCL_SHARE_SRC))
 DEPS_AUX_SRCLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_SRC/})
 DEPS_AUX_DSTLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_DST/})
-
-# PyTorch 2.6+ (AOTriton 0.8b+)
-# AKS = "AOTriton Kernel Storage", a file format to store GPU kernels compactly
-if (( $(echo "${PYTORCH_VERSION} 2.6" | awk '{print ($1 >= $2)}') )); then
-    LIBAOTRITON_DIR=$(find "$ROCM_HOME/lib/" -name "libaotriton_v2.so" -printf '%h\n')
-    if [[ -z ${LIBAOTRITON_DIR} ]]; then
-        LIBAOTRITON_DIR=$(find "$ROCM_HOME/" -name "libaotriton_v2.so" -printf '%h\n')
-    fi
-    AKS_FILES=($(find "${LIBAOTRITON_DIR}/aotriton.images" -type f -name '*.aks?' -printf '%P\n'))
-    AKS_SRC="${LIBAOTRITON_DIR}/aotriton.images"
-    AKS_DST="lib/aotriton.images"
-    DEPS_AUX_SRCLIST+=(${AKS_FILES[@]/#/${AKS_SRC}/})
-    DEPS_AUX_DSTLIST+=(${AKS_FILES[@]/#/${AKS_DST}/})
-fi
 
 echo "PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
 

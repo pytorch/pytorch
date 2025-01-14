@@ -3,7 +3,7 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
-from typing import Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Dict, List, Optional, Set, Type, Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -12,7 +12,7 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 __all__ = ["traverse", "traverse_dps"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
-DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]
+DataPipeGraph = Dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
 def _stub_unpickler():
@@ -61,7 +61,7 @@ def _list_connected_datapipes(
             cache.add(id(obj))
             return _stub_unpickler, ()
 
-    datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
+    datapipe_classes: tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
 
     try:
         for cls in datapipe_classes:
