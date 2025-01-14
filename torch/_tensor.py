@@ -70,6 +70,28 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     return ret
 
 
+def _dtype_to_typestr(dtype):
+    # CUDA devices are little-endian and tensors are stored in native byte
+    # order. 1-byte entries are endian-agnostic.
+    return {
+        torch.complex64: "<c8",
+        torch.complex128: "<c16",
+        torch.bfloat16: "<V2",  # Same as ml_dtypes.bfloat16.dtype.str.
+        torch.float16: "<f2",
+        torch.float32: "<f4",
+        torch.float64: "<f8",
+        torch.uint8: "|u1",
+        torch.int8: "|i1",
+        torch.uint16: "<u2",
+        torch.int16: "<i2",
+        torch.uint32: "<u4",
+        torch.int32: "<i4",
+        torch.uint64: "<u8",
+        torch.int64: "<i8",
+        torch.bool: "|b1",
+    }[dtype]
+
+
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
@@ -1262,28 +1284,8 @@ class Tensor(torch._C.TensorBase):
                 "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
             )
 
-        # CUDA devices are little-endian and tensors are stored in native byte
-        # order. 1-byte entries are endian-agnostic.
-        typestr = {
-            torch.complex64: "<c8",
-            torch.complex128: "<c16",
-            torch.bfloat16: "<f2",
-            torch.float16: "<f2",
-            torch.float32: "<f4",
-            torch.float64: "<f8",
-            torch.uint8: "|u1",
-            torch.int8: "|i1",
-            torch.uint16: "<u2",
-            torch.int16: "<i2",
-            torch.uint32: "<u4",
-            torch.int32: "<i4",
-            torch.uint64: "<u8",
-            torch.int64: "<i8",
-            torch.bool: "|b1",
-        }[self.dtype]
-
+        typestr = _dtype_to_typestr(self.dtype)
         itemsize = self.element_size()
-
         shape = tuple(self.shape)
         if self.is_contiguous():
             # __cuda_array_interface__ v2 requires the strides to be omitted

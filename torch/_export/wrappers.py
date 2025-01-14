@@ -61,11 +61,7 @@ def export_tracepoint_cpu(*args, **kwargs):
 def _wrap_submodule(mod, path, module_call_specs):
     assert isinstance(mod, torch.nn.Module)
     assert path != ""
-    submodule = mod
-    for name in path.split("."):
-        if not hasattr(submodule, name):
-            raise RuntimeError(f"Couldn't find submodule at path {path}")
-        submodule = getattr(submodule, name)
+    submodule = torch.fx.graph_module._get_attr(mod, path)
 
     def update_module_call_signatures(path, in_spec, out_spec):
         if path in module_call_specs:
