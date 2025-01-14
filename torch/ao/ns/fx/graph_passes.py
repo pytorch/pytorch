@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -89,8 +89,8 @@ def _insert_logger_after_node(
 
 def add_loggers_to_model(
     gm: GraphModule,
-    node_to_instrument_inputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
-    node_to_instrument_outputs_to_ref_node_name: Dict[Node, Tuple[str, str]],
+    node_to_instrument_inputs_to_ref_node_name: Dict[Node, tuple[str, str]],
+    node_to_instrument_outputs_to_ref_node_name: Dict[Node, tuple[str, str]],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -705,7 +705,7 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
+    matched_subgraph_pairs: Dict[str, tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
     node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
