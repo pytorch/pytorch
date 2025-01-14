@@ -43,6 +43,8 @@ class FakeSymbolicTensor(torch.Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
+        self.real_tensor = real_tensor
+
         return self
 
     @classmethod
@@ -101,6 +103,7 @@ def from_real_tensor(
                 make_meta_t(),
                 device,
                 constant=constant,
+                real_tensor=t,
             )
 
     out = meta_converter(
