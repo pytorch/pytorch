@@ -11,6 +11,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeIs
 
 import torch
 from torch._utils import _get_device_index
@@ -19,6 +20,7 @@ from torch.nn.parallel import comm
 
 
 if TYPE_CHECKING:
+    from torch._C import ScriptMethod
     from torch.jit import ScriptModule
     from torch.jit._state import EnabledProxy
 
@@ -26,13 +28,13 @@ if TYPE_CHECKING:
 __all__ = ["replicate"]
 
 
-def _is_script_module(module: Module) -> bool:
+def _is_script_module(module: Module) -> TypeIs["ScriptModule"]:
     import torch.jit
 
     return isinstance(module, torch.jit.ScriptModule)
 
 
-def _is_script_method(module: Module) -> bool:
+def _is_script_method(module: object) -> TypeIs["ScriptMethod"]:
     import torch.jit
 
     return isinstance(module, torch._C.ScriptMethod)
