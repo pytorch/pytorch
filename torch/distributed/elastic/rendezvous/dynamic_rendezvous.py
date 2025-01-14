@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch.distributed as dist
 from torch.distributed import Store
@@ -67,7 +67,7 @@ class RendezvousBackend(ABC):
         """Get the name of the backend."""
 
     @abstractmethod
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> Optional[tuple[bytes, Token]]:
         """Get the rendezvous state.
 
         Returns:
@@ -84,7 +84,7 @@ class RendezvousBackend(ABC):
     @abstractmethod
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+    ) -> Optional[tuple[bytes, Token, bool]]:
         """Set the rendezvous state.
 
         The new rendezvous state is set conditionally:
@@ -1351,7 +1351,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         self._keep_alive_timer.cancel()
 
-    def _get_world(self) -> Tuple[int, int]:
+    def _get_world(self) -> tuple[int, int]:
         state = self._state_holder.state
 
         return state.participants[self._this_node], len(state.participants)
