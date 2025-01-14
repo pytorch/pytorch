@@ -43,6 +43,8 @@ a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e
 # 2024-06-28 enable UFMT in `torch/storage.py`
 d80939e5e9337e8078f11489afefec59fd42f93b
 # 2024-06-28 enable UFMT in `torch.utils.data`
+7cf0b90e49689d45be91aa539fdf54cf2ea8a9a3
+# 2024-07-03 Enable UFMT on test/test_public_bindings.py (#128389)
 fe5424d0f8604f6e66d827ae9f94b05cb7119d55
 # 2024-07-03 Enable UFMT on test/test_public_bindings.py (#128389)
 c686304277f7cd72331f685605325498cff94a0b
