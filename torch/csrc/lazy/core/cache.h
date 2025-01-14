@@ -134,6 +134,7 @@ class Cache {
   }
 
   mutable std::mutex lock_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t max_size_ = 0;
   ElementList element_list_;
   ElementMap element_map_;
