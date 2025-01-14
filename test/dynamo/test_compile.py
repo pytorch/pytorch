@@ -147,7 +147,7 @@ class InPlaceCompilationTests(TestCase):
         @torch.compile(backend="eager")
         def fn(x):
             x = x + 1
-            does_not_exist()
+            does_not_exist()  # noqa: F821
             return x
 
         x = torch.randn(10, 10)
