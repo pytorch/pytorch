@@ -32,7 +32,7 @@ struct OpenRegAllocator final : at::Allocator {
   }
 
   static void ReportAndDelete(void* ptr) {
-    if (!ptr) {
+    if (!ptr || !Py_IsInitialized()) {
       return;
     }
     py::gil_scoped_acquire acquire;

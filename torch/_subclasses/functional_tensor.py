@@ -91,26 +91,6 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
-    # These are ops that claim to be functional, but actually are maybe-mutating/maybe-aliasing
-    # TODO (tmanlaibaatar) make it a tag
-    maybe_aliasing_or_mutating_ops = [
-        torch.ops.aten.dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.native_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
-        torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_1d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_2d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_3d.default,  # type: ignore[has-type]
-        torch.ops.aten.cartesian_prod.default,  # type: ignore[has-type]
-        torch.ops.aten.conj_physical.default,  # type: ignore[has-type]
-        torch.ops.aten.alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
-    ]
-
     # Used by auto_functionalize to determine base of tensors during inference mode.
     _inference_mode_base: Optional["FunctionalTensor"] = None
 
@@ -410,7 +390,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
-            if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+            from torch._decomp import _should_decompose_because_unsafe_op
+
+            if _should_decompose_because_unsafe_op(func):
                 return True
 
             # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,
@@ -553,7 +535,27 @@ class FunctionalTensorMode(TorchDispatchMode):
                             torch.ops.aten.dropout.default,
                             torch.ops.aten._to_copy.default,
                         ):
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+
+                            def must_copy():
+                                """
+                                Return True if the output of the op must be copied, not an alias
+                                """
+                                # output dtype is different from input
+                                return (
+                                    func == torch.ops.aten._to_copy.default
+                                    and "dtype" in kwargs
+                                    and kwargs["dtype"] != args_unwrapped[0].dtype
+                                )
+
+                            if must_copy():
+                                # We can further relax to args_unwrapped[0] != kwargs["dtype"], but I don't think
+                                # we have an aten op for that.
+                                torch.ops.aten._assert_tensor_metadata.default(
+                                    torch._from_functional_tensor(args_unwrapped[0]),
+                                    dtype=args_unwrapped[0].dtype,
+                                )
+                            else:
+                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )

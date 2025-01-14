@@ -543,7 +543,7 @@ def build_summary(args):
         out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
         out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
         out_io.write(
-            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory / 1e9}\n"
         )
 
     title = "## Build Summary"
@@ -1451,7 +1451,7 @@ class DashboardUpdater:
             RegressionDetector(self.args).generate_comment()
             try:
                 RegressionTracker(self.args).diff()
-            except Exception as e:
+            except Exception:
                 logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")

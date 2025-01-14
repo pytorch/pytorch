@@ -898,7 +898,7 @@ class TestBypassFailures(TestCase):
         repo = DummyGitRepo()
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
-            rule = find_matching_merge_rule(pr, repo)
+            find_matching_merge_rule(pr, repo)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "1 checks failed but were likely due flakiness or broken trunk",
