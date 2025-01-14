@@ -5,12 +5,8 @@ import torch
 import torch.fx
 import torch.nn.functional as F
 from torch import Tensor
-from torch._C import _disabled_torch_function_impl
-from torch._decomp import decomposition_table
 from torch._guards import Source
-
 from torch._ops import OpOverload
-from torch._subclasses.fake_impls import stride_incorrect_op
 from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 from torch.fx.immutable_collections import immutable_dict
