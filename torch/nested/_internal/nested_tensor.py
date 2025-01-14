@@ -352,22 +352,6 @@ class NestedTensor(torch.Tensor):
             with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
 
-    def __coerce_tangent_memory_format__(self, expected_size, expected_stride):
-        stride = self.stride()
-
-        # TODO: Just for testing.
-        # Here should be a logic that by expected_strides identifies the transformation of current tensor.
-        need_contiguous: bool = False
-        for s, es in zip(stride, expected_stride):
-            if s == 0 and es != 0:
-                need_contiguous = True
-                break
-
-        if need_contiguous:
-            return self.contiguous()
-
-        return self
-
 
 # NB: These fake view autograd.Functions are superseded by real view ops. Don't use them!
 # TODO: Remove ViewBufferFromNested, ViewNestedFromBuffer, and buffer_from_jagged once the

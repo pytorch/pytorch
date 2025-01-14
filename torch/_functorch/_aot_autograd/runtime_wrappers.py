@@ -1704,14 +1704,14 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
     assert expected_size is not None
     expected_stride = memory_format.stride
     assert expected_stride is not None
-    # we are guranteed that expected_size, expected_stride do not contain SymInts,
-    # we can use == to compare runtime tensor strides and shapes
+    # Expected size and stride are static ints
+    # ok to use == to compare runtime tensor strides and shapes
 
     if x.shape == expected_size and x.stride() == expected_stride:
         # Runtime tangent size and stride are the same as expected, no need to coerce
         return x
 
-    if torch._debug_has_internal_overlap(x) != 0:
+    if not torch._prims_common.is_non_overlapping_and_dense(x):
         x = x.contiguous()
 
     if x.shape == expected_size and x.stride() == expected_stride:

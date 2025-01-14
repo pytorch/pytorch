@@ -52,6 +52,7 @@ from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
+from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -6454,11 +6455,9 @@ metadata incorrectly.
         E = 16  # embedding dim
         H = 4  # number of heads
 
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def _compiled_flex_attn(q, k, v):
-            return torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=0, is_causal=True
-            )
+        compiled_flex_attn = torch.compile(
+            flex_attention, backend="aot_eager", fullgraph=True
+        )
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -6468,17 +6467,13 @@ metadata incorrectly.
             def forward(self, x):
                 B, T, E = x.size()
                 q, k, v = self.c_attn(x).split(E, dim=2)
-                # _compiled_flex_attn(q, k, v)
-                y = torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=None, dropout_p=0, is_causal=True
-                )
                 k = k.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
                 q = q.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
                 v = v.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
 
-                y = y.transpose(1, 2).contiguous().view(B, T, E)
+                y = compiled_flex_attn(query=q, key=k, value=v)
 
-                return y
+                return y.transpose(1, 2).contiguous().view(B, T, E)
 
         m = M()
         B = 1
@@ -6487,12 +6482,13 @@ metadata incorrectly.
         def _inp():
             return torch.randn(B, T, E, requires_grad=True)
 
-        x_ref = _inp()
-        m(x_ref)
+        x = _inp()
+        y = m(x)
+        y.sum().backward()
 
         x = _inp()
-        y_out = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
-        y_out.sum().backward()
+        y = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
+        y.backward(torch.ones_like(y).contiguous())
 
 
 # entries in here don't work and need to be fixed.
