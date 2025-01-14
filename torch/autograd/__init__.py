@@ -327,7 +327,7 @@ def backward(
     if inputs is not None and len(inputs) == 0:
         raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
-    tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
+    tensors = (tensors,) if isinstance(tensors, (torch.Tensor, graph.GradientEdge)) else tuple(tensors)
     inputs = (
         (inputs,)
         if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
