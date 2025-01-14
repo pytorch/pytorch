@@ -837,7 +837,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
     # TODO: Apparently, returning an OrderedSet here breaks
-    # python test/distributed/_tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
+    # python test/distributed/tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
 
 
@@ -4624,7 +4624,7 @@ class ShapeEnv:
         _simplified: bool = False,
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
-        langs: Tuple[str, ...] = ("python", "verbose"),
+        langs: Tuple[str, ...] = ("python", "verbose_python"),
     ) -> List[_ShapeGuardsHelper]:
         """
         Generates a list of guards strings which, when evaluated in a context that
@@ -4770,7 +4770,7 @@ class ShapeEnv:
             symbol_to_source, source_ref, self.var_to_sources
         )
         for lang in langs:
-            if lang in ["python", "verbose"]:
+            if lang in ["python", "verbose_python"]:
                 printers.append(py_printer)
             elif lang == "cpp":
                 printers.append(
@@ -5079,7 +5079,7 @@ class ShapeEnv:
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
                     res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
 
-                    if lang == "verbose":
+                    if lang == "verbose_python":
                         if (s0 := self.source_to_var.get(srcname)) is not None:
                             if source != self.var_to_sources[s0][0]:
                                 res = (
@@ -5168,7 +5168,7 @@ class ShapeEnv:
 
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
                     guard_expr = printer.doprint(expr)
-                    if lang == "verbose":
+                    if lang == "verbose_python":
                         guard_expr = f"{guard_expr}  # {guard.sloc}"
                     exprs.append(guard_expr)
 
@@ -5255,7 +5255,7 @@ class ShapeEnv:
                 bound = sympy.And(*bounds, evaluate=False)
 
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    if lang == "verbose":
+                    if lang == "verbose_python":
                         exprs.append(verbose_expr)
                     else:
                         exprs.append(printer.doprint(bound))
@@ -5290,7 +5290,7 @@ class ShapeEnv:
             if symbol_is_type(symbol, SymT.FLOAT):
                 res = f"not math.isnan({py_printer.print_source(sources[0])})"
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    if lang == "verbose":
+                    if lang == "verbose_python":
                         exprs.append(
                             f"{res}  # implicit guard for float input due to NaN specialization in the framework"
                         )

@@ -13,7 +13,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum
-from typing import Any, BinaryIO, Callable, Dict, Optional, Tuple, TypeVar
+from typing import Any, BinaryIO, Callable, Dict, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -34,7 +34,7 @@ def _pack_msg(job_id: int, length: int) -> bytes:
     return struct.pack("nn", job_id, length)
 
 
-def _unpack_msg(data: bytes) -> Tuple[int, int]:
+def _unpack_msg(data: bytes) -> tuple[int, int]:
     if not data:
         return -1, -1
     return struct.unpack("nn", data)
@@ -51,7 +51,7 @@ def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: BinaryIO) -> Tuple[int, bytes]:
+def _recv_msg(read_pipe: BinaryIO) -> tuple[int, bytes]:
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data

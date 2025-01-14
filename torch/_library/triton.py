@@ -4,7 +4,7 @@ from typing import Any, Callable, Generator, Iterable, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
-from .custom_ops import custom_op
+from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 
 
@@ -106,7 +106,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Any:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
@@ -130,14 +130,32 @@ def triton_op(
         # - With torch.compile, this means that the backend (usually Inductor)
         #   can see a call to the triton kernel(s) and so it can directly optimize
         #   them by inlining them into the lowering process.
-        # - With post-dispatch torch.export, this means that there will
-        #   be a call(s) to the triton_kernel_wrapper_functional HOP in the
-        #   graph (that we have yet to figure out how to serialize).
         def functional_decomp(  # type: ignore[no-untyped-def]
-            mode, _, types, args, kwargs
+            mode, op, types, args, kwargs
         ):
-            with mode:
-                return fn(*args, **kwargs)
+            # NOTE [Export custom triton op]
+            # For torch.export (strict and non-strict), we don't do functional decomposition.
+            # Instead, we preserve the custom triton ops as custom ops. This is because we want
+            # the exported program to be high-level and serializable. If we decompose
+            # the custom op to a functional hop and make it a node in exported program,
+            # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
+            # functions and triton dtypes. This is undesireble because:
+            # - it can be tedious to maintain a layer that serializes the jited function (e.g. with a string) and dtypes.
+            # - exported program will contain the implementation detail (e.g. triton source code) for a specific
+            #   backend (GPU), which is probably at a wrong level of abstraction.
+            # - changes to triton or the serialization logic for triton arguments can be BC breaking
+            #
+            # In the short term, we expect users to have a seperate aot_compile stage that compiles the exported program
+            # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
+            # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
+            # In the long term, we may export multiple cubins for the triton op directly
+            from torch.export._trace import custom_triton_ops_decomposition_disabled
+
+            if custom_triton_ops_decomposition_disabled():
+                return mode.__torch_dispatch__(op, types, args, kwargs)
+            else:
+                with mode:
+                    return fn(*args, **kwargs)
 
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result

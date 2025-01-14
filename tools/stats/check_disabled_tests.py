@@ -42,7 +42,8 @@ def process_report(
     all_tests: dict[str, dict[str, int]] = {}
 
     for test_case in root.iter(TESTCASE_TAG):
-        parsed_test_case = process_xml_element(test_case)
+        # Parse the test case as string values only.
+        parsed_test_case = process_xml_element(test_case, output_numbers=False)
 
         # Under --rerun-disabled-tests mode, a test is skipped when:
         # * it's skipped explicitly inside PyTorch code
