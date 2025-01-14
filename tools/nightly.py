@@ -45,6 +45,7 @@ import itertools
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -261,17 +262,28 @@ class Venv:
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
             raise RuntimeError(
-                f"No site-packages directory found for excecutable {python}"
+                f"No site-packages directory found for executable {python}"
             )
         return candidates[0]
+
+    @property
+    def activate_script(self) -> Path:
+        """Get the activation script for the virtual environment."""
+        if WINDOWS:
+            # Assume PowerShell
+            return self.prefix / "Scripts" / "Activate.ps1"
+        # Assume POSIX-compliant shell: Bash, Zsh, etc.
+        return self.prefix / "bin" / "activate"
 
     @property
     def activate_command(self) -> str:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f"& {self.prefix / 'Scripts' / 'Activate.ps1'}"
-        return f"source {self.prefix}/bin/activate"
+            return f'& "{self.activate_script}"'
+        # Assume Bash, Zsh, etc.
+        # POSIX standard should use dot `. venv/bin/activate` rather than `source`
+        return f"source {shlex.quote(str(self.activate_script))}"
 
     @timed("Creating virtual environment")
     def create(self, *, remove_if_exists: bool = False) -> Path:

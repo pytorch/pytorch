@@ -28,6 +28,7 @@ from .variables.base import (
     AttributeMutationNew,
     is_side_effect_safe,
     ValueMutationExisting,
+    ValueMutationNew,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
@@ -209,7 +210,7 @@ class SideEffects:
     def is_modified(self, item):
         if item.is_immutable():
             return False
-        if isinstance(item.mutation_type, AttributeMutationNew):
+        if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
