@@ -3700,17 +3700,27 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            dtype_sources = [
-                "load",
-                "constant",
-                "to_dtype",
-                "to_dtype_bitcast",
-            ]
-            dtype_sinks = [
-                "store",
-                "to_dtype",
-                "to_dtype_bitcast",
-            ]
+            def is_dtype_source(node: torch.fx.Node):
+                dtype_sources = [
+                    "load",
+                    "constant",
+                    "to_dtype",
+                    "to_dtype_bitcast",
+                ]
+                return node.target in dtype_sources
+
+            def is_dtype_sink(node: torch.fx.Node):
+                dtype_sinks = [
+                    "store",
+                    "to_dtype_bitcast",
+                ]
+                if node.target in dtype_sinks:
+                    return True
+                # The to_dtype node is a dtype sink only if its targeting dtype is
+                # not a bool, as not all bool vector maps to the same cpp type
+                if node.target == "to_dtype":
+                    return node.args[-1] is not torch.bool
+                return False
 
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target != "load":
@@ -3730,7 +3740,7 @@ class CppKernelProxy(CppKernel):
             for _node in sub_graph_nodes:
                 if is_lowp_fp_load(_node):
                     # No need to promote to float if all users are ops that are dtype sinks
-                    if all(user.target in dtype_sinks for user in _node.users):
+                    if all(is_dtype_sink(user) for user in _node.users):
                         continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
@@ -3744,8 +3754,8 @@ class CppKernelProxy(CppKernel):
                 elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
                     # No need to promote to float if it is a user of a dtype sources which are all directly feed to dtype sinks
-                    if value_var.target in dtype_sources and all(
-                        user.target in dtype_sinks for user in value_var.users
+                    if is_dtype_source(value_var) and all(
+                        is_dtype_sink(user) for user in value_var.users
                     ):
                         continue
                     dtype = V.graph.get_dtype(name)
@@ -3784,13 +3794,13 @@ class CppKernelProxy(CppKernel):
                         )
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that are dtype sinks
-                    if all(user.target in dtype_sinks for user in _node.users):
+                    if all(is_dtype_sink(user) for user in _node.users):
                         continue
                     (ops, value, _) = _node.args
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that are dtype sinks
-                    if all(user.target in dtype_sinks for user in _node.users):
+                    if all(is_dtype_sink(user) for user in _node.users):
                         continue
                     (ops, x, _) = _node.args
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
@@ -3817,9 +3827,9 @@ class CppKernelProxy(CppKernel):
                     if src_dtype in DTYPE_LOWP_FP:
                         # No need to promote to float if it is a user of a dtype sources which are all directly feed to dtype sinks
                         if not (
-                            value_var.target in dtype_sources
+                            is_dtype_source(value_var)
                             and all(
-                                user.target in dtype_sinks for user in value_var.users
+                                is_dtype_sink(user) for user in value_var.users
                             )
                         ):
                             with sub_graph.inserting_before(_node):
@@ -3835,7 +3845,7 @@ class CppKernelProxy(CppKernel):
                     if dtype in DTYPE_LOWP_FP:
                         # No need to promote to float if all users are ops that are dtype sinks
                         if not (
-                            all(user.target in dtype_sinks for user in _node.users)
+                            all(is_dtype_sink(user) for user in _node.users)
                         ):
                             ops = _node.args[0]
                             with sub_graph.inserting_after(_node):
