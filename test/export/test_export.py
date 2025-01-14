@@ -275,7 +275,7 @@ class TestDynamismExpression(TestCase):
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
                 l = seq_len.item()
-                torch._check_is_bounded(l, x.size(1))
+                torch._check_is_size(l, max=x.size(1))
                 x = x.narrow(1, 0, l)
                 return x
 
