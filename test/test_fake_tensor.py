@@ -159,26 +159,31 @@ class FakeTensorTest(TestCase):
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_index_cuda_with_cpu(self):
+    @parametrize(
+        "dtype",
+        [    
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+            torch.complex64,
+            torch.complex128,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2
+        ],
+    )
+    def test_index_cuda_with_cpu(self, dtype):
         with FakeTensorMode():
-            x = torch.rand([2048], device="cuda")
+            x = torch.ones([2048], device="cuda", dtype=dtype)
             out = x[torch.zeros([36], dtype=torch.int64)]
             self.checkType(out, "cuda", [36])
-
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
-    )
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    @parametrize(
-        "fp8_dtype",
-        [torch.float8_e4m3fn, torch.float8_e5m2],
-    )
-    def test_index_cuda_fp8(self, fp8_dtype):
-        with FakeTensorMode():
-            x = torch.ones([2048], device="cuda", dtype=fp8_dtype)
-            out = x[torch.zeros([36], dtype=torch.int64, device="cuda")]
-            self.checkType(out, "cuda", [36])
-            self.assertEqual(out.dtype, fp8_dtype)
+            self.assertEqual(out.dtype, dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
