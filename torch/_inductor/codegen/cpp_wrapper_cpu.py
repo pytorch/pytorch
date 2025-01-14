@@ -429,6 +429,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     )
 
                 run_impl_proto = """
+                    __attribute__ ((optnone))
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
