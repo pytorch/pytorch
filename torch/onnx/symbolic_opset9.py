@@ -6190,8 +6190,17 @@ def cdist(
     # In order to respect numpy style broadcasting as demonstrated in
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
     # we unsqueeze both input tensors
-    # Currently we ignore the 'compute_mode' variable as we use default to
-    # using matrix multiplication to calculate the euclidean distance
+    row_size_x1 = symbolic_helper._get_tensor_dim_size(x1, -2)
+    row_size_x2 = symbolic_helper._get_tensor_dim_size(x2, -2)
+    assert row_size_x1 is not None
+    assert row_size_x2 is not None
+    p_float = symbolic_helper._parse_arg(p, "f")
+    compute_mode = symbolic_helper._parse_arg(compute_mode, "i")
+    if p_float == 2.0 and (
+        compute_mode == 1
+        or (compute_mode is None and row_size_x1 >= 25 and row_size_x2 >= 25)
+    ):
+        return _euclidean_dist(g, x1, x2)
     rank = symbolic_helper._get_tensor_rank(x1)
     assert rank is not None
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
@@ -6199,6 +6208,48 @@ def cdist(
     return pairwise_distance(
         g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False
     )
+
+
+def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
+    # X1.shape = (B * P * D), X2.shape = (B * R * D)
+    # using matrix multiplication to accelerate the calculation of
+    # the euclidean distance
+    rank = symbolic_helper._get_tensor_rank(x1)
+    assert rank is not None
+    x1_norm = symbolic_helper._reducesum_helper(
+        g,
+        pow(g, x1, symbolic_helper._generate_wrapped_number(g, 2.0)),
+        axes_i=[-1],
+        keepdims_i=True,
+    )
+    x1_pad = ones_like(g, x1_norm)
+    x2_norm = symbolic_helper._reducesum_helper(
+        g,
+        pow(g, x2, symbolic_helper._generate_wrapped_number(g, 2.0)),
+        axes_i=[-1],
+        keepdims_i=True,
+    )
+    x2_pad = ones_like(g, x2_norm)
+    x1_ = g.op(
+        "Concat",
+        *[
+            mul(g, symbolic_helper._generate_wrapped_number(g, -2.0), x1),
+            x1_norm,
+            x1_pad,
+        ],
+        axis_i=-1,
+    )
+    x2_ = g.op("Concat", *[x2, x2_pad, x2_norm], axis_i=-1)
+    result = matmul(g, x1_, transpose(g, x2_, -2, -1))
+    dtype = _type_utils.JitScalarType.from_value(result)
+    min = g.op(
+        "Cast", symbolic_helper._generate_wrapped_number(g, 0.0), to_i=dtype.onnx_type()
+    )
+    result = symbolic_helper._op_with_optional_float_cast(
+        g, "Max", result, min, opset_before=12
+    )
+    result = sqrt(g, result)
+    return result
 
 
 @_onnx_symbolic("aten::lerp")

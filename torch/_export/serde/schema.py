@@ -8,7 +8,7 @@ from typing import Annotated, Dict, List, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 3)
+SCHEMA_VERSION = (8, 4)
 TREESPEC_VERSION = 1
 
 
@@ -212,6 +212,7 @@ class Node:
     inputs: Annotated[List[NamedArgument], 20]
     outputs: Annotated[List[Argument], 30]
     metadata: Annotated[Dict[str, str], 40]
+    is_hop_single_tensor_return: Annotated[Optional[bool], 50] = None
 
 
 @dataclass

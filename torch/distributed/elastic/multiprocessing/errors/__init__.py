@@ -143,7 +143,7 @@ class ProcessFailure:
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
-    def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
+    def _get_error_data(self, error_file_data: Dict[str, Any]) -> tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
             timestamp = int(error_file_data.get("timestamp", 0))
@@ -239,7 +239,7 @@ class ChildFailedError(Exception):
         )  # does not make sense to create a ChildFaileError with no failures
         super().__init__(self.format_msg())
 
-    def get_first_failure(self) -> Tuple[GlobalRank, ProcessFailure]:
+    def get_first_failure(self) -> tuple[GlobalRank, ProcessFailure]:
         rank = min(self.failures.keys(), key=lambda r: self.failures[r].timestamp)
         return rank, self.failures[rank]
 
@@ -271,7 +271,7 @@ class ChildFailedError(Exception):
 
     def _format_failure(
         self, idx: int, rank: int, failure: ProcessFailure
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         # failure.message is either a str (when the failure does not generate a traceback - e.g. signals)
         # or a dict (json) of the form
         # {"message": $ERROR_MSG, "extraInfo": {"py_callstack": $TRACEBACK, timestamp: $TS}}

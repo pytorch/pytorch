@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Type, Union
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
@@ -61,7 +61,7 @@ class AdaptiveRoundingOptimizer:
         self.feed_forward_wrapper = feed_forward_wrapper
 
     def run_adaround(self) -> torch.nn.Module:
-        layer_list: List[Tuple[str, torch.nn.Module, torch.nn.Module]] = []
+        layer_list: List[tuple[str, torch.nn.Module, torch.nn.Module]] = []
         for (name, module), q_module in zip(
             self.model.named_modules(), self.q_model.modules()
         ):
@@ -95,7 +95,7 @@ class AdaptiveRoundingOptimizer:
 
     def get_data_inp_out(
         self, module: torch.nn.Module, q_module: torch.nn.Module, data: List[Any]
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
+    ) -> tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
         fp_out: List[torch.Tensor] = []
         q_input: List[torch.Tensor] = []
         fp_input: List[torch.Tensor] = []

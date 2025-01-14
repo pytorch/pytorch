@@ -4,7 +4,7 @@ import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Set
 from typing_extensions import Self
 
 import torch
@@ -106,8 +106,8 @@ class _SACMetadata:
     time_taken: float
     memory_used: float
     curr_idx: int
-    output_ids: Tuple[int, ...]
-    inplace_info: Tuple[int, ...]
+    output_ids: tuple[int, ...]
+    inplace_info: tuple[int, ...]
     is_view_like: bool
     is_rand_op: bool
 
@@ -150,7 +150,7 @@ class SACStats:
     view_like_ops: List[int]
     rand_ops: List[int]
     saved_autograd_ops: List[int]
-    inplace_ops: List[Tuple[int, int]]
+    inplace_ops: List[tuple[int, int]]
     force_store_random: bool
 
 
@@ -382,7 +382,7 @@ class SACEstimator(TorchDispatchMode):
 
     def _get_inplace_metadata(
         self, func: Any, out_storages: Set[UntypedStorage]
-    ) -> Tuple[int, Tuple[int, ...], Dict[str, Tuple[int, ...]]]:
+    ) -> tuple[int, tuple[int, ...], Dict[str, tuple[int, ...]]]:
         # 1. Get the current index of the metadata obtained so far
         curr_idx = len(self._sac_metadata)
         # 2. Get the set of active modules that are not leaf

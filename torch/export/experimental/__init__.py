@@ -60,6 +60,10 @@ def _export_forward_backward(
         cia_to_decomp={},
         python_decomp_table=core_aten_decompositions(),
         joint_loss_index=joint_loss_index,
+        # For serialization purpose, we don't want to decompose custom triton ops.
+        # If users would like to decompose custom triton ops, they could do it
+        # with run_decompositions() API.
+        decompose_custom_triton_ops=False,
     )
     gm, new_graph_signature = _copy_graph_module_and_signature(ep)
     _remove_detach_pass(gm, new_graph_signature)

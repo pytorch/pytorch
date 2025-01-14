@@ -23,9 +23,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    MI300_ARCH,
     parametrize,
     skipIfNoXPU,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_ACL,
     TEST_MKL,
     xfailIfACL,
@@ -1032,6 +1034,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
+    @skipIfRocmArch(MI300_ARCH)
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -2167,6 +2170,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. QLinear Unary fusion in post-grad fusion pass
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
+                    2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_unary_lower_count"],
                     0 if TEST_ACL else 2,
                 )
 
@@ -2443,7 +2450,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 3. QLinear Unary fusion in post-grad fusion pass * 1
             self.assertEqual(
                 counters["inductor"]["qlinear_unary_matcher_count"],
-                0 if TEST_ACL else 1,
+                1,
             )
 
         self._test_common(
@@ -3706,7 +3713,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
-                    3 if annotate_matmul and not TEST_ACL else 0,
+                    3 if annotate_matmul else 0,
                 )
 
             quantizer = X86InductorQuantizer()

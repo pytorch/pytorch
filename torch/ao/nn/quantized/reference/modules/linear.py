@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, Optional
 
 import torch
@@ -30,11 +29,11 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
         weight_qparams: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         super().__init__(in_features, out_features, bias_, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def _get_name(self):
+    def _get_name(self) -> str:
         return "QuantizedLinear(Reference)"
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -53,7 +52,9 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         return result
 
     @classmethod
-    def from_float(cls, float_linear, weight_qparams):
+    def from_float(
+        cls, float_linear: nn.Linear, weight_qparams: Dict[str, Any]
+    ) -> "Linear":
         qref_linear = Linear(
             float_linear.in_features,
             float_linear.out_features,

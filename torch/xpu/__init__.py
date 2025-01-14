@@ -254,8 +254,6 @@ def get_device_properties(device: Optional[_device_t] = None) -> _XpuDevicePrope
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
-    if device < 0 or device >= device_count():
-        raise AssertionError("Invalid device index")
     return _get_device_properties(device)  # type: ignore[name-defined]  # noqa: F821
 
 

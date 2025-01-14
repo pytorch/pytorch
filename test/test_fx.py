@@ -1793,6 +1793,25 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
+    def test_shape_prop_unbacked_sym(self):
+        from torch._dynamo.utils import detect_fake_mode
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return torch.nonzero(x)
+
+        inp = (torch.tensor([1, 0, 1, 0]),)
+        gm = torch.export.export(M(), inp).module()
+        fake_inputs = [
+            node.meta.get("val")
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        inp = fake_inputs
+        fake_mode = detect_fake_mode(inp)
+        shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*inp)
+        self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
+
     def test_nn_module_stack(self):
         class SubModule(torch.nn.Module):
             def __init__(self) -> None:

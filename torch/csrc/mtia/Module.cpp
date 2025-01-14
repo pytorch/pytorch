@@ -90,7 +90,7 @@ void initModule(PyObject* module) {
 
   m.def(
       "_mtia_recordMemoryHistory",
-      [](std::optional<std::string> enabled,
+      [](const std::optional<std::string>& enabled,
          const std::string& stacks,
          size_t max_entries) {
         at::detail::getMTIAHooks().recordMemoryHistory(

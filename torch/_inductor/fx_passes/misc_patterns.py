@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 from torch._dynamo.utils import counters
@@ -71,7 +71,7 @@ def _misc_patterns_init():
 
 
 class NumpyCompatNormalization:
-    numpy_compat: Dict[str, Tuple[str, ...]] = {
+    numpy_compat: Dict[str, tuple[str, ...]] = {
         "dim": ("axis",),
         "keepdim": ("keepdims",),
         "input": ("x", "a", "x1"),

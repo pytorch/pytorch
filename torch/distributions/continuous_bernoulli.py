@@ -3,6 +3,7 @@ import math
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -52,7 +53,7 @@ class ContinuousBernoulli(ExponentialFamily):
 
     def __init__(
         self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
-    ):
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -127,7 +128,7 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), log_norm, taylor)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         cut_probs = self._cut_probs()
         mus = cut_probs / (2.0 * cut_probs - 1.0) + 1.0 / (
             torch.log1p(-cut_probs) - torch.log(cut_probs)
@@ -137,11 +138,11 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), mus, taylor)
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return torch.sqrt(self.variance)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         cut_probs = self._cut_probs()
         vars = cut_probs * (cut_probs - 1.0) / torch.pow(
             1.0 - 2.0 * cut_probs, 2
@@ -151,15 +152,15 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), vars, taylor)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return clamp_probs(logits_to_probs(self.logits, is_binary=True))
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
@@ -168,7 +169,7 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)
@@ -220,7 +221,7 @@ class ContinuousBernoulli(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (self.logits,)
 
     def _log_normalizer(self, x):

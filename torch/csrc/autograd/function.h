@@ -766,7 +766,7 @@ edge_list collect_next_edges(Variables&&... variables) {
 }
 
 struct TypeAndSize {
-  TypeAndSize() {}
+  TypeAndSize() = default;
   /* implicit */
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}

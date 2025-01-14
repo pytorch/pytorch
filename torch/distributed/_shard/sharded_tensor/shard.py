@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from dataclasses import dataclass
 from typing import List
 
@@ -23,7 +22,7 @@ class Shard:
     tensor: torch.Tensor
     metadata: ShardMetadata
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # verification between local tensor and metadata
         if list(self.tensor.size()) != self.metadata.shard_sizes:
             raise ValueError(
@@ -45,7 +44,7 @@ class Shard:
     @classmethod
     def from_tensor_and_offsets(
         cls, tensor: torch.Tensor, shard_offsets: List[int], rank: int
-    ):
+    ) -> "Shard":
         """
         Creates a Shard of a ShardedTensor from a local torch.Tensor, shard_offsets and rank.
 

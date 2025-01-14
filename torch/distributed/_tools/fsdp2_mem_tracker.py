@@ -1,18 +1,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -201,8 +190,8 @@ class FSDPMemTracker(MemTracker):
     def _fsdp_state_pre_forward(
         self,
         fsdp_mod: FSDPModule,
-        orig_fsdp_state_pre_fw: Callable[_P, Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]],
-    ) -> Callable[_P, Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]]:
+        orig_fsdp_state_pre_fw: Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]],
+    ) -> Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]]:
         # We capture memory snapshots before and after ``FSDPState._pre_forward`` to attribute the `unsharded` params
         # and `all_gather` buffers.  There are three cases:
         # Case 1: If the module is not in the ``memory_tracking`` dictionary, create a new ``_FSDPModMemStats``
@@ -219,7 +208,7 @@ class FSDPMemTracker(MemTracker):
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
             *args: _P.args, **kwargs: _P.kwargs
-        ) -> Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]:
+        ) -> tuple[tuple[Unpack[_Ts]], Dict[str, Any]]:
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
             assert mod_fqn is not None
             if fsdp_mod not in self.memory_tracking:
@@ -568,7 +557,7 @@ class FSDPMemTracker(MemTracker):
         dist.barrier = self._saved_collectives.barrier
         del self._saved_collectives
 
-    def track_inputs(self, inputs: Tuple[Any, ...]) -> None:
+    def track_inputs(self, inputs: tuple[Any, ...]) -> None:
         """
         This is used to track the input tensors to the model and annotate them as ``Inputs``.
         Args:

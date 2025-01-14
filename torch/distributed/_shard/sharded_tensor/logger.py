@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import List, Tuple
+from typing import List
 
 from torch.distributed._shard.sharded_tensor.logging_handlers import _log_handlers
 
@@ -30,7 +30,7 @@ def _get_or_create_logger() -> logging.Logger:
 
 def _get_logging_handler(
     destination: str = "default",
-) -> Tuple[logging.Handler, str]:
+) -> tuple[logging.Handler, str]:
     log_handler = _log_handlers[destination]
     log_handler_name = type(log_handler).__name__
     return (log_handler, log_handler_name)

@@ -280,11 +280,7 @@ namespace cuda {
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
-    if ((
-      std::is_same_v<scalar_t, int64_t> ||
-      std::is_same_v<scalar_t, double> ||
-      std::is_same_v<scalar_t, float> ||
-      std::is_same_v<scalar_t, at::BFloat16>) && range >= 1ULL << 32)
+    if (range >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
     {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {

@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Dict, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
@@ -1642,9 +1642,6 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                 lambda: {
                     "ns_prologue": ns_helper.prologue,
                     "ns_epilogue": ns_helper.epilogue,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
-                    if gen_dispatch_helpers
-                    else [],
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
@@ -2308,32 +2305,49 @@ def gen_source_files(
             dispatch_key != DispatchKey.CompositeImplicitAutogradNestedTensor
         )
 
-        dispatch_definitions = get_native_function_definitions(
-            fm=fm,
-            grouped_native_functions=grouped_native_functions,
-            dispatch_key=dispatch_key,
-            backend_idx=backend_index,
-            selector=selector,
-            rocm=rocm,
-            symint=True,
-            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-            gen_dispatch_helpers=gen_dispatch_helpers,
-        )
-        fm.write_with_template(
+        register_dispatch_key_base_env = {
+            "extra_cuda_headers": extra_cuda_headers
+            if is_cuda_dispatch_key(dispatch_key)
+            else "",
+            "external_backend_headers": "",
+            "dispatch_headers": dest.gen_registration_headers(
+                backend_index, per_operator_headers, rocm
+            ),
+            # ops_headers *could* be sharded, but doesn't seem necessary?
+            "ops_headers": operator_headers(),
+            "dispatch_helpers": (
+                dest.gen_registration_helpers(backend_index)
+                if gen_dispatch_helpers
+                else []
+            ),
+        }
+
+        def register_dispatch_key_env_callable(
+            gnf: NativeFunction | NativeFunctionsGroup,
+        ) -> Dict[str, list[str]]:
+            return {
+                "dispatch_definitions": get_native_function_definitions(
+                    fm=fm,  # noqa: F821
+                    grouped_native_functions=[gnf],
+                    dispatch_key=dispatch_key,
+                    backend_idx=backend_index,
+                    selector=selector,
+                    rocm=rocm,
+                    symint=True,
+                    skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                    gen_dispatch_helpers=gen_dispatch_helpers,
+                )
+            }
+
+        fm.write_sharded_with_template(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
-            lambda: {
-                "extra_cuda_headers": extra_cuda_headers
-                if is_cuda_dispatch_key(dispatch_key)
-                else "",
-                "external_backend_headers": "",
-                "dispatch_headers": dest.gen_registration_headers(
-                    backend_index, per_operator_headers, rocm
-                ),
-                "ops_headers": operator_headers(),
-                "dispatch_helpers": "",
-                "dispatch_definitions": dispatch_definitions,
-            },
+            grouped_native_functions,
+            key_fn=lambda x: x.root_name,
+            env_callable=register_dispatch_key_env_callable,
+            num_shards=4 if dispatch_key == DispatchKey.CPU else 1,
+            base_env=register_dispatch_key_base_env,
+            sharded_keys={"dispatch_definitions"},
         )
 
         for g in structured_native_functions:

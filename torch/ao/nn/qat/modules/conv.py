@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import ClassVar, Tuple, Type, Union
+from typing import ClassVar, Type, Union
 
 import torch
 import torch.nn as nn
@@ -18,12 +18,12 @@ class _ConvNd(nn.modules.conv._ConvNd):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Union[str, Tuple[int, ...]],
-        dilation: Tuple[int, ...],
+        kernel_size: tuple[int, ...],
+        stride: tuple[int, ...],
+        padding: Union[str, tuple[int, ...]],
+        dilation: tuple[int, ...],
         transposed: bool,
-        output_padding: Tuple[int, ...],
+        output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
         padding_mode: str,

@@ -525,7 +525,8 @@ class DDPOptimizer:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, fake_mode)
-        submod_compiler.run(*example_inputs)
+        with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+            submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
         ddp_graph_log.debug(

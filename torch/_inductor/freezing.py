@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -67,7 +67,7 @@ def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
     example_inputs: List[torch._subclasses.FakeTensor],
-) -> Tuple[torch.fx.GraphModule, List[int]]:
+) -> tuple[torch.fx.GraphModule, List[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
     and other techniques. If enabled, the function also discards the original parameters of the module for memory efficiency.

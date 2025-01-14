@@ -35,6 +35,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -682,6 +683,7 @@ class AOTAutogradCache:
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
+
                     counters["aot_autograd"]["autograd_cache_hit"] += 1
                     cache_state = "hit"
                     cache_event_time = time.time_ns()
@@ -805,7 +807,15 @@ class AOTAutogradCache:
                 path = os.path.join(subdir, "entry")
                 try:
                     with open(path, "rb") as f:
-                        entry: AOTAutogradCacheEntry = pickle.load(f)
+                        pickled_content = f.read()
+                        # NB: We are not sure at this point if this artifact is in fact
+                        # going to be a cache hit: it's possible that we'll cache miss due to a guard failure
+                        # or other reason. But it's safe for CacheArtifactManager to record and save this
+                        # artifact anyway, as it's possible that it will be a hit for a future attempt.
+                        CacheArtifactManager.record_artifact(
+                            CacheArtifactType.AOT_AUTOGRAD, key, pickled_content
+                        )
+                        entry: AOTAutogradCacheEntry = pickle.loads(pickled_content)
                         return entry
                 except Exception as e:
                     log.warning(
@@ -844,11 +854,26 @@ class AOTAutogradCache:
         return None
 
     @staticmethod
+    def _write_to_local_cache(key: str, content: bytes):
+        """Write an entry to the local cache."""
+        subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+        path = os.path.join(subdir, "entry")
+        log.info("Writing AOTAutograd cache entry to %s", path)
+        write_atomic(path, content)
+
+    @staticmethod
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
             check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AOT_AUTOGRAD, key, content
+            )
+            AOTAutogradCache._write_to_local_cache(key, content)
+            counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.warning("Bypassing autograd cache due to: %s", e)
@@ -864,14 +889,6 @@ class AOTAutogradCache:
             if config.strict_autograd_cache:
                 raise e
             return None
-
-        subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-        path = os.path.join(subdir, "entry")
-        log.info("Writing AOTAutograd cache entry to %s", path)
-        write_atomic(path, content)
-        counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
             remote_cache: Optional[

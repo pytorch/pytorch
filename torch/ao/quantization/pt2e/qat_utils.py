@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -357,7 +357,7 @@ def _is_dequantize(n: Node) -> bool:
     ]
 
 
-def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Node]]:
+def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, tuple[Node, Node]]:
     """
     Helper function to extract the nodes in the conv-bn fusion pattern after
     subgraph rewriting, in the form of a map:
@@ -374,7 +374,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
         "conv_bias_q", "conv_bias_dq"
     """
 
-    def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Optional[Node]]:
+    def _get_nodes(nodes: List[Node]) -> tuple[Node, Node, Optional[Node]]:
         """
         Return a 3-tuple of (conv_node, bn_node, getitem_node).
         This asserts that the match contains exactly one of each node.
@@ -396,7 +396,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
         assert bn_node is not None
         return (conv_node, bn_node, getitem_node)
 
-    def _get_q_dq_nodes(n: Node) -> Tuple[Node, Node, Node]:
+    def _get_q_dq_nodes(n: Node) -> tuple[Node, Node, Node]:
         """
         Return a 3-tuple of (orig_node, q_node, dq_node).
         """
@@ -640,7 +640,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
 def _fuse_conv_bn_qat_helper(
     m: GraphModule,
     conv_fn: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool,
 ) -> GraphModule:
     """
@@ -896,7 +896,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
 def _fold_conv_bn_qat_helper(
     m: GraphModule,
     conv_fn: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool,
 ) -> GraphModule:
     """

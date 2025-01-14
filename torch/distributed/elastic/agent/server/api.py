@@ -320,7 +320,7 @@ class _RoleInstanceInfo:
             return -1
 
     @staticmethod
-    def find_role_boundaries(roles_infos: List, role: str) -> Tuple[int, int]:
+    def find_role_boundaries(roles_infos: List, role: str) -> tuple[int, int]:
         start_idx, end_idx = -1, -1
         for idx, role_info in enumerate(roles_infos):
             if role_info.role == role:

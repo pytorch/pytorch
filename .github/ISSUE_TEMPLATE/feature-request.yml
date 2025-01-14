@@ -2,6 +2,10 @@ name: 🚀 Feature request
 description: Submit a proposal/request for a new PyTorch feature
 
 body:
+- type: markdown
+  attributes:
+    value: >
+      #### Note: Please write your feature request in English to ensure it can be understood and addressed by the development team.
 - type: textarea
   attributes:
     label: 🚀 The feature, motivation and pitch

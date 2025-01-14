@@ -73,6 +73,7 @@ inductor_fallback_ops = {
     "aten.index_put.default",
     "aten.index_reduce.default",
     "aten.index.Tensor",
+    "aten._int_mm.out",
     "aten.kthvalue.default",
     "aten.logcumsumexp.default",
     "aten.lu_unpack.default",

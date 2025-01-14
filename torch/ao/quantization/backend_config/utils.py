@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Type, Union
 
 import torch
 import torch.nn as nn
@@ -35,7 +35,7 @@ def get_pattern_to_dtype_configs(
     return pattern_to_dtype_configs
 
 
-def get_qat_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
+def get_qat_module_classes(backend_config: BackendConfig) -> tuple[type, ...]:
     qat_module_classes = [
         config.qat_module
         for config in backend_config.configs
@@ -44,7 +44,7 @@ def get_qat_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
     return tuple(set(qat_module_classes))
 
 
-def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
+def get_fused_module_classes(backend_config: BackendConfig) -> tuple[type, ...]:
     fused_module_classes = [
         config.fused_module
         for config in backend_config.configs

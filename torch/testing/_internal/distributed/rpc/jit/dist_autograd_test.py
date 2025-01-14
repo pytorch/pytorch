@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -93,7 +93,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         @torch.jit.script
         def forward_script(
             context_id: int, dst_worker_name: str, t1: Tensor, t2: Tensor
-        ) -> Tuple[Tensor, Tensor]:
+        ) -> tuple[Tensor, Tensor]:
             res1_fut = rpc.rpc_async(dst_worker_name, local_add, (t1, t1))
             res1 = res1_fut.wait()  # After this, the script runs in a new JIT thread.
             loss1 = res1.sum()

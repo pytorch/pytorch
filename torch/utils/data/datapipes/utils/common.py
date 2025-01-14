@@ -5,7 +5,7 @@ import inspect
 import os
 import warnings
 from io import IOBase
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
 from torch.utils._import_utils import dill_available
 
@@ -231,7 +231,7 @@ def get_file_binaries_from_pathnames(
         yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
-def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
+def validate_pathname_binary_tuple(data: tuple[str, IOBase]):
     if not isinstance(data, tuple):
         raise TypeError(
             f"pathname binary data should be tuple type, but it is type {type(data)}"

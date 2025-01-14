@@ -136,6 +136,7 @@ namespace torch::autograd {
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
+// NOLINTNEXTLINE(*-rvalue-reference*)
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
@@ -184,7 +185,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 }
 
 auto PyNode::defer_to_dynamo(
-    variable_list&& inputs,
+    const variable_list& inputs,
     const std::optional<PyObject*>& compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
@@ -526,7 +527,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-PyObject* THPFunction_new(
+static PyObject* THPFunction_new(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
@@ -875,6 +876,7 @@ struct InputFlags {
   std::vector<bool> is_variable_input;
 };
 
+namespace {
 template <bool enforce_variables>
 std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   UnpackedInput unpacked;
@@ -938,7 +940,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
 // value is assigned by the prim::PythonOp node and helps to eventually route
 // the outputs of the subgraph correctly This newly created subgraph is then
 // added to the prim::PythonOp node as a subgraph attribute
-static void _append_subgraph(
+void _append_subgraph(
     torch::jit::Node* node,
     torch::jit::Graph* graph,
     std::vector<torch::jit::Value*> trace_outputs,
@@ -980,7 +982,7 @@ static void _append_subgraph(
   }
 }
 
-static torch::jit::Node* _trace_pre_record(
+torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
     const variable_list& input_vars) {
@@ -1011,7 +1013,7 @@ static torch::jit::Node* _trace_pre_record(
       std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
-static void _trace_post_record(
+void _trace_post_record(
     torch::jit::Node* node,
     PyObject* op_obj,
     const variable_list& input_vars,
@@ -1218,8 +1220,6 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
   END_HANDLE_TH_ERRORS
 }
 
-namespace {
-
 THPObjectPtr make_ctx_input_tuple(
     THPFunction* ctx,
     const UnpackedInput& unpacked_input,
@@ -1252,8 +1252,6 @@ THPObjectPtr make_ctx_input_output_tuple(
   PyTuple_SET_ITEM(result.get(), 2, output);
   return result;
 }
-
-} // namespace
 
 static PyObject* THPFunction_setup_context = nullptr;
 
@@ -1652,6 +1650,7 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   return metadata;
   END_HANDLE_TH_ERRORS
 }
+} // namespace
 
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);

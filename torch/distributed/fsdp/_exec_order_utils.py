@@ -2,7 +2,7 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -190,7 +190,7 @@ class _ExecOrderData:
             return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
-            optional_local_indices: Tuple[
+            optional_local_indices: tuple[
                 Optional[int], ...
             ] = self._get_handle_indices(handle)
             device = handle.device  # guaranteed to be non-CPU
@@ -307,7 +307,7 @@ class _ExecOrderData:
     def _get_handle_indices(
         self,
         handle: FlatParamHandle,
-    ) -> Tuple[Optional[int], ...]:
+    ) -> tuple[Optional[int], ...]:
         """
         Returns the handle indices (i.e. indices into ``self.all_handles``)
         corresponding to the handles in ``handle``. An entry in the
@@ -320,7 +320,7 @@ class _ExecOrderData:
 
     def _get_names_from_handle_indices(
         self,
-        handle_indices: Tuple[int, ...],
+        handle_indices: tuple[int, ...],
     ) -> List[List[str]]:
         """
         Returns a list of FQNs for each handle in ``handle_indices``. If a

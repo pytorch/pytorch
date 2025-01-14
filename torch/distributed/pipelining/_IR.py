@@ -176,7 +176,7 @@ def _insert_stage_symbolic_backward(
             fx.node.map_arg(node.args, add_to_live_nodes)
             fx.node.map_arg(node.kwargs, add_to_live_nodes)
             if node.op == "call_module":
-                output_grads: Union[Tuple[Optional[fx.Node], ...], Optional[fx.Node]]
+                output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
                 if node in tuples:
                     stage_output = tuples[node]
                     output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
@@ -998,7 +998,7 @@ class Pipe(torch.nn.Module):
     @staticmethod
     def _trace_with_export(
         mod: torch.nn.Module,
-        example_args: Tuple[Any, ...],
+        example_args: tuple[Any, ...],
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
@@ -1022,7 +1022,7 @@ class Pipe(torch.nn.Module):
     @staticmethod
     def from_tracing(
         mod: torch.nn.Module,
-        example_args: Tuple[Any, ...],
+        example_args: tuple[Any, ...],
         example_kwargs: Optional[Dict[str, Any]] = None,
         split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
     ):
@@ -1199,7 +1199,7 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
 
 def pipeline(
     module: torch.nn.Module,
-    mb_args: Tuple[Any, ...],
+    mb_args: tuple[Any, ...],
     mb_kwargs: Optional[Dict[str, Any]] = None,
     split_spec: Optional[Dict[str, SplitPoint]] = None,
     split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,

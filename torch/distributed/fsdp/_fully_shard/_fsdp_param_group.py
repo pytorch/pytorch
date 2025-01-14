@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set
 
 import torch
 import torch.distributed as dist
@@ -81,7 +81,7 @@ class FSDPCommContext:
 
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
-    ) -> Tuple[torch.Stream, torch.Stream]:
+    ) -> tuple[torch.Stream, torch.Stream]:
         if not async_op and training_state in (
             TrainingState.FORWARD,
             TrainingState.PRE_BACKWARD,
@@ -117,7 +117,7 @@ class FSDPParamGroup:
     def __init__(
         self,
         params: List[nn.Parameter],
-        modules: Tuple[nn.Module, ...],
+        modules: tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
@@ -325,8 +325,8 @@ class FSDPParamGroup:
         self._to_sharded()
 
     def pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
@@ -539,8 +539,8 @@ class FSDPParamGroup:
 
     # Hook Registration #
     def _register_post_backward_hook(
-        self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, args: tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
         # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
         if (not torch._dynamo.config.skip_fsdp_hooks) or compiled_autograd_enabled():
@@ -666,7 +666,7 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
+    params: List[nn.Parameter], modules: tuple[nn.Module, ...]
 ) -> List[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight

@@ -656,10 +656,11 @@ struct TORCH_API TensorType : public SharedType {
     const auto& shape = sizes();
 
     for (size_t i = 0; i < shape.size(); i++) {
-      if (!shape[i].has_value()) {
+      auto const &s = shape[i];
+      if (!s.has_value()) {
         return std::optional<size_t>{};
       }
-      prod *= shape[i].value();
+      prod *= s.value();
     }
     return prod;
   }
@@ -727,10 +728,11 @@ struct TORCH_API TensorType : public SharedType {
 
   TensorTypePtr contiguous() const {
     auto cloned = clone();
-    TORCH_INTERNAL_ASSERT(sizes().concrete_sizes().has_value());
+    auto concrete_sizes =  sizes().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(concrete_sizes.has_value());
     auto strides = computeStrideProps(
-        *sizes().concrete_sizes(),
-        contiguousStridesOf(*sizes().concrete_sizes()));
+        *concrete_sizes,
+        contiguousStridesOf(*concrete_sizes));
     cloned->strides_ = strides;
     return cloned;
   }
@@ -1516,8 +1518,8 @@ struct TORCH_API FunctionType : public NamedType {
   FunctionType(torch::jit::Function* function);
   std::string annotation_str_impl(
       [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return name()->qualifiedName();
   }
   torch::jit::Function* function_;
 };
@@ -2133,6 +2135,7 @@ struct MatchTypeReturn {
     return !reason_.has_value();
   }
   const std::string& reason() const {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return reason_.value();
   }
 
@@ -2181,6 +2184,7 @@ struct TORCH_API InterfaceType : public NamedType {
   }
 
   std::string str() const override {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return std::string("InterfaceType<") + name()->name() + ">";
   }
 
@@ -2208,6 +2212,7 @@ struct TORCH_API InterfaceType : public NamedType {
 
   std::string annotation_str_impl(
       [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return name()->qualifiedName();
   }
 

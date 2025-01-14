@@ -500,7 +500,13 @@ class BenchmarkRequest:
         self.input_tensor_meta = input_tensor_meta
 
         if isinstance(output_tensor_meta, (tuple, list)):
-            assert len(output_tensor_meta) == 1
+            if len(output_tensor_meta) > 1:
+                # Each output with same meta for Grouped GEMM
+                assert all(
+                    getattr(output_tensor_meta[0], attr) == getattr(x, attr)
+                    for x in output_tensor_meta
+                    for attr in ["device", "dtype", "sizes", "strides", "offset"]
+                )
             output_tensor_meta = output_tensor_meta[0]
         self.output_tensor_meta = output_tensor_meta
 

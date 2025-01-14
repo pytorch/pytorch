@@ -2252,6 +2252,12 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    torch._check(
+        any(x > 0 for x in ret_shape[2:]),
+        lambda: f"Given input size per channel: {list(dims)}. "
+        f"Calculated output size per channel: {ret_shape[2:]}. "
+        f"Output size is too small",
+    )
 
     return ret_shape
 
@@ -2447,7 +2453,7 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 

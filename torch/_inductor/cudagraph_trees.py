@@ -60,7 +60,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TYPE_CHECKING,
     TypeVar,
@@ -363,7 +362,7 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
-    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]] = {}
+    fn_cache: Dict[tuple[int, ...], Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
@@ -413,10 +412,10 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
-    constants: Tuple[torch.Tensor, ...] = (),
-    placeholders: Tuple[PlaceholderInfo, ...] = (),
-    mutated_input_idxs: Tuple[int, ...] = (),
-) -> Tuple[ModelType, OutputType]:
+    constants: tuple[torch.Tensor, ...] = (),
+    placeholders: tuple[PlaceholderInfo, ...] = (),
+    mutated_input_idxs: tuple[int, ...] = (),
+) -> tuple[ModelType, OutputType]:
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
@@ -516,7 +515,7 @@ def is_live(weak_ref: Optional[StorageWeakRefWrapper]) -> bool:
 
 def maybe_deref(
     weak_ref: Optional[StorageWeakRefWrapper],
-) -> Optional[Tuple[StorageWeakRefPointer, int]]:
+) -> Optional[tuple[StorageWeakRefPointer, int]]:
     if weak_ref is None:
         return None
     r = weak_ref()
@@ -528,7 +527,7 @@ def maybe_deref(
 
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(
-    device: int, mem_pool: Tuple[int, int], stream: torch.cuda.Stream
+    device: int, mem_pool: tuple[int, int], stream: torch.cuda.Stream
 ) -> Generator[None, None, None]:
     """
     Context manager to use cuda graph pool for new allocations. If you use this manager
@@ -559,7 +558,7 @@ def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
 
 # A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
 # at graph output offset
-PathOutputIndex = Tuple[int, int]
+PathOutputIndex = tuple[int, int]
 
 # For each node in the path, for each output, is the output alive
 PathLiveness = List[List[bool]]
@@ -590,7 +589,7 @@ class CUDAWarmupNode:
         self,
         wrapped_function: WrappedFunction,
         parent: Optional[Union[CUDAGraphNode, CUDAWarmupNode]],
-        cuda_graphs_pool: Tuple[int, int],
+        cuda_graphs_pool: tuple[int, int],
         existing_cuda_graph: Optional[torch.cuda.CUDAGraph],
         device_index: int,
         stack_traces: Optional[StackTraces],
@@ -774,7 +773,7 @@ class CUDAGraphNode:
         id: GraphID,
         parent: Optional[CUDAGraphNode],
         inputs: List[InputType],
-        cuda_graphs_pool: Tuple[int, int],
+        cuda_graphs_pool: tuple[int, int],
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
@@ -1629,7 +1628,7 @@ class CUDAGraphNode:
 
     def check_invariants(
         self, inputs: List[InputType]
-    ) -> Tuple[CheckInvariantStatus, Callable[..., str]]:
+    ) -> tuple[CheckInvariantStatus, Callable[..., str]]:
         """
         Checks if this node can be run. The same pattern of tensor liveness, static inputs,
         and tensors managed in the cudagraph private pool must remain stable.
@@ -1710,12 +1709,12 @@ class CUDAGraphNode:
         return num_desc
 
 
-def get_cudagraph_segments(pool_id: Tuple[int, int]) -> Any:
+def get_cudagraph_segments(pool_id: tuple[int, int]) -> Any:
     segments = torch.cuda.memory_snapshot()
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
 
-def get_block_addrs(pool_id: Tuple[int, int], live_only: bool = True) -> List[int]:
+def get_block_addrs(pool_id: tuple[int, int], live_only: bool = True) -> List[int]:
     blocks = []
 
     for segment in get_cudagraph_segments(pool_id):
@@ -1740,7 +1739,7 @@ def format_tb(frames: List[Any]) -> str:
 
 def check_memory_pool(
     device: int,
-    pool_id: Tuple[int, int],
+    pool_id: tuple[int, int],
     live_storages_ptrs: List[StorageWeakRefWrapper],
 ) -> None:
     assert all(
@@ -2234,10 +2233,10 @@ class CUDAGraphTreeManager:
         static_input_idxs: Sequence[int],
         stack_traces: Optional[StackTraces],
         mode: CompilationMode,
-        constants: Tuple[torch.Tensor, ...],
-        placeholders: Tuple[PlaceholderInfo, ...],
-        mutated_input_idxs: Tuple[int, ...],
-    ) -> Tuple[ModelType, OutputType,]:
+        constants: tuple[torch.Tensor, ...],
+        placeholders: tuple[PlaceholderInfo, ...],
+        mutated_input_idxs: tuple[int, ...],
+    ) -> tuple[ModelType, OutputType,]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(

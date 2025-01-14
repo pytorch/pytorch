@@ -4,7 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -47,7 +47,7 @@ class ExtraOpData:
     # Returns: tuple of (single dim argname if available, dim list argname if available)
     # If the op doesn't support dim-related args at all OR this op only has overloads
     # with multiple dim args (e.g. transpose()), then this returns (None, None).
-    def get_dim_argnames(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_dim_argnames(self) -> tuple[Optional[str], Optional[str]]:
         if self.dim_args is None:
             return (None, None)
 
@@ -226,7 +226,7 @@ def _raggedness_matches(nt1, nt2):
 # as this causes autograd problems.
 def _clone(t):
     requires_grad = t.requires_grad
-    return t.clone().detach().requires_grad_(requires_grad)
+    return t.detach().clone().requires_grad_(requires_grad)
 
 
 # Helper function to update a sample with new kwargs / name
@@ -1316,10 +1316,10 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
         # non-contiguous transposed
         yield njt.transpose(1, 3)
         # non-contiguous with holes
-        values = njt.values().clone().detach()
-        offsets = njt.offsets().clone().detach()
+        values = njt.values().detach().clone()
+        offsets = njt.offsets().detach().clone()
         # subtract 1 to cause holes
-        lengths = (offsets.diff() - 1).clone().detach()
+        lengths = (offsets.diff() - 1).detach().clone()
         yield torch.nested.nested_tensor_from_jagged(
             values=values,
             offsets=offsets,

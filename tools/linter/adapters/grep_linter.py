@@ -61,18 +61,13 @@ def run_command(
 
 
 def lint_file(
-    matching_line: str,
+    filename: str,
     allowlist_pattern: str,
     replace_pattern: str,
     linter_name: str,
     error_name: str,
     error_description: str,
 ) -> LintMessage | None:
-    # matching_line looks like:
-    #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
-    split = matching_line.split(":")
-    filename = split[0]
-
     if allowlist_pattern:
         try:
             proc = run_command(["grep", "-nEHI", allowlist_pattern, filename])
@@ -144,8 +139,8 @@ def lint_file(
             )
 
     return LintMessage(
-        path=split[0],
-        line=int(split[1]) if len(split) > 1 else None,
+        path=filename,
+        line=None,
         char=None,
         code=linter_name,
         severity=LintSeverity.ERROR,
@@ -257,9 +252,12 @@ def main() -> None:
         sys.exit(0)
 
     lines = proc.stdout.decode().splitlines()
-    for line in lines:
+    # matching_line looks like:
+    #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
+    files = {line.split(":")[0] for line in lines}
+    for file in files:
         lint_message = lint_file(
-            line,
+            file,
             args.allowlist_pattern,
             args.replace_pattern,
             args.linter_name,

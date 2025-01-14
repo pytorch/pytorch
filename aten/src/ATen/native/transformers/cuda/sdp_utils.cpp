@@ -713,6 +713,14 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
 #ifdef USE_ROCM
+  if (params.attn_mask.has_value()) {
+    const auto q_dtype = params.query.dtype();
+    const auto bias_dtype = params.attn_mask.value().dtype();
+    if (bias_dtype != at::kBool && bias_dtype != q_dtype) {
+      TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
+      return false;
+    }
+  }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else
   auto dprop = at::cuda::getCurrentDeviceProperties();

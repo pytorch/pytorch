@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -269,8 +269,8 @@ class LSTMCell(RNNCellBase):
         return "QuantizedLSTMCell(Reference)"
 
     def forward(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tensor]:
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, Tensor]:
         assert input.dim() in (
             1,
             2,
@@ -490,9 +490,9 @@ class LSTM(RNNBase):
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],
+        hx: tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(
@@ -501,7 +501,7 @@ class LSTM(RNNBase):
 
     def get_expected_cell_size(
         self, input: Tensor, batch_sizes: Optional[Tensor]
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
@@ -519,7 +519,7 @@ class LSTM(RNNBase):
     def check_forward_args(  # type: ignore[override]
         self,
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         batch_sizes: Optional[Tensor],
     ):
         self.check_input(input, batch_sizes)

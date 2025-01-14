@@ -417,7 +417,6 @@ class TestDraftExport(TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             torch._inductor.aoti_compile_and_package(
                 draft_ep,
-                example_inputs,
                 package_path=f.name,
             )
 

@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -134,7 +134,7 @@ class TritonBundler:
     @classmethod
     def collect(
         cls,
-    ) -> Tuple[List[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
+    ) -> tuple[List[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
         """
         This is the main function called when a cache write happens. This function
         converts all the previously remembered kernels into bundled format so that
@@ -143,13 +143,9 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             cls.end_compile()
-            set_feature_use(
-                "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", False
-            )
+            set_feature_use("triton_bundling", False)
             return [], None
-        set_feature_use(
-            "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", True
-        )
+        set_feature_use("triton_bundling", True)
 
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries

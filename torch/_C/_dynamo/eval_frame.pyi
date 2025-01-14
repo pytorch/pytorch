@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import types
 from typing import Dict, NewType, Tuple
 
@@ -21,12 +20,12 @@ def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
-    def check_fn(self, *args, **kwargs): ...
+    def check_fn(self, *args: object, **kwargs: object) -> bool: ...
     code: types.CodeType
     next: _CacheEntry | None
 
 class _ExtraState:
-    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object): ...
+    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
 # This is an object that encapsulates the Python FrameType, and exposes
 # properties Dynamo cares about for a frame.

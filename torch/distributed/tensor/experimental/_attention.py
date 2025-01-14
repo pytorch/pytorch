@@ -8,18 +8,7 @@ import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Protocol,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Generator, List, Optional, Protocol, Set, Union
 
 import torch
 import torch.distributed as dist
@@ -186,7 +175,7 @@ class _SDPAMerger:
 
         self._merge_one(out, lse, partial)
 
-    def results(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def results(self) -> tuple[torch.Tensor, torch.Tensor]:
         assert self._out is not None
         assert self._lse is not None
         out, lse = self._out, self._lse.squeeze(-1)
@@ -203,7 +192,7 @@ def _scaled_dot_product_ring_flash_attention(
     return_debug_mask: bool = False,
     *,
     scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
 
@@ -232,7 +221,7 @@ def _scaled_dot_product_ring_efficient_attention(
     is_causal: bool = False,
     *,
     scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
     if not compute_log_sumexp:
@@ -261,7 +250,7 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> Tuple[torch.Tensor, ...]:
+    ) -> tuple[torch.Tensor, ...]:
         ...
 
 
@@ -363,7 +352,7 @@ def _templated_ring_attention(
     value: torch.Tensor,
     is_causal: bool = False,
     **kwargs: object,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     """
     This is a generalized ring attention implementation that can support multiple attention ops.
 
@@ -529,7 +518,7 @@ def _templated_ring_attention(
 
 def _sdpa_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
@@ -567,7 +556,7 @@ def _sdpa_handler(
 
 def _sdpa_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as output tensor
@@ -615,7 +604,7 @@ def _templated_ring_attention_backward(
     logsumexp: torch.Tensor,
     is_causal: bool,
     **kwargs: Any,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     """This API implements the backward of the ring attention."""
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
@@ -789,7 +778,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
     philox_offset: torch.Tensor,
     *,
     scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     seq_dim = 2
     return _templated_ring_attention_backward(
         mesh,
@@ -826,11 +815,11 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     philox_seed: torch.Tensor,
     philox_offset: torch.Tensor,
     dropout_p: float,
-    grad_input_mask: Tuple[bool, ...],
+    grad_input_mask: tuple[bool, ...],
     is_causal: bool = False,
     *,
     scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     seq_dim = 2
     return _templated_ring_attention_backward(
         mesh,
@@ -861,7 +850,7 @@ customized_ops = {
 }
 
 
-_replaced_functions: Dict[Callable, Tuple[str, Callable]] = {}
+_replaced_functions: Dict[Callable, tuple[str, Callable]] = {}
 
 
 def _distribute_function(
@@ -901,7 +890,7 @@ def _distribute_function(
     def wrapper(
         target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
     ) -> Callable:
-        def inner_fn(*args: Tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
+        def inner_fn(*args: tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
             if input_fn is not None:
                 args, kwargs = input_fn(device_mesh, *args, **kwargs)
             output = target_fn(*args, **kwargs)
@@ -987,9 +976,9 @@ class _AttentionContextParallel(ParallelStyle):
     def _input_fn(
         cls,
         module: nn.Module,
-        inputs: Tuple[Union[torch.Tensor, int, float], ...],
+        inputs: tuple[Union[torch.Tensor, int, float], ...],
         device_mesh: DeviceMesh,
-    ) -> Tuple[Union[torch.Tensor, int, float], ...]:
+    ) -> tuple[Union[torch.Tensor, int, float], ...]:
         # TODO(d4l3k); this should be Shard(2), need to fix Linear layer rules
         placement = [Replicate()]
 
@@ -1021,10 +1010,10 @@ class _AttentionContextParallel(ParallelStyle):
     def _output_fn(
         cls,
         module: nn.Module,
-        outputs: Union[torch.Tensor, Tuple[Union[torch.Tensor, int, float], ...]],
+        outputs: Union[torch.Tensor, tuple[Union[torch.Tensor, int, float], ...]],
         device_mesh: DeviceMesh,
     ) -> Union[
-        Union[torch.Tensor, int, float], Tuple[Union[torch.Tensor, int, float], ...]
+        Union[torch.Tensor, int, float], tuple[Union[torch.Tensor, int, float], ...]
     ]:
         cls._CONTEXT_MANAGERS[module].__exit__(None, None, None)
         del cls._CONTEXT_MANAGERS[module]
@@ -1056,8 +1045,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
-        mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: Dict[str, Any]
+    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
         placement = [Shard(seq_dim)]
         all_args = []
 

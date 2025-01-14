@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.distributed as dist
@@ -41,7 +41,7 @@ from torch.distributed.remote_device import _remote_device
 from torch.distributed.tensor import DTensor
 
 
-STATE_DICT_2D_LAYOUT = Dict[str, Tuple[Optional[Sequence[int]], Sequence[int]]]
+STATE_DICT_2D_LAYOUT = Dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
 
 
 # TODO: Update docstrings for optimizer.py
@@ -118,7 +118,7 @@ def _alloc_tensor(
 
 def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
+) -> tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
     """
     Load the right TP slice of the optimizer state.
 

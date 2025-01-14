@@ -10,7 +10,7 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
@@ -88,7 +88,7 @@ class LocalTimerServer(TimerServer):
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
     ):
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
-        self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
+        self._timers: Dict[tuple[Any, str], TimerRequest] = {}
 
     def register_timers(self, timer_requests: List[TimerRequest]) -> None:
         for request in timer_requests:

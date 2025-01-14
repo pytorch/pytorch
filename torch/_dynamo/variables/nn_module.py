@@ -1039,7 +1039,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
         # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
-        # ConstDictVariable to avoid any guard on the keys.
+        # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
         if (
             self.source
             and name
@@ -1069,7 +1069,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
             )
 
-            return variables.ConstDictVariable(
+            return variables.NNModuleHooksDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
         return super().var_getattr(tx, name)

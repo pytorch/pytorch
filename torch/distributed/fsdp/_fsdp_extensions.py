@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -24,7 +24,7 @@ class FSDPExtensions(ABC):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Optional[Any]]:
         """E.g. converting ``DistributedTensor`` to local tensor."""
         ...
 
@@ -64,7 +64,7 @@ class FSDPExtensions(ABC):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, List[Shard]]:
         """
         This is to be called before loading a *sharded* model state dict and
         should return the tensor and list of shards from which to load data.
@@ -96,7 +96,7 @@ def _set_fsdp_extensions(flattener: FSDPExtensions) -> None:
 def _ext_pre_flatten_transform(
     tensor: torch.Tensor,
     fsdp_extension: Optional[FSDPExtensions] = None,
-) -> Tuple[torch.Tensor, Optional[Any]]:
+) -> tuple[torch.Tensor, Optional[Any]]:
     if fsdp_extension is not None:
         new_tensor, param_extension = fsdp_extension.pre_flatten_transform(tensor)
         if param_extension is not None:
@@ -157,7 +157,7 @@ def _ext_chunk_dtensor(
 def _ext_pre_load_state_dict_transform(
     tensor: torch.Tensor,
     fsdp_extension: Optional[FSDPExtensions] = None,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, List[Shard]]:
     if fsdp_extension is not None:
         return fsdp_extension.pre_load_state_dict_transform(tensor)
 

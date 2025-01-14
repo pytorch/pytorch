@@ -2,7 +2,7 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch.fx
@@ -109,7 +109,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[Tuple[str, _MatchResult]] = []
+    matches_items_reversed: List[tuple[str, _MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 

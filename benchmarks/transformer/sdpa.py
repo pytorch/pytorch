@@ -2,7 +2,7 @@ import itertools
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from typing import Callable, List, Tuple
+from typing import Callable, List
 
 from tabulate import tabulate
 from tqdm import tqdm
@@ -68,7 +68,7 @@ class Experiment:
 
 def get_input(
     config: ExperimentConfig,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(
         (config.batch_size, config.num_heads, config.q_seq_len, config.head_dim),
         dtype=config.dtype,

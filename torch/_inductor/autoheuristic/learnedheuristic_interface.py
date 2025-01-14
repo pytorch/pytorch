@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -88,5 +88,5 @@ class LearnedHeuristicDecision(LearnedHeuristic):
         choices = [choice for choice in choices if choice is not None]
         return choices
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
         return []

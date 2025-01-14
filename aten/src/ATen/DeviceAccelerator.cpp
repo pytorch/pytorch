@@ -54,6 +54,7 @@ bool isAccelerator(c10::DeviceType device_type) {
   }
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 c10::DeviceIndex deviceCount() {
   const auto device_type = getAccelerator(false);
   if (!device_type.has_value()) {
@@ -99,5 +100,6 @@ void synchronizeDevice(c10::DeviceIndex device_index) {
   // impl.synchronizeDevice should can be safely called from any device
   impl.synchronizeDevice(device_index);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace at::accelerator

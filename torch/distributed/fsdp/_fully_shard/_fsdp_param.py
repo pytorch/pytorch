@@ -3,7 +3,7 @@ import inspect
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, List, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -198,10 +198,10 @@ class FSDPParam:
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: Tuple[int, ...]
+    contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
-    contiguous_sharded_post_forward_stride: Tuple[int, ...]
+    contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
@@ -305,7 +305,7 @@ class FSDPParam:
             assert (
                 2 <= self._spmd_mesh.ndim <= 3
             ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
-            self._spmd_placements: Tuple[Placement, ...]
+            self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
                 (
                     _StridedShard(shard_dim, split_factor=split_factor)
@@ -534,7 +534,7 @@ class FSDPParam:
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
             )
 
-    def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
+    def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
             t.view(-1, *s[1:])
             for t, s in zip(

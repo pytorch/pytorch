@@ -6,7 +6,7 @@ import functools
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -14,7 +14,7 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
+NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
 NodePattern.__module__ = "torch.ao.quantization.utils"
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
@@ -28,7 +28,7 @@ QuantizerCls = Any
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
 Pattern = Union[
-    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
+    Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
 ]
 Pattern.__module__ = "torch.ao.quantization.utils"
 
@@ -427,7 +427,7 @@ def calculate_qmin_qmax(
     has_customized_qrange: bool,
     dtype: torch.dtype,
     reduce_range: bool,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
@@ -626,7 +626,7 @@ def determine_qparams(
     eps: torch.Tensor,
     has_customized_qrange: bool,
     qscheme: torch.qscheme = torch.per_tensor_affine,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Calculates the quantization parameters, given min and max
     value tensors. Works for both per tensor and per channel cases
 
@@ -709,8 +709,8 @@ def _get_num_pos_args(f: Callable) -> int:
 
 
 def get_fqn_to_example_inputs(
-    model: torch.nn.Module, example_inputs: Tuple[Any, ...]
-) -> Dict[str, Tuple[Any, ...]]:
+    model: torch.nn.Module, example_inputs: tuple[Any, ...]
+) -> Dict[str, tuple[Any, ...]]:
     """Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),

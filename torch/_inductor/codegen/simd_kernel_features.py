@@ -154,6 +154,18 @@ class SIMDKernelFeatures:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
 
+    @cache_on_self
+    def buffer_read_counts(self) -> Dict[str, int]:
+        """Counts how many times each buffer is read within the kernel"""
+        read_counts: Dict[str, int] = collections.defaultdict(int)
+
+        for node in self.scheduler_nodes():
+            # node.read_writes.reads contains MemoryDep objects for each read
+            for read_dep in node.read_writes.reads:
+                read_counts[read_dep.name] += 1
+
+        return dict(read_counts)  # Convert defaultdict to regular dict
+
     def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
         pointwise_nodes = [
             n

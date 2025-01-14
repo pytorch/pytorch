@@ -11,7 +11,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -36,7 +35,7 @@ __all__ = [
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
 _T_dict = Dict[str, _T_co]
-_T_tuple = Tuple[_T_co, ...]
+_T_tuple = tuple[_T_co, ...]
 _T_stack = TypeVar("_T_stack", _T_tuple, _T_dict)
 
 
@@ -190,7 +189,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
-class TensorDataset(Dataset[Tuple[Tensor, ...]]):
+class TensorDataset(Dataset[tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
 
     Each sample will be retrieved by indexing tensors along the first dimension.
@@ -199,7 +198,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
 
-    tensors: Tuple[Tensor, ...]
+    tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
         assert all(

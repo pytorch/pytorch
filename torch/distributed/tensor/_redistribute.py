@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from functools import lru_cache
-from typing import cast, List, NamedTuple, Tuple
+from typing import cast, List, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
-    src_dst_placements: Tuple[Placement, Placement]
+    src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: List[int]
 
@@ -290,7 +290,7 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: tuple[Placement, ...],
         async_op: bool = False,
     ):
         current_spec = input._spec

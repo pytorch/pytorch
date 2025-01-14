@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
 
 import torch
@@ -85,7 +85,7 @@ def supported_builtin_dtype_torch_dtype() -> Dict[type, torch.dtype]:
     return {int: torch.int32, float: torch.float, bool: torch.bool}
 
 
-def supported_scalar_types() -> Tuple[type, ...]:
+def supported_scalar_types() -> tuple[type, ...]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
     return tuple(type_to_torch_dtype.keys())
 
@@ -170,7 +170,7 @@ def aoti_compile_with_persistent_cache(
     device_type: str,
     dynamic: bool,
     f: Callable[..., Any],
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Dict[str, Any],
     *,
     dynamic_shapes: Optional[Dict[str, Any]] = None,

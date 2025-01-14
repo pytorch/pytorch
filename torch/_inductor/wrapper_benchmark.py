@@ -396,7 +396,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
 
         if torch.cuda.is_available():
             peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
+            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)

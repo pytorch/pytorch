@@ -113,7 +113,7 @@ namespace {
     TYPED_TEST_SUITE(Pow, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RealTests, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RangeFactories, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatReducedFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
@@ -851,7 +851,7 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
         //all sets will be within 0  2^(n-1)
-        auto power_sets = 1 << (vec::size());
+        auto power_sets = 1UL << (vec::size());
         for (const auto expected : c10::irange(power_sets)) {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)

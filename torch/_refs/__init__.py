@@ -6542,7 +6542,11 @@ def _recursive_build(
 
     # seq can be a list of tensors
     seq = obj
-    return torch.stack([_recursive_build(scalarType, item) for item in seq])
+    return (
+        torch.empty(0)
+        if not seq
+        else torch.stack([_recursive_build(scalarType, item) for item in seq])
+    )
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6607,8 +6611,10 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
     # TODO (or not): support names kwarg
     if isinstance(data, torch.Tensor):
         warnings.warn(
-            "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-            "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor)"
+            "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
+            "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor)",
+            UserWarning,
+            stacklevel=2,
         )
     type_inference = dtype is None
     new_tensor = _internal_new_from_data(
