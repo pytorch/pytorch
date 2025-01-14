@@ -7725,9 +7725,9 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_continued_fraction(
     const Tensor& use_continued_fraction) {
   // Returns the partial derivatives of betainc with respect to a and b.
   /*
-   * This function evaluates betainc(x, a, b) by its continued fraction
+   * This function evaluates betainc(a, b, x) by its continued fraction
    * expansion given here: https://dlmf.nist.gov/8.17.E22
-   * We apply this function when the input (x, a, b) does not belong to the
+   * We apply this function when the input (a, b, x) does not belong to the
    * proper region of computation of `_betainc_der_power_series`.
    */
 
@@ -7735,7 +7735,7 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_continued_fraction(
    * for x < (a - 1) / (a + b - 2). For x >= (a - 1) / (a + b - 2),
    * we can obtain an equivalent computation by using the symmetry
    * relation given here: https://dlmf.nist.gov/8.17.E4
-   *   betainc(x, a, b) = 1 - betainc(1 - x, b, a) */
+   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
   Tensor use_symmetry_relation = (x >= (a - 1.0) / (a + b - 2.0));
   const Tensor& _a = at::where(use_symmetry_relation, b, a);
   const Tensor& _b = at::where(use_symmetry_relation, a, b);
@@ -7768,10 +7768,10 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
     const Tensor& use_power_series) {
   // Returns the partial derivatives of betainc with respect to a and b.
   /*
-   * This function evaluates betainc(x, a, b) by its series representation:
+   * This function evaluates betainc(a, b, x) by its series representation:
    *   x ** a * 2F1(a, 1 - b; a + 1; x) / (a * B(a, b)) ,
    * where 2F1 is the Gaussian hypergeometric function.
-   * We apply this function when the input (x, a, b) satisfies at least one
+   * We apply this function when the input (a, b, x) satisfies at least one
    * of the following conditions:
    *   C1: (x < a / (a + b)) & (b * x <= 1) & (x <= 0.95)
    *   C2: (x >= a / (a + b)) & (a * (1 - x) <= 1) & (x >= 0.05)
@@ -7800,7 +7800,7 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
 
   /* When x >= a / (a + b), we must apply the symmetry relation given here:
    * https://dlmf.nist.gov/8.17.E4
-   *   betainc(x, a, b) = 1 - betainc(1 - x, b, a) */
+   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
   Tensor use_symmetry_relation = (safe_x >= safe_a / (safe_a + safe_b));
   Tensor safe_a_orig = safe_a;
 
@@ -8021,7 +8021,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
     _b = _b.to(dtype);
   }
 
-  Tensor _x = at::special_betaincinv(_y, _a, _b);
+  Tensor _x = at::special_betaincinv(_a, _b, _y);
   auto [g_a, g_b, g_x] = _betainc_partials(_a, _b, _x);
   g_a = -g_a / g_x;
   g_b = -g_b / g_x;

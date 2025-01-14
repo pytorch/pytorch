@@ -13,8 +13,8 @@ namespace {
 
 void betainc_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "betainc_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
-        return calc_betainc(x, a, b);
+    cpu_kernel(iter, [](scalar_t a, scalar_t b, scalar_t x) -> scalar_t {
+        return calc_betainc(a, b, x);
     });
   });
 }

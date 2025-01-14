@@ -13806,13 +13806,13 @@
     CompositeExplicitAutograd: special_zeta_out
   tags: pointwise
 
-- func: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
+- func: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   structured_delegate: special_betainc.out
 
-- func: special_betainc.out(Tensor self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_betainc.out(Tensor a, Tensor b, Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
@@ -13836,13 +13836,13 @@
   dispatch:
     CPU, CUDA: special_betaln_out
 
-- func: special_betaincinv(Tensor self, Tensor a, Tensor b) -> Tensor
+- func: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special
   variants: function
   structured_delegate: special_betaincinv.out
 
-- func: special_betaincinv.out(Tensor self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_betaincinv.out(Tensor a, Tensor b, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
