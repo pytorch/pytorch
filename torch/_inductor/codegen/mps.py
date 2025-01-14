@@ -63,6 +63,11 @@ class MetalExprPrinter(ExprPrinter_):
         mod = self.doprint(mod)
         return f"({x}) % ({mod})"
 
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            raise RuntimeError("Min only supported for 2 or 3 args")
+        return f"metal::min({', '.join(map(self._print, expr.args))})"
+
 
 class MetalOverrides(OpOverrides):
     @staticmethod
