@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 ERROR = "Builtin `set` is deprecated"
-IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
+IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n\n"
 
 DESCRIPTION = """`set_linter` is a lintrunner linter which finds usages of the
 Python built-in class `set` in Python code, and optionally replaces them with
@@ -145,7 +145,7 @@ class SetFile(_linter.PythonFile):
                 return None
         if section := froms or imports:
             return self._lines_with_sets[section[-1]].tokens[-1].start[0] + 1
-        return 0
+        return self.opening_comment_lines + 1
 
     @cached_property
     def _lines_with_sets(self) -> list[LineWithSets]:
@@ -159,17 +159,16 @@ class SetLinter(_linter.FileLinter[SetFile]):
     report_column_numbers = True
 
     def _lint(self, sf: SetFile) -> Iterator[_linter.LintResult]:
+        if (sf.sets or sf.braced_sets) and (ins := sf.insert_import_line) is not None:
+            yield _linter.LintResult(
+                "Add import for OrderedSet", ins, 0, IMPORT_LINE, 0
+            )
         for b in sf.braced_sets:
             yield _linter.LintResult(ERROR, *b[0].start, "OrderedSet([", 1)
             yield _linter.LintResult(ERROR, *b[-1].start, "])", 1)
 
         for s in sf.sets:
             yield _linter.LintResult(ERROR, *s.start, "OrderedSet", 3)
-
-        if (sf.sets or sf.braced_sets) and (ins := sf.insert_import_line) is not None:
-            yield _linter.LintResult(
-                "Add import for OrderedSet", ins, 0, IMPORT_LINE, 0
-            )
 
 
 if __name__ == "__main__":

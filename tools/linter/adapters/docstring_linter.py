@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 
 GRANDFATHER_LIST = Path(str(_FILE).replace(".py", "-grandfather.json"))
+
 # We tolerate a 10% increase in block size before demanding a docstring
 TOLERANCE_PERCENT = 10
 
@@ -36,9 +37,6 @@ ERROR_FMT = "Every {type} with more than {length} lines needs a docstring"
 
 DESCRIPTION = """`docstring_linter` reports on long functions, methods or classes
 without docstrings"""
-
-# How many top violations to report?
-REPORT_TOP_RESULTS = 3
 
 
 @total_ordering
@@ -92,11 +90,11 @@ class Block:
 
     @property
     def start_line(self) -> int:
-        return self.tokens[self.indent].start[0]
+        return self.tokens[max(self.indent, self.index)].start[0]
 
     @property
     def end_line(self) -> int:
-        return self.tokens[self.dedent].start[0]
+        return self.tokens[max(self.dedent, self.index)].start[0]
 
     @property
     def line_count(self) -> int:
@@ -176,8 +174,19 @@ class DocstringFile(_linter.PythonFile):
         return dedents
 
     @cached_property
+    def errors(self) -> dict[str, str]:
+        return {}
+
+    @cached_property
     def blocks(self) -> list[Block]:
-        blocks = [b for i in range(len(self.tokens)) if (b := self.block(i))]
+        blocks: list[Block] = []
+
+        for i in range(len(self.tokens)):
+            try:
+                if (b := self.block(i)) is not None:
+                    blocks.append(b)
+            except _linter.ParseError as e:
+                self.errors[e.token.line] = " ".join(e.args)
 
         for i, parent in enumerate(blocks):
             for j in range(i + 1, len(blocks)):
@@ -188,32 +197,58 @@ class DocstringFile(_linter.PythonFile):
                     break
 
         for i, b in enumerate(blocks):
+            b.index = i
+
             parents = [b]
             while (p := parents[-1].parent) is not None:
                 parents.append(blocks[p])
+            parents = parents[1:]
 
-            b.full_name = ".".join(n.name for n in reversed(parents))
-            b.index = i
-            b.is_local = not all(p.is_class for p in parents[1:])
-            b.is_method = not b.is_class and len(parents) > 1 and parents[1].is_class
+            b.is_local = not all(p.is_class for p in parents)
+            b.is_method = not b.is_class and bool(parents) and parents[0].is_class
 
+        def add_full_names(children: Sequence[Block], prefix: str = "") -> None:
+            dupes: dict[str, list[Block]] = {}
+            for b in children:
+                dupes.setdefault(b.name, []).append(b)
+
+            for dl in dupes.values():
+                for i, b in enumerate(dl):
+                    suffix = f"[{i + 1}]" if len(dl) > 1 else ""
+                    b.full_name = prefix + b.name + suffix
+
+            for b in children:
+                if kids := [blocks[i] for i in b.children]:
+                    add_full_names(kids, b.full_name + ".")
+
+        add_full_names([b for b in blocks if b.parent is None])
         return blocks
 
-    def block(self, index: int) -> Block | None:
-        t = self.tokens[index]
+    def block(self, begin: int) -> Block | None:
+        t = self.tokens[begin]
         if not (t.type == token.NAME and t.string in ("class", "def")):
             return None
 
-        name = self.next_token(index + 1, token.NAME, "Definition but no name")
-        indent = self.next_token(name + 1, token.INDENT, "Definition but no indent")
+        category = Block.Category[t.string.upper()]
+        try:
+            ni = self.next_token(begin + 1, token.NAME, "Definition but no name")
+            name = self.tokens[ni].string
+            indent = self.next_token(ni + 1, token.INDENT, "Definition but no indent")
+            dedent = self.indent_to_dedent[indent]
+            docstring = self.docstring(indent)
+        except _linter.ParseError:
+            name = "(ParseError)"
+            indent = -1
+            dedent = -1
+            docstring = ""
 
         return Block(
-            begin=index,
-            category=Block.Category[t.string.upper()],
-            dedent=self.indent_to_dedent[indent],
-            docstring=self.docstring(indent),
+            begin=begin,
+            category=category,
+            dedent=dedent,
+            docstring=docstring,
             indent=indent,
-            name=self.tokens[name].string,
+            name=name,
             tokens=self.tokens,
         )
 
@@ -223,18 +258,41 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
     description = DESCRIPTION
     is_fixer = False
 
-    results: dict[str, list[dict[str, Any]]]
+    path_to_blocks: dict[str, list[dict[str, Any]]]
+    path_to_errors: dict[str, list[dict[str, Any]]]
 
     def __init__(self, argv: Sequence[str] | None = None) -> None:
         super().__init__(argv)
         add_arguments(self.parser.add_argument)
-        self.results = {}
+        self.path_to_blocks = {}
+        self.path_to_errors = {}
 
     def lint_all(self) -> bool:
         success = super().lint_all()
         self._report()
         self._write_grandfather()
         return success
+
+    def _lint(self, df: DocstringFile) -> Iterator[_linter.LintResult]:
+        if (p := str(df.path)) in self.path_to_blocks:
+            print("Repeated file", p, file=sys.stderr)
+            return
+
+        blocks = df.blocks
+        bad = {b for b in blocks if self._is_bad_block(b, df)}
+        bad = self._dont_require_constructor_and_class_docs(blocks, bad)
+        gf = self._grandfathered(df.path, bad)
+
+        yield from (self._block_result(b, df) for b in sorted(bad - gf))
+
+        def as_data(b: Block) -> dict[str, Any]:
+            status = "grandfather" if b in gf else "bad" if b in bad else "good"
+            return {"status": status, **b.as_data()}
+
+        self.path_to_blocks[p] = [as_data(b) for b in blocks]
+
+    def _error(self, df: DocstringFile, result: _linter.LintResult) -> None:
+        self.path_to_errors[str(df.path)] = [{str(result.line): result.name}]
 
     @cached_property
     def _grandfather(self) -> dict[str, dict[str, Any]]:
@@ -250,23 +308,6 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
     @cached_property
     def _max_lines(self) -> dict[str, int]:
         return {"class": self.args.max_class, "def": self.args.max_def}
-
-    def _lint(self, df: DocstringFile) -> Iterator[_linter.LintResult]:
-        if (p := str(df.path)) in self.results:
-            return
-
-        blocks = df.blocks
-        bad = {b for b in blocks if self._is_bad_block(b, df)}
-        bad = self._dont_require_constructor_and_class_docs(blocks, bad)
-        gf = self._grandfathered(df.path, bad)
-
-        yield from (self._block_result(b, df) for b in sorted(bad - gf))
-
-        def as_data(b: Block) -> dict[str, Any]:
-            status = "grandfather" if b in gf else "bad" if b in bad else "good"
-            return {"status": status, **b.as_data()}
-
-        self.results[p] = [as_data(b) for b in blocks]
 
     def _grandfathered(self, path: Path | None, bad: set[Block]) -> set[Block]:
         if path is None or self.args.no_grandfather or self.args.write_grandfather:
@@ -326,15 +367,17 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
         )
 
     def _report(self) -> None:
-        if not self.args.lintrunner and self.results and self.args.report:
-            report = {k: s for k, v in self.results.items() if (s := file_summary(v))}
+        if not self.args.lintrunner and self.path_to_blocks and self.args.report:
+            report = {
+                k: s for k, v in self.path_to_blocks.items() if (s := file_summary(v))
+            } | self.path_to_errors
             print(json.dumps(report, sort_keys=True, indent=2))
 
     def _write_grandfather(self) -> None:
         if self.args.write_grandfather:
             results: dict[str, dict[str, int]] = {}
 
-            for path, blocks in self.results.items():
+            for path, blocks in self.path_to_blocks.items():
                 for block in blocks:
                     if block["status"] == "bad":
                         d = results.setdefault(path, {})
@@ -411,7 +454,10 @@ def file_summary(
         return f"{name}{parens}: {lines=}, {docs=}{fail}"
 
     t = make_terse(blocks)
-    return {k: line for k, v in t.items() if (line := to_line(v))}
+    r = {k: line for k, v in t.items() if (line := to_line(v))}
+    while r and all(k.startswith(" ") for k in r):
+        r = {k[1:]: v for k, v in r.items()}
+    return r
 
 
 def add_arguments(add: Callable[..., Any]) -> None:
