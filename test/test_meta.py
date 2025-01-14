@@ -1794,6 +1794,24 @@ class TestMeta(TestCase):
         elif cpu_err is not None and meta_err is None:
             raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
 
+    def test_stride_for_index_Tensor(self):
+        from torch._subclasses import FakeTensorMode
+        x = torch.randn((24, 16, 32, 32)).to(memory_format=torch.channels_last)
+        x = x.view(2, 12, 16, 32, 32)
+
+        i1 = torch.arange(2).unsqueeze(-1)
+        i2 = torch.argsort(torch.rand(2, 12), dim=-1)[:, :3]
+
+        out = x[i1, i2]
+
+        mode = FakeTensorMode()
+        with mode:
+            f_x = mode.from_tensor(x)
+            f_i1 = mode.from_tensor(i1)
+            f_i2 = mode.from_tensor(i2)
+            f_out = f_x[f_i1, f_i2]
+
+        self.assertEqual(out.stride(), f_out.stride())
 
 instantiate_device_type_tests(TestMeta, globals())
 
