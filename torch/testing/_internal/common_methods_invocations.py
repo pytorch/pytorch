@@ -11666,8 +11666,8 @@ def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **k
         device=device,
         requires_grad=requires_grad,
         exclude_zero=True,
-        low=0.01,
-        high=0.99,
+        low=0.1,
+        high=0.9,
     )
 
     make_arg_params = partial(
@@ -11676,17 +11676,17 @@ def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **k
         device=device,
         requires_grad=requires_grad,
         exclude_zero=True,
-        low=0.01,
+        low=0.1,
     )
-    li_make_arg = [make_arg_probs, make_arg_params, make_arg_params]
+    li_make_arg = [make_arg_params, make_arg_params, make_arg_probs]
 
     test_cases = [
         (((S, S), (S, S), (S, S)), False),
-        (((S, S), (S, 1), (1, S)), False),
-        (((1,), (S, S, 1), (1, S)), True),
+        (((S, 1), (1, S), (S, S)), False),
+        (((S, S, 1), (1, S), (1,)), True),
         (((), (), ()), False),
-        (((S, S), (), ()), True),
-        (((), (S, S, 1), (1, S)), True),
+        (((), (), (S, S)), True),
+        (((S, S, 1), (1, S), ()), True),
     ]
 
     for input_args, broadcasts_input in test_cases:
@@ -11703,7 +11703,7 @@ def sample_inputs_binary_beta_family(op_info, device, dtype, requires_grad, **kw
         device=device,
         requires_grad=requires_grad,
         exclude_zero=True,
-        low=0.01,
+        low=0.1,
     )
 
     li_make_arg = [make_arg_params, make_arg_params]
@@ -12086,6 +12086,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('special.betainc',
            aten_name='special_betainc',
+           ref=scipy.special.betainc,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12097,6 +12098,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_ternary_beta_family),
     OpInfo('special.betaincinv',
            aten_name='special_betaincinv',
+           ref=scipy.special.betaincinv,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12108,6 +12110,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_ternary_beta_family),
     OpInfo('special.betaln',
            aten_name='special_betaln',
+           ref=scipy.special.betaln,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),

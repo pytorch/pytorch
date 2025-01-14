@@ -110,4 +110,4 @@ class Beta(ExponentialFamily):
         return torch.special.betaln(x, y)
 
     def cdf(self, x):
-        return torch.special.betainc(x, self.concentration1, self.concentration0)
+        return torch.special.betainc(self.concentration1, self.concentration0, x)
