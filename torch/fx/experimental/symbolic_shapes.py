@@ -5628,7 +5628,7 @@ class ShapeEnv:
                 s in self.size_like,
                 self.oblivious_upper_bound_exclusive.get(s),
             )
-            for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
+            for s in sorted(fs, key=str)  # TODO: speed up sort?
         )
 
         r = _maybe_evaluate_static_worker(
