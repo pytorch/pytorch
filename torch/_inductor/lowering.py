@@ -5623,6 +5623,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
         return data / ops.maximum(zero, N - c)
 
     var = make_pointwise(scale_fn)(m2)
+    var.realize()
 
     if return_mean:
         mean.realize()
