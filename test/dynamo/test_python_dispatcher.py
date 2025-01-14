@@ -4,13 +4,15 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
     def test_dispatch_key(self):
-        @torch.compile(backend="eager", fullgraph=True)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
         def fn(x):
             key_set = torch._C._dispatch_tls_local_include_set()
             key_set = key_set | torch._C._dispatch_keys(x)
@@ -23,6 +25,22 @@ class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         with enable_python_dispatcher():
             self.assertEqual(fn(x), torch.sin(x + 1))
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 3]"):
+        l_x_ = L_x_
+
+        add: "f32[2, 3]" = l_x_ + 1;  l_x_ = None
+        sin: "f32[2, 3]" = torch.sin(add);  add = None
+        return (sin,)
+""",  # NOQA: B950
+        )
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_dispatch_key_set_guard(self):
