@@ -16,7 +16,8 @@ namespace {
 std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_initialized{};
 std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
 std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES>
-    bad_fork_once_flags{};
+    at_fork_once_flags{};
+std::optional<c10::DeviceType> at_fork_device_type{};
 
 } // anonymous namespace
 
@@ -78,15 +79,21 @@ void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
 // Should be called before the first device runtime call.
 void register_fork_handler_for_device_init(at::DeviceType device_type) {
 #ifndef WIN32
-  auto forked_child = [device_type]() {
-    torch::utils::set_device_in_bad_fork(device_type, true);
-    if (is_device_lazy_init_supported(device_type)) {
-      torch::utils::set_requires_device_init(device_type, true);
-    }
-  };
-  auto& flag = bad_fork_once_flags[static_cast<int>(device_type)];
-  c10::call_once(flag, [&forked_child]() {
-    pthread_atfork(nullptr, nullptr, forked_child);
+  auto& flag = at_fork_once_flags[static_cast<int>(device_type)];
+  c10::call_once(flag, [device_type]() {
+    TORCH_CHECK(
+        !at_fork_device_type,
+        "Only one device type can be registered. But now, we have two device types: ",
+        at_fork_device_type.value(),
+        " and ",
+        device_type);
+    at_fork_device_type = device_type;
+    pthread_atfork(nullptr, nullptr, []() {
+      set_device_in_bad_fork(at_fork_device_type.value(), true);
+      if (is_device_lazy_init_supported(at_fork_device_type.value())) {
+        set_requires_device_init(at_fork_device_type.value(), true);
+      }
+    });
   });
 #endif
 }
