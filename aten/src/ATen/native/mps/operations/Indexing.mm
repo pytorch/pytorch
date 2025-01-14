@@ -656,19 +656,20 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
 
       // Create less than comparison
-      MPSGraphTensor* lessMaskTensor = [mpsGraph lessThanWithPrimaryTensor:indexTensor
+      MPSGraphTensor* checkTensor = [mpsGraph lessThanWithPrimaryTensor:indexTensor
                                                     secondaryTensor:[mpsGraph constantWithScalar: self.size(dim)
                                                         dataType:getMPSDataType(index)]
                                                     name:nil];
 
-      // Select between indexTensor and zeroTensor based on mask
-      MPSGraphTensor* maskedIndexTensor = [mpsGraph selectWithPredicateTensor:lessMaskTensor
-                                                          truePredicateTensor:indexTensor
+      // Create a mask tensor with 1s and 0s
+      MPSGraphTensor* maskTensor = [mpsGraph selectWithPredicateTensor:checkTensor
+                                                          truePredicateTensor:[mpsGraph constantWithScalar:1
+                                                              dataType:getMPSDataType(index)]
                                                           falsePredicateTensor:[mpsGraph constantWithScalar:0
                                                                   dataType:getMPSDataType(index)]
                                                           name:nil];
       // drop all indices that are zero
-      MPSGraphTensor* validIndices = [mpsGraph nonZeroIndicesOfTensor:maskedIndexTensor
+      MPSGraphTensor* validIndices = [mpsGraph nonZeroIndicesOfTensor:maskTensor
                                                                 name:nil];
 
       // Reshape the indices to a 1D tensor
@@ -678,8 +679,8 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       // remove values from index that are greater than the size of the dimension
       // nothing should be done if the values are valid
       // if values have been removed, then this will fail with an error because the tensors are not the same size
-      MPSGraphTensor* filteredTensor = [mpsGraph gatherWithUpdatesTensor:maskedIndexTensor
-                                                  indicesTensor:validIndices
+      MPSGraphTensor* filteredTensor = [mpsGraph gatherWithUpdatesTensor:indexTensor
+                                                  indicesTensor:reshapedIndices
                                                   axis:0
                                                   batchDimensions:0
                                                   name:nil];
@@ -693,7 +694,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->outputTensor_ = filteredTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
     });
 
     // MPS TODO: MPS Gather is failing with MPS strided API. Fallback to old gather.
