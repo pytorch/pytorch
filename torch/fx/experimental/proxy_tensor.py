@@ -1594,14 +1594,14 @@ class _ModuleStackTracer(PythonKeyTracer):
         tracer = self
 
         class AttrProxy(_AttrProxy):
-            def __init__(self, base: Module, path: str) -> None:
+            def __init__(self, base: Module, path: str, **kwargs) -> None:
                 # Class is modified to be a subclass of torch.nn.Module
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
-                    {},
+                    **kwargs,
                 )
                 self.__dict__ = base.__dict__
                 self.__class__.__module__ = base.__class__.__module__
