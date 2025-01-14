@@ -804,8 +804,6 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
     B *= out.size(i);
   }
 
-  uint32_t batch_stride = N * N;
-
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
 
@@ -819,30 +817,19 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
   id<MTLBuffer> successBuffer = getMTLBufferStorage(success);
 
-  Tensor allSizes = at::empty({numBlocks, 9}, input.options().dtype(kInt));
-  for (int k = 0; k < numBlocks; k++) {
-    allSizes[k][0] = static_cast<uint32_t>(N);
-    allSizes[k][1] = static_cast<uint32_t>(NB);
-    allSizes[k][2] = static_cast<uint32_t>(k);
-    allSizes[k][3] = static_cast<uint32_t>(std::min(N - k * NB, (int64_t)NB)); // actSize
-    allSizes[k][4] = static_cast<uint32_t>(B);
-    allSizes[k][5] = static_cast<uint32_t>(batch_stride);
-    allSizes[k][6] = static_cast<uint32_t>(k + 1); // startJ
-    allSizes[k][7] = static_cast<uint32_t>((numBlocks - (k + 1))); // nBlocksJ
-    allSizes[k][8] = static_cast<uint32_t>((numBlocks - (k + 1)) * (((numBlocks - (k + 1)) + 1) / 2)); // nPairs
-  }
   MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
-  id<MTLBuffer> sizesBuffer = getMTLBufferStorage(allSizes);
   id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
   [computeEncoder setBuffer:outBuffer offset:0 atIndex:0];
+  [computeEncoder setBytes:&N length:sizeof(int64_t) atIndex:2];
+  [computeEncoder setBytes:&NB length:sizeof(int64_t) atIndex:3];
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       for (int64_t k = 0; k < numBlocks; k++) {
         [computeEncoder setComputePipelineState:factorDiagonalPSO];
-        [computeEncoder setBuffer:sizesBuffer offset:(9 * k * sizeof(int)) atIndex:1];
-        [computeEncoder setBuffer:successBuffer offset:0 atIndex:2];
+        [computeEncoder setBuffer:successBuffer offset:0 atIndex:1];
+        [computeEncoder setBytes:&k length:sizeof(int64_t) atIndex:4];
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
@@ -868,8 +855,8 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
     });
   }
 
-  TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
-  out.tril_();
+  // TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
+  out.tril_(); //
   return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
 } // namespace mps

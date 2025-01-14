@@ -52,24 +52,21 @@ inline float blockReduceSum(
 
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
-    device uint32_t* sizes [[buffer(1)]],
-    device int* success [[buffer(2)]],
+    device int* success [[buffer(1)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
     uint tid [[thread_position_in_threadgroup]],
     uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
-  if (bid >= sizes[4])
-    return;
-  const uint N = sizes[0];
-  const uint NB = sizes[1];
-  const uint k = sizes[2];
-  const uint actSize = sizes[3];
-  const uint batch_offset = bid * sizes[5];
+  const uint actSize = min(N - k * NB, NB); // uint64 before NB
+  const uint batch_offset = bid * N * N;
 
   const uint row0 = k * NB;
   const uint col0 = k * NB;
 
   threadgroup float tile[32][33];
-  threadgroup float reduceScratch[1024];
+  threadgroup float reduceScratch[256];
   const uint tileSize = actSize * actSize;
 
   for (uint i = tid; i < tileSize; i += tpg) {
@@ -126,20 +123,18 @@ kernel void factorDiagonalBlock(
 
 kernel void applyTRSM(
     device float* A [[buffer(0)]],
-    device uint32_t* sizes [[buffer(1)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]]) {
   uint b = tgid.x;
   uint idxJ = tgid.y;
 
-  uint j = sizes[6] + idxJ;
-
-  const uint N = sizes[0];
-  const uint NB = sizes[1];
-  const uint k = sizes[2];
-  const uint actSize_k = sizes[3];
-  const uint batch_offset = b * sizes[5];
+  const uint actSize_k = uint(min(int64_t(N - k * NB), int64_t(NB)));
+  const uint batch_offset = b * N * N;
+  const uint j = (k + 1) + idxJ;
 
   uint row0 = j * NB;
   uint col0 = k * NB;
@@ -199,7 +194,9 @@ kernel void applyTRSM(
 
 kernel void applySYRK(
     device float* A [[buffer(0)]],
-    device uint32_t* sizes [[buffer(1)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]]) {
@@ -209,20 +206,16 @@ kernel void applySYRK(
   uint jRel = (-1 + sqrt(1 + 8 * float(pairID))) / 2;
   uint hRel = pairID - (jRel * (jRel + 1) >> 1);
 
-  const uint startJ = sizes[6];
-
-  const uint k = sizes[2];
+  const uint startJ = (k + 1);
   uint j = startJ + jRel;
   uint h = startJ + hRel;
-  const uint NB = sizes[1];
   uint row0 = j * NB;
   uint col0 = h * NB;
 
-  const uint N = sizes[0];
-  const uint actSize_k = sizes[3];
+  const uint actSize_k = uint(min(int64_t(N - k * NB), int64_t(NB)));
   const uint actSize_j = min((uint)(N - row0), NB);
   const uint actSize_h = min((uint)(N - col0), NB);
-  const uint batch_offset = b * sizes[5];
+  const uint batch_offset = b * N * N;
 
   if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0)
     return;
