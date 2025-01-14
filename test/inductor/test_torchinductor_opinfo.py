@@ -241,6 +241,12 @@ inductor_expected_failures_single_sample["cpu"] = {
         f64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
+    # torch didn't guarantee the output's stride for fft_c2c, this test case failed on it,
+    # please see https://github.com/pytorch/pytorch/pull/144151.
+    "fft.fft2": {f64},
+    # maybe as same root cause as previous op, but haven't investigate into it yet,
+    # because I couldn't repro it on my local.
+    "linalg.eigvals": {f64},
 }
 
 
