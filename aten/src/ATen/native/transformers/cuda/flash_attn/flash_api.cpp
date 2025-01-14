@@ -520,7 +520,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // We want to checkpoint and save the RNG state for backward if dropout
     // We get the default generator and return the seed and offset which will
     // be used in the backward function
-    at::Tensor seed_t, offset_t;
+    // Note BC breaking update to how rng state is checkpointed
+    auto rng_state = at::empty({2}, at::dtype(c10::kUInt64).device(at::kCUDA));
+    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
     if (p_dropout > 0.0)  {
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
         // number of times random will be generated per thread, to offset philox counter in thc random
@@ -530,12 +532,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
-        seed_t = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
-        params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
+        rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
+        params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
         params.philox_args = philox_state;
-    }else{
-            seed_t = at::empty({2}, at::dtype(c10::kUInt64).device(at::kCUDA));
-            offset_t = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -554,7 +553,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -764,7 +763,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // We want to checkpoint and save the RNG state for backward if dropout
     // We get the default generator and return the seed and offset which will
     // be used in the backward function
-    at::Tensor seed_t, offset_t;
+    auto rng_state = at::empty({2}, at::dtype(c10::kUInt64).device(at::kCUDA));
+    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
     if (p_dropout > 0.0)  {
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
         // number of times random will be generated per thread, to offset philox counter in thc random
@@ -774,12 +774,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
-        seed_t = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
-        params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
+        rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
+        params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
         params.philox_args = philox_state;
-    } else {
-      seed_t = at::empty({2}, at::dtype(c10::kUInt64).device(at::kCUDA));
-      offset_t = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -801,7 +798,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
-    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
