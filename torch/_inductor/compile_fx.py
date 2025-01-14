@@ -1103,11 +1103,11 @@ class _InProcessFxCompile(FxCompile):
                                 disable = f"{disable} Found from {stack_trace}\n"
                             V.graph.disable_cudagraphs_reason = disable
 
-                    if V.aot_compilation is True:
+                    if V.aot_mode is True:
                         assert isinstance(compiled_fn, (str, list))
                         return CompiledAOTI(compiled_fn)
 
-                    # TODO: Hoist this above V.aot_compilation
+                    # TODO: Hoist this above V.aot_mode
                     if cudagraphs and not V.graph.disable_cudagraphs_reason:
                         from torch._inductor.cudagraph_utils import (
                             check_lowering_disable_cudagraph,
@@ -1378,7 +1378,7 @@ def compile_fx_aot(
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
-    with V.set_aot_compilation(True), torch._guards.compile_context(
+    with torch._guards.compile_context(
         saved_compile_context
     ):
         compiled_artifacts = compile_fx(
@@ -1489,7 +1489,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if V.aot_compilation is True:
+    if V.aot_mode is True:
         return optimized_function
 
     def wrapper(args: List[object]) -> Sequence[torch.Tensor]:
@@ -1867,7 +1867,7 @@ def compile_fx(
             or torch._guards.TracingContext(fake_mode)
         )
 
-        if V.aot_compilation is True:
+        if V.aot_mode is True:
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
