@@ -107,7 +107,7 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP"])
+    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
         [
@@ -132,31 +132,42 @@ class ComposabilityTest(MultiProcContinousTest):
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
+        # fsdp_mixed-precision dtype
+        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+
         # create "entire model"
         total_layers = 8
         dim = 10
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
+        if dp_type == "FSDP_MP":
+            ref_model.to(dtype=mp_dtype)
 
         # Prepare inputs
         num_microbatches = 8
 
-        def build_rand(num_microbatches, dim):
+        def build_rand(num_microbatches, dim, dtype=torch.float32):
             full = [
-                torch.rand((num_microbatches, dim), device=self.device)
+                torch.rand((num_microbatches, dim), device=self.device, dtype=dtype)
                 for _ in range(dp_mesh.size())
             ]
             local = full[dp_mesh.get_local_rank()]
             local_mb = [[local[i].reshape((1, dim))] for i in range(num_microbatches)]
             return full, local, local_mb
 
-        inputs, _, input_mb = build_rand(num_microbatches, dim)
-        targets, _, target_mb = build_rand(num_microbatches, dim)
+        inputs, _, input_mb = build_rand(num_microbatches, dim, dtype=mp_dtype)
+        targets, targets_local, target_mb = build_rand(
+            num_microbatches, dim, dtype=mp_dtype
+        )
+        # WHY do we have to format the targets list differently than the inputs list???
+        target_mb = [
+            targets_local[i].reshape((1, dim)) for i in range(num_microbatches)
+        ]
 
-        # dummy loss needed just to force backwards to run in schedule step
-        def loss_fn(y, target):
-            return y.sum()
+        def loss_fn(y, target, scale=1e-4):
+            # Scale the loss to simulate a small learning rate and avoid exploding grads
+            return torch.nn.functional.cross_entropy(y, target) * scale
 
         # Get stage module i from the entire model
         def get_stage_module(stage_idx, num_stages):
@@ -173,13 +184,10 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Apply DP to stage module
         def apply_dp(partial_model, dp_type):
-            if dp_type == "FSDP":
+            if dp_type in ("FSDP", "FSDP_MP"):
                 # apply FSDP
                 mp_policy = MixedPrecisionPolicy(
-                    # TODO(whc) need to fix PP + FSDP-mixed-precision
-                    # tracer for PP assumes f32 and is caught off guard when runtime FSDP interacts using bf16 inputs
-                    # param_dtype=torch.bfloat16, reduce_dtype=torch.float32
-                    param_dtype=torch.float32,
+                    param_dtype=mp_dtype,
                     reduce_dtype=torch.float32,
                 )
                 fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
@@ -261,7 +269,9 @@ class ComposabilityTest(MultiProcContinousTest):
             loss_fn(ref_model(inputs[sim_dp_rank]), targets[sim_dp_rank]).backward()
 
         # simulate the built-in averaging done by FSDP
+        ref_model.to(torch.float32)
         for p in ref_model.parameters():
+            p.grad = p.grad.to(torch.float32)
             p.grad /= dp_mesh.size()
 
         # Validate that whichever weights we have locally match that part of our local/full ref model
@@ -277,7 +287,7 @@ class ComposabilityTest(MultiProcContinousTest):
                 parts[0] = str(int(parts[0]) + offset)
                 name = ".".join(parts)
                 ref_p = ref_parameters[name]
-                if dp_type == "FSDP":
+                if dp_type in ("FSDP", "FSDP_MP"):
                     self.assertTrue(isinstance(p.grad, DTensor))
                     torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
                 else:
