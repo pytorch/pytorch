@@ -16,10 +16,10 @@ from typing import (
     Optional,
     overload,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
@@ -50,6 +50,8 @@ unsupported = eval_frame.unsupported
 three = 3
 
 log = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
 
 
 def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
@@ -138,7 +140,7 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
+    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
 ) -> float:
     ...
 
@@ -251,6 +253,11 @@ class CompileCounterWithBackend:
                 self.op_count += 1
         self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
+
+    def clear(self) -> None:
+        self.frame_count = 0
+        self.op_count = 0
+        self.graphs = []
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -407,9 +414,9 @@ def check_dynamic_shape_capture() -> bool:
     return not config.assume_static_by_default
 
 
-def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
+def _make_fn_with_patches(fn: Callable[_P, _T], *patches: Any) -> Callable[_P, _T]:
     @functools.wraps(fn)
-    def _fn(*args: Any, **kwargs: Any) -> _T:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         with contextlib.ExitStack() as stack:
             for module, attr, val in patches:
                 stack.enter_context(patch.object(module, attr, val))
