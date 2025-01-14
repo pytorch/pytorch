@@ -142,9 +142,15 @@ Tensor embedding_dense_backward_cpu(
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
       for (const auto i : c10::irange(numel)) {
+        TORCH_CHECK(indices_data[i] < num_weights,
+          "Out-of-bound array access is not allowed, indices_data[i] should be less than num_weights."
+          )
         counts[indices_data[i]] = 0;
       }
       for (const auto i : c10::irange(numel)) {
+        TORCH_CHECK(indices_data[i] < num_weights,
+          "Out-of-bound array access is not allowed, indices_data[i] should be less than num_weights."
+          )
         counts[indices_data[i]]++;
       }
     }
