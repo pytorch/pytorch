@@ -3926,7 +3926,7 @@ inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 } // T spherical_bessel_j0_forward(T x)
 
 template <typename T>
-inline C10_HOST_DEVICE T calc_betainc(T x, T a, T b) {
+inline C10_HOST_DEVICE T calc_betainc(T a, T b, T x) {
     if (std::is_same_v<T, float>) {
         const float _x = x, _a = a, _b = b;
         return Eigen::numext::betainc(_a, _b, _x);
