@@ -42,7 +42,7 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
 
-chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
+chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.compress

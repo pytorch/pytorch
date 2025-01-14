@@ -284,6 +284,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
   }
   template <typename T>
   inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    // NOLINTNEXTLINE(bugprone-sizeof-expression)
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(value)));
   }
 };
@@ -392,7 +393,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
 #endif
 
-  auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -901,12 +902,10 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
-#ifndef USE_ROCM
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
     if (!at::globalContext().allowFP16ReductionCuBLAS()) {
       cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
     }
-#endif
     // Disallow fp16 reductions that could lead to unexpected overflow issues.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
@@ -1284,7 +1283,7 @@ void gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
 
-  auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1466,7 +1465,7 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
   size_t workspaceSize = _getWorkspaceSize();
-  auto workspace = at::empty(workspaceSize, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
 
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
