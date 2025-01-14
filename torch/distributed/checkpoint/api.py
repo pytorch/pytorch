@@ -1,9 +1,8 @@
-# mypy: allow-untyped-defs
 import traceback as tb
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 
-WRAPPED_EXCEPTION = Tuple[BaseException, tb.StackSummary]
+WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
 
 __all__ = ["CheckpointException"]
 
@@ -32,7 +31,7 @@ class CheckpointException(BaseException):
         """Return a dictionary mapping node ranks to their associated exceptions in case of failure."""
         return self._failures
 
-    def __str__(self):
+    def __str__(self) -> str:
         str = f"CheckpointException ranks:{self._failures.keys()}\n"
         for rank, exc_pair in self._failures.items():
             exc, trace = exc_pair
