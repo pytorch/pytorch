@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.custom_op_db import custom_op_db
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -161,22 +162,7 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     @parametrize(
         "dtype",
-        [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-            torch.complex64,
-            torch.complex128,
-            torch.float8_e4m3fn,
-            torch.float8_e5m2
-        ],
+        all_types_complex_float8_and(),
     )
     def test_index_cuda_with_cpu(self, dtype):
         with FakeTensorMode():
