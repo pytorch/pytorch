@@ -9,8 +9,8 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/cudnn/ConvShared.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
