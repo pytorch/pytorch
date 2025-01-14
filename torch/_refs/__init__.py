@@ -8,7 +8,6 @@ import math
 import operator
 import warnings
 from collections.abc import Iterable
-from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import (
     Any,
@@ -2022,7 +2021,8 @@ def _to_will_alias(
     layout: Optional[torch.layout] = None,
     memory_format: Optional[torch.memory_format] = None,
     pin_memory: Optional[bool] = False,
-    non_blocking: bool = False,  # not using non_blocking
+    # not using non_blocking
+    **kwargs: Any,
 ) -> bool:
     return (
         not copy
@@ -3703,7 +3703,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
