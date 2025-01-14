@@ -235,6 +235,10 @@ class MetalOverrides(OpOverrides):
         float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
         return f"metal::trunc({float_a}/{float_b})"
 
+    @staticmethod
+    def ceil(x: CSEVariable) -> str:
+        return f"metal::ceil({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
