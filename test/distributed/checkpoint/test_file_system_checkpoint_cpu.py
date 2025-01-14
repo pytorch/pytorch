@@ -167,8 +167,6 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
 class TestDistributedStateDictSaveLoadZStandard(TestCase):
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
-        print("ZStandard test")
-
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 

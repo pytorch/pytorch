@@ -1,15 +1,31 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import abc
+import importlib.util
 import io
 import os
+import sys
 from collections.abc import Sequence
 from typing import cast, IO, Optional, Type
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
 
-import zstandard
+
+# NOTE: everything in this file is experimental, and subject to
+# change.  Feedback and bug fixes are always welcome.
+
+
+zstandard_module_name = "zstandard"
+
+if (zstandard := sys.modules.get(zstandard_module_name, None)) is not None:
+    pass
+elif (zstandard_spec := importlib.util.find_spec(zstandard_module_name)) is not None:
+    zstandard = importlib.util.module_from_spec(zstandard_spec)
+    sys.modules[zstandard_module_name] = zstandard
+    zstandard_spec.loader.exec_module(zstandard)  # type: ignore[union-attr]
+else:
+    zstandard = None
 
 
 __all__ = [
@@ -178,28 +194,40 @@ class Rot13Example(StreamTransformExtension):
 
 
 class ZStandard(StreamTransformExtension):
-    def __init__(self) -> None:
-        super().__init__()
+    @staticmethod
+    def is_available() -> bool:
+        return zstandard is not None
 
     @staticmethod
     def from_descriptor(version: str) -> "ZStandard":
         if version.partition(".")[0] != "1":
             raise ValueError(f"Unknown extension {version=}")
+        if not ZStandard.is_available():
+            raise ValueError(
+                f"Stream with ZStandard compression cannot be processed because no module named '{zstandard_module_name}'"
+            )
         return ZStandard()
 
     @staticmethod
     def registry_name() -> str:
         return "stream.zstd"
 
+    def __init__(self) -> None:
+        super().__init__()
+        if not ZStandard.is_available():
+            raise ValueError(
+                f"ZStandard extension is unavailable because no module named '{zstandard_module_name}'"
+            )
+
     def get_descriptor(self) -> str:
         return f"{self.registry_name()}/1"
 
     def transform_to(self, output: IO[bytes]) -> IO[bytes]:
-        compressor = zstandard.ZstdCompressor()
+        compressor = zstandard.ZstdCompressor()  # type: ignore[union-attr]
         return compressor.stream_writer(output)
 
     def transform_from(self, input: IO[bytes]) -> IO[bytes]:
-        decompressor = zstandard.ZstdDecompressor()
+        decompressor = zstandard.ZstdDecompressor()  # type: ignore[union-attr]
         return decompressor.stream_reader(input)
 
 
