@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
 
 import torch
@@ -20,10 +20,9 @@ def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
 
 
 def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
-    from filelock import FileLock
-
     # Avoid circular import
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+    from torch.utils._filelock import FileLock
 
     op_conf_lock_file = f"{op_func_name_with_overload}.lock"
     lock_dir = get_lock_dir()
@@ -86,7 +85,7 @@ def supported_builtin_dtype_torch_dtype() -> Dict[type, torch.dtype]:
     return {int: torch.int32, float: torch.float, bool: torch.bool}
 
 
-def supported_scalar_types() -> Tuple[type, ...]:
+def supported_scalar_types() -> tuple[type, ...]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
     return tuple(type_to_torch_dtype.keys())
 
@@ -171,7 +170,7 @@ def aoti_compile_with_persistent_cache(
     device_type: str,
     dynamic: bool,
     f: Callable[..., Any],
-    args: Tuple[Any],
+    args: tuple[Any],
     kwargs: Dict[str, Any],
     *,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
@@ -276,7 +275,7 @@ def aoti_compile_with_persistent_cache(
                 with open(op_conf, mode) as op_conf_file:
                     try:
                         json_data = json.load(op_conf_file)
-                    except Exception as e:
+                    except Exception:
                         json_data = []
 
                     assert isinstance(json_data, list)

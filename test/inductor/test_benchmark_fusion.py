@@ -242,7 +242,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def setUp(self):
             super().setUp()
-            if not is_big_gpu(0):
+            if not is_big_gpu():
                 return self.skipTest("Need a big GPU to run max_autotune=True")
 
         def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):

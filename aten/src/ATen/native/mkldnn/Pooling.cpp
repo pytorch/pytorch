@@ -5,7 +5,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
-#include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -195,8 +194,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor _mkldnn_pooling(
     const Tensor& input,
@@ -210,15 +208,13 @@ static Tensor _mkldnn_pooling(
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
   if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
-  auto padding_vec = expand_param_if_needed(padding, "padding", dims);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto padding_vec_l = padding_vec;
-  auto padding_vec_r = padding_vec;
+  const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
   std::vector<int64_t> output_sizes;
 
+  auto padding_vec_r = padding_vec;
   if (ceil_mode) {
     // MKLDNN does not support ceil mode, so we adjust padding
     // on the right side to match behavior. Adjust output size
@@ -227,7 +223,7 @@ static Tensor _mkldnn_pooling(
         input.sizes(),
         kernel_size_vec,
         stride_vec,
-        padding_vec_l,
+        padding_vec,
         padding_vec_r,
         dilation_vec,
         true /* ceil_mode */);
@@ -239,7 +235,7 @@ static Tensor _mkldnn_pooling(
           input.sizes(),
           kernel_size_vec,
           stride_vec,
-          padding_vec_l,
+          padding_vec,
           padding_vec_r,
           dilation_vec,
           false /*ceil_mode */);
@@ -257,7 +253,7 @@ static Tensor _mkldnn_pooling(
         input.sizes(),
         kernel_size_vec,
         stride_vec,
-        padding_vec_l,
+        padding_vec,
         padding_vec_r,
         dilation_vec,
         false /*ceil_mode */);
@@ -279,7 +275,7 @@ static Tensor _mkldnn_pooling(
       y,
       {stride_vec.cbegin(), stride_vec.cend()},
       {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
-      {padding_vec_l.cbegin(), padding_vec_l.cend()},
+      {padding_vec.cbegin(), padding_vec.cend()},
       {padding_vec_r.cbegin(), padding_vec_r.cend()},
       algo,
       aprop_kind);
@@ -301,9 +297,7 @@ static Tensor _mkldnn_pooling_backward(
   const int64_t dims = input.dim() - 2;
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
-  auto padding_vec = expand_param_if_needed(padding, "padding", dims);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto padding_vec_l = padding_vec;
+  auto const padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
@@ -315,7 +309,7 @@ static Tensor _mkldnn_pooling_backward(
         input.sizes(),
         kernel_size_vec,
         stride_vec,
-        padding_vec_l,
+        padding_vec,
         padding_vec_r,
         dilation_vec,
         true /* ceil_mode */);
@@ -328,7 +322,7 @@ static Tensor _mkldnn_pooling_backward(
           input.sizes(),
           kernel_size_vec,
           stride_vec,
-          padding_vec_l,
+          padding_vec,
           padding_vec_r,
           dilation_vec,
           false /*ceil_mode */);
@@ -354,7 +348,7 @@ static Tensor _mkldnn_pooling_backward(
       gradx,
       {stride_vec.cbegin(), stride_vec.cend()},
       {kernel_size_vec.cbegin(), kernel_size_vec.cend()},
-      {padding_vec_l.cbegin(), padding_vec_l.cend()},
+      {padding_vec.cbegin(), padding_vec.cend()},
       {padding_vec_r.cbegin(), padding_vec_r.cend()},
       algo);
 
@@ -667,7 +661,6 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

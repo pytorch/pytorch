@@ -47,7 +47,7 @@ static void upsample_out_template(const Tensor& input,
                                   std::optional<double> scale_w_opt,
                                   const Tensor& output,
                                   bool align_corners,
-                                  const c10::string_view resize_mode_str) {
+                                  const std::string_view resize_mode_str) {
   if (input.numel() == 0) {
     return;
   }

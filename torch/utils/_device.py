@@ -31,8 +31,7 @@ def _device_constructors():
         torch.linspace,
         torch.logspace,
         torch.nested.nested_tensor,
-        # This function doesn't actually take a device argument
-        # torch.normal,
+        torch.normal,
         torch.ones,
         torch.rand,
         torch.randn,
@@ -70,9 +69,7 @@ class DeviceContext(TorchFunctionMode):
         # If we set default device within a function mode context
         # exiting that context mode will pop the device function mode off
         # of the stack incorrectly
-        cur_stack = []
-        for _ in range(_len_torch_function_stack()):
-            cur_stack.append(_pop_mode())
+        cur_stack = [_pop_mode() for _ in range(_len_torch_function_stack())]
 
         _push_mode(self)
 

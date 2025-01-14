@@ -130,9 +130,10 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
-        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
+        new_output.name = output_node.name
+        new_output.meta.update(output_node.meta)
 
 
 def _get_codegen(
@@ -275,10 +276,10 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
-    # TODO(suo) this should not be optional, but is since we still ahve
+    # TODO(suo) this should not be optional, but is since we still have
     # capture_pre_autograd_graph grr
     ep: Optional[ExportedProgram] = None,
-):
+) -> _StatefulGraphModule:
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
         plain_graph_module.graph,
