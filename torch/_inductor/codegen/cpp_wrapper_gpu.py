@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -38,7 +38,7 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
+        keys: tuple[str, ...],
         additional_files: List[str],
     ):
         super().__init__(line_template)
@@ -94,7 +94,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[List[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
