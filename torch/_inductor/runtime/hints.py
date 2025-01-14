@@ -43,9 +43,10 @@ def _is_triton_available() -> bool:
 
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
 if _is_triton_available():
-    try:
-        from triton.backends.compiler import AttrsDescriptor
+    import triton.backends.compiler
+    import triton.compiler.compiler
 
+    if (AttrsDescriptor := getattr(triton.backends.compiler, "AttrsDescriptor", None)) is not None:
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
@@ -64,9 +65,7 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    except ImportError:
-        from triton.compiler.compiler import AttrsDescriptor
-
+    elif (AttrsDescriptor := getattr(triton.compiler.compiler, "AttrsDescriptor", None)) is not None:
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
