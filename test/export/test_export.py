@@ -2252,8 +2252,6 @@ graph():
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
-    @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
-    @testing.expectedFailureSerDerNonStrict
     def test_hoo_inline_users_issue(self):
         # This came from an issue where replace_with_hop passes would inline subgraphs,
         # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
