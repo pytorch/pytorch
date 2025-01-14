@@ -851,7 +851,7 @@ std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> ProcessGroupNCCL::
         std::forward_as_tuple(
             std::make_shared<ProcessGroupNCCL::CUDAEventCache>()));
   }
-  return *(it->second);
+  return it->second;
 }
 
 static std::atomic<size_t> process_group_id = 0;
