@@ -32,6 +32,7 @@ import torch._inductor.aoti_eager
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -2754,6 +2755,16 @@ class CommonTemplate:
             return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    @skipCUDAIf(True, "Not implemented for CUDA")
+    def test_logaddexp(self):
+        self.common(
+            torch.logaddexp,
+            (
+                torch.randn(8, 8).to(dtype=torch.complex64),
+                torch.randn(8, 8).to(dtype=torch.complex64),
+            ),
+        )
 
     def test_sigmoid(self):
         def fn(a, b):
@@ -7375,18 +7386,16 @@ class CommonTemplate:
         def fn(x):
             return x.isinf(), x.isnan()
 
-        self.common(
-            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
-        )
-        self.common(
-            fn,
-            [
-                torch.tensor(
-                    [1, float("inf"), 2, float("-inf"), float("nan")],
-                    dtype=torch.float64,
-                )
-            ],
-        )
+        values = [1, float("inf"), 2, float("-inf"), float("nan")]
+        device_interface = get_interface_for_device(self.device)
+        for dtype in [torch.float32, torch.float64]:
+            ctx = (
+                contextlib.nullcontext()
+                if device_interface.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
+            with ctx:
+                self.common(fn, [torch.tensor(values, dtype=dtype)])
 
     @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
@@ -8657,6 +8666,26 @@ class CommonTemplate:
         self.assertGreaterEqual(c0.min(), 0)
         self.assertGreater(c0.max(), 2**40)
         self.assertLess(c0.max(), 2**50)
+
+    def test_randint_distribution(self):
+        @torch.compile(fullgraph=True)
+        def fn(n_argsmax, size):
+            return torch.randint(n_max, (size,), device=self.device)
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+
+        size = 1_000_000
+        n_max = int(0.75 * 2**32)
+        n_bins = 8
+
+        res = fn(n_max, size)
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
     def test_like_rands(self):
@@ -10938,7 +10967,8 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
-    def test_bucketize(self):
+    @parametrize("nd_tiling", (False, True))
+    def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
             return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
 
@@ -10949,7 +10979,10 @@ class CommonTemplate:
             for right in [True, False]:
                 out_int32 = True
                 right = False
-                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+                with config.patch("triton.prefer_nd_tiling", nd_tiling):
+                    self.common(
+                        fn, (input, boundaries, out_int32, right), check_lowp=False
+                    )
 
     def test_bucketize_default_kwargs(self):
         def fn(input, offsets):
@@ -12181,6 +12214,31 @@ class CommonTemplate:
 
         self.assertEqual(res1, ref1)
         self.assertEqual(res2, ref2)
+
+    def test_conv_shape_check(self):
+        # https://github.com/pytorch/pytorch/issues/144013
+        class Model(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                conv_t_cls = eval(f"torch.nn.ConvTranspose{dim}d")
+                self.conv_t = conv_t_cls(
+                    1, 1, kernel_size=(2,) * dim, padding=(1,) * dim
+                )
+
+            def forward(self, x):
+                x = self.conv_t(x)
+                x = torch.sigmoid(x)  # tigger condition
+                return x
+
+        for dim in (1, 2, 3):
+            inputs = torch.randn((1,) * (dim + 2))
+            model = Model(dim)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = model(inputs)
+
+            with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
+                _ = torch.compile(model)(inputs)
 
 
 @dataclasses.dataclass
