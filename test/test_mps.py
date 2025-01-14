@@ -375,6 +375,7 @@ def mps_ops_modifier(ops):
         'addcmul',
         'addmmdecomposed',
         'addmv',
+        'as_stridedpartial_views',
         'asin',
         'atan',
         'atanh',
@@ -958,7 +959,6 @@ def mps_ops_modifier(ops):
         # CPU Errors:
         'addr': [torch.bool, torch.int16, torch.int32,
                  torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
-        'as_stridedpartial_views': None,  # cpu result off, showing random values
 
         # random results
         # mps vs cpu:
