@@ -207,7 +207,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -297,7 +297,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
+        python_versions = FULL_PYTHON_VERSIONS
 
     if arches is None:
         # Define default compute archivectures
@@ -329,19 +329,6 @@ def generate_wheels_matrix(
                 or arch_version == "xpu"
                 else arch_version
             )
-
-            # TODO: Enable python 3.13 on aarch64, windows
-            if (
-                os
-                not in [
-                    "linux",
-                    "linux-s390x",
-                    "linux-aarch64",
-                    "macos-arm64",
-                    "windows",
-                ]
-            ) and python_version in ["3.13", "3.13t"]:
-                continue
 
             # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS or Windows
             if (
