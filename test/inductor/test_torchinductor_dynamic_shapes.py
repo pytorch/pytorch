@@ -20,6 +20,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -58,6 +59,7 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
 
 if TEST_WITH_ROCM:
@@ -575,6 +577,10 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Fails(with OOMS) on SM89, see https://github.com/pytorch/pytorch/issues/141915",
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -976,7 +982,7 @@ class TestInductorDynamic(TestCase):
                     return op(x, y)
 
                 cnt = CompileCounterWithBackend("inductor")
-                fn_opt = torch._dynamo.optimize(cnt)(fn)
+                fn_opt = torch.compile(fn, backend=cnt)
 
                 x = torch.arange(3)
                 self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
@@ -1005,7 +1011,7 @@ class TestInductorDynamic(TestCase):
             )
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.arange(3)
         z = 1.3
 
@@ -1015,6 +1021,7 @@ class TestInductorDynamic(TestCase):
         # Automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 2)
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_softshrink(self):
         # This test is particularly interesting since it exercises
         # both standard operator replacements ie. torch.ops.aten.mul.Tensor
@@ -1023,7 +1030,7 @@ class TestInductorDynamic(TestCase):
             return torch._C._nn.softshrink(x, lambd=y)
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.randn(5, 5)
 
         print(fn(x, 2.0), fn_opt(x, 2.0))
@@ -1039,7 +1046,7 @@ class TestInductorDynamic(TestCase):
             return math.floor(x**2) * y
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         y = torch.arange(3)
 
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))

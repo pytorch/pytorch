@@ -543,7 +543,6 @@ Tensor computeQuantizedMulScalar(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
@@ -598,9 +597,7 @@ Tensor computeQuantizedCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
-    // NOLINTNEXTLINE
     at::Device device) {
   auto const& inputList = std::get<BufList>(inputs[0]);
   auto argDim = std::get<int64_t>(inputs[1]);
