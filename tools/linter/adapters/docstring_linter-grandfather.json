@@ -42,7 +42,7 @@
     "CppKernelProxy.codegen_functions": 183,
     "CppKernelProxy.legalize_lowp_fp_dtype_loopbody": 141,
     "CppOverrides": 444,
-    "CppScheduling": 727,
+    "CppScheduling": 765,
     "CppScheduling.fuse": 81,
     "CppVecKernel": 803,
     "CppVecKernel.reduction": 186,
@@ -54,18 +54,23 @@
     "CppFlexAttentionTemplate": 318
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "CppGemmTemplate": 949,
+    "CppGemmTemplate": 954,
     "CppGemmTemplate.add_choices": 152,
-    "CppGemmTemplate.get_options": 224
+    "CppGemmTemplate.get_options": 228
+  },
+  "torch/_inductor/codegen/cpp_grouped_gemm_template.py": {
+    "CppGroupedGemmTemplate.add_choices": 141,
+    "CppGroupedGemmTemplate.render": 146
   },
   "torch/_inductor/codegen/cpp_micro_gemm.py": {
     "create_micro_gemm": 94
   },
   "torch/_inductor/codegen/cpp_template.py": {
-    "CppTemplate": 103
+    "CppTemplate": 110
   },
   "torch/_inductor/codegen/cpp_template_kernel.py": {
-    "CppTemplateKernel": 297
+    "CppTemplateKernel": 463,
+    "CppTemplateKernel.store_outputs": 102
   },
   "torch/_inductor/codegen/cpp_utils.py": {
     "create_epilogue_with_attr": 165
@@ -74,7 +79,7 @@
     "CppWrapperCpu.codegen_reinterpret_view": 110,
     "CppWrapperCpu.generate_extern_kernel_args_decl_if_needed": 133,
     "CppWrapperCpu.generate_input_output_runtime_checks": 93,
-    "CppWrapperCpu.generate_py_arg": 103,
+    "CppWrapperCpu.generate_py_arg": 105,
     "CppWrapperCpu.val_to_arg_str": 83,
     "CppWrapperCpu.write_header": 98,
     "CppWrapperCpu.write_wrapper_decl": 138
@@ -84,9 +89,6 @@
     "CppWrapperCpuArrayRef.generate_return": 127,
     "CppWrapperCpuArrayRef.val_to_arg_str": 88,
     "CppWrapperCpuArrayRef.write_wrapper_decl": 202
-  },
-  "torch/_inductor/codegen/cuda/cutlass_lib_extensions/gemm_operation_extensions.py": {
-    "EmitGemmUniversal3xInstanceWithEVT.emit": 94
   },
   "torch/_inductor/codegen/cuda/device_op_overrides.py": {
     "CUDADeviceOpOverrides": 236,
@@ -107,7 +109,8 @@
     "HalidePrinter": 124
   },
   "torch/_inductor/codegen/mps.py": {
-    "MetalOverrides": 157
+    "MetalKernel": 126,
+    "MetalOverrides": 179
   },
   "torch/_inductor/codegen/rocm/ck_conv_template.py": {
     "CKGroupedConvFwdTemplate": 488,
@@ -162,12 +165,12 @@
     "fw_compiler_freezing": 95
   },
   "torch/_inductor/config.py": {
-    "cpp": 105,
-    "triton": 158
+    "cpp": 107,
+    "triton": 162
   },
   "torch/_inductor/constant_folding.py": {
-    "ConstantFolder": 210,
-    "ConstantFolder.run_node": 85
+    "ConstantFolder": 215,
+    "ConstantFolder.run_node": 90
   },
   "torch/_inductor/cpu_vec_isa.py": {
     "VecISA": 120
@@ -294,14 +297,14 @@
   },
   "torch/_inductor/scheduler.py": {
     "BaseSchedulerNode": 645,
-    "BaseScheduling": 105,
-    "Scheduler": 2002,
+    "BaseScheduling": 117,
+    "Scheduler": 2008,
     "SchedulerNode": 254
   },
   "torch/_inductor/select_algorithm.py": {
     "AlgorithmSelectorCache": 631,
     "AlgorithmSelectorCache.log_results": 88,
-    "AlgorithmSelectorCache.make_benchmark_fn": 145,
+    "AlgorithmSelectorCache.make_benchmark_fn[2]": 145,
     "TritonTemplate": 194,
     "TritonTemplateKernel": 743
   },
