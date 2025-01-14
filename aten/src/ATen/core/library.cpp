@@ -48,7 +48,6 @@ CppFunction::CppFunction(c10::KernelFunction func, std::optional<c10::impl::CppS
   : func_(std::move(func))
   , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
-  , debug_()
   {}
 
 CppFunction::~CppFunction() = default;
