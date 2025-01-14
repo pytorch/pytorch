@@ -41,7 +41,7 @@ namespace {
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
 #define NCCL_HAS_AVG 1
-#endif   // NCCL version >= 2.10
+#endif // NCCL version >= 2.10
 
 // NCCL op mapping
 const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
@@ -51,7 +51,7 @@ const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::PRODUCT, ncclProd},
 #ifdef NCCL_HAS_AVG
     {ReduceOp::AVG, ncclAvg},
-#endif  // NCCL_HAS_AVG
+#endif // NCCL_HAS_AVG
 };
 
 // NCCL type typing
@@ -70,7 +70,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kFloat8_e5m2fnuz, ncclUint8},
 #if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
-#endif  // HAS_NCCL_BF16_DATATYPE
+#endif // HAS_NCCL_BF16_DATATYPE
 };
 
 // Helper function that gets the data type and issues error if not supported
