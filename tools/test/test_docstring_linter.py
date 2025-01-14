@@ -25,6 +25,7 @@ else:
 
 TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
 TEST_FILE2 = Path("tools/test/docstring_linter_testdata/more_python_code.py.txt")
+TEST_BLOCK_NAMES = Path("tools/test/docstring_linter_testdata/block_names.py.txt")
 ARGS = "--max-class=3", "--max-def=4", "--min-docstring=16"
 
 
@@ -97,6 +98,26 @@ class TestDocstringLinter(LinterTestCase):
     def test_file_summary(self):
         actual = _dumps(file_summary(_data(), report_all=True))
         self.assertExpected(TEST_FILE, actual, "single.line.json")
+
+    def test_file_names(self):
+        f = DocstringLinter.make_file(TEST_BLOCK_NAMES)
+        actual = [b.full_name for b in f.blocks]
+        expected = [
+            "top",
+            "top.fun[1]",
+            "top.fun[1].sab",
+            "top.fun[1].sub",
+            "top.fun[2]",
+            "top.fun[2].sub[1]",
+            "top.fun[2].sub[2]",
+            "top.fun[3]",
+            "top.fun[3].sub",
+            "top.fun[3].sab",
+            "top.run",
+            "top.run.sub[1]",
+            "top.run.sub[2]",
+        ]
+        self.assertEqual(actual, expected)
 
 
 def _dumps(d: dict) -> str:
