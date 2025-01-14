@@ -143,6 +143,17 @@ class InPlaceCompilationTests(TestCase):
             printed_output, "Counter = 1\nCounter = 2\nCounter = 3\nCounter = 4"
         )
 
+    def test_compilation_name_error(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            does_not_exist()
+            return x
+
+        x = torch.randn(10, 10)
+        with self.assertRaises(NameError):
+            fn(x)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
