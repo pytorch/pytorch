@@ -4496,6 +4496,18 @@ class CppTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
+        self.outputs: Optional[List[Buffer]] = None
+
+    def get_layout(self) -> Layout:
+        if isinstance(self.layout, MultiOutputLayout):
+            assert isinstance(self.outputs, Iterable)
+            first_output = self.outputs[0]
+            assert isinstance(first_output, Buffer)
+            layout = first_output.layout
+            assert isinstance(layout, Layout)
+            return layout
+        else:
+            return super().get_layout()
 
 
 @ir_dataclass(frozen=False)
@@ -6832,6 +6844,10 @@ class MultiOutput(ExternKernel):
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self) -> bool:
+        if len(self.inputs) == 1 and (
+            isinstance(self.inputs[0], CppTemplateBuffer)  # Grouped GEMM
+        ):
+            return True
         return False
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:

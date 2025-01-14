@@ -4,7 +4,7 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -33,7 +33,9 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
+        self.output_node: Union[ir.Buffer, List[ir.Buffer]] = ir.Buffer(
+            name="buf_out", layout=layout
+        )
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
@@ -57,7 +59,10 @@ class CppTemplate(KernelTemplate):
         expected_args = list(
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
-        expected_args.extend([self.output_node.get_name()])
+        if isinstance(self.output_node, Iterable):
+            expected_args.extend([node.get_name() for node in self.output_node])
+        else:
+            expected_args.extend([self.output_node.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
             expected_args,
@@ -102,7 +107,9 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            self.output_node.get_layout(),
+            self.output_node[0].get_layout()
+            if isinstance(self.output_node, Iterable)
+            else self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
             self,
