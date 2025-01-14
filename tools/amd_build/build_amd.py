@@ -180,6 +180,7 @@ hip_platform_files = [
     "third_party/tensorpipe/cmake/Hip.cmake",
 ]
 
+
 def remove_hcc(line: str) -> str:
     line = line.replace("HIP_PLATFORM_HCC", "HIP_PLATFORM_AMD")
     line = line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS")
@@ -201,11 +202,14 @@ for hip_platform_file in hip_platform_files:
             print(f"{hip_platform_file} updated")
 
 
-ck_kernel_launch_file = "third_party/composable_kernel/include/ck_tile/host/kernel_launch.hpp"
+ck_kernel_launch_file = (
+    "third_party/composable_kernel/include/ck_tile/host/kernel_launch.hpp"
+)
+
 
 def add_make_kernel_pt(line: str) -> str:
     search_string = "namespace ck_tile {"
-    replace_string = '''namespace ck_tile {
+    replace_string = """namespace ck_tile {
 // Added by hipification to become a no-op on non supported architectures
 template <int MaxThreadPerBlock, int MinBlockPerCu, typename Kernel, typename... Args>
 #if CK_TILE_USE_LAUNCH_BOUNDS
@@ -237,9 +241,10 @@ make_kernel_pt(KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
     };
 }
-'''
+"""
     line = line.replace(search_string, replace_string)
     return line
+
 
 # add new functions to CK
 if os.path.exists(ck_kernel_launch_file):
@@ -256,9 +261,6 @@ if os.path.exists(ck_kernel_launch_file):
 
 else:
     print(f"{ck_kernel_launch_file} does NOT exist. skipping...")
-
-
-
 
 
 hipify_python.hipify(
