@@ -1637,11 +1637,17 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_is_size(i, message=None):
+def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over _check(i >= 0) because we can use the semantic
-    information (that i is a size) to make some further inferences in case
-    i is an unbacked SymInt.
+    You should use this over ``_check(i >= 0)`` because it can prevent
+    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
+    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
+    equivalently to all other values.
+
+    When max is not None, this specifies an upper bound equivalent to
+    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
+    in ``guard_size_oblivious`` tests, we assume that the max bound is treated
+    equivalently to all other values.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
@@ -1652,6 +1658,13 @@ def _check_is_size(i, message=None):
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
     _advise_is_size(i)
+
+    if max is not None:
+        _check(i <= max, message)
+
+        from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
+
+        _advise_is_bounded(i, max)
 
 
 def _check_index(cond, message=None):  # noqa: F811

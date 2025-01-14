@@ -121,14 +121,14 @@ class MetalOverrides(OpOverrides):
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         max_res = f"metal::max({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b}) ? {a} + {b} : {max_res}"
+        return f"isnan({a} + {b}) ? {a} + {b} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         min_res = f"metal::min({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b})  ? {a} + {b} : {min_res}"
+        return f"isnan({a} + {b})  ? {a} + {b} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -227,6 +227,22 @@ class MetalOverrides(OpOverrides):
     def trunc(x: CSEVariable) -> str:
         return f"metal::trunc({x})"
 
+    @staticmethod
+    def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
+        # Upcast to float otherwise the generated code doesn't typecheck.
+        # TODO (dcci): remove this workaround
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"metal::trunc({float_a}/{float_b})"
+
+    @staticmethod
+    def ceil(x: CSEVariable) -> str:
+        return f"metal::ceil({x})"
+
+    @staticmethod
+    def round(x: CSEVariable) -> str:
+        return f"metal::round({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -275,6 +291,17 @@ class MetalKernel(SIMDKernel):
         code.writeline('compile_mps_shader("""')
         idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
+            code.splice(
+                """
+            template<typename T> inline bool isnan(T) { return false; }
+            template<> inline bool isnan(float x) { return metal::isnan(x); }
+            template<> inline bool isnan(half x) { return metal::isnan(x); }
+            #if __METAL_VERSION__ >= 310
+            template<> inline bool isnan(bfloat x) { return metal::isnan(x); }
+            #endif
+            """,
+                strip=True,
+            )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
