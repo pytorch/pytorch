@@ -1166,7 +1166,7 @@ def set_default_device(
     .. note::
 
         This doesn't affect functions that create tensors that share the same memory as the input, like:
-        :func:`torch.from_numpy` and :func:`torch.frombuffer`. Using :func:`torch.Tensor.to` move tensor to desired device.
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
         device (device or string): the device to set as default
