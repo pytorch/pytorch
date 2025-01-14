@@ -3444,9 +3444,11 @@ def _register_quantization_weight_pack_pass():
     _register_smooth_quant_int_mm_pattern()
 
     # Step 5: QLinear post op Fusion
-    _register_qconv_unary_fusion()
-    _register_qlinear_unary_fusion()
-    _register_qlinear_binary_fusion()
+    if not torch.ops.mkldnn._is_mkldnn_acl_supported():
+        # skip fusion on ARM
+        _register_qconv_unary_fusion()
+        _register_qlinear_unary_fusion()
+        _register_qlinear_binary_fusion()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):
