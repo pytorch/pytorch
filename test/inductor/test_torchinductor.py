@@ -804,10 +804,10 @@ def skip_if_triton_cpu(fn):
 
     def decorator(fn):
         @functools.wraps(fn)
-        def wrapper(self):
+        def wrapper(self, *args, **kwargs):
             if is_triton_cpu_backend(self.device):
                 raise unittest.SkipTest(reason)
-            return fn(self)
+            return fn(self, *args, **kwargs)
 
         return wrapper
 
@@ -2755,6 +2755,16 @@ class CommonTemplate:
             return (torch.exp2(a), torch.exp2(a + b), torch.pow(2, -torch.abs(a - b)))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    @skipCUDAIf(True, "Not implemented for CUDA")
+    def test_logaddexp(self):
+        self.common(
+            torch.logaddexp,
+            (
+                torch.randn(8, 8).to(dtype=torch.complex64),
+                torch.randn(8, 8).to(dtype=torch.complex64),
+            ),
+        )
 
     def test_sigmoid(self):
         def fn(a, b):
@@ -8334,7 +8344,7 @@ class CommonTemplate:
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                a.add_(b[0] * c * e),
+                (a.add_(b[0] * c * e),)
                 if d is not None:
                     d.add_(b[1])
 
@@ -8374,7 +8384,7 @@ class CommonTemplate:
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                a.add_(b[0] * c * e),
+                (a.add_(b[0] * c * e),)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
@@ -10785,12 +10795,16 @@ class CommonTemplate:
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             # 3. y has some other strides (not contiguous or channels last) and fn gets preserve
             yield x, torch.randn(*y_size), memory_format
-            yield x, torch.randn(*y_size).contiguous(
-                memory_format=memory_format
-            ), torch.preserve_format
-            yield x, torch.randn(*y_size).permute(
-                tuple(reversed(range(len(y_size))))
-            ), torch.preserve_format
+            yield (
+                x,
+                torch.randn(*y_size).contiguous(memory_format=memory_format),
+                torch.preserve_format,
+            )
+            yield (
+                x,
+                torch.randn(*y_size).permute(tuple(reversed(range(len(y_size))))),
+                torch.preserve_format,
+            )
 
     @skipIfXpu
     def test_resize_as(self):
