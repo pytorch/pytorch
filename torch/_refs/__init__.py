@@ -3244,9 +3244,6 @@ def native_group_norm(
     # remove broadcast dimensions from mean and rstd
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
-    print("out", out)
-    print("mean", mean)
-    print("rstd", rstd)
     return (out, mean, rstd)
 
 
