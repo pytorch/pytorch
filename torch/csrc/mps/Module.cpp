@@ -37,8 +37,8 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
 
 static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::register_fork_handler_for_device_init(at::kMPS);
   if (at::detail::getMPSHooks().hasMPS()) {
+    torch::utils::register_fork_handler_for_device_init(at::kMPS);
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
