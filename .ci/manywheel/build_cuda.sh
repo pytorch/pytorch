@@ -43,13 +43,6 @@ if [[ -n "$DESIRED_CUDA" ]]; then
         fi
     fi
     echo "Using CUDA $CUDA_VERSION as determined by DESIRED_CUDA"
-
-    # There really has to be a better way to do this - eli
-    # Possibly limiting builds to specific cuda versions be delimiting images would be a choice
-    if [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-        echo "Switching to CUDA version ${DESIRED_CUDA}"
-        /builder/conda/switch_cuda_version.sh "${DESIRED_CUDA}"
-    fi
 else
     CUDA_VERSION=$(nvcc --version|grep release|cut -f5 -d" "|cut -f1 -d",")
     echo "CUDA $CUDA_VERSION Detected"
@@ -60,22 +53,10 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
     12.6)
-        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="9.0"
-        else
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
-        fi
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.4)
-        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="9.0"
-        else
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
-        fi
-        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
-        ;;
-    12.1)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
@@ -275,7 +256,7 @@ else
     exit 1
 fi
 
-# builder/test.sh requires DESIRED_CUDA to know what tests to exclude
+# run_tests.sh requires DESIRED_CUDA to know what tests to exclude
 export DESIRED_CUDA="$cuda_version_nodot"
 
 # Switch `/usr/local/cuda` to the desired CUDA version

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Type
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -16,9 +16,9 @@ __all__: List[str] = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
-_MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
+_MatchResult = tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
-_MatchResultWithQConfig = Tuple[
+_MatchResultWithQConfig = tuple[
     Node, List[Node], Optional[Pattern], QuantizeHandler, QConfigAny
 ]
 

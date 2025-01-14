@@ -191,6 +191,7 @@ COLLECTIVES = {
     "gather",
     "scatter",
     "all_to_all",
+    "all_reduce_barrier",
 }
 
 P2P = {
