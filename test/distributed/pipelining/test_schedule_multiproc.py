@@ -910,7 +910,9 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=full_loss_fn)
+        schedule = ScheduleClass(
+            stages, chunks, loss_fn=full_loss_fn, scale_grads=False
+        )
 
         for _ in range(2):
             # Zero gradients
