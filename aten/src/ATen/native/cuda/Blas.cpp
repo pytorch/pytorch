@@ -1078,6 +1078,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out);
     return out;
   }
+#else
+  // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+  if (scaling_choice == ScalingType::RowWise) {
+    Tensor b = mat2;
+    TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+  }
 #endif
 
   cublasCommonArgs args(mat1, mat2, out);
