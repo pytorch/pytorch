@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     skipIfTorchDynamo,
     TEST_CUDA,
+    TEST_MPS,
     TEST_PRIVATEUSE1,
     TEST_XPU,
 )
@@ -24,7 +25,13 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM or TEST_XPU,
+    IS_ARM64
+    or not IS_LINUX
+    or TEST_CUDA
+    or TEST_PRIVATEUSE1
+    or TEST_ROCM
+    or TEST_XPU
+    or TEST_MPS,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest

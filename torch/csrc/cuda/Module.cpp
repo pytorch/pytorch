@@ -55,16 +55,6 @@
 
 using namespace torch;
 
-// Should be called before the first cuda call.
-// Note: This is distinct from initExtension because a stub cuda implementation
-// has some working functions (e.g. device_count) but cannot fully initialize.
-static void poison_fork() {
-#ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
-#endif
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
@@ -148,6 +138,9 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // Note: This is distinct from initExtension because a stub cuda
+  // implementation has some working functions (e.g. device_count) but cannot
+  // fully initialize.
   torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
