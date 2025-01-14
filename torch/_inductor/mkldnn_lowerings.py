@@ -543,10 +543,12 @@ def register_onednn_fusion_ops():
                         ir.ComputedBuffer,
                     )
                     and (
-                        (x_zp.get_numel() == 0 and x.get_dtype() == torch.int8)
-                        or (  # dummy x_zp
+                        (
+                            x_zp.get_numel() == 0 and x.get_dtype() == torch.int8
+                        )  # dummy x_zp
+                        or (
                             x_zp.get_numel() == 1
-                        )  # per-tensor dynamic quantization of x
+                        )  # dynamic per-tensor quantization of x
                     )
                 ) or (
                     isinstance(
@@ -554,7 +556,7 @@ def register_onednn_fusion_ops():
                         ir.ConstantBuffer,
                     )
                     and len(x_zp.get_layout().size)
-                    == 0  # statically quantized per-tensor quantization of x
+                    == 0  # static per-tensor quantization of x
                 ):
                     return True
                 else:
@@ -664,7 +666,14 @@ def register_onednn_fusion_ops():
                                 ),
                                 _w_scale,
                             )
-
+                            # NOTE: We will apply compensation even if the x_zp is 0 for int8 quantization.
+                            # That's because when torch.compile is invoked for dynamic quantization,
+                            # x might coincidentally have such values that x_zp might be zero despite
+                            # asymmetric quantization.
+                            # Besides, if x_zp is dummy for int8 x, or if x is statically quantized,
+                            # we'd still perform that redundant compute to avoid making the code messy
+                            # because we discovered that redundant computation of compensation did not
+                            # lead to performance degradation with the input shapes tested.
                             temp = ops.sub(
                                 temp,
                                 ops.mul(
