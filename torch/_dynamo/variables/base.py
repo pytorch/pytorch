@@ -420,9 +420,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # NB : Checking for mutation is necessary because we compare
             # constant values
             other = args[0]
-            if not issubclass(type(self), type(other)) and not issubclass(
-                type(other), type(self)
-            ):
+            if not isinstance(self, type(other)):
                 return variables.ConstantVariable.create(NotImplemented)
             if (
                 not other.is_python_constant()
