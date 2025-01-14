@@ -417,14 +417,27 @@ class _OpPickleData:
     def unpickle(self, unpickle_state: _UnpickleState) -> object:
         pass
 
+    @classmethod
+    def _lookup_global_by_name(cls, name: str) -> object:
+        """
+        Like `globals()[name]` but supports dotted names.
+        """
+        if "." in name:
+            mod, rest = name.split(".", 1)
+            root = globals()[mod]
+            return cls._getattr_by_name(root, rest)
+        else:
+            return globals()[name]
+
     @staticmethod
-    def _lookup_by_name(name: str) -> object:
-        mod, rest = name.split(".", 1)
-        root = globals()[mod]
-        while "." in rest:
-            mod, rest = rest.split(".", 1)
+    def _getattr_by_name(root: object, name: str) -> object:
+        """
+        Like `getattr(root, name)` but supports dotted names.
+        """
+        while "." in name:
+            mod, name = name.split(".", 1)
             root = getattr(root, mod)
-        return getattr(root, rest)
+        return getattr(root, name)
 
 
 class _OpStrPickleData(_OpPickleData):
@@ -440,7 +453,7 @@ class _OpOverloadPickleData(_OpPickleData):
         self.name = name
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverload:
-        obj = self._lookup_by_name(self.name)
+        obj = self._lookup_global_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverload)
         return obj
 
@@ -450,7 +463,7 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         self.name = name
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverloadPacket:
-        obj = self._lookup_by_name(self.name)
+        obj = self._lookup_global_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
 
@@ -466,9 +479,9 @@ class _OpBuiltinPickleData(_OpPickleData):
         elif self.root == "math":
             import math
 
-            return getattr(math, self.name)
+            return self._getattr_by_name(math, self.name)
         elif self.root == "torch":
-            return getattr(torch, self.name)
+            return self._getattr_by_name(torch, self.name)
         else:
             raise NotImplementedError
 
@@ -480,7 +493,7 @@ class _OpOperatorPickleData(_OpPickleData):
     def unpickle(self, unpickle_state: _UnpickleState) -> object:
         import operator
 
-        return getattr(operator, self.name)
+        return self._getattr_by_name(operator, self.name)
 
 
 class _GraphPickleData:

@@ -6,6 +6,10 @@ body:
   - type: markdown
     attributes:
       value: >
+      #### Note: Please write your bug report in English to ensure it can be understood and addressed by the development team.
+  - type: markdown
+    attributes:
+      value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/pytorch/issues)
         It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)

@@ -1073,6 +1073,14 @@ class GetAttrVariable(VariableTracker):
             else:
                 return variables.ConstantVariable(False)
 
+        elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
+            if isinstance(self.obj, variables.UserDefinedObjectVariable):
+                # Bypass any custom setattr as we are updating the `__dict__` itself
+                return self.obj.method_setattr_standard(tx, args[0], args[1])
+            if isinstance(self.obj, variables.NNModuleVariable):
+                # This matches how `setattr` is handled for NNModuleVariable
+                self.obj.convert_to_unspecialized(tx)
+
         return super().call_method(tx, name, args, kwargs)
 
 
