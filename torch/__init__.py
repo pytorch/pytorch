@@ -288,6 +288,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         candidate_lib_paths = glob.glob(
             os.path.join(nvidia_path, lib_folder, "lib", lib_name)
         )
+        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
+        if not candidate_lib_paths:
+            candidate_lib_paths = glob.glob(
+                os.path.join(path, lib_folder, "lib", lib_name)
+            )
+
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
@@ -323,6 +329,7 @@ def _load_global_deps() -> None:
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
@@ -1141,7 +1148,7 @@ def set_default_device(
     .. note::
 
         This doesn't affect functions that create tensors that share the same memory as the input, like:
-        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`. Using :func:`torch.Tensor.to` move tensor to desired device.
 
     Args:
         device (device or string): the device to set as default
@@ -1630,11 +1637,17 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_is_size(i, message=None):
+def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over _check(i >= 0) because we can use the semantic
-    information (that i is a size) to make some further inferences in case
-    i is an unbacked SymInt.
+    You should use this over ``_check(i >= 0)`` because it can prevent
+    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
+    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
+    equivalently to all other values.
+
+    When max is not None, this specifies an upper bound equivalent to
+    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
+    in ``guard_size_oblivious`` tests, we assume that the max bound is treated
+    equivalently to all other values.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
@@ -1645,6 +1658,13 @@ def _check_is_size(i, message=None):
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
     _advise_is_size(i)
+
+    if max is not None:
+        _check(i <= max, message)
+
+        from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
+
+        _advise_is_bounded(i, max)
 
 
 def _check_index(cond, message=None):  # noqa: F811
@@ -2491,11 +2511,15 @@ def compile(
             return torch.sin(x) + torch.cos(x)
 
     """
+    import sysconfig
+
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
-        raise RuntimeError("Dynamo is not supported on Python 3.14+")
-    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
-        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
+        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        raise RuntimeError(
+            "torch.compile is not supported on Python built with GIL disabled"
+        )
 
     # Decorator mode
     if model is None:
