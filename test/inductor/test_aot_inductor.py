@@ -4264,6 +4264,7 @@ class AOTInductorTestsTemplate:
         model = Model()
         self.check_model(model, example_inputs)
 
+
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
