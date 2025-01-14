@@ -2655,7 +2655,7 @@ def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
-    if device.type in ["cuda", "xpu"]:
+    if device.type == "cuda":
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
