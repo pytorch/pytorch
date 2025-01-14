@@ -87,6 +87,8 @@ DTensor supports the following types of :class:`Placement` on each :class:`Devic
   :undoc-members:
 
 
+.. _create_dtensor:
+
 Different ways to create a DTensor
 ---------------------------------------
 
