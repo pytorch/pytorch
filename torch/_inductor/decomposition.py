@@ -538,7 +538,7 @@ def rand_like(
     result = torch.empty_like(
         self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
-    return aten.uniform_(result, 0, 1)
+    return aten.copy(result, aten.uniform(result, 0, 1))
 
 
 @register_decomposition(aten.randn_like)
