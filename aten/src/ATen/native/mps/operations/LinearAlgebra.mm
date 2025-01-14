@@ -855,7 +855,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
     });
   }
 
-  // TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
+  TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
   out.tril_(); //
   return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
