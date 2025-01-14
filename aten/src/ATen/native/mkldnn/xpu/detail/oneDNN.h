@@ -109,8 +109,8 @@ dnnl::memory::dims deconv_dst_size(
 
 at::Tensor quantized_convolution(
     at::Tensor act,
-    double act_scale,
-    int64_t act_zero_point,
+    at::Tensor act_scale,
+    at::Tensor act_zero_point,
     at::Tensor weight,
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,

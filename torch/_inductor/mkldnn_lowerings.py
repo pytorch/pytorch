@@ -362,6 +362,9 @@ def register_onednn_fusion_ops():
             )
 
         @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.tensor, type_promotion_kind=None
+        )
         def qconvolution_unary(
             x: TensorBox,
             x_scale,
@@ -383,12 +386,15 @@ def register_onednn_fusion_ops():
         ):
             # To align with qlinear where x_scale and x_zp are converted to Tensor
             assert type(x_scale) == float
+            assert x_scale != 0.0
             x_scale = V.graph.add_tensor_constant(
-                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+                torch.tensor(x_scale, dtype=torch.float32, device=x.get_device()),
+                name="x_scale",
             )
             assert type(x_zp) == int
             x_zp = V.graph.add_tensor_constant(
-                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+                torch.tensor(x_zp, dtype=torch.int32, device=x.get_device()),
+                name="x_zp",
             )
 
             return TensorBox.create(

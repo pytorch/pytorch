@@ -49,8 +49,8 @@ qconv_get_md(
 
 at::Tensor quantized_convolution(
     at::Tensor act,
-    double act_scale,
-    int64_t act_zero_point,
+    at::Tensor act_scale,
+    at::Tensor act_zero_point,
     at::Tensor weight,
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
@@ -128,7 +128,7 @@ at::Tensor quantized_convolution(
   mask_weight = weight_zero_points.numel() > 1 ? 1 : 0;
   dnnl::primitive_attr pattr;
 
-  bool src_need_zp = (act_scale != 0);
+  bool src_need_zp = true; // (act_scale != 0);
 
   std::tie(src_md, weight_md, output_md) =
       qconv_get_md(act, weight, output, groups);
@@ -179,11 +179,13 @@ at::Tensor quantized_convolution(
   args.insert({DNNL_ARG_DST, output_m});
 
   dnnl::memory src_sc_m, src_zp_m;
-  Tensor src_sc_tensor, src_zp_tensor;
-  src_sc_m = dnnl_memory_from_host_scalar(
-      static_cast<float>(act_scale), src_sc_tensor, engine);
-  src_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(act_zero_point), src_zp_tensor, engine);
+  src_sc_m = make_onednn_memory(
+      {{1}, dnnl::memory::data_type::f32, {1}}, engine, act_scale.data_ptr());
+  src_zp_m = make_onednn_memory(
+      {{1}, dnnl::memory::data_type::s32, {1}},
+      engine,
+      act_zero_point.data_ptr());
+
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_m});
   if (src_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_m});

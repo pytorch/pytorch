@@ -26,8 +26,8 @@ class QConvoneDNNXPU final {
  public:
   static at::Tensor run_pointwise(
       at::Tensor act,
-      double act_scale,
-      int64_t act_zero_point,
+      at::Tensor act_scale,
+      at::Tensor act_zero_point,
       at::Tensor weight,
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
@@ -42,6 +42,13 @@ class QConvoneDNNXPU final {
       std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<std::string_view> algorithm) {
+    TORCH_CHECK(
+        act_scale.scalar_type() == at::ScalarType::Float,
+        "act_scale should be a float tensor");
+    TORCH_CHECK(
+        act_zero_point.scalar_type() == at::ScalarType::Int,
+        "act_zero_point should be a int tensor");
+
     if (act.dim() == 3 || act.dim() == 5) {
       TORCH_CHECK(
           attr == "none",
@@ -111,13 +118,13 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
       TORCH_SELECTIVE_NAME("onednn::qconv_prepack"),
       TORCH_FN(xpu::qconv_prepack_xpu));
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise.tensor"),
       QConvoneDNNXPU::run_pointwise);
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.tensor"),
       QConvoneDNNXPU::run_pointwise);
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise.tensor"),
       QConvoneDNNXPU::run_pointwise);
 }
 
