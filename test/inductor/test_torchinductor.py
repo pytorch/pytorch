@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
 
+import einops
+
 import numpy as np
 
 import torch
@@ -37,6 +39,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
     rand_strided,
+    reset_rng_state,
     same,
     skipIfPy312,
 )
@@ -12239,6 +12242,39 @@ class CommonTemplate:
 
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
+
+    @requires_gpu()
+    @config.patch(fallback_random=True)
+    def test_mix_device_index(self):
+        """
+        A tiny repro for this meta internal issue: https://fb.workplace.com/groups/1075192433118967/posts/1567334737238065
+        whose root cause is Inductor having wrong assumption of index.Tensor's output
+        stride.
+        """
+        image_latent = (
+            torch.randn((24, 16, 32, 32), device=GPU_TYPE)
+            .to(memory_format=torch.channels_last)
+            .view(2, 12, 16, 32, 32)
+        )
+
+        def f(image_latent):
+            indices = torch.argsort(torch.rand(2, 12), dim=-1)
+
+            tar_latent = image_latent[torch.arange(2).unsqueeze(-1), indices[:, :3]]
+
+            tar_latent_rearranged = einops.rearrange(
+                tar_latent, "b n c h w -> (b n) c h w"
+            )
+
+            return tar_latent_rearranged
+
+        reset_rng_state()
+        ref = f(image_latent)
+        opt_f = torch.compile(f)
+        reset_rng_state()
+        act = opt_f(image_latent)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
 
 @dataclasses.dataclass
