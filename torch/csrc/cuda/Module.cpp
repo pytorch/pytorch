@@ -148,14 +148,14 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::register_fork_handler_for_device_init(at::kXPU);
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::register_fork_handler_for_device_init(at::kXPU);
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
 #ifdef CUDA_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
   return THPUtils_packString(flags);
