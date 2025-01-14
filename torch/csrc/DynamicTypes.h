@@ -27,8 +27,8 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
 TORCH_PYTHON_API PyObject* createPyObject(const at::Storage& storage);
 TORCH_PYTHON_API at::Storage createStorage(PyObject* obj);
-TORCH_PYTHON_API std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
-    PyObject* obj);
+TORCH_PYTHON_API std::tuple<at::Storage, at::ScalarType, bool>
+createStorageGetType(PyObject* obj);
 TORCH_PYTHON_API bool isStorage(PyObject* obj);
 
 // Both methods below return a borrowed reference!
