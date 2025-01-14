@@ -792,6 +792,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& devicesKey,
       int p2pRank);
 
+  // Helper that allgathers nccl unique IDs to all ranks through the store
+  void allgatherUniqueNCCLID(
+      int root,
+      ncclUniqueId* ncclID,
+      std::vector<ncclUniqueId>& ncclIDs);
+
   // Helper that looks up the cached NCCL communicators only
   std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
 
