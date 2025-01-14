@@ -846,7 +846,7 @@ static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* modu
 
 static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
-  
+
   if (state != NULL) {
       if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
