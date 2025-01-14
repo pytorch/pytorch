@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import ExternKernel, IRNode, Layout, Operation
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -1849,6 +1849,30 @@ def pass_execution_and_save(
             t,
             time_elapsed,
         )
+
+
+def is_multi_outputs_template(input_buf: Buffer) -> bool:
+    """
+    Check if input buffer is a multi-outputs template buffer
+    """
+    from . import ir
+
+    return isinstance(input_buf, ir.CppTemplateBuffer) and isinstance(
+        input_buf.layout, ir.MultiOutputLayout
+    )
+
+
+def is_output_of_multi_outputs_template(input_buf: Buffer) -> bool:
+    """
+    Check if input buffer is a output of multi-outputs template buffer
+    """
+    from . import ir
+
+    return (
+        isinstance(input_buf, ir.MultiOutput)
+        and len(input_buf.inputs) == 1
+        and is_multi_outputs_template(input_buf.inputs[0])
+    )
 
 
 def is_collective(
