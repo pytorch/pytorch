@@ -38,6 +38,12 @@ runs:
         cat /opt/rocm/.info/version || true
         whoami
 
+    - name: Runner health check amdgpu info
+      if: always()
+      shell: bash
+      run: |
+        dpkg -l | grep -E "  amdgpu"
+
     - name: Runner health check rocm-smi
       if: always()
       shell: bash

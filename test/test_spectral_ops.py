@@ -21,7 +21,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
-from typing import Optional, List
+from typing import Optional
 from packaging import version
 
 
@@ -597,7 +597,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: Optional[List[int]], dim: List[int] = (-2, -1), norm: Optional[str] = None):
+                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))

@@ -56,7 +56,7 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    GetItemSource,
+    DictGetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
@@ -1344,7 +1344,7 @@ class InstructionTranslatorBase(
             builtins_source = GlobalSource(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
-            var_source = GetItemSource(builtins_source, argval)
+            var_source = DictGetItemSource(builtins_source, argval)
             self.push(VariableTracker.build(self, val, var_source))
         else:
             assert is_builtin_constant(val)
@@ -3368,7 +3368,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
-            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+            global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
     def _load_global(self, inst):

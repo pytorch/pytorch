@@ -9034,8 +9034,8 @@ Constructs a tensor with no autograd history (also known as a "leaf tensor", see
     When working with tensors prefer using :func:`torch.Tensor.clone`,
     :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    ``t.detach().clone()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.detach().clone().requires_grad_(True)``.
 
 .. seealso::
 

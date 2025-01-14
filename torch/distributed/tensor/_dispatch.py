@@ -74,7 +74,7 @@ def found_inf_reduce_handler(
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(List[object], op_info.local_args), op_info.args_tree_spec
+        cast(List[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
     )
     local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)
