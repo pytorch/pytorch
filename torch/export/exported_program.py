@@ -506,10 +506,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
-            gm, new_graph_signature
-        )
-
         # When we apply parameterixzation rule to unwrap
         # subclasses, the state dict will now have different
         # desugared parameters. We need to manually filter those
