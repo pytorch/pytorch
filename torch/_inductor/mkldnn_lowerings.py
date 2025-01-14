@@ -529,6 +529,41 @@ def register_onednn_fusion_ops():
             else:
                 x_zp.realize()
 
+            def _is_act_zp_compatible_with_onednn():
+                # oneDNN doesn't currently have an optimized kernel for a vector activation zero-point.
+                # So, if the activation zero point is a vector, we won't support it with oneDNN.
+                # We can support the provided activation if:
+                # 1. if x_zp is dummy (empty tensor) created to match an Inductor pattern
+                # 2. If the activation is per-tensor quantized (x may even be uint8 in that case).
+                # in the latter case, the quantization may either be static or dynamic.
+                nonlocal x_zp
+                if (
+                    isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                        ir.ComputedBuffer,
+                    )
+                    and (
+                        (x_zp.get_numel() == 0 and x.get_dtype() == torch.int8)
+                        or (  # dummy x_zp
+                            x_zp.get_numel() == 1
+                        )  # per-tensor dynamic quantization of x
+                    )
+                ) or (
+                    isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                        ir.ConstantBuffer,
+                    )
+                    and len(x_zp.get_layout().size)
+                    == 0  # statically quantized per-tensor quantization of x
+                ):
+                    return True
+                else:
+                    return False
+
+            assert (
+                _is_act_zp_compatible_with_onednn()
+            ), "x_zp is incompatible with oneDNN qlinear"
+
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to https://github.com/pytorch/pytorch/blob
             # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
@@ -549,35 +584,24 @@ def register_onednn_fusion_ops():
             choices: List[ChoiceCaller] = []
 
             if use_max_autotune():
-                # NOTE: since vector weight scale is supported with oneDNN qlinear in PyTorch,
-                # we are able to support the case of per-token quantized activation & per-channel quantized weights
-                # if x_zp is not present in a pattern, since in that case, we can apply the actual scale of x
-                # after oneDNN qlinear in a replacement pattern. This is being done for a smoothquant pattern.
-                # Inductor codegen is able to make it an epilogue fusion.
-                # We don't support the case of per-token quantized activation with oneDNN qlinear if
-                # the activation is quantized asymmetrically, or if the per-token quantized activation is
-                # quantized symmetrically but still has a corresponding zero-points tensor,
-                # which would be all zeros in case of int8).
-
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
 
                 def _is_sym_quantized_wgt():
-                    # weight zero point may not be a ConstantBuffer, but a computeBuffer instead.
-                    # That may happen if it's dummy.
                     # In some Inductor pattern, we may insert a dummy weight zero-point even if it doesn't exist
-                    # just because oneDNN qlinear has a w_zp parameter.
-                    # If it is empty/dummy, then we can be sure that the weight is symmetrically quantized.
-                    # We've already established by now that packed weights are int8, so if w_zp is not dummy,
-                    # then all its values must be zeros if weights are int8 symmetrically quantized.
+                    # just because oneDNN qlinear has a parameter corresponding to zero-points of weights.
+                    # w_zp will be a computedBuffer if it's dummy.
+                    # packed weights are int8, so if w_zp is not dummy, then we check for all its values
+                    # being zeros (weights being int8 symmetrically quantized),
+                    # because we don't support the GEMM template with asymmetrically quantized weights.
                     nonlocal w_zp
                     if (
                         isinstance(
                             ir.InputsKernel.unwrap_storage_for_input(w_zp),
                             ir.ComputedBuffer,
                         )
-                        and w_zp.get_numel() == 0
+                        and w_zp.get_numel() == 0  # dummy w_zp
                     ) or (
                         isinstance(
                             ir.InputsKernel.unwrap_storage_for_input(w_zp),
@@ -586,41 +610,14 @@ def register_onednn_fusion_ops():
                         and torch.equal(
                             torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                             V.graph.constants[w_zp.get_name()],
-                        )
+                        )  # symmetrically quantized w_zp
                     ):
                         return True
                     else:
                         return False
 
-                def _is_act_comptaible_with_onednn():
-                    # oneDNN doesn't currently have an optimized kernel for a vector activation zero-point.
-                    # So, if the activation zero point is a vector, we won't support it with oneDNN.
-                    # We can support the provided activation if:
-                    # 1. if x_zp is dummy (empty tensor) created to match an Inductor pattern
-                    # 2. If the activation is per-tensor quantized (x may even be uint8 in that case).
-                    nonlocal x_zp
-                    if (
-                        isinstance(
-                            ir.InputsKernel.unwrap_storage_for_input(x_zp),
-                            ir.ComputedBuffer,
-                        )
-                        and x_zp.get_numel() == 0
-                        and x.get_dtype() == torch.int8
-                    ) or (
-                        isinstance(
-                            ir.InputsKernel.unwrap_storage_for_input(x_zp),
-                            ir.ConstantBuffer,
-                        )
-                        and len(x_zp.get_layout().size) == 0
-                    ):
-                        return True
-                    else:
-                        return False
-
-                if (
-                    _is_sym_quantized_wgt()
-                    and _is_act_comptaible_with_onednn()
-                    and use_cpp_gemm_template(layout, x, packed_weight)
+                if _is_sym_quantized_wgt() and use_cpp_gemm_template(
+                    layout, x, packed_weight
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
@@ -658,7 +655,7 @@ def register_onednn_fusion_ops():
                             _w_scale = w_scale_loader(weight_compens_index)
                             _weight_compo = weight_compens_loader(weight_compens_index)
 
-                            # Step 1: Compute int8xint8->int32 GEMM & then apply compensation
+                            # Step 1: Compute s8s8->s32 or u8s8->s32 GEMM & then apply compensation
 
                             temp = ops.mul(
                                 ops.mul(
