@@ -321,7 +321,7 @@ def _load_global_deps() -> None:
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
         # if `LD_LIBRARY_PATH` is defined
         # See https://github.com/pytorch/pytorch/issues/138460
-        if version.cuda not in ["12.4", "12.6"]:
+        if version.cuda not in ["12.4", "12.6"]:  # typing: ignore[name-defined]
             return
         try:
             with open("/proc/self/maps") as f:
