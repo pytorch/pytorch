@@ -23,7 +23,7 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
-
+import torch._dispatch.python
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -1705,10 +1705,8 @@ class InsertTypePromotion(_pass.Transform):
         fake_args = self._fetch_fake_args()
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
-
-        with fake_tensor.unset_fake_temporarily(), (
-            fake_mode
-        ), fx_traceback.preserve_node_meta():
+        dispatcher_mode = torch._dispatch.python.enable_python_dispatcher()
+        with fake_mode, dispatcher_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module
