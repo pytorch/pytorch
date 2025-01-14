@@ -182,13 +182,9 @@ jobs:
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
+        uses: ./.github/actions/upload-sccache-stats
         with:
-          s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-          retention-days: 14
-          if-no-files-found: warn
-          path: sccache-stats-*.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

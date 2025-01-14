@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 
@@ -9,8 +10,8 @@ def gen_linker_script(
         prioritized_text = [
             line.replace("\n", "") for line in prioritized_text if line != "\n"
         ]
-
-    linker_script_lines = subprocess.check_output(["ld", "-verbose"], text=True).split(
+    ld = os.environ.get("LD", "ld")
+    linker_script_lines = subprocess.check_output([ld, "-verbose"], text=True).split(
         "\n"
     )
 

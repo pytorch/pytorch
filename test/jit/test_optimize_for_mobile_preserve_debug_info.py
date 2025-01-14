@@ -105,9 +105,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
                     bias=self.conv_transpose2d_bias,
                 )
 
-        minibatch = 1
         in_channels = 6
-        iH = 4
         iW = 5
         out_channels = 6
         kH = 2

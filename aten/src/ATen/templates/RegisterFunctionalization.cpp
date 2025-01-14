@@ -56,13 +56,13 @@ inline bool has_internal_overlap_helper(const at::Tensor t) {
 inline Tensor to_meta(const Tensor& t) {
     if (!t.defined()) return t;
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
-/*dtype=*/std::make_optional(t.scalar_type()), /*layout=*/std::make_optional(t.layout()),
-/*device=*/std::make_optional(c10::Device(kMeta)), /*pin_memory=*/std::nullopt);
+/*dtype=*/t.scalar_type(), /*layout=*/t.layout(),
+/*device=*/c10::Device(kMeta), /*pin_memory=*/std::nullopt);
 }
 
 inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
   if (t.has_value()) {
-    return std::make_optional<Tensor>(to_meta(*t));
+    return to_meta(*t);
   }
   return std::nullopt;
 }

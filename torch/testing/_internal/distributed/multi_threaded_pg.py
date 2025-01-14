@@ -3,7 +3,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 from functools import partial, reduce
 
 import torch
@@ -123,13 +123,11 @@ class AllReduce:
     @torch.no_grad()
     def work(self, data):
         for i in range(len(data[0])):
-            tensors = []
             # use rank0 as the device for sum
             rank_0_device = data[0][i].device
             # collect all data to the list and make them
             # all on rank 0 device
-            for src_rank in range(0, len(data)):
-                tensors.append(data[src_rank][i].to(rank_0_device))
+            tensors = [data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))]
 
             # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
@@ -457,7 +455,7 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
+    pg_map: Dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
     pg_backend_config: Dict[dist.ProcessGroup, str]

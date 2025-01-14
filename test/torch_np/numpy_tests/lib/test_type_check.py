@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -51,7 +51,7 @@ def assert_all(x):
     assert_(np.all(x), x)
 
 
-@xpassIfTorchDynamo  # (reason="common_type not implemented")
+@xpassIfTorchDynamo_np  # (reason="common_type not implemented")
 class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
@@ -118,7 +118,7 @@ class TestMintypecode(TestCase):
         assert_equal(mintypecode("idD"), "D")
 
 
-@xpassIfTorchDynamo  # (reason="TODO: decide on if [1] is a scalar or not")
+@xpassIfTorchDynamo_np  # (reason="TODO: decide on if [1] is a scalar or not")
 class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))

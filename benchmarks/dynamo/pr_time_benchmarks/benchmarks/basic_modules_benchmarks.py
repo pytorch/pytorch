@@ -24,15 +24,20 @@ class Benchmark(BenchmarkBase):
         self, ModuleClass, backend, is_gpu=False, dynamic=False, force_shape_pad=False
     ):
         self.ModuleClass = ModuleClass
-        self.backend = backend
         self._name = ModuleClass.__name__
         self._is_gpu = is_gpu
-        self._dynamic = dynamic
         self._force_shape_pad = force_shape_pad
 
+        super().__init__(
+            category="basic_modules",
+            backend=backend,
+            device="cuda" if self._is_gpu else "cpu",
+            dynamic=dynamic,
+        )
+
     def name(self):
-        prefix = f"basic_modules_{self._name}_{self.backend}"
-        if self._dynamic:
+        prefix = f"{self.category()}_{self._name}_{self.backend()}"
+        if self.is_dynamic():
             prefix += "_dynamic"
         if self._is_gpu:
             prefix += "_gpu"
@@ -43,7 +48,7 @@ class Benchmark(BenchmarkBase):
     def _prepare_once(self):
         self.m = self.ModuleClass()
         torch.set_float32_matmul_precision("high")
-        self.input = torch.ones(10, device="cuda" if self._is_gpu else "cpu")
+        self.input = torch.ones(10, device=self.device())
 
     def _prepare(self):
         torch._dynamo.reset()
@@ -52,7 +57,7 @@ class Benchmark(BenchmarkBase):
         with fresh_inductor_cache(), torch._inductor.config.patch(
             force_shape_pad=self._force_shape_pad
         ):
-            opt_m = torch.compile(backend=self.backend, dynamic=self._dynamic)(
+            opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
                 self.m.cuda() if self._is_gpu else self.m
             )
             opt_m(self.input)

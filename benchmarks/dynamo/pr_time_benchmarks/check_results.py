@@ -135,7 +135,7 @@ def main():
         # only change if abs(ratio) > entry.noise_margin /3.
         new_entry.expected_value = (
             replace_with_zeros(result)
-            if abs(ratio) > entry.noise_margin / 3
+            if abs(ratio) > entry.noise_margin * 100 / 3
             else entry.expected_value
         )
         new_expected[key] = new_entry
@@ -144,7 +144,7 @@ def main():
             fail = True
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
-                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:+.2f}% "
+                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin * 100:+.2f}% "
                 f"if this is an expected regression, please update the expected results.\n"
             )
             print(
@@ -158,7 +158,7 @@ def main():
 
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
-                f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
+                f"expected {entry.expected_value} ±{entry.noise_margin * 100:.2f}% "
                 f"please update the expected results. \n"
             )
             print(
@@ -170,7 +170,7 @@ def main():
         else:
             print(
                 f"PASS: benchmark {key} pass, actual result {result} {ratio:+.2f}% is within "
-                f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}%\n"
+                f"expected {entry.expected_value} ±{entry.noise_margin * 100:.2f}%\n"
             )
 
             log("pass")

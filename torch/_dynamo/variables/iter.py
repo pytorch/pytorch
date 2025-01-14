@@ -42,15 +42,17 @@ class ItertoolsVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # See also: module `torch._dynamo.polyfills.itertools`
+
         if (
             self.value is itertools.product
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item)))
+            items = [
+                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+            ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )
@@ -190,14 +192,6 @@ class ItertoolsVariable(VariableTracker):
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
-            )
-        elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
-                tx, args, kwargs
-            )
-        elif self.value is itertools.zip_longest:
-            return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
-                tx, args, kwargs
             )
         else:
             return super().call_function(tx, args, kwargs)
