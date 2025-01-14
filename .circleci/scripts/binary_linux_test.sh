@@ -94,6 +94,8 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
   python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
 fi
 
+# Clean temp files
+cd /pytorch/.ci/pytorch/ && git clean -ffdx
 
 # =================== The above code will be executed inside Docker container ===================
 EOL

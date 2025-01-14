@@ -14,8 +14,7 @@ import random
 import types
 import unittest
 import warnings
-from collections import namedtuple
-from typing import OrderedDict
+from collections import namedtuple, OrderedDict
 from unittest.case import skipIf
 
 from common_utils import (
@@ -682,6 +681,8 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
+        # noqa: F841
+
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -1246,7 +1247,7 @@ class TestVmapAPI(TestCase):
 
     def test_data_attribute(self):
         def foo(x):
-            y = x.data
+            y = x.data  # noqa: F841
             return x
 
         with self.assertRaisesRegex(

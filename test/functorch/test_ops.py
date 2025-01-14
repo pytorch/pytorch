@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
