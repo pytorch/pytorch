@@ -169,11 +169,11 @@ class InputAliasInfo:
 @dataclass
 class MemoryFormatMeta:
     # For static shapes we assume tangents have the same strideness as outputs
-    size: Optional[Sequence[int]]
-    stride: Optional[Sequence[int]]
+    size: Optional[Sequence[int]] = None
+    stride: Optional[Sequence[int]] = None
 
     # For dynamic shapes we assume the same memory format: contiguous, channels_last etc.
-    memory_format: Optional[torch.memory_format]
+    memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
@@ -187,12 +187,9 @@ class MemoryFormatMeta:
             return MemoryFormatMeta(
                 size=t.size(),
                 stride=t.stride(),
-                memory_format=None,
             )
 
         return MemoryFormatMeta(
-            size=None,
-            stride=None,
             memory_format=torch._prims_common.suggest_memory_format(t),
         )
 

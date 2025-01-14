@@ -5748,45 +5748,69 @@ metadata incorrectly.
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
         # flake8: noqa: TOR901
-        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
         self.d = {
             torch.channels_last: 0,
             torch.contiguous_format: 0,
         }
+        self.tangent_strides = []
 
-        self.lib.define("foo(Tensor x) -> Tensor")
-        self.lib.define("foo2(Tensor x) -> Tensor")
+        self.lib.define("log_tangents_memory_format(Tensor x) -> Tensor")
+        self.lib.define("log_tangents_memory_format_log(Tensor x) -> Tensor")
 
-        def foo_impl(a):
+        def log_tangents_memory_format_impl(a):
             return a.clone()
 
-        def foo_meta(a):
+        def log_tangents_memory_format_meta(a):
             return a.clone()
 
-        def foo2_impl(x):
+        def log_tangents_memory_format_log_impl(x):
             self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            self.tangent_strides.append(x.stride())
             return x.clone()
 
-        def foo2_meta(a):
+        def log_tangents_memory_format_log_meta(a):
             return a.clone()
 
         for backend in ["CPU", "CUDA"]:
-            self.lib.impl("foo", foo_impl, backend)
-            self.lib.impl("foo2", foo2_impl, backend)
+            self.lib.impl(
+                "log_tangents_memory_format", log_tangents_memory_format_impl, backend
+            )
+            self.lib.impl(
+                "log_tangents_memory_format_log",
+                log_tangents_memory_format_log_impl,
+                backend,
+            )
 
-        self.lib.impl("foo", foo_meta, "Meta")
-        self.lib.impl("foo2", foo2_meta, "Meta")
+        self.lib.impl(
+            "log_tangents_memory_format", log_tangents_memory_format_meta, "Meta"
+        )
+        self.lib.impl(
+            "log_tangents_memory_format_log",
+            log_tangents_memory_format_log_meta,
+            "Meta",
+        )
 
-        def foo_bwd(ctx, grad):
-            torch.ops._mylib.foo2(grad)
+        def log_tangents_memory_format_bwd(ctx, grad):
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format_log(grad)
             return grad.clone()
 
-        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+        torch.library.register_autograd(
+            "_test_aotdispatch_lib::log_tangents_memory_format",
+            log_tangents_memory_format_bwd,
+            lib=self.lib,
+        )
 
         from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
 
-        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
-        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+        _register_effectful_op(
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format.default,
+            _EffectType.ORDERED,
+        )
+        _register_effectful_op(
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format_log.default,
+            _EffectType.ORDERED,
+        )
 
         return self
 
@@ -6043,7 +6067,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                     z = y + 3
                     y.mul_(2)
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return (
                         r,
                         r.transpose(0, 1),
@@ -6452,43 +6476,45 @@ metadata incorrectly.
         y2.sum().backward()
 
     def test_flex_attn_noncontiguous_tangents(self):
-        E = 16  # embedding dim
-        H = 4  # number of heads
+        with GradsNoForceContiguousContextManager() as ctx:
+            E = 16  # embedding dim
+            H = 4  # number of heads
 
-        compiled_flex_attn = torch.compile(
-            flex_attention, backend="aot_eager", fullgraph=True
-        )
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def attn_fn(q, k, v):
+                y = flex_attention(query=q, key=k, value=v)
+                y = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(y)
+                return y
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.c_attn = torch.nn.Linear(E, 3 * E)
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.c_attn = torch.nn.Linear(E, 3 * E)
 
-            def forward(self, x):
-                B, T, E = x.size()
-                q, k, v = self.c_attn(x).split(E, dim=2)
-                k = k.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
-                q = q.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
-                v = v.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                def forward(self, x):
+                    B, T, E = x.size()
+                    q, k, v = self.c_attn(x).split(E, dim=2)
+                    k = k.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                    q = q.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                    v = v.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
 
-                y = compiled_flex_attn(query=q, key=k, value=v)
+                    y = attn_fn(q, k, v)
 
-                return y.transpose(1, 2).contiguous().view(B, T, E)
+                    return y.transpose(1, 2).contiguous().view(B, T, E)
 
-        m = M()
-        B = 1
-        T = 8
+            m = M()
+            B = 1
+            T = 8
 
-        def _inp():
-            return torch.randn(B, T, E, requires_grad=True)
+            def _inp():
+                return torch.randn(B, T, E, requires_grad=True)
 
-        x = _inp()
-        y = m(x)
-        y.sum().backward()
+            x = _inp()
+            y = m(x)
+            y.backward(torch.ones_like(y).contiguous())
 
-        x = _inp()
-        y = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
-        y.backward(torch.ones_like(y).contiguous())
+            self.assertEqual(1, len(ctx.tangent_strides))
+            self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
 
 
 # entries in here don't work and need to be fixed.
