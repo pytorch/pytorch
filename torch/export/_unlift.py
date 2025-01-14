@@ -121,6 +121,7 @@ def _insert_copy_for_mutations(
             copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
+            copy_node.meta = return_node.meta
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = [
