@@ -100,21 +100,27 @@ class LintResult:
     def is_edit(self) -> bool:
         return None not in (self.char, self.length, self.line, self.replacement)
 
-    def apply(self, lines: list[str]) -> bool:
-        if self.line is None:
-            return False
-        line = lines[self.line - 1]
+    @property
+    def end(self) -> int:
+        assert self.char is not None and self.length is not None
+        return self.char + self.length
 
-        if self.char is None:
-            return False
-        before = line[: self.char]
+    def contains(self, r: LintResult) -> bool:
+        assert self.char is not None and self.line is not None
+        assert r.char is not None and r.line is not None
+        return self.line == r.line and self.char <= r.char and self.end >= r.end
 
-        if self.length is None:
-            return False
-        after = line[self.char + self.length :]
-
-        lines[self.line - 1] = f"{before}{self.replacement}{after}"
-        return True
+    def apply(self, lines: list[str]) -> None:
+        if not (
+            self.char is None
+            or self.length is None
+            or self.line is None
+            or self.replacement is None
+        ):
+            line = lines[self.line - 1]
+            before = line[: self.char]
+            after = line[self.char + self.length :]
+            lines[self.line - 1] = f"{before}{self.replacement}{after}"
 
     def as_message(self, code: str, path: str) -> LintMessage:
         d = dc.asdict(self)
@@ -272,6 +278,11 @@ class PythonFile:
 
         return [froms, imports]
 
+    @cached_property
+    def opening_comment_lines(self) -> int:
+        it = (i for i, s in enumerate(self.lines) if not s.startswith("#"))
+        return next(it, 0)
+
 
 def bracket_pairs(tokens: Sequence[TokenInfo]) -> dict[int, int]:
     """Returns a dictionary mapping opening to closing brackets"""
@@ -394,6 +405,9 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         return not results or self.args.fix and all(r.is_edit for r in results)
 
+    def _error(self, pf: PythonFileT, result: LintResult) -> None:
+        """Called on files that are unparseable"""
+
     def _replace(self, pf: PythonFileT) -> tuple[str, list[LintResult]]:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
@@ -403,21 +417,34 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         while True:
             try:
-                results = list(self._lint(pf))
+                results = sorted(self._lint(pf), key=LintResult.sort_key)
             except IndentationError as e:
                 error, (_name, lineno, column, _line) = e.args
+
                 results = [LintResult(error, lineno, column)]
+                self._error(pf, *results)
 
-            if first_results is None:
-                first_results = sorted(results, key=LintResult.sort_key)
+            except ParseError as e:
+                results = [LintResult(str(e), *e.token.start)]
+                self._error(pf, *results)
 
+            for i, ri in enumerate(results):
+                if not ri.is_recursive:
+                    for j in range(i + 1, len(results)):
+                        rj = results[j]
+                        if ri.contains(rj):
+                            rj.is_recursive = True
+                        else:
+                            break
+
+            first_results = first_results or results
             if not results or len(results) >= previous_result_count:
                 break
             previous_result_count = len(results)
 
             lines = pf.lines[:]
             for r in reversed(results):
-                if not r.is_recursive:
+                if r.is_edit and not r.is_recursive:
                     r.apply(lines)
             replacement = "".join(lines)
 
