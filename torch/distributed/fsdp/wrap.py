@@ -17,7 +17,6 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
     Type,
     Union,
 )
@@ -500,7 +499,7 @@ def _recursive_wrap(
     ignored_params: Set[nn.Parameter],
     only_wrap_children: bool = False,
     **kwargs: Any,
-) -> Tuple[nn.Module, int]:
+) -> tuple[nn.Module, int]:
     """
     Wraps submodules of ``module`` for which ``auto_wrap_policy`` returns
     ``True`` with ``wrapper_cls``.
