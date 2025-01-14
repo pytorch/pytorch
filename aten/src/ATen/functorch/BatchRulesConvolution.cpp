@@ -362,6 +362,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     c10::SymIntArrayRef output_padding, c10::SymInt groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){

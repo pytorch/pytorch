@@ -1,5 +1,5 @@
 # Owner(s): ["module: nestedtensor"]
-
+# ruff: noqa: F841
 import ast
 import io
 import itertools
@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -3559,7 +3559,7 @@ def get_tolerances(
     true_value: torch.Tensor,
     computed_value: torch.Tensor,
     fudge_factor: Optional[float] = None,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Returns the absolute and relative tolerances for comparing two tensors."""
     fudge_factor = fudge_factor if fudge_factor is not None else 1.0
     atol = get_atol(true_value, computed_value)
@@ -7271,14 +7271,46 @@ torch.cuda.synchronize()
 
         flex_attention(query, key, value, score_mod=my_score_mod)
 
+        # Test with batch-specific score_mod
+        batch_size = query.size(0)
+        batch_table = torch.randn(batch_size, device=device, dtype=dtype)
+        # Keep score the same for batch index == 0
+        batch_table[0].zero_()
+
+        def batch_specific_score_mod(score, b, h, q_idx, kv_idx):
+            return score + batch_table[b]
+
+        def identity_score_mod(score, b, h, q_idx, kv_idx):
+            return score
+
+        output = flex_attention(query, key, value, score_mod=batch_specific_score_mod)
+        output_identity = flex_attention(
+            query, key, value, score_mod=identity_score_mod
+        )
+
+        # Guard against a bug where the batch index passed to score_mod is always b == 0.
+        # Output would be equivalent to applying an identity score_mod.
+        # See https://github.com/pytorch/pytorch/issues/143788
+        self.assertFalse(torch.allclose(output._values, output_identity._values))
+
         # Test with mask_mod
         mask_mod_table = score_mod_table > 0.0
 
         def my_mask_mod(b, h, q_idx, kv_idx):
             return mask_mod_table[q_idx]
 
+        def my_mask_mod2(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx] & (b == 0)
+
         block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
-        flex_attention(query, key, value, block_mask=block_mask)
+        output = flex_attention(query, key, value, block_mask=block_mask)
+
+        block_mask2 = create_nested_block_mask(my_mask_mod2, 1, 1, query, _compile=True)
+        output2 = flex_attention(query, key, value, block_mask=block_mask2)
+
+        # Guard against a bug where the batch index passed to mask_mod is always b == 0.
+        # See https://github.com/pytorch/pytorch/issues/143788
+        self.assertFalse(torch.allclose(output._values, output2._values))
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
@@ -8959,8 +8991,6 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
         self.assertEqual(cached_tensor.shape, a.shape)
-        # Test that cached_tensor behaves like 'a'
-        self.assertEqual(cached_tensor + 1, a + 1)
         # Accessing a field that is listed in all_fields but not present in metadata returns
         # None instead of raising AttributeError.
         self.assertIsNone(cached_tensor.c, c)
@@ -8968,7 +8998,6 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         # Create CachedTensor with source_field='b'
         cached_tensor_b = CachedTensor(metadata, source_field="b")
         self.assertEqual(cached_tensor_b.shape, b.shape)
-        self.assertEqual(cached_tensor_b + 1, b + 1)
 
         # Test that accessing a non-existent field raises AttributeError
         with self.assertRaises(AttributeError):
@@ -8990,9 +9019,12 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             metadata = {"a": a, "b": b, "c": c}
             cached_tensor = CachedTensor(metadata, source_field="a")
 
-            # Before registration, clone unwraps
-            cloned_cached_tensor = cached_tensor.clone()
-            self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+            # Before registration, clone errors
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "CachedTensor does not support for aten.clone.default",
+            ):
+                cached_tensor.clone()
 
             # Define a custom clone function that rewraps the output into
             # a new CachedTensor.
@@ -9019,27 +9051,66 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
                 )
 
         # After leaving the context, clone behaves as it did before.
-        cloned_cached_tensor = cached_tensor.clone()
-        self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+        with self.assertRaisesRegex(
+            NotImplementedError, "CachedTensor does not support for aten.clone.default"
+        ):
+            cached_tensor.clone()
 
     def test_basic_compile(self):
-        # Create outside the graph
-        a = torch.tensor([1, 2, 3], dtype=torch.float32)
-        b = torch.tensor([4, 5, 6], dtype=torch.float32)
-        c = torch.tensor([7, 8, 9], dtype=torch.float32)
-        metadata = {"a": a, "b": b, "c": c}
-
-        cached_tensor = CachedTensor(
-            metadata,
-            source_field="a",
+        from torch.nested._internal.cached_tensor import (
+            register_cached_tensor_func,
+            set_func_registry,
         )
 
-        @torch.compile
-        def fn(x):
-            return x.clone()
+        tmp_registry = {}
 
-        out = fn(cached_tensor)
-        self.assertFalse(isinstance(out, CachedTensor))
+        with set_func_registry(tmp_registry):
+
+            @register_cached_tensor_func(torch.ops.aten.clone.default)
+            def cached_tensor_clone(op, inp, *args, **kwargs):
+                # Unwraps to the source and clones
+                out = inp.metadata[inp.source_field].clone()
+                print(isinstance(out, CachedTensor))
+                return out
+
+            #
+            # Construct CachedTensor outside the graph
+            #
+            a = torch.tensor([1, 2, 3], dtype=torch.float32)
+            b = torch.tensor([4, 5, 6], dtype=torch.float32)
+            c = torch.tensor([7, 8, 9], dtype=torch.float32)
+            metadata = {"a": a, "b": b, "c": c}
+
+            cached_tensor = CachedTensor(
+                metadata,
+                source_field="a",
+            )
+
+            @torch.compile(fullgraph=True)
+            def fn1(x):
+                return x.clone().clone()
+
+            out = fn1(cached_tensor)
+            self.assertFalse(isinstance(out, CachedTensor))
+
+            #
+            # Construct CachedTensor inside the graph
+            #
+            a = torch.tensor([1, 2, 3], dtype=torch.float32)
+            b = torch.tensor([4, 5, 6], dtype=torch.float32)
+            c = torch.tensor([7, 8, 9], dtype=torch.float32)
+            metadata = {"a": a, "b": b, "c": c}
+
+            @torch.compile(fullgraph=True)
+            def fn2(y):
+                x = CachedTensor(
+                    metadata,
+                    source_field="a",
+                )
+                return x.clone() * y
+
+            out = fn2(a.clone())
+            self.assertFalse(isinstance(out, CachedTensor))
 
 
 instantiate_parametrized_tests(TestNestedTensor)

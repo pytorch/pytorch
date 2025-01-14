@@ -585,7 +585,7 @@ def linear_backward_default(func, *args, **kwargs):
         dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
         # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
-        db = grad_output._values
+        db = grad_output._values.detach()
     return (ds, dw, db)
 
 
@@ -2367,13 +2367,13 @@ def record_stream_default(func, *args, **kwargs):
     stream = args[1]
 
     # ensure all components live until stream computation completes
-    def func(x: torch.Tensor) -> None:
+    def apply_func(x: torch.Tensor) -> None:
         if not x.is_cpu:
             x.record_stream(stream)
 
     nested_metadata_apply_func(
         inp._metadata,
-        func,
+        apply_func,
         only_source_fields=False,
         unpack_functional_tensor=False,
     )
