@@ -752,7 +752,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
         ):
-            return PassthroughHigherOrderVariable(value, source, **kwargs)
+            return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         elif isinstance(value, PrimHOPBase):
@@ -2171,12 +2171,32 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class PassthroughHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     """
     A Variable to proxy a call to the HOP into the Dynamo output graph.
     Used by Compiled Autograd to let backward HOPs survive until AOTDispatcher.
     """
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
+class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     def proxy_submod(self, tx, arg):
         assert isinstance(arg.source, DictGetItemSource)
         submod_name = tx.output.install_subgraph(arg.source.index, arg.value)
@@ -2188,13 +2208,9 @@ class PassthroughHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if isinstance(arg, UnspecializedNNModuleVariable):
             return self.proxy_submod(tx, arg)
         elif isinstance(arg, (ListVariable, TupleVariable)):
-            proxies_nested = []
-            for nested_arg in arg.items:
-                proxies_nested.append(self.to_proxy(tx, nested_arg))
-
-            if isinstance(arg, TupleVariable):
-                return tuple(proxies_nested)
-            return proxies_nested
+            return arg.python_type()(
+                self.to_proxy(tx, nested_arg) for nested_arg in arg.items
+            )
         else:
             return arg.as_proxy()
 
@@ -2203,8 +2219,13 @@ class PassthroughHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args = tuple(self.to_proxy(tx, arg) for arg in args)
-        p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
+        try:
+            p_args = tuple(self.to_proxy(tx, arg) for arg in args)
+            p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
+        except (NotImplementedError, Unsupported) as err:
+            raise Unsupported(
+                "Missing Dynamo support for FlexAttentionBackward HOP argument. Please file an issue."
+            ) from err
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(

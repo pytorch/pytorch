@@ -2994,10 +2994,8 @@ class SourcelessBuilder:
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
         elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
-            return (
-                torch._dynamo.variables.higher_order_ops.PassthroughHigherOrderVariable(
-                    value
-                )
+            return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
+                value
             )
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"

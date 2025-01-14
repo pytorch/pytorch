@@ -3235,10 +3235,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_flex_attention(self):
+        def _squared(score, b, h, m, n):
+            """Joint graph needed for correctness"""
+            return score * score
+
         def fn():
             @torch.compile(backend="aot_eager")
             def fwd_bwd(x: torch.Tensor):
-                flex_attention(x, x, x).sum().backward()
+                flex_attention(x, x, x, score_mod=_squared).sum().backward()
 
             for a, b in zip([12, 24, 12], [64, 128, 64]):
                 v = torch.zeros(
