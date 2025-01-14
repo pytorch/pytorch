@@ -464,30 +464,30 @@ inline Tensor& betaln_out(Tensor& result, const Tensor& a, const Tensor& b) {
 
 /// Computes betainc
 /// ```
-inline Tensor betainc(const Tensor& self, const Tensor& a, const Tensor& b) {
-  return torch::special_betainc(self, a, b);
+inline Tensor betainc(const Tensor& a, const Tensor& b, const Tensor& x) {
+  return torch::special_betainc(a, b, x);
 }
 
 inline Tensor& betainc_out(
     Tensor& result,
-    const Tensor& self,
     const Tensor& a,
-    const Tensor& b) {
-  return torch::special_betainc_out(result, self, a, b);
+    const Tensor& b,
+    const Tensor& x) {
+  return torch::special_betainc_out(result, a, b, x);
 }
 
 /// Computes betaincinv
 /// ```
-inline Tensor betaincinv(const Tensor& self, const Tensor& a, const Tensor& b) {
-  return torch::special_betaincinv(self, a, b);
+inline Tensor betaincinv(const Tensor& a, const Tensor& b, const Tensor& y) {
+  return torch::special_betaincinv(a, b, y);
 }
 
 inline Tensor& betaincinv_out(
     Tensor& result,
-    const Tensor& self,
     const Tensor& a,
-    const Tensor& b) {
-  return torch::special_betaincinv_out(result, self, a, b);
+    const Tensor& b,
+    const Tensor& y) {
+  return torch::special_betaincinv_out(result, a, b, y);
 }
 
 /// Computes the zeroth order modified Bessel function of the first kind of
