@@ -704,22 +704,16 @@ template <typename scalar_t, typename accscalar_t, typename outscalar_t, templat
 __global__ void
 cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, int classes)
 {
-  // printf("call to cunn_SoftMaxForwardReg!\n");
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
 
   scalar_t reg[reg_cnt];
 
-  // forward pointers to batch[blockIdx.x]
-  // each block handles a sample in the mini-batch
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
   accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
-
-  // const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
-  // const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
 
   // Load the elements from gmem into reg, and get the max for current thread.
   MaxFloat<scalar_t, accscalar_t> maxFunc;
@@ -733,16 +727,9 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, int classes)
     }
   }
 
-  // printf("threadMax is %f\n", threadMax);
-
   // Reduce to the max for block
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
     Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
-
-  // printf("max_k is %f\n", max_k);
-  // if(threadIdx.x == 0){
-  //   printf("max_k is %f\n", max_k);
-  // }
 
   SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
   // reduce all values
@@ -753,15 +740,10 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, int classes)
       threadExp = sumExpFunc(threadExp, reg[reg_idx]);
     }
   }
-  // accscalar_t threadExp = ReduceReg<SumExpFloat, scalar_t, accscalar_t, reg_cnt>(
-  //   reg, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
-  // printf("threadExp is %f\n", threadExp);
   accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
     Add<accscalar_t>(), static_cast<accscalar_t>(0));
-  // printf("sumAll is %f\n", sumAll);
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-
 
   // Write back the value
   #pragma unroll
