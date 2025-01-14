@@ -633,7 +633,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
                     i,
                     loss=loss,
                     last_backward=i == self._n_microbatches - 1,
-                    grad_scale_factor=self._n_microbatches if self.scale_grads else 1,
                 )
 
                 ops = self._stage.get_bwd_send_ops(i)
@@ -641,6 +640,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
+
+        self._stage.scale_grads(
+            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
+        )
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
@@ -734,7 +737,6 @@ class Schedule1F1B(PipelineScheduleSingle):
                 bwd_mb_index,
                 loss=loss,
                 last_backward=bwd_mb_index == self._n_microbatches - 1,
-                grad_scale_factor=self._n_microbatches if self.scale_grads else 1,
             )
 
             # Get the bwd send ops, but don't fire, to be fused with the 1F below
@@ -778,7 +780,6 @@ class Schedule1F1B(PipelineScheduleSingle):
                 bwd_mb_index,
                 loss=loss,
                 last_backward=bwd_mb_index == self._n_microbatches - 1,
-                grad_scale_factor=self._n_microbatches if self.scale_grads else 1,
             )
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
@@ -789,6 +790,10 @@ class Schedule1F1B(PipelineScheduleSingle):
             bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
+
+        self._stage.scale_grads(
+            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
+        )
 
         # Wait for the last backward send to finish
         if send_work:
@@ -1267,16 +1272,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         stage = stage_index_to_stage[stage_index]
                         loss = self._maybe_get_loss(stage, mb_index)
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_one_chunk(
                             mb_index,
                             loss=loss,
                             full_backward=True,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
-                            grad_scale_factor=self._n_microbatches
-                            if self.scale_grads
-                            else 1,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
+
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_INPUT:
                         # perform backward computation
@@ -1293,14 +1303,18 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         # perform weight update
                         stage = stage_index_to_stage[stage_index]
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
-                            grad_scale_factor=self._n_microbatches
-                            if self.scale_grads
-                            else 1,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -1632,16 +1646,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         bwd_recv_ops.pop((stage_idx, mb_index)).wait()
                     loss = self._maybe_get_loss(stage, mb_index)
                     backward_counter[stage_idx] += 1
+                    last_backward = backward_counter[stage_idx] == self._n_microbatches
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                     stage.backward_one_chunk(
                         mb_index,
                         loss=loss,
                         full_backward=True,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
-                        grad_scale_factor=self._n_microbatches
-                        if self.scale_grads
-                        else 1,
+                        last_backward=last_backward,
                     )
+                    if last_backward:
+                        stage.scale_grads(grad_scale_factor)
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
                     if is_prev_stage_on_this_rank:
