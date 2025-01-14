@@ -14,7 +14,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-#include <aten/src/ATen/native/quantized/library.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>

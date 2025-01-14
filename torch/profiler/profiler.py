@@ -7,7 +7,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -723,7 +723,7 @@ class profile(_KinetoProfile):
         self.step_rec_fn: Optional[prof.record_function] = None
 
         self.action_map: Dict[
-            Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+            tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],

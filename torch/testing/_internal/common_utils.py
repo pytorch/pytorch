@@ -1591,11 +1591,17 @@ def xpassIfTorchDynamo_np(func):
         return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 
+
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
+def xfailIfPy312Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
 def xfailIfLinux(func):
