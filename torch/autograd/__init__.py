@@ -284,7 +284,7 @@ def backward(
         See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
     Args:
-        tensors (Sequence[Tensor] or Tensor or Sequence[GradientEdge]): Tensors of which
+        tensors (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or GradientEdge): Tensors of which
             the derivative will be computed.
         grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
             the Jacobian-vector product, usually gradients w.r.t. each element of
@@ -329,7 +329,7 @@ def backward(
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(
-            Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (tensors,)
+            Union[Tuple[torch.Tensor], Tuple[graph.GradientEdge]], (tensors,)
         )
     else:
         tensors = tuple(tensors)
