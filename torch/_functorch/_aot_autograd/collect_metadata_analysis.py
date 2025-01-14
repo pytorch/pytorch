@@ -77,7 +77,11 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
     is_subclass = is_traceable_wrapper_subclass(out)
 
     memory_format = MemoryFormatMeta.from_tensor(out)
-    updated = False
+
+    if memory_format.memory_format is not None:
+        was = out
+        out = out.contiguous(memory_format=memory_format.memory_format)
+        updated = was is not out
 
     # For subclass we keep memory format of outer strides at the beggining of the list
     out_memory_format = [memory_format] if is_subclass else memory_format

@@ -6412,7 +6412,12 @@ metadata incorrectly.
         _test_fn(fn_inplace, check_backward=False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_noncontig_nonmemformat_tangents(self):
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @parametrize("device", ["cuda", "cpu"])
+    def test_noncontig_nonmemformat_tangents(
+        self, dynamic_shapes, test_subclasses, device
+    ):
         B = 2
         T = 8
         E = 16
@@ -6421,8 +6426,17 @@ metadata incorrectly.
             x = x + 1
             return x.transpose(1, 2)
 
-        def _inp():
-            return torch.randn(B, T, E, device="cuda", requires_grad=True)
+        def _inp_dense():
+            t = torch.randn(B, T, E, device=device, requires_grad=True)
+            if dynamic_shapes:
+                for i in range(t.ndim):
+                    torch._dynamo.mark_dynamic(t, i)
+            return t
+
+        def _inp_sc():
+            return TwoTensor(_inp_dense(), _inp_dense())
+
+        _inp = _inp_dense if not test_subclasses else _inp_sc
 
         fn(_inp())
 
@@ -6785,6 +6799,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestAOTModuleSimplified)
 only_for = "cpu"
 instantiate_device_type_tests(
     TestPythonKey,

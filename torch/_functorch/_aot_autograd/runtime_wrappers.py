@@ -1693,57 +1693,31 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
     return out
 
 
-def coerce_subclass_to_expected_memory_format(
-    x: torch.Tensor,
-    expected_size: Sequence[Union[int, torch.SymInt]],
-    expected_stride: Sequence[Union[int, torch.SymInt]],
-) -> Optional[torch.Tensor]:
-    if not hasattr(x, "__coerce_tangent_memory_format__"):
-        # If custom coercion is not implemented, try to coerce with as_strided
-        return x.as_strided(size=expected_size, stride=expected_stride)
-    return x.__coerce_tangent_memory_format__(expected_size, expected_stride)
-
-
 def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    if memory_format.memory_format is not None:
+        # Coerce to torch.memory_format
+        if not x.is_contiguous(memory_format=memory_format.memory_format):
+            x = x.contiguous(memory_format=memory_format.memory_format)
+        return x
+
     expected_size = memory_format.size
+    assert expected_size is not None
     expected_stride = memory_format.stride
+    assert expected_stride is not None
+    # we are guranteed that expected_size, expected_stride do not contain SymInts,
+    # we can use == to compare runtime tensor strides and shapes
 
     if x.shape == expected_size and x.stride() == expected_stride:
         # Runtime tangent size and stride are the same as expected, no need to coerce
         return x
 
-    if not is_traceable_wrapper_subclass(x):
-        # Runtime tangent is a dense tensor
+    if torch._debug_has_internal_overlap(x) != 0:
+        x = x.contiguous()
 
-        # We can not use as_strided() when tensor has memory overlap as storage size is different
-        # => use contiguous() to avoid memory overlap.
+    if x.shape == expected_size and x.stride() == expected_stride:
+        return x
 
-        if torch._debug_has_internal_overlap(x) != 0:
-            x = x.contiguous()
-
-        return x.as_strided(size=expected_size, stride=expected_stride)
-
-    # Runtime tangent is traceable wrapper subclass with different size and stride from expected
-    # TODO: ??? to introduce a separate method to coerce subclass to expected memory format or it can just override as_strided for that?
-    try:
-        x = coerce_subclass_to_expected_memory_format(x, expected_size, expected_stride)
-        if x is None:
-            raise Exception(
-                f"Subclass type {type(x)} __coerce_tangent_memory_format__ could not coerce to size:{expected_size} stride:{expected_stride} and returned None"
-            )
-    except Exception as e:
-        raise RuntimeError(
-            f"""
-During the backward, we encountered a tensor subclass {type(x)} where we guessed its
-stride incorrectly.
-
-Expected size: {expected_size}, expected_stride:{expected_stride}
-
-Runtime size:{x.shape}, runtime stride {x.stride()}
-
-To fix this, your tensor subclass must implement __coerce_tangent_memory_format__ or torch.ops.aten.as_strided.
-"""
-        ) from e
+    return x.as_strided(size=expected_size, stride=expected_stride)
 
 
 # This is wrapped in a class just for namespacing purposes

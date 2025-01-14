@@ -7,6 +7,7 @@ input/output types, metadata, config, function signatures etc.
 import collections
 import dataclasses
 import functools
+import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -167,14 +168,32 @@ class InputAliasInfo:
 
 @dataclass
 class MemoryFormatMeta:
-    size: Sequence[Union[int | torch.SymInt]]
-    stride: Sequence[Union[int | torch.SymInt]]
+    # For static shapes we assume tangents have the same strideness as outputs
+    size: Optional[Sequence[Union[int, torch.SymInt]]]
+    stride: Optional[Sequence[Union[int, torch.SymInt]]]
+
+    # For dynamic shapes we assume the same memory format: contiguous, channels_last etc.
+    memory_format: Optional[torch.memory_format]
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+        memory_format_as_strides = True
+        for s in itertools.chain(t.shape, t.stride()):
+            if isinstance(s, torch.SymInt):
+                memory_format_as_strides = False
+                break
+
+        if memory_format_as_strides:
+            return MemoryFormatMeta(
+                size=t.size(),
+                stride=t.stride(),
+                memory_format=None,
+            )
+
         return MemoryFormatMeta(
-            size=t.size(),
-            stride=t.stride(),
+            size=None,
+            stride=None,
+            memory_format=torch._prims_common.suggest_memory_format(t),
         )
 
 
