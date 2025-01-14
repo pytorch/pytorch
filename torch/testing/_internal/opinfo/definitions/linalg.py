@@ -1003,7 +1003,7 @@ def sample_inputs_linalg_solve(
         make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
-    batches = [(), (0,), (2,)]
+    batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
     if vector_rhs_allowed:
         nrhs = [(), (1,), (3,)]

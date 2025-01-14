@@ -8,7 +8,7 @@ import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
-from ..scheduler import SchedulerNode
+from ..scheduler import Scheduler, SchedulerNode
 from ..utils import get_bounds_index_expr, get_kernel_metadata
 from ..virtualized import ops, V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
@@ -75,6 +75,12 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        return f"*reinterpret_cast<thread {DTYPE_TO_METAL[dtype]}*>(&{x})"
+
+    @staticmethod
     def constant(val: CSEVariable, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
@@ -115,14 +121,14 @@ class MetalOverrides(OpOverrides):
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         max_res = f"metal::max({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b}) ? {a} + {b} : {max_res}"
+        return f"isnan({a} + {b}) ? {a} + {b} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         min_res = f"metal::min({typecast_a}, {typecast_b})"
-        return f"metal::isnan({a} + {b})  ? {a} + {b} : {min_res}"
+        return f"isnan({a} + {b})  ? {a} + {b} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -143,6 +149,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def log(x: CSEVariable) -> str:
         return f"metal::log({x})"
+
+    @staticmethod
+    def exp(x: CSEVariable) -> str:
+        return f"metal::exp({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -213,6 +223,26 @@ class MetalOverrides(OpOverrides):
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
+    @staticmethod
+    def trunc(x: CSEVariable) -> str:
+        return f"metal::trunc({x})"
+
+    @staticmethod
+    def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
+        # Upcast to float otherwise the generated code doesn't typecheck.
+        # TODO (dcci): remove this workaround
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"metal::trunc({float_a}/{float_b})"
+
+    @staticmethod
+    def ceil(x: CSEVariable) -> str:
+        return f"metal::ceil({x})"
+
+    @staticmethod
+    def round(x: CSEVariable) -> str:
+        return f"metal::round({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -238,7 +268,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{index}]"
+        line = f"{var}[{self.sexpr(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
@@ -258,9 +288,20 @@ class MetalKernel(SIMDKernel):
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
-        code.writeline('torch.mps._compile_shader("""')
+        code.writeline('compile_mps_shader("""')
         idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
+            code.splice(
+                """
+            template<typename T> inline bool isnan(T) { return false; }
+            template<> inline bool isnan(float x) { return metal::isnan(x); }
+            template<> inline bool isnan(half x) { return metal::isnan(x); }
+            #if __METAL_VERSION__ >= 310
+            template<> inline bool isnan(bfloat x) { return metal::isnan(x); }
+            #endif
+            """,
+                strip=True,
+            )
             code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
@@ -271,6 +312,8 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
+                for outer, inner in self.args.sizevars.items():
+                    code.writeline(f"constant long& {inner},")
                 if len(idx_var_names) == 1:
                     code.writeline(
                         f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
@@ -299,6 +342,7 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        args += [str(v) for v in self.args.sizevars.keys()]
         if len(self.active_range_trees()) > 0:
             args += [
                 f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
@@ -311,9 +355,31 @@ class MetalKernel(SIMDKernel):
             triton=False,
         )
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        if not (lower or upper):
+            return
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
+        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
+        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        if lower and upper:
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
+        else:
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.body, line, assignment=False)
+
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+
+    def __init__(self, scheduler: Scheduler) -> None:
+        super().__init__(scheduler)
+        wrapper = V.graph.wrapper_code
+        wrapper.header.splice(
+            "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+        )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
