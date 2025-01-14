@@ -75,12 +75,12 @@ namespace at::meta {
     .enforce_safe_casting_to_output(true)       \
     .promote_integer_inputs_to_float(true)
 
-TORCH_META_FUNC(special_betainc) (const Tensor& self, const Tensor& a, const Tensor& b) {
+TORCH_META_FUNC(special_betainc) (const Tensor& a, const Tensor& b, const Tensor& x) {
   build(FLOAT_OP_CONFIG()
       .add_output(maybe_get_output())
-      .add_const_input(self)
       .add_const_input(a)
-      .add_const_input(b));
+      .add_const_input(b)
+      .add_const_input(x));
 }
 
 TORCH_META_FUNC(special_betaln) (const Tensor& a, const Tensor& b) {
@@ -90,12 +90,12 @@ TORCH_META_FUNC(special_betaln) (const Tensor& a, const Tensor& b) {
       .add_const_input(b));
 }
 
-TORCH_META_FUNC(special_betaincinv) (const Tensor& self, const Tensor& a, const Tensor& b) {
+TORCH_META_FUNC(special_betaincinv) (const Tensor& a, const Tensor& b, const Tensor& y) {
   build(FLOAT_OP_CONFIG()
       .add_output(maybe_get_output())
-      .add_const_input(self)
       .add_const_input(a)
-      .add_const_input(b));
+      .add_const_input(b)
+      .add_const_input(y));
 }
 
 } // namespace at::meta
@@ -105,7 +105,7 @@ namespace at::native {
 
 DEFINE_DISPATCH(betainc_stub);
 
-TORCH_IMPL_FUNC(special_betainc_out) (const Tensor& self, const Tensor& a, const Tensor& b, const Tensor& result) {
+TORCH_IMPL_FUNC(special_betainc_out) (const Tensor& a, const Tensor& b, const Tensor& x, const Tensor& result) {
   betainc_stub(device_type(), *this);
 }
 
@@ -185,8 +185,8 @@ TORCH_IMPL_FUNC(special_betaln_out) (const Tensor& a, const Tensor& b, const Ten
   result.copy_(result_tmp);
 }
 
-static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const Tensor& b, at::ScalarType& dtype) {
-    /* Computes an initial approximation for `betaincinv(y, a, b)`. */
+static Tensor _betaincinv_initial_approx(const Tensor& a, const Tensor& b, const Tensor& y, at::ScalarType& dtype) {
+    /* Computes an initial approximation for `betaincinv(a, b, y)`. */
   const auto&& [eps, tiny, maxexp] = AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -218,14 +218,14 @@ static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const
 
   /* When min(a, b) < 1 and max(a, b) >= 1, we use the approximation proposed by
    * [2]. This approximation depends on the following approximation for betainc:
-   *   betainc(x, a, b) ~=
+   *   betainc(a, b, x) ~=
    *       x ** a / (integral_approx * a) , when x <= mean ,
    *       (1 - x) ** b / (integral_approx * b) , when x > mean ,
    * where:
    *   integral_approx = (mean ** a) / a + (mean_complement ** b) / b ,
    *   mean = a / (a + b) ,
    *   mean_complement = 1 - mean = b / (a + b) .
-   *   We invert betainc(x, a, b) with respect to x in the proper regime. */
+   *   We invert betainc(a, b, x) with respect to x in the proper regime. */
 
   // Equation 6.4.7 [2, page 271]
   Tensor a_plus_b = a + b;
@@ -248,7 +248,7 @@ static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const
 
   /* And when max(a, b) < 1, we use the approximation proposed by [3] for the
    * same domain:
-   *   betaincinv(y, a, b) ~= xg / (1 + xg) ,
+   *   betaincinv(a, b, y) ~= xg / (1 + xg) ,
    * where:
    *   xg = (a * y * Beta(a, b)) ** (1 / a) . */
   Tensor log_xg = at::xlogy(inv_a, a) + at::xlogy(inv_a, y) + (
@@ -266,7 +266,7 @@ static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const
   return at::clamp(result, tiny, 1.0 - eps);
 }
 
-static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Tensor& b) {
+static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Tensor& y) {
   at::ScalarType dtype_orig = at::promoteTypes(at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
   bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) | (dtype_orig == at::ScalarType::Half)) ? true : false;
   at::ScalarType dtype = should_promote_dtype ? at::ScalarType::Float : dtype_orig;
@@ -300,17 +300,17 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
 
   /* When betainc(0.5, a, b) < y, we apply the symmetry relation given
    * here: https://dlmf.nist.gov/8.17.E4
-   *   torch.special.betainc(x, a, b) = 1 - torch.special.betainc(1 - x, b, a) .
+   *   torch.special.betainc(a, b, x) = 1 - torch.special.betainc(b, a, 1 - x) .
    * If dtype is float32, we have additional conditions to apply this relation:
    *   (a < 1) & (b < 1) & (torch_special.betainc(a / (a + b), a, b) < y) . */
   Tensor a_and_b_are_small;
   Tensor error_at_mean;
 
-  Tensor error_at_half = at::special_betainc(half, _a, _b) - _y;
+  Tensor error_at_half = at::special_betainc(_a, _b, half) - _y;
   Tensor use_symmetry_relation;
   if (dtype == at::ScalarType::Float) {
       a_and_b_are_small = (_a < 1.0) & (_b < 1.0);
-      error_at_mean = at::special_betainc(_a / (_a + _b), _a, _b) - _y;
+      error_at_mean = at::special_betainc(_a, _b, _a / (_a + _b)) - _y;
       use_symmetry_relation = (error_at_half < 0.0) & a_and_b_are_small & (
           error_at_mean < 0.0);
   } else { // T is double
@@ -338,7 +338,7 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
       tolerance = at::scalar_tensor(4096.0, options) * eps;
   }
 
-  Tensor initial_candidate = _betaincinv_initial_approx(_y, _a, _b, dtype);
+  Tensor initial_candidate = _betaincinv_initial_approx(_a, _b, _y, dtype);
   // Bracket the solution with the interval (low, high).
   Tensor initial_low = at::zeros_like(_y);
   Tensor initial_high;
@@ -358,7 +358,7 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
   for (int i = 0; i < max_iterations; i++) {
       if (should_stop.all().equal(_true))
           break;
-      Tensor error = at::special_betainc(candidate, _a, _b) - _y;
+      Tensor error = at::special_betainc(_a, _b, candidate) - _y;
       Tensor error_over_der = error / at::exp(
           at::xlogy(a_minus_1, candidate) +
           at::special_xlog1py(b_minus_1, -candidate) -
@@ -416,8 +416,8 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
   return result;
 }
 
-TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& self, const Tensor& a, const Tensor& b, const Tensor& result) {
-  const Tensor&& result_tmp = _betaincinv_computation(self, a, b);
+TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& a, const Tensor& b, const Tensor& y, const Tensor& result) {
+  const Tensor&& result_tmp = _betaincinv_computation(a, b, y);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
 }
