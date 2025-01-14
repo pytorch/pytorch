@@ -243,7 +243,7 @@ class _StorageWriterTransforms:
 
     def transform_save_stream(
         self, write_item: WriteItem, raw_stream: io.IOBase
-    ) -> Tuple[IO[bytes], List[str]]:
+    ) -> tuple[IO[bytes], List[str]]:
         # In order to avoid leaking fds, transformers' close must
         # cascade to wrapped streams, but since this function can
         # append to the raw stream, we can't close the actual stream.
