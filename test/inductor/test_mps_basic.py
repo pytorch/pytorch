@@ -64,6 +64,7 @@ class MPSBasicTests(TestCase):
     test_slice_scatter4 = CommonTemplate.test_slice_scatter4
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
+    test_view_on_aliased = CommonTemplate.test_view_on_aliased
     test_views3 = CommonTemplate.test_views3
     test_views6 = CommonTemplate.test_views6
     test_views7 = CommonTemplate.test_views7

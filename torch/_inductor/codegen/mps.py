@@ -239,6 +239,10 @@ class MetalOverrides(OpOverrides):
     def ceil(x: CSEVariable) -> str:
         return f"metal::ceil({x})"
 
+    @staticmethod
+    def round(x: CSEVariable) -> str:
+        return f"metal::round({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
