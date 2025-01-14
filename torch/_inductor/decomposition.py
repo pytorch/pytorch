@@ -553,7 +553,10 @@ def randn_like(
     result = torch.empty_like(
         self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
-    return aten.normal_(result, 0, 1)
+    return aten.copy(
+        result,
+        torch.randn(result.shape, dtype=result.dtype, device=result.device, **kwargs),
+    )
 
 
 @register_decomposition(aten.full_like)
@@ -605,7 +608,7 @@ def randint_like(
     result = torch.empty_like(
         self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
-    return aten.random_(result, 0, high)
+    return aten.copy(result, aten.random(result, 0, high))
 
 
 @register_decomposition(aten.randint_like.low_dtype)
@@ -622,7 +625,7 @@ def randint_like_low(
     result = torch.empty_like(
         self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
-    return aten.random_(result, low, high)
+    return aten.copy(result, aten.random(result, low, high))
 
 
 @register_decomposition(aten.randint.default)
