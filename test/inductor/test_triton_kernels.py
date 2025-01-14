@@ -19,7 +19,12 @@ from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1296,6 +1301,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    @skipIfRocm
     def test_triton_kernel_with_imported_symbol(self):
         @triton.jit
         def add_kernel_with_imported_symbol(
