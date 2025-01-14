@@ -1119,7 +1119,7 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
-        'setuptools ; python_version >= "3.12"',
+        "setuptools",
         "sympy>=1.13.3",
         "networkx",
         "jinja2",
