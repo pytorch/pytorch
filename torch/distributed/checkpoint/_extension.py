@@ -10,6 +10,10 @@ from typing import cast, IO, Optional, Type
 from typing_extensions import Buffer
 
 
+# NOTE: everything in this file is experimental, and subject to
+# change.  Feedback and bug fixes are always welcome.
+
+
 __all__ = ["Extension", "StreamTransformExtension", "Rot13Example", "ExtensionRegistry"]
 
 
