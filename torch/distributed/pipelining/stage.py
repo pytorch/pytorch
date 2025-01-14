@@ -814,9 +814,7 @@ class _PipelineStageBase(ABC):
         else:
             if full_backward:
                 grads_input, _ = self.backward_maybe_with_nosync(
-                    "full",
-                    bwd_kwargs,
-                    last_backward=last_backward,
+                    "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
                 param_groups: List[Dict[str, Any]] | None = None
@@ -829,9 +827,7 @@ class _PipelineStageBase(ABC):
                     # perform the partial backwards for the inputs with a custom backward function
                     # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
                     grads_input, param_groups = self.backward_maybe_with_nosync(
-                        "input",
-                        bwd_kwargs,
-                        last_backward=last_backward,
+                        "input", bwd_kwargs, last_backward=last_backward
                     )
 
                 # TODO: we dont need to save this, add to dw_runner?
@@ -880,9 +876,7 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                 }
                 self.backward_maybe_with_nosync(
-                    "weight",
-                    bwd_kwargs,
-                    last_backward=last_backward,
+                    "weight", bwd_kwargs, last_backward=last_backward
                 )
             else:
                 # TODO: figure out a better way to do this:
@@ -896,9 +890,7 @@ class _PipelineStageBase(ABC):
                     "input_values": input_values,
                 }
                 self.backward_maybe_with_nosync(
-                    "full",
-                    bwd_kwargs,
-                    last_backward=last_backward,
+                    "full", bwd_kwargs, last_backward=last_backward
                 )
 
     def _validate_fwd_input(self, args, kwargs):
