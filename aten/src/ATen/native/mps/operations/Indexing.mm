@@ -667,7 +667,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
                                                           falsePredicateTensor:[mpsGraph constantWithScalar:0
                                                                   dataType:getMPSDataType(index)]
                                                           name:nil];
-      // drop all values that are zero
+      // drop all indices that are zero
       MPSGraphTensor* validIndices = [mpsGraph nonZeroIndicesOfTensor:maskedIndexTensor
                                                                 name:nil];
 
@@ -678,22 +678,22 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       // remove values from index that are greater than the size of the dimension
       // nothing should be done if the values are valid
       // if values have been removed, then this will fail with an error because the tensors are not the same size
-      MPSGraphTensor* droppedTensor = [mpsGraph gatherWithUpdatesTensor:indexTensor
-                                                  indicesTensor:reshapedIndices
+      MPSGraphTensor* filteredTensor = [mpsGraph gatherWithUpdatesTensor:maskedIndexTensor
+                                                  indicesTensor:validIndices
                                                   axis:0
                                                   batchDimensions:0
                                                   name:nil];
 
       // Gather the values from the input tensor
       MPSGraphTensor* outputTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
-                                                         indicesTensor:droppedTensor
+                                                         indicesTensor:filteredTensor
                                                                   axis:dim
                                                        batchDimensions:0
                                                                   name:nil];
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->outputTensor_ = filteredTensor;
     });
 
     // MPS TODO: MPS Gather is failing with MPS strided API. Fallback to old gather.
