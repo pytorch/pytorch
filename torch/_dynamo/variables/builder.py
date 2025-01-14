@@ -14,7 +14,6 @@ import math
 import operator
 import random
 import re
-import sys
 import types
 import warnings
 import weakref
@@ -142,7 +141,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    PythonSysModulesVariable,
     SetVariable,
 )
 from .distributed import (
@@ -218,8 +216,8 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
+    DispatchKeySetVariable,
     TorchCtxManagerClassVariable,
-    TorchDispatchKeySetVariable,
     TorchInGraphFunctionVariable,
 )
 from .torch_function import (
@@ -578,37 +576,15 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                TypingVariable(k): UserDefinedObjectVariable(
-                    v,
-                    source=DictGetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-            # Optimisation for the common case strings, ints, etc
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -729,7 +705,7 @@ class VariableBuilder:
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
@@ -918,7 +894,7 @@ class VariableBuilder:
             return OptimizerVariable(value, source=self.source)
         elif isinstance(value, torch.DispatchKeySet):
             self.install_guards(GuardBuilder.DISPATCH_KEY_SET_MATCH)
-            return TorchDispatchKeySetVariable(value)
+            return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
@@ -1262,9 +1238,11 @@ class VariableBuilder:
             # apply side-effects of this dict_vt.
             dict_vt = ConstDictVariable(
                 result,
-                user_cls=collections.OrderedDict
-                if isinstance(value, collections.OrderedDict)
-                else dict,
+                user_cls=(
+                    collections.OrderedDict
+                    if isinstance(value, collections.OrderedDict)
+                    else dict
+                ),
                 mutation_type=ValueMutationNew(),
             )
 
@@ -2499,13 +2477,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
-    elif proxy.node.target in [
-        torch._C._dispatch_keys,
-        torch._C._dispatch_tls_local_include_set,
-        torch._C._dispatch_tls_local_exclude_set,
-    ]:
-        set_example_value(proxy.node, example_value)
-        return TorchDispatchKeySetVariable(example_value, **options)
     elif isinstance(example_value, int) and (
         proxy.node.target
         in [
@@ -3045,7 +3016,7 @@ class SourcelessBuilder:
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
-        handlers[torch.DispatchKeySet] = lambda tx, value: TorchDispatchKeySetVariable(
+        handlers[torch.DispatchKeySet] = lambda tx, value: DispatchKeySetVariable(
             value, mutation_type=ValueMutationNew()
         )
 

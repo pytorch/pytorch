@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, List, NamedTuple, Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -16,7 +16,7 @@ class TensorMeta(NamedTuple):
     # intentionally to stay simple only for sharding
     # propagation purposes.
     shape: torch.Size
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     dtype: torch.dtype
 
 
@@ -24,7 +24,7 @@ class TensorMeta(NamedTuple):
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Tuple[Placement, ...]
+    placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
@@ -107,7 +107,7 @@ class DTensorSpec:
         return self.tensor_meta.shape
 
     @property
-    def stride(self) -> Tuple[int, ...]:
+    def stride(self) -> tuple[int, ...]:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return self.tensor_meta.stride

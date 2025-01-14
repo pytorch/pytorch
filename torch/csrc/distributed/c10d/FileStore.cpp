@@ -99,6 +99,7 @@ class Lock {
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
