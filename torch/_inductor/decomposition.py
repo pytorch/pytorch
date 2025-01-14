@@ -526,17 +526,6 @@ def view_copy_dtype(
     return self.to(dtype).clone()
 
 
-def _memory_format_like(
-    output: torch.Tensor,
-    input: torch.Tensor,
-    memory_format: Optional[torch.memory_format] = None,
-) -> torch.Tensor:
-    if memory_format is torch.preserve_format or memory_format is None:
-        return output.as_strided(input.shape, input.stride())
-    else:
-        return output.to(memory_format=memory_format)
-
-
 @register_decomposition(aten.rand_like)
 def rand_like(
     self: torch.Tensor,
@@ -546,16 +535,10 @@ def rand_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return _memory_format_like(
-        torch.rand(
-            [*self.size()],
-            dtype=dtype or self.dtype,
-            device=device or self.device,
-            **kwargs,
-        ),
-        self,
-        memory_format,
+    result = torch.empty_like(
+        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
+    return aten.uniform_(result, 0, 1)
 
 
 @register_decomposition(aten.randn_like)
@@ -567,16 +550,10 @@ def randn_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return _memory_format_like(
-        torch.randn(
-            [*self.size()],
-            dtype=dtype or self.dtype,
-            device=device or self.device,
-            **kwargs,
-        ),
-        self,
-        memory_format,
+    result = torch.empty_like(
+        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
+    return aten.normal_(result, 0, 1)
 
 
 @register_decomposition(aten.full_like)
@@ -591,18 +568,28 @@ def full_like(
     requires_grad: bool = False,
     memory_format: Optional[torch.memory_format] = torch.preserve_format,
 ) -> torch.Tensor:
-    return _memory_format_like(
-        torch.full(
+    # Can't use aten.fill_ as that dispatches to full_like
+    if memory_format is torch.preserve_format or memory_format is None:
+        result = torch.empty_like(
+            self,
+            dtype=dtype,
+            device=device,
+            memory_format=memory_format,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        full = torch.tensor(fill_value, device=device, dtype=dtype)
+        return aten.copy(result, full)
+    else:
+        result = torch.full(
             [*self.size()],
             fill_value,
             dtype=dtype or self.dtype,
             layout=layout or self.layout,
             device=device or self.device,
             requires_grad=requires_grad,
-        ),
-        self,
-        memory_format,
-    )
+        )
+        return result.to(memory_format=memory_format)
 
 
 @register_decomposition(aten.randint_like.default)
@@ -615,18 +602,10 @@ def randint_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return _memory_format_like(
-        aten.randint.low(
-            0,
-            high,
-            [*self.size()],
-            dtype=dtype or self.dtype,
-            device=device or self.device,
-            **kwargs,
-        ),
-        self,
-        memory_format,
+    result = torch.empty_like(
+        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
+    return aten.random_(result, 0, high)
 
 
 @register_decomposition(aten.randint_like.low_dtype)
@@ -640,18 +619,10 @@ def randint_like_low(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return _memory_format_like(
-        aten.randint.low(
-            low,
-            high,
-            [*self.size()],
-            dtype=dtype or self.dtype,
-            device=device or self.device,
-            **kwargs,
-        ),
-        self,
-        memory_format,
+    result = torch.empty_like(
+        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
     )
+    return aten.random_(result, low, high)
 
 
 @register_decomposition(aten.randint.default)
