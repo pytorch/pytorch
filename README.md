@@ -359,14 +359,6 @@ In this mode PyTorch with Intel GPU support will be built.
 
 Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed in prior. For build tool support, Visual Studio 2022 is required.
 
-Specifically, the environmental variables needs to be configured by the following commands:
-
-```cmd
-$ call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
-$ call "C:\Program Files (x86)\Intel\oneAPI\compiler\2025.0\env\vars.bat"
-$ call "C:\Program Files (x86)\Intel\oneAPI\ocloc\2024.2\env\vars.bat"
-```
-
 Then PyTorch can be built with the command:
 
 ```cmd
