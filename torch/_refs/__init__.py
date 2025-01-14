@@ -3230,12 +3230,10 @@ def native_group_norm(
         )
         b = b + bias_reshaped
 
-    w = w.as_strided([batch_size, num_channels], [num_channels, 1])
-    b = b.as_strided([batch_size, num_channels], [num_channels, 1])
-    broadcast_dims = list(range(2, input.ndim))
-    unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
-    unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-    out = input_acc * unsqueeze_w + unsqueeze_b
+    w = w.as_strided(w.size(), w.stride())
+    b = b.as_strided(b.size(), b.stride())
+    out = input_reshaped * w + b
+    out = out.view(input.shape)
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]

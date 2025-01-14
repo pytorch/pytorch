@@ -6513,6 +6513,30 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             else:
                 del os.environ["MASTER_PORT"]
 
+    def test_dont_dce_rand(self):
+        # https://github.com/pytorch/pytorch/issues/143431
+        def f(image_latent):
+            B = 2
+            num_ref = 3
+            num_tar = 3
+            x = torch.rand(B, 12)
+            indices = torch.argsort(torch.rand(*x.shape), dim=-1)[
+                :, : num_ref + num_tar
+            ]
+            return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
+
+        torch.manual_seed(54321)
+        torch.cuda.manual_seed_all(54321)
+        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+
+        for backend in ["eager", "aot_eager"]:
+            torch.manual_seed(54321)
+            torch.cuda.manual_seed_all(54321)
+            actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                torch.randn((2, 12, 16, 32, 32))
+            ).sum()
+            self.assertEqual(actual, expected)
+
 
 instantiate_parametrized_tests(ReproTests)
 
