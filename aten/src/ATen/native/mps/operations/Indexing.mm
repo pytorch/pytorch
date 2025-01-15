@@ -657,33 +657,33 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
 
       // Create less than comparison
       MPSGraphTensor* checkTensor = [mpsGraph lessThanWithPrimaryTensor:indexTensor
-                                                    secondaryTensor:[mpsGraph constantWithScalar: self.size(dim)
-                                                        dataType:getMPSDataType(index)]
-                                                    name:nil];
+                                                        secondaryTensor:[mpsGraph constantWithScalar:self.size(dim)
+                                                                                            dataType:getMPSDataType(index)]
+                                                                   name:nil];
 
       // Create a mask tensor with 1s and 0s
       MPSGraphTensor* maskTensor = [mpsGraph selectWithPredicateTensor:checkTensor
-                                                          truePredicateTensor:[mpsGraph constantWithScalar:1
-                                                              dataType:getMPSDataType(index)]
-                                                          falsePredicateTensor:[mpsGraph constantWithScalar:0
-                                                                  dataType:getMPSDataType(index)]
-                                                          name:nil];
+                                                   truePredicateTensor:[mpsGraph constantWithScalar:1
+                                                                                           dataType:getMPSDataType(index)]
+                                                  falsePredicateTensor:[mpsGraph constantWithScalar:0
+                                                                                           dataType:getMPSDataType(index)]
+                                                                  name:nil];
       // drop all indices that are zero
       MPSGraphTensor* validIndices = [mpsGraph nonZeroIndicesOfTensor:maskTensor
-                                                                name:nil];
+                                                                 name:nil];
 
       // Reshape the indices to a 1D tensor
       MPSGraphTensor* reshapedIndices = [mpsGraph reshapeTensor:validIndices
-                                                    withShape:@[@-1]  // -1 means infer from input
-                                                        name:nil];
+                                                      withShape:@[@-1]  // -1 means infer from input
+                                                           name:nil];
       // remove values from index that are greater than the size of the dimension
       // nothing should be done if the values are valid
       // if values have been removed, then this will fail with an error because the tensors are not the same size
       MPSGraphTensor* filteredTensor = [mpsGraph gatherWithUpdatesTensor:indexTensor
-                                                  indicesTensor:reshapedIndices
-                                                  axis:0
-                                                  batchDimensions:0
-                                                  name:nil];
+                                                           indicesTensor:reshapedIndices
+                                                                    axis:0
+                                                         batchDimensions:0
+                                                                    name:nil];
 
       // Gather the values from the input tensor
       MPSGraphTensor* outputTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
