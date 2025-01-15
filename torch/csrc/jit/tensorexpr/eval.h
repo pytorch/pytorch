@@ -30,7 +30,7 @@ class InterpValue {
     Name##values.push_back(v); \
     return;                    \
   }
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     throw unsupported_dtype();
   }
@@ -89,9 +89,9 @@ class InterpValue {
     }                                         \
     return Name##values[0];                   \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
-VALUE_AS_DISPATCH(c10::quint8, QUInt8);
-VALUE_AS_DISPATCH(c10::qint8, QInt8);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH)
+VALUE_AS_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_DISPATCH
 
 #define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
@@ -102,9 +102,9 @@ VALUE_AS_DISPATCH(c10::qint8, QInt8);
     }                                                                 \
     return Name##values;                                              \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH);
-VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8);
-VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH)
+VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_VEC_DISPATCH
 
 template <typename Type>

@@ -167,7 +167,7 @@ inline void setStrided(
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
-  self_->set_sizes_and_strides(size, stride, std::make_optional(storage_offset));
+  self_->set_sizes_and_strides(size, stride, storage_offset);
 }
 
 } // namespace at::native

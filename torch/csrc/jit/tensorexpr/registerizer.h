@@ -342,9 +342,9 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
     stmtStack_.pop_front();               \
   }
 
-  STMT_ON_STACK(AtomicAdd);
-  STMT_ON_STACK(Allocate);
-  STMT_ON_STACK(Free);
+  STMT_ON_STACK(AtomicAdd)
+  STMT_ON_STACK(Allocate)
+  STMT_ON_STACK(Free)
 
 #undef STMT_ON_STACK
 

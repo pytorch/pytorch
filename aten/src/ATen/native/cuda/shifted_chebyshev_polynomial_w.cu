@@ -27,5 +27,5 @@ namespace at::native {
             } // shifted_chebyshev_polynomial_w_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel_cuda);
+        REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel_cuda)
 } // namespace at::native

@@ -90,6 +90,7 @@ static Tensor binary_cross_entropy_plumbing(
     const std::optional<Tensor>& weight, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "binary_cross_entropy_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(target, cur_level)
@@ -126,6 +127,7 @@ static Tensor binary_cross_entropy_backward_plumbing(
     const std::optional<Tensor>& weight_opt, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "binary_cross_entropy_backward_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad, input, target, weight_opt}, cur_level)) {

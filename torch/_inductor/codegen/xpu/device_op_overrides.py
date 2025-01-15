@@ -16,7 +16,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return f"torch.xpu._DeviceGuard({device_idx})"
 
     def cpp_device_guard(self):
-        return "at::xpu::XPUGuard"
+        return "at::DeviceGuard"
 
     def cpp_aoti_device_guard(self):
         return "AOTIXpuGuard"
@@ -29,6 +29,51 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_getStreamFromExternal(self):
         return "at::xpu::getStreamFromExternal"
+
+    def kernel_header(self):
+        source_codes = """
+        #include <torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h>
+        """
+        return source_codes
+
+    def kernel_driver(self):
+        source_codes = """
+            namespace {
+
+            struct Grid {
+                Grid(uint32_t x, uint32_t y, uint32_t z)
+                  : grid_x(x), grid_y(y), grid_z(z) {}
+                uint32_t grid_x;
+                uint32_t grid_y;
+                uint32_t grid_z;
+
+                bool is_non_zero() {
+                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
+                }
+            };
+
+            }  // anonymous namespace
+
+        """
+        return source_codes
+
+    def abi_compatible_header(self):
+        return """
+        #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+        #include <torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h>
+        """
+
+    def cpp_stream_type(self):
+        return "sycl::queue*"
+
+    def aoti_get_stream(self):
+        return "aoti_torch_get_current_xpu_stream"
+
+    def cpp_kernel_type(self):
+        return "std::unique_ptr<sycl::kernel>"
+
+    def cpp_device_ptr(self):
+        return "void *"
 
 
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())
