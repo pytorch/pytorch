@@ -12,6 +12,7 @@ from typing import Optional
 from torch.testing._internal import (
     fake_config_module as config,
     fake_config_module2 as config2,
+    fake_config_module3 as config3,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._config_module import _UNSET_SENTINEL, Config
@@ -173,7 +174,27 @@ class TestConfigModule(TestCase):
         self.assertEqual(
             code,
             """torch.testing._internal.fake_config_module.e_bool = False
+torch.testing._internal.fake_config_module.e_env_default = True
+torch.testing._internal.fake_config_module.e_env_default_FALSE = False
+torch.testing._internal.fake_config_module.e_env_force = True
 torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
+        )
+
+    def test_codegen_config_function(self):
+        import logging
+        import warnings
+
+        config3.e_list = [print, warnings.warn, logging.warn]
+        config3.e_set = {print}
+        config3.e_func = warnings.warn
+        code = config3.codegen_config()
+        self.assertIn("import _warnings", code)
+        self.assertIn("import logging", code)
+        self.assertIn(
+            """torch.testing._internal.fake_config_module3.e_list = ['print', '_warnings.warn', 'logging.warn']
+torch.testing._internal.fake_config_module3.e_set = { print }
+torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
+            code,
         )
 
     def test_get_hash(self):
