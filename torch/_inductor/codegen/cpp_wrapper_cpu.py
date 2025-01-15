@@ -2174,6 +2174,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         elif isinstance(val, int):
             # uint64_t is long on Linux, but long long on MacOS and Windows
             return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
+        elif isinstance(val, complex):
+            return f"c10::complex<double>{{ {self.generate_float_value(val.real)}, {self.generate_float_value(val.imag)} }}"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
@@ -2262,7 +2264,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        elif isinstance(type_, torch.ListType):
+        if isinstance(type_, torch.ListType):
             assert isinstance(
                 val, (list, tuple)
             ), f"{val} does not match with arg type {type_}"
@@ -2281,6 +2283,30 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 )
             # Need to pass the array length because we can't use std::vector
             return f"{var_name}, {len(val)}"
+
+        val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
+        if isinstance(type_, torch.TensorType) and val_is_scalar:
+
+            def get_scalar_func_name(v):
+                if isinstance(v, (bool, torch.SymBool)):
+                    return "aoti_torch_scalar_to_tensor_bool"
+                if isinstance(v, complex):
+                    return "aoti_torch_scalar_to_tensor_complex128"
+                if isinstance(v, (float, torch.SymFloat)):
+                    return "aoti_torch_scalar_to_tensor_float64"
+                if isinstance(v, (int, torch.SymInt)):
+                    return "aoti_torch_scalar_to_tensor_int64"
+
+            var_name = f"var_{next(self.arg_var_id)}"
+            func_name = get_scalar_func_name(val)
+            val_str = self.val_to_arg_str_for_prim_type(val, None)
+
+            self.writeline(f"AtenTensorHandle {var_name}_handle;")
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK({func_name}({val_str}, &{var_name}_handle));"
+            )
+            self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
+            return var_name
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
