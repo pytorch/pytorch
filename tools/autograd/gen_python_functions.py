@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, Iterable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 import yaml
 
@@ -74,6 +74,10 @@ from torchgen.yaml_utils import YamlLoader
 
 from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 #
@@ -1318,8 +1322,6 @@ def emit_single_dispatch(
             schema_comment = f"// [deprecated] aten::{ps.deprecated_schema}"
         else:
             schema_comment = f"// aten::{f.func}"
-
-        deprecated = "[deprecated] " if ps.deprecated else ""
 
         # dispatch lambda signature
         name = cpp.name(f.func)

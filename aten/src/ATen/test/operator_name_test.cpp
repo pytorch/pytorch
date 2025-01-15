@@ -9,7 +9,7 @@ TEST(OperatorNameTest, SetNamespaceIfNotSetWithoutExistingNamespace) {
   EXPECT_TRUE(result);
   EXPECT_EQ(testName.name, "ns::operator");
   EXPECT_EQ(testName.overload_name, "operator.overload");
-  EXPECT_EQ(testName.getNamespace(), std::optional<c10::string_view>("ns"));
+  EXPECT_EQ(testName.getNamespace(), std::optional<std::string_view>("ns"));
 }
 
 TEST(OperatorNameTest, SetNamespaceIfNotSetWithExistingNamespace) {
@@ -18,5 +18,5 @@ TEST(OperatorNameTest, SetNamespaceIfNotSetWithExistingNamespace) {
   EXPECT_FALSE(result);
   EXPECT_EQ(namespacedName.name, "already_namespaced::operator");
   EXPECT_EQ(namespacedName.overload_name, "operator.overload");
-  EXPECT_EQ(namespacedName.getNamespace(), std::optional<c10::string_view>("already_namespaced"));
+  EXPECT_EQ(namespacedName.getNamespace(), std::optional<std::string_view>("already_namespaced"));
 }

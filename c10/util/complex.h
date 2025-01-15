@@ -3,6 +3,7 @@
 #include <complex>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Half.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/complex.h>
@@ -605,6 +606,55 @@ C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
   return complex<T>(r * std::cos(theta), r * std::sin(theta));
 #endif
 }
+
+template <>
+struct alignas(4) complex<Half> {
+  Half real_;
+  Half imag_;
+
+  // Constructors
+  complex() = default;
+  // Half constructor is not constexpr so the following constructor can't
+  // be constexpr
+  C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
+      : real_(real), imag_(imag) {}
+  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  // Conversion operator
+  inline C10_HOST_DEVICE operator c10::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  constexpr C10_HOST_DEVICE Half real() const {
+    return real_;
+  }
+  constexpr C10_HOST_DEVICE Half imag() const {
+    return imag_;
+  }
+
+  C10_HOST_DEVICE complex<Half>& operator+=(const complex<Half>& other) {
+    real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<Half>& operator-=(const complex<Half>& other) {
+    real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
+    auto a = static_cast<float>(real_);
+    auto b = static_cast<float>(imag_);
+    auto c = static_cast<float>(other.real());
+    auto d = static_cast<float>(other.imag());
+    real_ = a * c - b * d;
+    imag_ = a * d + b * c;
+    return *this;
+  }
+};
 
 } // namespace c10
 

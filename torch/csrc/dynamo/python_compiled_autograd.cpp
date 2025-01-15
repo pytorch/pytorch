@@ -73,8 +73,7 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
 static void throw_python_error() {
   python_error err;
   err.persist();
-  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-  throw err;
+  throw std::move(err);
 }
 
 static PyObject* check(PyObject* pyresult) {
@@ -109,20 +108,21 @@ struct PythonLogger {
 
   // must be called while GIL is held
   void log(Level level, std::string_view msg) const {
-    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level]));
     TORCH_INTERNAL_ASSERT(pymethod != nullptr);
     THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
+    PyObject* result =
+        PyObject_CallFunction(pyfunc.get(), "s", std::string(msg).c_str());
     if (result == nullptr) {
       throw_python_error();
     }
   }
 
  private:
-  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
+  static constexpr std::array<const char*, COUNT> levelNames_ = {
       "debug", // Level::DEBUG
       "info", // Level::INFO
       "warning", // Level::WARNING
@@ -153,7 +153,9 @@ struct VerboseLogger : public PythonLogger {
     std::string node_name =
         fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
 
-    cumulative_sizes_per_node[size_inputs_num] = node_name;
+    if (size_inputs_num > 0) {
+      cumulative_sizes_per_node[size_inputs_num] = node_name;
+    }
 
     if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
       _log_node_miss(typeid(fn), cached_keys, key, node_name);
@@ -369,6 +371,7 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 };
 
 static PyObject* the_autograd_compiler = nullptr;
+static int default_dyn_type_int = 0;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
@@ -418,7 +421,7 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
-PyObject* wrap_lifted_ivalue_args(
+static PyObject* wrap_lifted_ivalue_args(
     const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
   PyObject* pyivalueargs =
       PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
@@ -437,7 +440,7 @@ PyObject* wrap_lifted_ivalue_args(
   return pyivalueargs;
 }
 
-PyObject* wrap_node_origins(
+static PyObject* wrap_node_origins(
     const AutogradCompilerCall& compiler,
     size_t dynamic_sizes) {
   TORCH_INTERNAL_ASSERT(
@@ -472,7 +475,7 @@ PyObject* wrap_node_origins(
   return pyallorigins;
 }
 
-void set_ivalue_proxies(
+static void set_ivalue_proxies(
     PyObject* fake_ivalue_args,
     std::vector<LiftedIValueArg>& lifted_ivalue_args) {
   TORCH_INTERNAL_ASSERT(PyList_Check(fake_ivalue_args));
@@ -543,6 +546,10 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
+  ClosingTHPObjectPtr(ClosingTHPObjectPtr&& other) = default;
+  ClosingTHPObjectPtr(const ClosingTHPObjectPtr&) = delete;
+  ClosingTHPObjectPtr& operator=(const ClosingTHPObjectPtr&) = delete;
+  ClosingTHPObjectPtr& operator=(ClosingTHPObjectPtr&&) = default;
   ~ClosingTHPObjectPtr() {
     if (PyErr_Occurred()) {
       // do nothing, do not attempt to close
@@ -556,8 +563,13 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
+static SizeInput::DynType get_default_dyn_type() {
+  TORCH_INTERNAL_ASSERT(default_dyn_type_int >= 0 && default_dyn_type_int < 2);
+  return default_dyn_type_int == 0 ? SizeInput::STATIC : SizeInput::DYNAMIC;
+}
+
 // Only call this function while holding GIL
-CacheNode* _compiled_autograd_impl(
+static CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
@@ -568,7 +580,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -592,10 +604,10 @@ CacheNode* _compiled_autograd_impl(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
-      node_args.collect(call);
       if (vlogger.has_value()) {
         compiler_call.set_active_node_call_idx(i);
       }
+      node_args.collect(call);
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
@@ -796,10 +808,11 @@ struct LockGuardWithErrorLogs {
     mtx_.unlock();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::mutex& mtx_;
 };
 
-variable_list compiled_autograd(
+static variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
@@ -842,11 +855,15 @@ variable_list compiled_autograd(
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
+  int b = 0;
+  if (!PyArg_ParseTuple(args, "Op", &obj, &b)) {
     return nullptr;
   }
 
-  PyObject* prior = the_autograd_compiler;
+  TORCH_INTERNAL_ASSERT(b >= 0 && b < 2);
+  PyObject* prior_compiler = the_autograd_compiler;
+  PyObject* prior_dynamic = default_dyn_type_int == 0 ? Py_False : Py_True;
+  default_dyn_type_int = b;
   if (obj == Py_None) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`
     Engine::set_compiled_autograd(nullptr);
@@ -856,11 +873,13 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
     Engine::set_compiled_autograd(&compiled_autograd);
   }
 
-  if (prior == nullptr) {
-    Py_RETURN_NONE;
-  } else {
-    return prior;
+  if (prior_compiler == nullptr) {
+    prior_compiler = Py_None;
   }
+  PyObject* prior = PyTuple_New(2);
+  PyTuple_SET_ITEM(prior, 0, prior_compiler);
+  PyTuple_SET_ITEM(prior, 1, prior_dynamic);
+  return prior;
   END_HANDLE_TH_ERRORS;
 }
 

@@ -195,7 +195,7 @@ class TORCH_API Tensor: public TensorBase {
   //
   // TODO: temporarily disabled
 
-  Tensor& operator=(const TensorBase& x) & {
+  Tensor& operator=(const TensorBase& x) & noexcept {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
@@ -204,7 +204,7 @@ class TORCH_API Tensor: public TensorBase {
     return *this;
   }
 
-  Tensor& operator=(const Tensor &x) & {
+  Tensor& operator=(const Tensor &x) & noexcept {
     return operator=(static_cast<const TensorBase&>(x));
   }
   Tensor& operator=(Tensor &&x) & noexcept {

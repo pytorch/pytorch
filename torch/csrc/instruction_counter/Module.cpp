@@ -1,3 +1,4 @@
+#include <c10/util/error.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cerrno>
@@ -38,7 +39,7 @@ long start() {
     fprintf(
         stderr,
         "Failed to open instruction count event: %s.\n",
-        strerror(errno));
+        c10::utils::str_error(errno).c_str());
     return -1;
   }
   ioctl((int)fd, PERF_EVENT_IOC_RESET, 0); // Reset the counter
@@ -57,7 +58,7 @@ uint64_t end(int fd) {
         stderr,
         "Error disabling perf event (fd: %d): %s\n",
         fd,
-        strerror(errno));
+        c10::utils::str_error(errno).c_str());
     return -1;
   }
 
@@ -66,7 +67,10 @@ uint64_t end(int fd) {
   // Read results
   long ret_val = read(fd, &total_instructions, sizeof(total_instructions));
   if (ret_val == -1) {
-    fprintf(stderr, "Error reading perf event results: %s\n", strerror(errno));
+    fprintf(
+        stderr,
+        "Error reading perf event results: %s\n",
+        c10::utils::str_error(errno).c_str());
     return -1;
   }
 

@@ -48,25 +48,6 @@ def patch_init_py(
         f.write(orig)
 
 
-# TODO: remove patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-def patch_setup_py(path: Path) -> None:
-    with open(path) as f:
-        orig = f.read()
-    try:
-        orig = check_and_replace(
-            orig,
-            "https://tritonlang.blob.core.windows.net/llvm-builds/",
-            "https://oaitriton.blob.core.windows.net/public/llvm-builds/",
-        )
-        with open(path, "w") as f:
-            f.write(orig)
-    except RuntimeError as e:
-        print(
-            f"Applying patch_setup_py() for llvm-build package failed: {e}.",
-            "If you are trying to build a newer version of Triton, you can ignore this.",
-        )
-
-
 def build_triton(
     *,
     version: str,
@@ -75,18 +56,12 @@ def build_triton(
     device: str = "cuda",
     py_version: Optional[str] = None,
     release: bool = False,
+    with_clang_ldd: bool = False,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
-
-    version_suffix = ""
-    if not release:
-        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
-        # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
-        version += version_suffix
 
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
@@ -108,9 +83,6 @@ def build_triton(
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
-        # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-        patch_setup_py(triton_pythondir / "setup.py")
-
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
@@ -125,8 +97,8 @@ def build_triton(
                     file=meta,
                 )
                 print(
-                    "requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n"
-                    "    - filelock\n    - pytorch\n",
+                    "requirements:\n  host:\n    - python\n    - setuptools\n    - pybind11\n"
+                    "  run:\n    - python\n    - filelock\n    - pytorch\n",
                     file=meta,
                 )
                 print(
@@ -162,7 +134,9 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
+        if with_clang_ldd:
+            env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
+
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
@@ -204,18 +178,20 @@ def main() -> None:
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
+    parser.add_argument("--with-clang-ldd", action="store_true")
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
         device=args.device,
-        commit_hash=args.commit_hash
-        if args.commit_hash
-        else read_triton_pin(args.device),
+        commit_hash=(
+            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
+        ),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
         release=args.release,
+        with_clang_ldd=args.with_clang_ldd,
     )
 
 

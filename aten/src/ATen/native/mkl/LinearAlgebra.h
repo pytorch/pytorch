@@ -10,8 +10,7 @@
 #include <mkl.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void mkl_gemm_batched(
     TransposeType trans_A, TransposeType trans_B,
@@ -48,4 +47,4 @@ void mkl_gemm_f16f16f32(
     int M, int N, int K, const float alpha,
     const c10::Half* A, int lda, const c10::Half* B, int ldb,
     const float beta, float* C, int ldc);
-}}  // namespace at::native
+}  // namespace at::native

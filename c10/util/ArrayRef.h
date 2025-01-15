@@ -98,9 +98,9 @@ class ArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same_v<
-          std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>>>
+      typename U = decltype(std::declval<Container>().data()),
+      typename = std::enable_if_t<
+          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();

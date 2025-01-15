@@ -62,9 +62,9 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
         groups,
         binary_attr,
         pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<c10::string_view>(unary_attr),
+        pointer_to_optional<std::string_view>(unary_attr),
         unary_scalars_list,
-        pointer_to_optional<c10::string_view>(unary_algorithm));
+        pointer_to_optional<std::string_view>(unary_algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -105,9 +105,9 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
         groups,
         binary_attr,
         pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<c10::string_view>(unary_attr),
+        pointer_to_optional<std::string_view>(unary_attr),
         unary_scalars_list,
-        pointer_to_optional<c10::string_view>(unary_algorithm));
+        pointer_to_optional<std::string_view>(unary_algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -144,13 +144,12 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
         groups,
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string_view>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
+AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,
@@ -185,7 +184,7 @@ aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
         groups,
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string_view>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -258,7 +257,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
         pointer_to_optional<at::Tensor>(B),
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string_view>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -281,7 +280,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -322,8 +321,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu__qlinear_pointwise_binary_tensor(
+AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -374,7 +372,7 @@ aoti_torch_cpu__qlinear_pointwise_binary_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -428,13 +426,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
         pointer_to_optional<at::ScalarType>(output_dtype),
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string_view>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
+AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -496,16 +493,16 @@ aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
         accum_zero_point,
         binary_attr,
         pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<c10::string_view>(unary_attr),
+        pointer_to_optional<std::string_view>(unary_attr),
         unary_scalars_list,
-        pointer_to_optional<c10::string_view>(unary_algorithm));
+        pointer_to_optional<std::string_view>(unary_algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
 
 #if AT_MKL_ENABLED()
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
+AOTITorchError aoti_torch_cpu__mkl_linear(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle origin_W,

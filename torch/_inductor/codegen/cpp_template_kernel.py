@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
@@ -56,7 +57,12 @@ class CppTemplateKernel(CppKernel):
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
         aliases: Optional[Dict[str, str]] = None,
+        function_name: str = "",
+        extra_sizevars: Optional[List[sympy.Expr]] = None,
+        placeholder: str = "<DEF_KERNEL>",
     ) -> str:
+        if len(function_name) == 0:
+            function_name = str(self.kernel_name)
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
@@ -69,21 +75,27 @@ class CppTemplateKernel(CppKernel):
                 if orig in self.args.output_buffers:
                     self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
-        unique_sizevars = {
+        unique_sizevars = OrderedSet(
             s
             for input in inputs.values()
             if input is not None
             for sym in itertools.chain(input.get_size(), input.get_stride())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
-        }
-        unique_sizevars |= {
+        )
+        unique_sizevars.update(
+            s
+            for sym in extra_sizevars or []
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        )
+        unique_sizevars.update(
             s
             for output in outputs.values()
             for sym in itertools.chain(output.get_size(), output.get_stride())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
-        }
+        )
         sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
             self.args.sizevars[sizevar] = f"k{sizevar}"
@@ -97,9 +109,8 @@ class CppTemplateKernel(CppKernel):
                     if alias in self.args.output_buffers:
                         self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
-            return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
+            return f"void {function_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
@@ -127,7 +138,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.layout.as_fixed().make_indexer()
+        indexer = node.get_layout().as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -138,7 +149,7 @@ class CppTemplateKernel(CppKernel):
         )
         return f"{inner_name}[{cexpr_index(index)}]"
 
-    def slice_nd(self, node, ranges: List[Tuple[Any, Any]]) -> ir.ReinterpretView:
+    def slice_nd(self, node, ranges: List[tuple[Any, Any]]) -> ir.ReinterpretView:
         """
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
@@ -151,6 +162,15 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        return sliced.data
+
+    def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
+        # We avoid using L.select here because we need clamp=False so the dim after slicing
+        # is 1 instead of a sympy expression of symbol - dim_size.
+        node = wrap_with_tensorbox(node)
+        idx = ir.View.handle_negative_index(idx, node.get_size()[dim])
+        sliced = L.squeeze(L.slice_(node, dim, idx, idx + 1, clamp=False), dim)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
@@ -216,11 +236,11 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()(var_ranges.keys())
+        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -236,6 +256,60 @@ class CppTemplateKernel(CppKernel):
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                if reindexers[i] is not None:
+                    new_args = reindexers[i](new_args)  # type: ignore[misc]
+                V.ops.store(
+                    output_name,
+                    output_index,
+                    node.make_loader()(new_args).value,
+                )
+
+            body = LoopBody(
+                fn,
+                (list(var_ranges.keys()), ()),
+                var_ranges,
+                list(var_ranges.keys()),
+                tuple(),
+            )
+            bodies.append(body)
+            var_sizes_list.append(var_sizes)
+
+        cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+        return kernel_group.loops_code.getvalue()
+
+    def store_grouped_gemm_pointwise_nodes(
+        self,
+        dst: tuple[ir.Buffer],
+        nodes: List[ir.IRNode],
+        offsets: List[sympy.Expr],
+        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+        output_names: List[str],
+    ) -> str:
+        ref_dst = dst[0]
+        var_sizes = (tuple(ref_dst.get_size()), ())
+        var_ranges = {
+            sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
+            for i, sz in enumerate(var_sizes[0])
+        }
+        assert offsets, "offsets should be set outside"
+        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
+        output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
+        kernel_group = KernelGroup()
+        kernel_group.args = self.args
+        cpp_kernel_proxy = CppKernelProxy(kernel_group)
+        bodies = []
+        var_sizes_list = []
+        for i, node in enumerate(nodes):
+            output_name = output_names[i]
+            node = node.data if isinstance(node, ir.ComputedBuffer) else node
+            assert isinstance(node, ir.Pointwise), node
+
+            def fn(*args):
+                assert len(args) == 2
+                assert len(args[0]) == len(var_sizes[0])
+                assert len(args[1]) == 0
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -287,6 +361,7 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
+        assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
         assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
@@ -313,6 +388,117 @@ class CppTemplateKernel(CppKernel):
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
+                return ""
+
+    def store_outputs(
+        self,
+        dst: tuple[ir.Buffer],
+        src: tuple[ir.IRNode],
+        orig_src: Optional[tuple[ir.IRNode]] = None,
+        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        offsets: Optional[List[Any]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
+    ):
+        assert isinstance(dst, Iterable)
+        assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
+        if offsets:
+            offsets = parse_expr_with_index_symbols(offsets)
+        gemm_num = len(src)
+        final_offsets = []
+        output_names = []
+        if epilogue_nodes:
+            if not reindexers:
+                reindexers = [None] * len(epilogue_nodes)
+            with LocalBufferContext(self.args) as scope:
+                assert orig_src is not None
+                localize_epilogue_nodes = []
+                all_read_names = []
+                for epilogue in epilogue_nodes:
+                    all_read_names.extend(list(epilogue.get_read_names()))
+                localize_epilogue_nodes.extend(scope.localize_nodes(epilogue_nodes))
+                final_offsets.extend([offsets] * len(localize_epilogue_nodes))
+                output_names.extend(
+                    [node.get_name() for node in localize_epilogue_nodes]
+                )
+                for gemm_idx in range(gemm_num):
+                    if orig_src[gemm_idx].get_name() != src[gemm_idx].get_name():
+                        if orig_src[gemm_idx].get_name() in all_read_names or (
+                            multi_output_buffers
+                            and multi_output_buffers[gemm_idx].get_name()
+                            in all_read_names
+                        ):
+                            # If any of the Epilogue nodes use this GEMM output, let's localize the GEMM output
+                            global_buffers = [orig_src[gemm_idx]]
+                            if (
+                                multi_output_buffers
+                                and multi_output_buffers[gemm_idx].get_name()
+                                in all_read_names
+                                and orig_src[gemm_idx].get_name() not in all_read_names
+                            ):
+                                # Epilogue might directly read the MultiOutput, Locallize MultiOutput to the local Buffer
+                                # if this MultiOutput has not been stored by in-template epilogue
+                                # otherwise, use the cse store cache if it will be stored before used
+                                global_buffers.append(multi_output_buffers[gemm_idx])
+                            scope.add_local_buffer(
+                                src[gemm_idx],
+                                global_buffers,
+                            )
+                        else:
+                            scope.add_local_buffer(src[gemm_idx])
+                            localize_epilogue_nodes.extend(
+                                [L.copy(dst[gemm_idx], src[gemm_idx]).data.data]
+                            )
+                            reindexers.append(None)
+                            output_names.append(dst[gemm_idx].get_name())
+                            final_offsets.append(
+                                [sympy.S.Zero] * len(dst[gemm_idx].get_size())
+                            )
+                res = self.store_grouped_gemm_pointwise_nodes(
+                    dst,
+                    localize_epilogue_nodes,
+                    final_offsets,
+                    reindexers,
+                    output_names=output_names,
+                )
+                for gemm_idx in range(gemm_num):
+                    if (
+                        multi_output_buffers
+                        and multi_output_buffers[gemm_idx].get_name() in all_read_names
+                    ):
+                        # If the MultiOutput is used in the Epilogue, let's remove it from args
+                        multi_output_name = multi_output_buffers[gemm_idx].get_name()
+                        if (
+                            multi_output_name in self.args.output_buffers
+                            and self.args.output_buffers[multi_output_name] != "REMOVED"
+                        ):
+                            self.remove_buffer(multi_output_name)
+                return res
+        else:
+            if dst[0].get_name() != src[0].get_name():
+                copy_list = []
+                with LocalBufferContext(self.args) as scope:
+                    for _src, _dst in zip(src, dst):
+                        copy_list.extend([L.copy(_dst, _src).data.data])
+                        scope.add_local_buffer(_src)
+                        output_names.append(_dst.get_name())
+                        final_offsets.append([sympy.S.Zero] * len(_dst.get_size()))
+                    reindexers = [None] * len(copy_list)
+                    return self.store_grouped_gemm_pointwise_nodes(
+                        dst,
+                        nodes=copy_list,
+                        offsets=final_offsets,
+                        reindexers=reindexers,
+                        output_names=output_names,
+                    )
+            else:
+                assert all(
+                    _src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst)
+                )
+                assert all(
+                    _src.get_layout() == _dst.get_layout()
+                    for _src, _dst in zip(src, dst)
+                )
                 return ""
 
 

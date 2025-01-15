@@ -19,7 +19,6 @@ from typing import (
     no_type_check,
     Optional,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
 )
@@ -98,12 +97,12 @@ class _FSDPDeviceHandle:
             return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
-    def __getattr__(self, __name: str) -> Any:
+    def __getattr__(self, name: str, /) -> Any:
         try:
-            return getattr(self.__backend, __name)
+            return getattr(self.__backend, name)
         except AttributeError as exc:
             raise AttributeError(
-                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{name}'"
             ) from exc
 
 
@@ -111,7 +110,7 @@ class _UninitializedDeviceHandle(_FSDPDeviceHandle):
     def __init__(self) -> None:
         pass
 
-    def __getattribute__(self, __name: str) -> Any:
+    def __getattribute__(self, name: str, /) -> Any:
         raise RuntimeError("Trying to use an uninitialized device handle.")
 
 
@@ -263,7 +262,7 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
 
 def _named_parameters_with_duplicates(
     module: nn.Module, **kwargs: Any
-) -> List[Tuple[str, nn.Parameter]]:
+) -> List[tuple[str, nn.Parameter]]:
     """
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
@@ -535,10 +534,11 @@ def _override_module_mixed_precision(
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
-    # FIXME record_stream doesn't work with non-cuda/mtia tensors
+    # FIXME record_stream doesn't work with non-cuda/mtia/xpu tensors
     if tensor.device.type not in [
         "cuda",
         "mtia",
+        "xpu",
         torch._C._get_privateuse1_backend_name(),
     ]:
         return

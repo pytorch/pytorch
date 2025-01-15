@@ -1,6 +1,6 @@
 import itertools
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Set
 
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -21,7 +21,7 @@ class EinsumDims:
     rhs_out_only_dims: List[str]
 
     @classmethod
-    def parse_equation(cls, equation: str) -> Tuple[List[str], str]:
+    def parse_equation(cls, equation: str) -> tuple[List[str], str]:
         # parse einop equation and extract arg specs
         """
         Parse the einsum equation str to input dim chars and output dim char
@@ -167,9 +167,7 @@ def gen_einsum_strategies(
     # (i.e. for Shard, tensor dim size must > mesh size)
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list = []
-        for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+        spec_list = [DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)]
         strat = PlacementStrategy(output_specs=spec_list[0], input_specs=spec_list[1:])
         all_strategies.append(strat)
 

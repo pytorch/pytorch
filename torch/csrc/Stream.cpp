@@ -94,6 +94,7 @@ static PyObject* THPStream_pynew(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
+  self->context = nullptr;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -112,6 +113,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
+  self->context = nullptr;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
@@ -256,6 +258,89 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  c10::DeviceType stream_device_type =
+      static_cast<c10::DeviceType>(self->device_type);
+  // No operation is performed if the stream does not belong to an accelerator.
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+    Py_INCREF(_self);
+    return _self;
+  }
+  c10::DeviceIndex cur_device_idx = at::accelerator::getDeviceIndex();
+  c10::DeviceIndex stream_device_idx =
+      static_cast<c10::DeviceIndex>(self->device_index);
+  // If the stream is not on the current device, switch the current device to
+  // the device of the stream.
+  if (stream_device_idx != cur_device_idx) {
+    at::accelerator::setDeviceIndex(stream_device_idx);
+  }
+  c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      self->stream_id, stream_device_idx, stream_device_type));
+  // Save the current device index and previous stream to the context.
+  auto ctx_device_index =
+      THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
+  auto ctx_stream = THPObjectPtr(THPStream_Wrap(cur_stream));
+  TORCH_CHECK(!(self->context), "Stream's context should not be initialized.");
+  auto dict = THPObjectPtr(PyDict_New());
+  if (!dict) {
+    throw python_error();
+  }
+  self->context = dict.release();
+  if (PyDict_SetItemString(
+          self->context, "_ctx_device_index", ctx_device_index.get()) < 0) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(self->context, "_ctx_stream", ctx_stream.get()) <
+      0) {
+    throw python_error();
+  }
+  Py_INCREF(_self);
+  return _self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  // No operation is performed if the stream does not belong to an accelerator.
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type)))) {
+    Py_RETURN_NONE;
+  }
+  PyObject* py_stream = nullptr;
+  if (PyDict_GetItemStringRef(self->context, "_ctx_stream", &py_stream) < 0) {
+    throw python_error();
+  }
+  auto ctx_stream = THPObjectPtr(py_stream);
+  PyObject* py_device_index = nullptr;
+  if (PyDict_GetItemStringRef(
+          self->context, "_ctx_device_index", &py_device_index) < 0) {
+    throw python_error();
+  }
+  auto ctx_device_index = THPObjectPtr(py_device_index);
+  TORCH_INTERNAL_ASSERT(
+      ctx_stream.get(), "ctx_stream should be present on the context dict.");
+  auto prev_stream = (THPStream*)(ctx_stream.get());
+  TORCH_INTERNAL_ASSERT(
+      ctx_device_index.get(),
+      "ctx_device_index should be present on the context dict.");
+  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      prev_stream->stream_id,
+      static_cast<c10::DeviceIndex>(prev_stream->device_index),
+      static_cast<c10::DeviceType>(prev_stream->device_type)));
+  // Reset the current device to the previous device if they differ.
+  if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
+    at::accelerator::setDeviceIndex(prev_device_index);
+  }
+  Py_CLEAR(self->context);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_ne(THPStream* self, THPStream* other) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(
@@ -289,8 +374,7 @@ static PyObject* THPStream_richcompare(
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMemberDef THPStream_members[] = {
+static const std::initializer_list<PyMemberDef> THPStream_members = {
     {"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
@@ -308,13 +392,11 @@ static struct PyMemberDef THPStream_members[] = {
      nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPStream_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {"device", (getter)THPStream_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStream_methods[] = {
+static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
@@ -324,6 +406,8 @@ static PyMethodDef THPStream_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
+    {"__enter__", THPStream_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPStream_exit, METH_VARARGS, nullptr},
     {nullptr}};
 
 static PyTypeObject THPStreamType = {
@@ -355,9 +439,12 @@ static PyTypeObject THPStreamType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPStream_methods, /* tp_methods */
-    THPStream_members, /* tp_members */
-    THPStream_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPStream_methods)), /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMemberDef*>(std::data(THPStream_members)), /* tp_members */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPStream_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

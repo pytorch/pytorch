@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
 from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
 
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
@@ -443,6 +444,27 @@ def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.expectedFailure,
+        device_type=device_type,
+        dtypes=dtypes,
+    )
+
+
+# fail_fn should be a callable that accepts a single SampleInput and returns True if failure
+# is expected
+def xfailIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=sample_skips_and_xfails(
+            [
+                XFailRule(
+                    # op matching is already handled by DecorateMeta
+                    op_match_fn=lambda device, op: True,
+                    # device matching is already handled by DecorateMeta
+                    sample_match_fn=lambda device, sample: fail_fn(sample),
+                )
+            ]
+        ),
         device_type=device_type,
         dtypes=dtypes,
     )

@@ -81,7 +81,6 @@ jobs:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash
         run: |
@@ -123,7 +122,6 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash
         run: |

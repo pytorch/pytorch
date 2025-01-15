@@ -30,7 +30,7 @@ void polar_kernel_cuda(TensorIterator& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(complex_stub, &complex_kernel_cuda);
-REGISTER_DISPATCH(polar_stub, &polar_kernel_cuda);
+REGISTER_DISPATCH(complex_stub, &complex_kernel_cuda)
+REGISTER_DISPATCH(polar_stub, &polar_kernel_cuda)
 
 } // namespace at::native

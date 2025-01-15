@@ -11,6 +11,7 @@ from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
+from ._tree_utils import reorder_kwargs
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -19,20 +20,31 @@ from .exported_program import (
 )
 
 
+def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> List:
+    reordered_kwargs = reorder_kwargs(kwargs, in_spec)
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, reordered_kwargs)
+    )
+
+    if received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}.\n"
+            "Please check that the inputs have the same number of args "
+            "and kwargs as the ones you used when tracing."
+        )
+
+    return flat_args_with_path
+
+
 @torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
+def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
         return
 
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
-
-    if received_spec != self._in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
+    flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
 
     _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
@@ -118,9 +130,10 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
-        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
+        new_output.name = output_node.name
+        new_output.meta.update(output_node.meta)
 
 
 def _get_codegen(
@@ -263,10 +276,10 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
-    # TODO(suo) this should not be optional, but is since we still ahve
+    # TODO(suo) this should not be optional, but is since we still have
     # capture_pre_autograd_graph grr
     ep: Optional[ExportedProgram] = None,
-):
+) -> _StatefulGraphModule:
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
         plain_graph_module.graph,
@@ -331,12 +344,12 @@ def _create_stateful_graph_module(
                         detached_value = value.detach()
                         original_tensor_to_detached_tensor[value] = detached_value
                         value = detached_value
-                _assign_attr(
-                    value,
-                    stateful_gm,
-                    const_name,
-                    attr_kind=_AttrKind.CONSTANT,
-                )
+            _assign_attr(
+                value,
+                stateful_gm,
+                const_name,
+                attr_kind=_AttrKind.CONSTANT,
+            )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
@@ -354,7 +367,9 @@ def _create_stateful_graph_module(
 
 
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
-    ep = _remove_effect_tokens(ep)
+    # TODO T206340015
+    if ep.verifiers[0].dialect != "TRAINING":
+        ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (

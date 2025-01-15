@@ -87,7 +87,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         mod = Foo()
         arg = torch.randn(3, 2)
         real_result = mod(arg)
-        opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(opt_mod(arg), real_result)
 
 

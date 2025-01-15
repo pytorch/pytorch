@@ -1,0 +1,20 @@
+--- control/thread_queue.cpp	2016-08-30 06:37:49.000000000 -0700
++++ control/thread_queue.cpp	2016-10-10 19:47:28.911580965 -0700
+@@ -15,7 +15,7 @@
+ {
+     if ( err != 0 ) {
+         fprintf( stderr, "Error: %s (%d)\n", strerror(err), err );
+-        throw std::exception();
++        // throw std::exception();
+     }
+ }
+ 
+@@ -172,7 +172,7 @@
+     check( pthread_mutex_lock( &mutex ));
+     if ( quit_flag ) {
+         fprintf( stderr, "Error: push_task() called after quit()\n" );
+-        throw std::exception();
++        // throw std::exception();
+     }
+     q.push( task );
+     ntask += 1;

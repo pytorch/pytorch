@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict as OrdDict
-from typing import Any, Dict, List, OrderedDict, Set, Tuple
+from typing import Any, Dict, List, OrderedDict, Set
 
 import torch
 
@@ -181,7 +181,7 @@ class ModelReportVisualizer:
         self,
         filtered_data: OrderedDict[str, Dict[str, Any]],
         tensor_features: List[str],
-    ) -> Tuple[List, List]:
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
@@ -238,7 +238,7 @@ class ModelReportVisualizer:
         filtered_data: OrderedDict[str, Any],
         channel_features: List[str],
         num_channels: int,
-    ) -> Tuple[List, List]:
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the channels headers and table
 
@@ -297,7 +297,7 @@ class ModelReportVisualizer:
 
     def generate_filtered_tables(
         self, feature_filter: str = "", module_fqn_filter: str = ""
-    ) -> Dict[str, Tuple[List, List]]:
+    ) -> Dict[str, tuple[List, List]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
@@ -467,7 +467,7 @@ class ModelReportVisualizer:
 
     def _get_plottable_data(
         self, feature_filter: str, module_fqn_filter: str
-    ) -> Tuple[List, List[List], bool]:
+    ) -> tuple[List, List[List], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 
@@ -527,8 +527,9 @@ class ModelReportVisualizer:
             # gather the x_data and multiple y_data
             # calculate the number of channels
             num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
-            for channel in range(num_channels):
-                y_data.append([])  # separate data list per channel
+
+            # separate data list per channel
+            y_data.extend([] for _ in range(num_channels))
 
             for table_row_num, row in enumerate(table):
                 # get x_value to append
@@ -676,7 +677,7 @@ class ModelReportVisualizer:
             return None
 
         # get the x and y data and if per channel
-        x_data, y_data, data_per_channel = self._get_plottable_data(
+        _x_data, y_data, data_per_channel = self._get_plottable_data(
             feature_filter, module_fqn_filter
         )
 
@@ -694,7 +695,7 @@ class ModelReportVisualizer:
             for channel_info in y_data:
                 all_data.extend(channel_info)
 
-            val, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 all_data,
                 bins=num_bins,
                 stacked=True,
@@ -702,7 +703,7 @@ class ModelReportVisualizer:
             )
             plt.xticks(bins)
         else:
-            val, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 y_data,
                 bins=num_bins,
                 stacked=False,

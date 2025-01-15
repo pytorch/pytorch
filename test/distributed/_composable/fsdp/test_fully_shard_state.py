@@ -4,7 +4,7 @@ import copy
 import unittest
 
 import torch.nn as nn
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests

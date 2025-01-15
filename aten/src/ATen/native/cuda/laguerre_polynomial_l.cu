@@ -27,5 +27,5 @@ namespace at::native {
             } // laguerre_polynomial_l_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
+        REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda)
 } // namespace at::native

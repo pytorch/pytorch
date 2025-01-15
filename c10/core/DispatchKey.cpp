@@ -1,6 +1,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
+#include <regex>
 #include <unordered_map>
 
 namespace c10 {
@@ -84,6 +85,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Quantized:
       return "Quantized";
+    case DispatchKey::QuantizedPrivateUse1:
+      return "QuantizedPrivateUse1";
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
     case DispatchKey::MkldnnCPU:
@@ -328,6 +331,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
+      {"NestedTensorXPU", c10::DispatchKey::NestedTensorXPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
@@ -381,6 +385,17 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
+  if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
+    std::string pu1_backend_name = c10::get_privateuse1_backend();
+    std::transform(
+        pu1_backend_name.begin(),
+        pu1_backend_name.end(),
+        pu1_backend_name.begin(),
+        ::toupper);
+    std::string processed_k =
+        std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
+    it = key_map.find(processed_k);
+  }
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
   return it->second;
 }

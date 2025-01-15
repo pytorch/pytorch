@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, overload, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, overload, Union
 
 import torch
 import torch.distributed as dist
@@ -22,6 +22,7 @@ def _is_supported_device(tensor: torch.Tensor) -> bool:
         "cpu",
         "hpu",
         "mtia",
+        "xpu",
         torch._C._get_privateuse1_backend_name(),
     )
 
@@ -118,7 +119,7 @@ class ShardedGradScaler(GradScaler):
         ...
 
     @overload
-    def scale(self, outputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
+    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
         ...
 
     @overload
