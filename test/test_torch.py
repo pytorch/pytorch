@@ -4403,12 +4403,11 @@ else:
 
     @onlyCUDA
     def test_addcdiv_cuda_errors_with_cpu_scalars(self, device):
-        alpha = 0.5
-
         a = torch.rand((2, 2), device=device)
         b = torch.rand((2, 2), device=device)
         c = torch.rand((2, 2), device=device)
         scalar = torch.rand([], device="cpu")
+        alpha = 0.5
 
         with self.assertRaisesRegex(ValueError, r'CPU Scalar support for tensor1 argument'):
             torch.addcdiv(a, scalar, c, value=alpha)
