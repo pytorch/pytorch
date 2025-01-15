@@ -495,8 +495,8 @@ ilpReduce(index_t shift,
 
 int32_t potential_register_count(int32_t dim_size, int32_t thread_count){
   // This method calculate the potential register count for ilpReduce method (it's just a rough number).
-  int reg_cnt = dim_size / thread_count;
-  return reg_cnt + 1;
+  int reg_cnt = (dim_size + thread_count - 1) / thread_count;
+  return reg_cnt;
 }
 
 /**

@@ -343,7 +343,7 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
             LAUNCH_SOFTMAX_WARP_FORWARD(8);  // 256
             LAUNCH_SOFTMAX_WARP_FORWARD(9);  // 512
             LAUNCH_SOFTMAX_WARP_FORWARD(10); // 1024
-            LAUNCH_SOFTMAX_WARP_FORWARD(11); ;// 1024
+            LAUNCH_SOFTMAX_WARP_FORWARD(11); // 2048
             default:
                 break;
         }
