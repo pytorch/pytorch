@@ -17,7 +17,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import counters, get_chromium_event_logger
+from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
+from torch._dynamo.utils import CompileEventLogger, counters
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -35,6 +36,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -134,7 +136,14 @@ def check_node_safe(node: Node):
 
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
-        return f"{target.__module__}.{target.__name__}" in SAFE_TORCH_FUNCTIONS
+        function_name = f"{target.__module__}.{target.__name__}"
+        # Functions in torch_non_c_binding_in_graph_functions
+        # are guaranteed to be cache safe.
+        # See NOTE: [Cacheability of in-graph torch functions]
+        return (
+            function_name in torch_non_c_binding_in_graph_functions
+            or function_name in SAFE_TORCH_FUNCTIONS
+        )
 
     def is_torch_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -500,14 +509,15 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
-        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            chromium_log.try_add_event_data("backend_compile", dispatch_mode="autograd")
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", dispatch_mode="autograd"
+            )
         else:
             needs_autograd = False
-            chromium_log.try_add_event_data(
+            CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="inference"
             )
 
@@ -522,7 +532,7 @@ class AOTAutogradCacheEntry:
         )
 
         req_subclass_dispatch = self.maybe_subclass_meta is not None
-        chromium_log.add_event_data(
+        CompileEventLogger.pt2_compile(
             "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
@@ -681,6 +691,7 @@ class AOTAutogradCache:
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
+
                     counters["aot_autograd"]["autograd_cache_hit"] += 1
                     cache_state = "hit"
                     cache_event_time = time.time_ns()
@@ -760,11 +771,12 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            chromium_log = get_chromium_event_logger()
-            chromium_log.log_instant_event(
-                f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
+            CompileEventLogger.instant(
+                f"autograd_cache_{cache_state}",
+                metadata=cache_info,
+                time_ns=cache_event_time,
             )
-            chromium_log.try_add_event_data(
+            CompileEventLogger.try_add_pt2_compile(
                 "backend_compile",
                 cache_state=cache_state,
                 cache_event_time=cache_event_time,
@@ -803,7 +815,15 @@ class AOTAutogradCache:
                 path = os.path.join(subdir, "entry")
                 try:
                     with open(path, "rb") as f:
-                        entry: AOTAutogradCacheEntry = pickle.load(f)
+                        pickled_content = f.read()
+                        # NB: We are not sure at this point if this artifact is in fact
+                        # going to be a cache hit: it's possible that we'll cache miss due to a guard failure
+                        # or other reason. But it's safe for CacheArtifactManager to record and save this
+                        # artifact anyway, as it's possible that it will be a hit for a future attempt.
+                        CacheArtifactManager.record_artifact(
+                            CacheArtifactType.AOT_AUTOGRAD, key, pickled_content
+                        )
+                        entry: AOTAutogradCacheEntry = pickle.loads(pickled_content)
                         return entry
                 except Exception as e:
                     log.warning(
@@ -842,11 +862,26 @@ class AOTAutogradCache:
         return None
 
     @staticmethod
+    def _write_to_local_cache(key: str, content: bytes):
+        """Write an entry to the local cache."""
+        subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+        path = os.path.join(subdir, "entry")
+        log.info("Writing AOTAutograd cache entry to %s", path)
+        write_atomic(path, content)
+
+    @staticmethod
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
             check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AOT_AUTOGRAD, key, content
+            )
+            AOTAutogradCache._write_to_local_cache(key, content)
+            counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.warning("Bypassing autograd cache due to: %s", e)
@@ -862,14 +897,6 @@ class AOTAutogradCache:
             if config.strict_autograd_cache:
                 raise e
             return None
-
-        subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-        path = os.path.join(subdir, "entry")
-        log.info("Writing AOTAutograd cache entry to %s", path)
-        write_atomic(path, content)
-        counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
             remote_cache: Optional[

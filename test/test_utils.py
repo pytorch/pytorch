@@ -12,7 +12,7 @@ import textwrap
 import traceback
 import unittest
 import warnings
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.cuda
@@ -439,7 +439,7 @@ class TestCheckpoint(TestCase):
         # get de-allocated directly. So using cuda memory usage as a proxy
 
         def _do_test(fn, should_free):
-            stats: List[int] = []
+            stats: list[int] = []
 
             def track(x, idx):
                 # Track that at each step of the backward, some Tensor were
@@ -561,11 +561,6 @@ class TestCheckpoint(TestCase):
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
-    def setUp(self):
-        super().setUp()
-        self.dataset = torch.randn(5, 3, 3, 2)
-        self.batch_size = 3
-
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -584,12 +579,12 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        # self.dataset is a Tensor here; technically not a valid input because
+        # torch.rand(5, 3, 3, 2) is a Tensor here; technically not a valid input because
         # not a Dataset subclass, but needs to stay working so add ignore's
         # for type checking with mypy
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=0,
             drop_last=False,
         )
@@ -598,8 +593,8 @@ class TestDataLoaderUtils(TestCase):
 
     def test_single_drop(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=0,
             drop_last=True,
         )
@@ -611,8 +606,8 @@ class TestDataLoaderUtils(TestCase):
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=2,
             drop_last=False,
             timeout=self.MAX_TIMEOUT_IN_SECOND,
@@ -622,8 +617,8 @@ class TestDataLoaderUtils(TestCase):
 
     def test_multi_drop(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=2,
             drop_last=True,
             timeout=self.MAX_TIMEOUT_IN_SECOND,
@@ -1208,7 +1203,7 @@ def f(x):
     return g(x) + 1
 """
 
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         scope = {"__compile_source__": source}
         exec(source, scope, out)
 

@@ -33,7 +33,9 @@ def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(
+            OrderedSet(all_args)
+        ), f"{args} v.s. {all_args}"
 
     return all_args, arg_types
 
@@ -193,11 +195,11 @@ class MultiKernel:
         return workspace_args
 
     def get_grid_fn(self):
-        fns = {kernel._get_grid_fn() for kernel in self.kernels}
+        fns = OrderedSet(kernel._get_grid_fn() for kernel in self.kernels)
         if len(fns) == 1:
-            return next(iter(fns))
+            return fns.pop()
         elif len(fns) == 2:
-            assert fns == {cooperative_reduction_grid, grid}
+            assert fns == OrderedSet([cooperative_reduction_grid, grid])
             V.graph.wrapper_code.add_import_once(
                 f"from {maybe_cooperative_reduction_grid.__module__} import maybe_cooperative_reduction_grid"
             )
@@ -250,7 +252,7 @@ class MultiKernel:
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = set()
+        seen = OrderedSet[str]()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
@@ -311,7 +313,14 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        key = code_hash(",".join([k.fn.cache_key for k in self.kernels]))
+        key = code_hash(
+            ",".join(
+                [
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    for k in self.kernels
+                ]
+            )
+        )
         _, _, path = get_path(key, "picked_kernel")
         return pathlib.Path(path)
 

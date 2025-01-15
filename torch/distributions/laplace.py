@@ -2,6 +2,7 @@
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -31,19 +32,19 @@ class Laplace(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return 2 * self.scale.pow(2)
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return (2**0.5) * self.scale
 
     def __init__(self, loc, scale, validate_args=None):
@@ -63,7 +64,7 @@ class Laplace(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         finfo = torch.finfo(self.loc.dtype)
         if torch._C._get_tracing_state():
