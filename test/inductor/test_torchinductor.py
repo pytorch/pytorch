@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_X86,
+    MACOS_VERSION,
     parametrize,
     serialTest,
     skipIfNNModuleInlined,
@@ -5685,6 +5686,10 @@ class CommonTemplate:
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
 
+        # pow is broken in MPSGraph for MacOS before version 13.3
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
+
         self.common(
             fn,
             (
@@ -6007,7 +6012,6 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
@@ -6049,20 +6053,25 @@ class CommonTemplate:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
-        inps = [
-            torch.rand([256, 256], device=self.device, dtype=torch.bfloat16)
-            for _ in range(2)
-        ]
-        for fn in fns:
+        device_interface = get_interface_for_device(self.device)
+
+        for lowp_dtype in [torch.float16, torch.bfloat16]:
+            if not device_interface.is_dtype_supported(lowp_dtype):
+                continue
+            inps = [
+                torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
+                for _ in range(2)
+            ]
+            for fn in fns:
+                out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+                self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+            # test broadcasted shape bail
+            fn = lambda x: x + torch.zeros(  # noqa: E731
+                [256, 256, 256], dtype=lowp_dtype, device=self.device
+            )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
-
-        # test broadcasted shape bail
-        fn = lambda x: x + torch.zeros(  # noqa: E731
-            [256, 256, 256], dtype=torch.bfloat16, device=self.device
-        )
-        out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-        self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_remove_noop_copy(self):
         def fn(x, y):
