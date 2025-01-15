@@ -46,11 +46,11 @@ tools/test/docstring_linter_testdata/python_code.py.txt:84: No docstring found f
    85 |     def short1(self):
    86 |         pass
 
-Top 3 undocumented classs:
+Top undocumented classes:
     12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:NotDocstring
     6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:LongWithShortDocstring
     6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:Long
 
-Top 2 undocumented functions:
+Top undocumented functions:
     12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:needs_docs
     11 lines: tools/test/docstring_linter_testdata/python_code.py.txt:not_short

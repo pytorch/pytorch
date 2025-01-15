@@ -40,6 +40,7 @@ class SourcePartition:
     source: Any
 
     # Nodes in the graph that are needed as inputs to the partition
+    # These do not include the params of the partition
     input_nodes: List[Node] = field(default_factory=list)
 
     # Nodes in the partition that are being used by nodes outside of the
@@ -103,11 +104,13 @@ def get_source_partitions(
         params = set()
         for node in nodes:
             for arg in node.args:
-                if isinstance(arg, Node) and arg not in nodes:
+                if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
                 params.add(node)
+                # get_attr nodes won't be output nodes
+                continue
 
             for user in node.users.keys():
                 if user not in nodes:
