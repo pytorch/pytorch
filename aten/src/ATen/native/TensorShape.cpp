@@ -9,7 +9,6 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
-#include <c10/core/GradMode.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/Tensor.h>
@@ -25,6 +24,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -4894,7 +4894,10 @@ void split_copy_Tensor_out(
 
 namespace {
 
-void copy_tensor_array_to_out(const char* name, const std::vector<Tensor>& array, at::TensorList out) {
+void copy_tensor_array_to_out(
+    const char* name,
+    const std::vector<Tensor>& array,
+    at::TensorList out) {
   TORCH_CHECK(
       out.size() == array.size(),
       name,
@@ -4924,7 +4927,7 @@ void copy_tensor_array_to_out(const char* name, const std::vector<Tensor>& array
   }
 }
 
-}
+} // namespace
 
 void split_with_sizes_copy_out(
     const at::Tensor& self,
@@ -4941,10 +4944,10 @@ void unbind_copy_int_out(
     at::TensorList out) {
   if (at::GradMode::is_enabled()) {
     for (const auto i : c10::irange(out.size())) {
-      TORCH_CHECK(!out[i].requires_grad(),
-        "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
-        "but one of the arguments requires grad."
-      );
+      TORCH_CHECK(
+          !out[i].requires_grad(),
+          "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
+          "but one of the arguments requires grad.");
     }
   }
 
