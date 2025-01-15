@@ -1079,7 +1079,13 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
   }
 #ifdef USE_ROCM
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    c10::string_view arch(dprops->gcnArchName);
+    if (arch == "gfx1100") { //no CK GEMM version for gfx1100
+      gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
+    } else{
+      at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+    }
   }
 #endif
   else {
