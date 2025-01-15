@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -58,6 +59,7 @@ from .dicts import (
     is_hashable,
     SetVariable,
 )
+from .functions import BaseUserFunctionVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -761,6 +763,20 @@ class BuiltinVariable(VariableTracker):
                             return rv
 
                 handlers.append(call_binop_handlers)
+
+        if (
+            fn is builtins.__build_class__
+            and issubclass(arg_types[0], BaseUserFunctionVariable)
+            and not has_kwargs
+        ):
+
+            def call___build_class__(tx, args, kwargs):
+                fn = args[0].get_function()
+                args = (a.as_python_constant() for a in args[1:])
+                r = builtins.__build_class__(fn, *args)
+                return VariableTracker.build(tx, r)
+
+            handlers.append(call___build_class__)
 
         self_handler = getattr(obj, f"call_{fn.__name__}", None)
         if self_handler:
