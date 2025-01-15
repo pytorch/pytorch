@@ -3685,7 +3685,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
     @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
-    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
