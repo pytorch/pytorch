@@ -36,6 +36,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
 
 
@@ -3113,6 +3114,25 @@ def meta_complex(real, imag):
 @out_wrapper()
 def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
+
+
+@register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
+@out_wrapper()
+def nonzero(self):
+    torch._check_not_implemented(
+        exp_config.meta_nonzero_assume_all_nonzero,
+        lambda: "The register_meta function for torch.nonzero() raises unimplemented by default, "
+        "as a correct data-independent implementation does not exist. This implementation "
+        "returns a fake value, assuming all elements of the tensor are non-zero. "
+        "To enable this registration, please set "
+        "'torch.fx.experimental._config.meta_nonzero_assume_all_nonzero' to True.",
+    )
+    return torch.empty_strided(
+        (self.numel(), self.dim()),
+        (1, self.numel()),
+        dtype=torch.long,
+        device=self.device,
+    )
 
 
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
