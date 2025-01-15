@@ -95,6 +95,7 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor([1, 2, 3, 1])
         y = torch.tensor([10, 20, 30, 10])
         self.assertEqual(fn(x, y), torch.tensor([11, 24, 39, 11]))
+        # No recompile
         self.assertEqual(counter.frame_count, 1)
 
 
