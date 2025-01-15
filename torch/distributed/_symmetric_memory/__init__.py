@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 import math
 import os
 import socket
@@ -513,7 +512,7 @@ def _fused_all_gather_matmul_impl(
     gather_dim: int,
     group_name: str,
     return_A: bool,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -636,7 +635,7 @@ def _fused_all_gather_matmul_fallback(
     group_name: str,
     *,
     return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
@@ -658,7 +657,7 @@ def _fused_all_gather_matmul(
     group_name: str,
     *,
     return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -729,7 +728,7 @@ def _fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     B: torch.Tensor,
     group_name: str,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -832,7 +831,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     result_scales: List[Optional[torch.Tensor]],
     out_dtypes: List[Optional[torch.dtype]],
     use_fast_accum: List[bool],
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+) -> tuple[torch.Tensor, List[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     group_size = c10d._get_group_size_by_name(group_name)
@@ -906,7 +905,7 @@ def _fused_all_gather_scaled_matmul(
     result_scales: List[Optional[torch.Tensor]],
     out_dtypes: List[Optional[torch.dtype]],
     use_fast_accum: List[bool],
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+) -> tuple[torch.Tensor, List[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:

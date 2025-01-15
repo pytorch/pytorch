@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -95,7 +95,7 @@ def _tensor_shape_equals(x: object, y: object) -> bool:
             all_equal = all_equal and k in y and (_tensor_shape_equals(x[k], y[k]))
         return all_equal
     else:
-        print(f"Comparing non Tensors: {x} and {y}, they must be equal")
+        log.debug("Comparing non Tensors: %s and %s, they must be equal", x, y)
         return type(x) == type(y) and x == y
 
 
@@ -270,7 +270,7 @@ def _module_stack_to_str(module_stack: object) -> str:
 
 def extract_results_from_loggers(
     model: GraphModule,
-) -> Dict[int, Tuple[Optional[str], object, List[object]]]:
+) -> Dict[int, tuple[Optional[str], object, List[object]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
     The reason we have a list of object, instead of Tensor is because the output of node may not be
     a Tensor, it could be (nested) list, tuple or dict as well.
@@ -281,7 +281,7 @@ def extract_results_from_loggers(
 
     """
     # Results maps debug handle to a tensor list for each model being compared.
-    handles: Dict[int, Tuple[Optional[str], object, List[object]]] = {}
+    handles: Dict[int, tuple[Optional[str], object, List[object]]] = {}
     for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
             handles[module.debug_handle] = (
@@ -294,8 +294,8 @@ def extract_results_from_loggers(
 
 
 def compare_results(
-    ref_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
-    actual_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
+    ref_results: Dict[int, tuple[Optional[str], object, List[torch.Tensor]]],
+    actual_results: Dict[int, tuple[Optional[str], object, List[torch.Tensor]]],
 ) -> Dict[int, NodeAccuracySummary]:
     """Given two dict mapping from `debug_handle_id` (int) to list of tensors
     return a map from `debug_handle_id` to `NodeAccuracySummary` that contains
