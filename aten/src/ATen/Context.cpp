@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <cctype>
@@ -173,6 +174,9 @@ bool Context::userEnabledOverrideableSDP() const {
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+#ifdef USE_ROCM
+static constexpr const auto hipblaslt_allow_tf32 = "HIPBLASLT_ALLOW_TF32";
+#endif
 
 bool Context::checkCuBLASConfigDeterministic() {
   bool cublas_config_deterministic = true;
@@ -228,10 +232,24 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
+#ifdef USE_ROCM
+    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    if (allow_tf32 != true) {
+      return false;
+    }
+#endif
   return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
+#ifdef USE_ROCM
+  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  if (allow_tf32 != true) {
+    LOG(INFO) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
+    return;
+  }
+#endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
 }
 
