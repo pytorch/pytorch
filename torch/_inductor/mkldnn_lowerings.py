@@ -601,11 +601,20 @@ def register_onednn_fusion_ops():
                 ir.InputsKernel.unwrap_storage_for_input(x_zp),
                 ir.ComputedBuffer,
             ) and (x_zp.get_numel() == 0 and x.get_dtype() == torch.int8):
-                # If x_zp is dummy, x is int8 quantized per-tensor and its scale is not reshaped,
+                # If x_zp is empty, x is int8 quantized per-tensor and its scale is not reshaped,
                 # then the codegened code would segfault if we don't create a tensor for x_zp.
-                # It's safe to do so since the quantization is symmetric
+                # It's safe to do so since x is a symmetrically quantized int8 tensor.
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+            if isinstance(
+                ir.InputsKernel.unwrap_storage_for_input(w_zp),
+                ir.ComputedBuffer,
+            ) and (w_zp.get_numel() == 0):
+                # If w_zp is empty, then it's a dummy tensor created to denote the
+                # absence of a zero point, and thus w is int8 symmetrically quantized.
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
 
             assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
@@ -635,29 +644,15 @@ def register_onednn_fusion_ops():
                 )
 
                 def _is_sym_quantized_wgt():
-                    # In some Inductor pattern, we may insert a dummy weight zero-point even if it doesn't exist
-                    # just because oneDNN qlinear has a parameter corresponding to zero-points of weights.
-                    # w_zp will be a computedBuffer if it's dummy.
-                    # packed weights are int8, so if w_zp is not dummy, then we check for all its values
-                    # being zeros (weights being int8 symmetrically quantized),
-                    # because we don't support the GEMM template with asymmetrically quantized weights.
+                    # We don't support the GEMM template with asymmetrically quantized weights.
                     nonlocal w_zp
-                    return (
-                        isinstance(
-                            ir.InputsKernel.unwrap_storage_for_input(w_zp),
-                            ir.ComputedBuffer,
-                        )
-                        and w_zp.get_numel() == 0  # dummy w_zp
-                    ) or (
-                        isinstance(
-                            ir.InputsKernel.unwrap_storage_for_input(w_zp),
-                            ir.ConstantBuffer,
-                        )
-                        and torch.equal(
-                            torch.zeros_like(V.graph.constants[w_zp.get_name()]),
-                            V.graph.constants[w_zp.get_name()],
-                        )  # symmetrically quantized w_zp
-                    )
+                    return isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(w_zp),
+                        ir.ConstantBuffer,
+                    ) and torch.equal(
+                        torch.zeros_like(V.graph.constants[w_zp.get_name()]),
+                        V.graph.constants[w_zp.get_name()],
+                    )  # symmetrically quantized weights
 
                 if _is_sym_quantized_wgt() and use_cpp_gemm_template(
                     layout, x, packed_weight
