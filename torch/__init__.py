@@ -316,6 +316,24 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        # Workaround slim-wheel CUDA-12.4+ dependency bug in libcusparse by preloading nvjitlink
+        # In those versions of cuda cusparse depends on nvjitlink, but does not have rpath when
+        # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
+        # if `LD_LIBRARY_PATH` is defined
+        # See https://github.com/pytorch/pytorch/issues/138460
+        if version.cuda not in ["12.4", "12.6"]:  # type: ignore[name-defined]
+            return
+        try:
+            with open("/proc/self/maps") as f:
+                _maps = f.read()
+            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
+            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+                return
+            # If all abovementioned conditions are met, preload nvjitlink
+            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+        except Exception:
+            pass
+
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -1148,7 +1166,7 @@ def set_default_device(
     .. note::
 
         This doesn't affect functions that create tensors that share the same memory as the input, like:
-        :func:`torch.from_numpy` and :func:`torch.frombuffer`. Using :func:`torch.Tensor.to` move tensor to desired device.
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
         device (device or string): the device to set as default
