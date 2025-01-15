@@ -25,7 +25,8 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   std::optional<c10::DeviceType> device_type = std::nullopt;
   bool is_accelerator_detected = false;
   DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
-  DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
+  // Comment out MTIA to avoid blocking the internal build.
+  // DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
   DETECT_AND_ASSIGN_ACCELERATOR(XPU)
   DETECT_AND_ASSIGN_ACCELERATOR(HIP)
   DETECT_AND_ASSIGN_ACCELERATOR(MPS)
