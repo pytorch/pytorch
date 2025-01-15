@@ -36,7 +36,7 @@ import psutil  # type: ignore[import]
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
-
+_DATA_MODEL_VERSION = "1.0"
 @dataclasses.dataclass
 class UsageData:
     """
@@ -165,6 +165,7 @@ class UsageLogger:
         self._summary_info = {
             "level": "metadata",
             "interval": self._log_interval,
+            "data_model_version":_DATA_MODEL_VERSION,
         }
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled
