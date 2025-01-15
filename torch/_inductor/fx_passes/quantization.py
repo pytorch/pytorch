@@ -676,7 +676,10 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         # can be broadcasted to the tensor shape of the computation node.
         compute_op = compute_node.target
         compute_node_size = compute_node.meta.get("val", None).size()
-        if compute_op is torch.ops.onednn.qlinear_pointwise.default:
+        if compute_op in [
+            torch.ops.onednn.qlinear_pointwise.default,
+            torch.ops.onednn.qlinear_pointwise.tensor,
+        ]:
             broadcast_sizes = []
             if len(compute_node_size) >= 2:
                 broadcast_sizes = [
