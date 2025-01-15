@@ -61,6 +61,7 @@ class MPSBasicTests(TestCase):
     test_nan_to_num = CommonTemplate.test_nan_to_num
     test_remainder = CommonTemplate.test_remainder
     test_remove_no_ops = CommonTemplate.test_remove_no_ops
+    test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
     test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
     test_silu = CommonTemplate.test_silu
