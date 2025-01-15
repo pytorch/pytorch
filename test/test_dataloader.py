@@ -3226,7 +3226,7 @@ if __name__ == '__main__':
         RandomDataset(64, (28, 28)),
         batch_size=16,
         num_workers=2,
-        pin_memory=True if not torch.backends.mps.is_available() else False,
+        pin_memory=True,
         persistent_workers=True,
         multiprocessing_context="fork",
     )
