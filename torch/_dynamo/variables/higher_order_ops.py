@@ -2172,11 +2172,6 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    """
-    A Variable to proxy a call to the HOP into the Dynamo output graph.
-    Used by Compiled Autograd to let backward HOPs survive until AOTDispatcher.
-    """
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
