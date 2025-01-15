@@ -3120,6 +3120,9 @@ class CppVecKernel(CppKernel):
             else:
                 return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
         elif reduction_type == "any":
+            if isinstance(next_value, CppCSEVariable):
+                assert next_value.dtype == torch.bool
+                (next_value,) = unify_mask_base_type(V.kernel.compute, (next_value,))
             return f"{var} | {next_value}"
         else:
             raise NotImplementedError
@@ -3700,7 +3703,8 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_dtype_source(node: torch.fx.Node):
+            def is_lowp_fp_source(node: torch.fx.Node):
+                """Given the node's ouput is the input of a node that requires lowp fp, check if it generates lowp fp ouput."""
                 dtype_sources = [
                     "load",
                     "constant",
@@ -3709,18 +3713,14 @@ class CppKernelProxy(CppKernel):
                 ]
                 return node.target in dtype_sources
 
-            def is_dtype_sink(node: torch.fx.Node):
+            def is_lowp_fp_sink(node: torch.fx.Node):
+                """Given the node's input is the output of a node that generates lowp fp, check if it accepts lowp fp input."""
                 dtype_sinks = [
                     "store",
+                    "to_dtype",
                     "to_dtype_bitcast",
                 ]
-                if node.target in dtype_sinks:
-                    return True
-                # The to_dtype node is a dtype sink only if its targeting dtype is
-                # not a bool, as not all bool vector maps to the same cpp type
-                if node.target == "to_dtype":
-                    return node.args[-1] is not torch.bool
-                return False
+                return node.target in dtype_sinks
 
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target != "load":
@@ -3739,8 +3739,8 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if is_lowp_fp_load(_node):
-                    # No need to promote to float if all users are ops that are dtype sinks
-                    if all(is_dtype_sink(user) for user in _node.users):
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    if all(is_lowp_fp_sink(user) for user in _node.users):
                         continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
@@ -3753,9 +3753,10 @@ class CppKernelProxy(CppKernel):
                         metrics.cpp_to_dtype_count += 1
                 elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
-                    # No need to promote to float if it is a user of a dtype sources which are all directly feed to dtype sinks
-                    if is_dtype_source(value_var) and all(
-                        is_dtype_sink(user) for user in value_var.users
+                    # No need to promote to float if it is a user of a lowp fp sources
+                    # which are all directly fed to ops that accepts lowp fp input
+                    if is_lowp_fp_source(value_var) and all(
+                        is_lowp_fp_sink(user) for user in value_var.users
                     ):
                         continue
                     dtype = V.graph.get_dtype(name)
@@ -3793,14 +3794,14 @@ class CppKernelProxy(CppKernel):
                             value,
                         )
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
-                    # No need to promote to float if all users are ops that are dtype sinks
-                    if all(is_dtype_sink(user) for user in _node.users):
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    if all(is_lowp_fp_sink(user) for user in _node.users):
                         continue
                     (ops, value, _) = _node.args
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
-                    # No need to promote to float if all users are ops that are dtype sinks
-                    if all(is_dtype_sink(user) for user in _node.users):
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    if all(is_lowp_fp_sink(user) for user in _node.users):
                         continue
                     (ops, x, _) = _node.args
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
@@ -3820,17 +3821,16 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "to_dtype_bitcast":
                     (ops, value_var, dtype, src_dtype) = _node.args
 
-                    # to_dtype_bitcast act as a dtype sink:
+                    # to_dtype_bitcast act as a lowp fp sink:
                     # c10::bit_cast requires the source and target have the bitwidth. Because the input tensor's dtype
                     # could be promoted, e.g. from float16 to float, we have to cast the tensor to its original source
                     # dtype before invoking bit_cast.
                     if src_dtype in DTYPE_LOWP_FP:
-                        # No need to promote to float if it is a user of a dtype sources which are all directly feed to dtype sinks
+                        # No need to promote to float if it is a user of a lowp fp sources
+                        # which are all directly fed to ops that accepts lowp fp input
                         if not (
-                            is_dtype_source(value_var)
-                            and all(
-                                is_dtype_sink(user) for user in value_var.users
-                            )
+                            is_lowp_fp_source(value_var)
+                            and all(is_lowp_fp_sink(user) for user in value_var.users)
                         ):
                             with sub_graph.inserting_before(_node):
                                 to_type_node = sub_graph.call_method(
@@ -3839,14 +3839,12 @@ class CppKernelProxy(CppKernel):
                                 _node.replace_input_with(value_var, to_type_node)
                                 metrics.cpp_to_dtype_count += 1
 
-                    # to_dtype_bitcast act as a dtype source:
+                    # to_dtype_bitcast act as a lowp fp source:
                     # We also need to convert the bit-casted tensor back to float to make sure we keep using higher
                     # precision values for the rest of the computation.
                     if dtype in DTYPE_LOWP_FP:
-                        # No need to promote to float if all users are ops that are dtype sinks
-                        if not (
-                            all(is_dtype_sink(user) for user in _node.users)
-                        ):
+                        # No need to promote to float if all users are ops that accepts lowp fp input
+                        if not (all(is_lowp_fp_sink(user) for user in _node.users)):
                             ops = _node.args[0]
                             with sub_graph.inserting_after(_node):
                                 to_type_node = sub_graph.call_method(
