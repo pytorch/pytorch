@@ -369,7 +369,7 @@ void f8f8bf16_rowwise_impl_sm89(
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
     at::Tensor out) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 860 && __CUDA_ARCH__ < 900
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 890
   int M = XQ.size(0);
   int N = WQ.size(1);
   int K = XQ.size(1);

@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_X86,
+    MACOS_VERSION,
     parametrize,
     serialTest,
     skipIfNNModuleInlined,
@@ -5684,6 +5685,10 @@ class CommonTemplate:
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
+
+        # pow is broken in MPSGraph for MacOS before version 13.3
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
 
         self.common(
             fn,
