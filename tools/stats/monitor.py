@@ -207,21 +207,20 @@ class UsageLogger:
             finally:
                 time.sleep(self._data_collect_interval)
 
-    def _generate_stats(self, data_list) -> dict[str, Any]:
+    def _generate_stats(self, data_list: list[float]) -> dict[str, Any]:
         """
         Generate stats from the data list.
         """
         if len(data_list) == 0:
             return {}
 
-        total= sum(data_list)
+        total = sum(data_list)
         avg = total / len(data_list)
         maxi = max(data_list)
         return {
             "avg": round(avg, 2),
             "max": round(maxi, 2),
         }
-
 
     def _output_data(self) -> None:
         """
@@ -258,8 +257,12 @@ class UsageLogger:
                     }
                 )
 
-                cpu_stats = self._generate_stats([data.cpu_percent for data in data_list])
-                memory_stats = self._generate_stats([data.memory_percent for data in data_list])
+                cpu_stats = self._generate_stats(
+                    [data.cpu_percent for data in data_list]
+                )
+                memory_stats = self._generate_stats(
+                    [data.memory_percent for data in data_list]
+                )
 
                 # find all cmds during the interval
                 cmds = {
