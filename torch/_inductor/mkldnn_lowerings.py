@@ -607,6 +607,14 @@ def register_onednn_fusion_ops():
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="x_zp"
                 )
+
+            assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
+
+            # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
+            # Refer to https://github.com/pytorch/pytorch/blob
+            # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
+            w_scale.realize()
+            w_zp.realize()
             if isinstance(
                 ir.InputsKernel.unwrap_storage_for_input(w_zp),
                 ir.ComputedBuffer,
@@ -616,14 +624,6 @@ def register_onednn_fusion_ops():
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
-
-            assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
-
-            # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
-            # Refer to https://github.com/pytorch/pytorch/blob
-            # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
-            w_scale.realize()
-            w_zp.realize()
             if w_zp.get_dtype() != torch.int32 and isinstance(
                 ir.InputsKernel.unwrap_storage_for_input(w_zp),
                 ir.ConstantBuffer,
