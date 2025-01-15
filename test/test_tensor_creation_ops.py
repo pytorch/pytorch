@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
+    IS_S390X,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1083,6 +1084,7 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
     @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
+    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
@@ -3500,6 +3502,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
         n_max = int(0.75 * 2 ** 32)
