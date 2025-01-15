@@ -1,8 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
@@ -19,6 +23,8 @@ __all__ = [
     "is_compiling",
     "is_dynamo_compiling",
     "is_exporting",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
@@ -424,3 +430,34 @@ def is_exporting() -> bool:
         >>>     # ...rest of the function...
     """
     return _is_exporting_flag
+
+
+def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
+    """
+    Serializes all the cache artifacts that were created during the compilation
+
+    Example:
+
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+    """
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
+
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)
