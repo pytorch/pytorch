@@ -60,7 +60,7 @@ def triton_op(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
-        >>> from torch._library import triton_op, wrap_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> import triton
         >>> from triton import language as tl
