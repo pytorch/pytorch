@@ -20,6 +20,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Set,
@@ -290,8 +291,8 @@ class _InsertPoint:
 
 
 class _node_list:
-    def __init__(self, graph: "Graph", direction: str = "_next"):
-        assert direction in ["_next", "_prev"]
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
+        assert direction in ("_next", "_prev")
         self.graph = graph
         self.direction = direction
 
@@ -299,8 +300,7 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        assert self.direction == "_prev" or self.direction == "_next"
-        yield from _NodeIter(self.graph._root, self.direction == "_prev")
+        return _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
@@ -1983,20 +1983,18 @@ reflectable_magic_methods = {
     "matmul": "{} @ {}",
 }
 
-magic_methods = dict(
-    {
-        "eq": "{} == {}",
-        "ne": "{} != {}",
-        "lt": "{} < {}",
-        "gt": "{} > {}",
-        "le": "{} <= {}",
-        "ge": "{} >= {}",
-        "pos": "+{}",
-        "neg": "-{}",
-        "invert": "~{}",
-    },
+magic_methods = {
+    "eq": "{} == {}",
+    "ne": "{} != {}",
+    "lt": "{} < {}",
+    "gt": "{} > {}",
+    "le": "{} <= {}",
+    "ge": "{} >= {}",
+    "pos": "+{}",
+    "neg": "-{}",
+    "invert": "~{}",
     **reflectable_magic_methods,
-)
+}
 
 inplace_methods = {
     "iadd": "{} += {}",
