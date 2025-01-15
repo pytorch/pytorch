@@ -63,6 +63,12 @@ __all__ = [
     "xlog1py",
     "xlogy",
     "zeta",
+    "beta",
+    "betaln",
+    "betainc",
+    "betaincc",
+    "betaincinv",
+    "betainccinv",
 ]
 
 Tensor = torch.Tensor
