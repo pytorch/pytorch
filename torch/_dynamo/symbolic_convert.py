@@ -213,11 +213,13 @@ class SpeculationLog:
                 f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
                 f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
             )
-        assert (
+        if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), f"""
+        ):
+            raise SpeculationLogDivergence(
+                f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
 - Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
 - Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
@@ -235,6 +237,7 @@ do this for graph breaks, you will infinite loop).
 
 Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
 """
+            )
         self.index += 1
         return entry
 
@@ -317,6 +320,10 @@ class BlockStackEntry:
             is_graph_break and self.with_context.exit_on_graph_break()
         ) or not is_graph_break:
             return self.with_context.exit(tx)
+
+
+class SpeculationLogDivergence(AssertionError):
+    pass
 
 
 class ReturnValueOp(Exception):
