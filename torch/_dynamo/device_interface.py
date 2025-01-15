@@ -320,6 +320,10 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return True
+
+    @staticmethod
     def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
@@ -364,6 +368,10 @@ class MpsInterface(DeviceInterface):
     @staticmethod
     def current_device():
         return 0
+
+    @staticmethod
+    def get_compute_capability(device: _device_t = None) -> str:
+        return ""
 
     @staticmethod
     def synchronize(device: _device_t = None):
