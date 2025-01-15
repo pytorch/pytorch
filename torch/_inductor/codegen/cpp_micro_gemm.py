@@ -582,7 +582,7 @@ inline void {{kernel_name}}_kernel(
         __m256i first_fp16_vector = _mm512_cvtps_ph(first_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
         __m256i second_fp16_vector = _mm512_cvtps_ph(next_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
         scales[i] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
-        _mm512_inserti64x4(_mm512_castph_si512(scales[i]), second_fp16_vector, 1);
+        scales[i] = _mm512_castsi512_ph(_mm512_inserti64x4(_mm512_castph_si512(scales[i]), second_fp16_vector, 1));
     };
     c10::ForcedUnroll<COLS>{}(load_scales);
 
@@ -620,7 +620,7 @@ inline void {{kernel_name}}_kernel(
             __m256i second_fp16_vector = _mm512_cvtps_ph(second_float_vector, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
 
             vb[col] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
-            _mm512_inserti64x4(_mm512_castph_si512(vb[col]), second_fp16_vector, 1);
+            vb[col] = _mm512_castsi512_ph(_mm512_inserti64x4(_mm512_castph_si512(vb[col]), second_fp16_vector, 1));
 
             vb[col] = _mm512_mul_ph(vb[col], scales[col]);
         }
