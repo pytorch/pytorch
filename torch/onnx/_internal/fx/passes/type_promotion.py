@@ -9,6 +9,7 @@ import logging
 from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
+import torch._dispatch.python
 import torch._ops
 import torch.fx
 import torch.fx.traceback as fx_traceback
@@ -19,25 +20,18 @@ from torch._prims_common import (
 )
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
-import torch._dispatch.python
+
 
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from torch._subclasses import fake_tensor
+
 
 logger = logging.getLogger(__name__)
-
-# TODO(bowbao): move to type utils.
-_SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
-    bool: torch.bool,
-    int: torch.int64,
-    float: torch.float32,
-    complex: torch.complex32,
-}
 
 
 def _try_getclosurevars(func):
