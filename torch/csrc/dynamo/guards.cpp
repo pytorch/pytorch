@@ -539,6 +539,7 @@ struct AutocastState {
 
   bool operator==(const AutocastState& o) const {
     for (size_t i = 0; i < DEVICES.size(); i++) {
+      // If disabled audocast, autocast_dtype comparison not occur
       if (enabled[i] == false && o.enabled[i] == false) {
         continue;
       }

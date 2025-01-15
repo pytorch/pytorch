@@ -84,7 +84,6 @@ class TestThroughputBenchmark(TestCase):
         from torch._dynamo import config
         config.error_on_recompile = True
         inductor_config.cpp_wrapper = True
-        inductor_config.cpp.enable_kernel_profile = True
         inductor_config.freezing = True
         D_in = 10
         H = 5
@@ -120,6 +119,8 @@ class TestThroughputBenchmark(TestCase):
                 num_warmup_iters=100,
                 num_iters=1000
             )
+
+            print(stats)
 
     def test_compile(self):
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
