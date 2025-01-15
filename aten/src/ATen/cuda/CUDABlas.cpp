@@ -1084,7 +1084,7 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
     if (arch == "gfx1100") { //no CK GEMM version for gfx1100
       gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
     } else{
-      at::native::bgemm_internal_ck<at::float>(CUDABLAS_BGEMM_ARGS(at::float));
+      at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
     }
   }
 #endif
