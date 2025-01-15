@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch.utils
 
+from ...utils._ordered_set import OrderedSet
 from .. import ir
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
@@ -97,7 +98,7 @@ static inline scalar_t* {{kernel_name}}_conditional_data_ptr(scalar_t* ptr, scal
 }
 
 template <typename scalar_t,
-          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
+          typename std::enable_if_t<c10::is_reduced_floating_point_v<scalar_t>, int> = 0>
 static inline scalar_t* {{kernel_name}}_conditional_data_ptr(float* ptr, scalar_t* ptr2) {
   return ptr2;
 }
@@ -319,7 +320,7 @@ extern "C"
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
-  constexpr bool is_reduced_type = std::is_reduced_floating_point_v<scalar_t>;
+  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
@@ -823,11 +824,11 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
         self.extra_sizevars = list(
-            {
+            OrderedSet(
                 val
                 for val in self.kernel_input_name_to_buffer.values()
                 if isinstance(val, sympy.Symbol)
-            }
+            )
         )
         self.other_buf_start_idx = 5
         self.score_mod_other_buffers = (
