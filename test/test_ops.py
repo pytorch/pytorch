@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipMeta,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -74,6 +75,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
+
+# test_out
+# test_out_warning
+# test_variant_consistency_eager
 
 
 assert torch.get_default_dtype() == torch.float32
@@ -719,7 +725,7 @@ class TestCommon(TestCase):
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     @with_tf32_off
-    @onlyNativeDeviceTypesAnd(["hpu"])
+    @onlyNativeDeviceTypesAnd(["hpu", "mps"])
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -810,6 +816,7 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
+    @skipMPS
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -948,6 +955,7 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
+    @skipMPS
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
@@ -1136,6 +1144,7 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @skipMPS
     @ops(
         [
             op
@@ -1216,6 +1225,7 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
+    @skipMPS
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
@@ -2821,7 +2831,7 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals())
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")

@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
+    MACOS_VERSION,
     retry_shell,
     set_cwd,
     shell,
@@ -1803,6 +1804,10 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
         ]
+        if MACOS_VERSION >= 15.0:
+            selected_tests += [
+                "test_ops",
+            ]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
