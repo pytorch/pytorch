@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
 import torch.distributed as dist
 
@@ -20,7 +20,7 @@ def with_temp_dir(
     assert func is not None
 
     @wraps(func)
-    def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:
+    def wrapper(self, *args: tuple[object], **kwargs: Dict[str, Any]) -> None:
         if dist.is_initialized():
             # Only create temp_dir when rank is 0
             if dist.get_rank() == 0:
