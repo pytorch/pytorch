@@ -1,4 +1,6 @@
-# mypy: allow-untyped-defs
+from typing import Any, Callable, List, TypeVar
+from typing_extensions import ParamSpec
+
 import torch
 import torch.nn.functional as F
 
@@ -12,12 +14,21 @@ from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import forward_helper
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
 @implements_per_sample_grads(F.conv1d)
 @implements_per_sample_grads(F.conv2d)
 @implements_per_sample_grads(F.conv3d)
 class ConvPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, kwarg_names, conv_fn, *expanded_args_and_kwargs):
+    def forward(
+        ctx: Any,
+        kwarg_names: List[str],
+        conv_fn: Callable[_P, _T],
+        *expanded_args_and_kwargs: Any,
+    ) -> _T:
         expanded_args, expanded_kwargs = conv_args_and_kwargs(
             kwarg_names, expanded_args_and_kwargs
         )
@@ -64,5 +75,5 @@ class ConvPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output):
+    def backward(ctx: Any, *grad_output: Any) -> Any:
         return conv_backward(ctx.conv_fn, ctx, grad_output)
