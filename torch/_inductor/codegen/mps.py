@@ -63,6 +63,20 @@ class MetalExprPrinter(ExprPrinter_):
         mod = self.doprint(mod)
         return f"({x}) % ({mod})"
 
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            raise RuntimeError("metal::min only supported for 2 args")
+        return f"metal::min({', '.join(map(self._print, expr.args))})"
+
+    def _print_Max(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            raise RuntimeError("metal::max only supported for 2 args")
+        return f"metal::max({', '.join(map(self._print, expr.args))})"
+
+    def _print_Abs(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"metal::abs({self._print(expr.args[0])})"
+
 
 class MetalOverrides(OpOverrides):
     @staticmethod
@@ -234,6 +248,20 @@ class MetalOverrides(OpOverrides):
         float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
         float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
         return f"metal::trunc({float_a}/{float_b})"
+
+    @staticmethod
+    def ceil(x: CSEVariable) -> str:
+        return f"metal::ceil({x})"
+
+    @staticmethod
+    def round(x: CSEVariable) -> str:
+        return f"metal::round({x})"
+
+    @staticmethod
+    def pow(a: CSEVariable, b: CSEVariable) -> str:
+        cast_a = f"static_cast<decltype({a}+{b})>({a})"
+        cast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::pow({cast_a}, {cast_b})"
 
 
 class MetalKernel(SIMDKernel):

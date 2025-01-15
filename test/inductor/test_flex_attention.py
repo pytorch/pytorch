@@ -575,7 +575,11 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device=self.device, dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
@@ -4346,7 +4350,11 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
             device="cuda",
@@ -4496,7 +4504,11 @@ class TestPagedAttention(InductorTestCase):
         )
 
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
