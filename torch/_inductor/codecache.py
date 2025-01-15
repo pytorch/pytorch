@@ -1975,7 +1975,7 @@ def _precompile_header(
     header_hash, header_full_path = write(
         content=f"#include <{header}>\n",
         extension="h",
-        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__}",
+        extra=f"{hashable_cmd_line} {compiler_version} {torch.version.__version__} {torch.version.build_uuid}",
         specified_dir=_HEADER_DIR,
     )
 
