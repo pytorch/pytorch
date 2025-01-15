@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import logging
 import math
+from torch._dispatch.python import enable_python_dispatcher
 import os
 import traceback
 import typing
@@ -1212,6 +1213,8 @@ class FakeTensorMode(TorchDispatchMode):
             Tuple[bool, Optional[TorchDispatchMode], Optional[bool]]
         ] = []
 
+        self.enable_py_dispatcher : Optional[torch._C._EnablePythonDispatcher] = None
+
         self.shape_env = shape_env
 
         self._stack_trace = traceback.extract_stack()
@@ -1296,6 +1299,11 @@ class FakeTensorMode(TorchDispatchMode):
             prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
             torch._C._set_only_lift_cpu_tensors(True)
         maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
+
+        if self.enable_py_dispatcher is None:
+            self.enable_py_dispatcher = enable_python_dispatcher()
+            self.enable_py_dispatcher.__enter__()
+            
         if self is not maybe_prev_fake_mode:
             self.enter_stack.append(
                 (True, maybe_prev_fake_mode, prev_only_lift_cpu_tensors)
@@ -1317,7 +1325,13 @@ class FakeTensorMode(TorchDispatchMode):
             live,
             maybe_prev_fake_mode,
             maybe_prev_only_lift_cpu_tensors,
+        
         ) = self.enter_stack.pop()
+
+        if len(self.enter_stack) == 0:
+            self.enable_py_dispatcher.__exit__(a, b, c)
+            self.enable_py_dispatcher = None
+
         if live:
             super().__exit__(a, b, c)
 
