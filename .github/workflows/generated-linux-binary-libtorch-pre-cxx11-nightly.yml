@@ -104,8 +104,6 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-build:
@@ -171,8 +169,6 @@ jobs:
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-build:
@@ -238,8 +234,6 @@ jobs:
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda12_6-shared-with-deps-pre-cxx11-build:
@@ -305,6 +299,4 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
