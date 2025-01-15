@@ -47,6 +47,7 @@
 #ifdef OVRSOURCE
 // Do not export AOTI on Windows for internal builds
 #define AOTI_TORCH_EXPORT
+#else /* OVRSOURCE */
 #ifdef EXPORT_AOTI_FUNCTIONS
 #define AOTI_TORCH_EXPORT __declspec(dllexport)
 #else
