@@ -73,6 +73,7 @@ class MetalExprPrinter(ExprPrinter_):
             raise RuntimeError("metal::max only supported for 2 args")
         return f"metal::max({', '.join(map(self._print, expr.args))})"
 
+
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
