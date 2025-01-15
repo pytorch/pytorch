@@ -180,9 +180,9 @@ static void upsample_nearest3d_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{ceil_div(n, bdim.x)};
-  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  // safe check for int64 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(output.numel() <= std::numeric_limits<int64_t>::max(),
-        "upsample_nearest3d only supports output tensors with less than INT_MAX elements, but got ", output.sizes());
+        "upsample_nearest3d only supports output tensors with less than INT64_MAX elements, but got ", output.sizes());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte,input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
@@ -256,9 +256,9 @@ static void upsample_nearest3d_backward_out_cuda_template(
   dim3 gdim{ceil_div(n, bdim.x)};
   // safe check for int64 indexing; implicitly restrict launch config for kernel
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int64_t>::max(),
-    "upsample_nearest3d_backward only supports input tensors with less than INT_MAX elements, but got ", grad_input.sizes());
+    "upsample_nearest3d_backward only supports input tensors with less than INT64_MAX elements, but got ", grad_input.sizes());
   TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int64_t>::max(),
-    "upsample_nearest3d_backward only supports output tensors with less than INT_MAX elements, but got ", grad_output.sizes());
+    "upsample_nearest3d_backward only supports output tensors with less than INT64_MAX elements, but got ", grad_output.sizes());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
