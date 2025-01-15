@@ -562,7 +562,7 @@ def main() -> None:
 
     # If the tag matches, we can get the PR number from it, this is from ciflow
     # workflow dispatcher
-    tag_regex = re.compile(r"^ciflow/\w+/(?P<pr_number>\d+)$")
+    tag_regex = re.compile(r"^ciflow/[\w\-]+/(?P<pr_number>\d+)$")
 
     labels = set()
     if pr_number:

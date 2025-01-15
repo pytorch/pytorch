@@ -1,8 +1,5 @@
-#include <autograd/grad_mode.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#include <cstddef>
-#include <stdexcept>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>

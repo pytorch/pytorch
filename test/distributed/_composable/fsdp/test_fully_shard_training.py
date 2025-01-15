@@ -6,7 +6,8 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -30,13 +31,13 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
+    compiled_fsdp_test,
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
     patch_all_gather,
     patch_reduce_scatter,
-    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -316,7 +317,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -361,7 +362,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -590,7 +591,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
-        for iter_idx in range(10):
+        for _ in range(10):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad()
@@ -624,12 +625,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         # sync point after each iteration
         ref_losses: List[torch.Tensor] = []
         losses: List[torch.Tensor] = []
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_optim.zero_grad()
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
             ref_optim.step()
-        for iter_idx in range(10):
+        for _ in range(10):
             optim.zero_grad()
             losses.append(model(inp).sum())
             losses[-1].backward()
@@ -649,7 +650,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation
@@ -1185,7 +1186,7 @@ class TestFullyShardNDTraining(FSDPTest):
         foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
-        pp_mesh, dp_mesh, tp_mesh = (
+        _, dp_mesh, tp_mesh = (
             global_mesh["pp"],
             global_mesh["dp"],
             global_mesh["tp"],
@@ -1217,7 +1218,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for n, p in model.named_parameters():
+        for _, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
@@ -1288,7 +1289,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for n, p in model.named_parameters():
+        for _, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 3)
             self.assertEqual(len(p.placements), 3)

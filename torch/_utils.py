@@ -726,9 +726,9 @@ class ExceptionWrapper:
             raise self.exc_type(message=msg)
         try:
             exception = self.exc_type(msg)
-        except TypeError:
-            # If the exception takes multiple arguments, don't try to
-            # instantiate since we don't know how to
+        except Exception:
+            # If the exception takes multiple arguments or otherwise can't
+            # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
 
@@ -1006,7 +1006,7 @@ class CallbackRegistry(Generic[P]):
         for cb in self.callback_list:
             try:
                 cb(*args, **kwargs)
-            except Exception as e:
+            except Exception:
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
