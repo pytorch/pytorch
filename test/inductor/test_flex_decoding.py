@@ -431,7 +431,11 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device="cuda", dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
@@ -1635,6 +1639,146 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         eager = flex_attention(q, k, v, block_mask=mask_2)
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
+
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @supported_platform
+    def test_decode_at_different_input_position(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        n_pages, page_size, max_batch_size, max_seq_len = 32, 64, 4, 512
+        n_heads, head_dim = 4, 16
+
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            causal_mask,
+            max_batch_size,
+            1,
+            max_seq_len,
+            max_seq_len,
+            device="cuda",
+            BLOCK_SIZE=page_size,
+        )
+
+        # init 4 requests with different prefill length
+        prefill_length = [5, 98, 47, 194]
+        querys, keys, values = [], [], []
+        for seq_len in prefill_length:
+            q = torch.randn(
+                1,
+                n_heads,
+                1,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=False,
+            )
+            k = torch.randn(
+                1,
+                n_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=False,
+            )
+            v = torch.randn(
+                1,
+                n_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+                requires_grad=False,
+            )
+            querys.append(q)
+            keys.append(k)
+            values.append(v)
+
+        # get ground truth output
+        ref_outs, golden_outs = [], []
+        for q, k, v in zip(querys, keys, values):
+            q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+            q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+            slice_block_mask = block_mask._adjust(1, k_ref.shape[2])
+            slice_block_mask.seq_lengths = (1, k_ref.shape[2])
+            ref_out = flex_attention(
+                q_ref, k_ref, v_ref, score_mod, slice_block_mask, enable_gqa=False
+            )
+            golden_out = flex_attention(
+                q_gold, k_gold, v_gold, score_mod, slice_block_mask, enable_gqa=False
+            )
+
+            ref_outs.append(ref_out)
+            golden_outs.append(golden_out)
+        ref_outs = torch.cat(ref_outs)
+        golden_outs = torch.cat(golden_outs)
+
+        # init paged attention
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device="cuda")
+        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device="cuda"))
+
+        # allocate paged kv cache
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        v_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        # prefill paged kv cache
+        for i, seq_len in enumerate(prefill_length):
+            batch_idx = torch.tensor([i], device="cuda", dtype=torch.int32)
+            input_pos = torch.arange(seq_len, device="cuda", dtype=torch.int32).view(
+                1, seq_len
+            )
+            paged_cache.assign(
+                batch_idx, input_pos, keys[i], values[i], k_cache, v_cache
+            )
+
+        # get paged out and check correctness
+        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
+        input_pos = torch.tensor(prefill_length, device="cuda", dtype=torch.int32).view(
+            max_batch_size, 1
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod), new_block_mask, enable_gqa=False
+            )
+        )
+        paged_out = compiled_sdpa(
+            torch.cat(querys, 0), k_cache, v_cache, block_mask=new_block_mask
+        )
+
+        with torch.no_grad():
+            dtype = paged_out.dtype
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
 
 
 common_utils.instantiate_parametrized_tests(TestFlexDecoding)

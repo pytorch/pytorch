@@ -1055,6 +1055,9 @@ class TritonHOPifier:
     ) -> List["TritonConfig"]:
         raise NotImplementedError("abstract method")
 
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+        raise NotImplementedError("abstract method")
+
     @staticmethod
     def do_prune_configs(  # type: ignore[no-untyped-def]
         autotuner: "TritonAutotunerType",
@@ -1250,25 +1253,81 @@ class TritonHOPifier:
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
 
-        """
-        We also don't support the @triton.heuristics wrapper yet.
-        We raise an error here to avoid silent incorrectness in these cases
-        """
+        # raise an exception if there are multiple @triton.autotune decorators
         iter_kernel = variable.kernel
         autotuner_count = 0
         while not isinstance(iter_kernel, JITFunction):
             if isinstance(iter_kernel, Autotuner):
                 autotuner_count += 1
-            if isinstance(iter_kernel, Heuristics):
-                self.raise_unsupported(
-                    "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported."
-                )
             if autotuner_count > 1:
                 self.raise_unsupported(
                     "Passing multiple @triton.autotune decorators is not supported. "
                     "Please use a single @triton.autotune decorator instead."
                 )
             iter_kernel = iter_kernel.fn
+
+        # Process the @triton.heuristics decorator:
+        # - We know there is only 1 autotuner decorator here
+        # - We can apply the heuristic to all triton.Configs in the order that the decorators appear
+        #   This way, when the config is selected, the heuristics have already been applied.
+        # - Decorators that appear *before* the autotuner are already processed correctly
+        if isinstance(variable.kernel, Autotuner) and isinstance(
+            variable.kernel.fn, Heuristics
+        ):
+            # unwrap the heuristics decorator, we don't need it anymore
+            # variable.kernel ==> Autotuner
+            # variable.kernel.fn ==> Heuristics
+            # ...
+            # There can be arbitrarily many heuristics wrappers here!
+            # ...
+            # variable.kernel.fn ==> JITFunction
+
+            # Copy the configs, we are going to be modifying them
+            new_configs = copy.deepcopy(variable.kernel.configs)
+
+            named_args = dict(zip(variable.kernel.arg_names, args))
+
+            # Iterate through all of the heuristics wrappers that come after the autotune wrapper
+            iter_kernel = variable.kernel.fn
+            while isinstance(iter_kernel, Heuristics):
+                # For each config, apply the heuristic fn(s)
+                for config_idx in range(len(new_configs)):
+                    for kwarg_key, heuristic_fn in iter_kernel.values.items():
+                        # Run heuristics on the combined configs + kwargs
+                        heuristic_result = self.call_user_defined_fn(
+                            heuristic_fn,
+                            [
+                                {
+                                    **named_args,
+                                    **kwargs,
+                                    **new_configs[config_idx].__dict__["kwargs"],
+                                },
+                            ],
+                            {},
+                            tx,
+                            variable,
+                        )
+
+                        # Update the kwargs in each config
+                        # maybe_unpack_heuristic_result raises unsupported if the value is non-constant
+                        new_configs[config_idx].__dict__["kwargs"][
+                            kwarg_key
+                        ] = self.maybe_unpack_heuristic_result(heuristic_result)
+
+                iter_kernel = iter_kernel.fn
+            assert isinstance(iter_kernel, JITFunction)
+            prune_configs_by = {
+                "perf_model": variable.kernel.perf_model,
+                "early_config_prune": variable.kernel.early_config_prune,
+                "configs_top_k": variable.kernel.configs_top_k,
+            }
+            new_kernel = autotune(
+                configs=new_configs, key=[], prune_configs_by=prune_configs_by
+            )(iter_kernel)
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = type(variable)(new_kernel, None, variable.grid)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
@@ -1525,6 +1584,9 @@ class TracingTritonHOPifier(TritonHOPifier):
     ) -> List["TritonConfig"]:
         assert isinstance(configs, list)
         return configs
+
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+        return result
 
     def check_grid(
         self,
