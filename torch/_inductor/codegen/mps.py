@@ -73,6 +73,10 @@ class MetalExprPrinter(ExprPrinter_):
             raise RuntimeError("metal::max only supported for 2 args")
         return f"metal::max({', '.join(map(self._print, expr.args))})"
 
+    def _print_Abs(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"metal::abs({self._print(expr.args[0])})"
+
 
 class MetalOverrides(OpOverrides):
     @staticmethod
