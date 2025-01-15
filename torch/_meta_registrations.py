@@ -3182,10 +3182,22 @@ def meta_index_Tensor(self, indices):
         else:
             replacement_shape = list(index.shape)
 
+    def _restride_src(self):
+        """
+        This follows restride_src in TensorAdvancedIndexing.cpp
+        """
+        shape = before_shape + replacement_shape + after_shape
+        strides = list(self.stride())
+        strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
+            replacement_shape
+        )
+        return self.as_strided(shape, strides)
+
     # Try to follow eager to decide the output stride based on self.
     # Note that perm here is the reverse of the 'perm_' decided by
     # TensorIteratorBase::reorder_dimensions
-    perm = utils.compute_elementwise_output_logical_to_physical_perm(self)
+    restrided_self = _restride_src(self)
+    perm = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
     out = self.new_empty(before_shape + replacement_shape + after_shape)
 
     # Follow TensorIteratorBase::allocate_or_resize_outputs
