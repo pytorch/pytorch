@@ -712,7 +712,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            _kernel_layout,
+            kernel_layout,
             req_stride_order,
             qaccum,
         ) = _prepare_convolution_fusion_create(
