@@ -6246,8 +6246,8 @@ class CommonTemplate:
             ):
                 model(x)
 
+    @torch._dynamo.config.patch(recompile_limit=12)
     def test_avg_pool_errors_with_uint(self):
-        torch._dynamo.config.recompile_limit = 12
         for dim in (1, 2, 3):
             for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
                 x = torch.randn([2] * (dim + 2)).to(dtype)
