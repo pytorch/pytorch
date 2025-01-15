@@ -36,7 +36,7 @@ import psutil  # type: ignore[import]
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
-_DATA_MODEL_VERSION = "1.0"
+_DATA_MODEL_VERSION = 1.0
 @dataclasses.dataclass
 class UsageData:
     """
