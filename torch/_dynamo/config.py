@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+import getpass
 import inspect
 import os
 import re
 import sys
+import tempfile
 from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
@@ -132,6 +134,12 @@ guard_nn_modules = True
 # TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
+
+# Flag to enable preparation for graph freezing, so that the named parameters and
+# buffers are passed as params_flat in tracing context by AOT autograd.
+# Non-Inductor backends can use this list for graph freezing.
+prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
+
 
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
@@ -435,6 +443,10 @@ def default_debug_dir_root():
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
         return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+    elif is_fbcode():
+        return os.path.join(
+            tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
+        )
     else:
         return os.path.join(os.getcwd(), "torch_compile_debug")
 
