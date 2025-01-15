@@ -2215,6 +2215,11 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
             return
+        elif len(serialized_node.outputs) == 1 and serialized_node.outputs[0].type == "as_none":
+            # manually rename the node to a unused name to avoid naming conflicts
+            fx_node.meta["val"] = None
+            fx_node._rename(f"{self.graph._target_to_str(fx_node.target)}_unused")
+            return
 
         self.deserialize_multiple_outputs(serialized_node, fx_node)
 
