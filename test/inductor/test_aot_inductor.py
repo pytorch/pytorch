@@ -4196,6 +4196,20 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    def test__int_mm(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                return torch._int_mm(x, y)
+
+        example_inputs = (
+            torch.randint(-10, 10, (64, 32), device=self.device, dtype=torch.int8),
+            torch.randint(-10, 10, (32, 64), device=self.device, dtype=torch.int8),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
