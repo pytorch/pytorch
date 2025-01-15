@@ -67,7 +67,6 @@ def valuetype_type(
     t: Type,
     *,
     binds: ArgName,
-    remove_non_owning_ref_types: bool = False,
 ) -> NamedCType | None:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
@@ -75,11 +74,6 @@ def valuetype_type(
         # For SymInt we simply treat it as int.
         elif str(t) == "SymInt":
             return NamedCType(binds, BaseCType(BaseTypeToCppMapping[BaseTy.int]))
-        if remove_non_owning_ref_types:
-            if t.name == BaseTy.str:
-                raise AssertionError(
-                    "string ref->value conversion: not implemented yet"
-                )
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
@@ -114,7 +108,6 @@ def argumenttype_type(
     r = valuetype_type(
         t,
         binds=binds,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
         return r

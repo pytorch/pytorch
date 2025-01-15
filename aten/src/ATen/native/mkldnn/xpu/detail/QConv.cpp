@@ -54,7 +54,7 @@ at::Tensor quantized_convolution(
     at::Tensor weight,
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    c10::optional<at::Tensor> bias,
+    std::optional<at::Tensor> bias,
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
@@ -63,15 +63,15 @@ at::Tensor quantized_convolution(
     at::Tensor output,
     double inv_output_scale,
     int64_t output_zero_point,
-    c10::optional<at::Tensor> accum,
+    std::optional<at::Tensor> accum,
     double accum_scale,
     int64_t accum_zero_point,
-    c10::optional<c10::ScalarType> output_dtype,
-    c10::optional<c10::string_view> binary_attr,
-    c10::optional<at::Scalar> binary_alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<std::string_view> binary_attr,
+    std::optional<at::Scalar> binary_alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
   Attr attr =
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
@@ -100,8 +100,6 @@ at::Tensor quantized_convolution(
       {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, output_md;
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
   dnnl::memory::dims weight_dims = weight.sizes().vec();
@@ -130,7 +128,8 @@ at::Tensor quantized_convolution(
 
   bool src_need_zp = (act_scale != 0);
 
-  std::tie(src_md, weight_md, output_md) =
+  // create usr_md for tensors, and md for conv primitive
+  auto [src_md, weight_md, output_md] =
       qconv_get_md(act, weight, output, groups);
 
   // get tensor md
@@ -194,7 +193,7 @@ at::Tensor quantized_convolution(
   Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)},
       act.options().dtype(at::kByte),
-      c10::nullopt);
+      std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});

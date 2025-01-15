@@ -17,13 +17,13 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
 
 import torch
 import torch.distributed as dist
+from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
@@ -43,6 +43,7 @@ __all__ = [
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
+    "ScheduleZBVZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -227,9 +228,9 @@ class _PipelineSchedule(ABC):
         self,
         n_microbatches: int,
         loss_fn: Optional[Callable[..., torch.Tensor]] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
@@ -367,7 +368,7 @@ class _PipelineSchedule(ABC):
 
     def _split_inputs(
         self,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -449,9 +450,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
         stage: _PipelineStageBase,
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        scale_grads: bool = True,
     ):
         # Init parent
         super().__init__(
@@ -467,6 +469,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
         self._stage_initialized = False
+        self.scale_grads = scale_grads
 
     def _initialize_stage(self, args, kwargs):
         self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
@@ -627,7 +630,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
                 loss = self._maybe_get_loss(self._stage, i)
                 self._stage.backward_one_chunk(
-                    i, loss=loss, last_backward=i == self._n_microbatches - 1
+                    i,
+                    loss=loss,
+                    last_backward=i == self._n_microbatches - 1,
                 )
 
                 ops = self._stage.get_bwd_send_ops(i)
@@ -635,6 +640,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
+
+        self._stage.scale_grads(
+            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
+        )
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
@@ -782,6 +791,10 @@ class Schedule1F1B(PipelineScheduleSingle):
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
+        self._stage.scale_grads(
+            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
+        )
+
         # Wait for the last backward send to finish
         if send_work:
             send_work.wait()
@@ -914,7 +927,7 @@ def _add_send_recv(
             ) != stage_to_rank(action.stage_index)
         return False
 
-    def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
+    def _get_comms(action: _Action) -> tuple[_Action, _Action]:
         assert _has_comms(action), f"{action} is not a valid comm action"
         stage_idx = action.stage_index
         ctype = action.computation_type
@@ -1047,8 +1060,8 @@ def _validate_schedule(
                 stage_actions[s_id][I].add(mb_id)
             elif ctype == W:
                 assert (
-                    mb_id in stage_actions[s_id][B]
-                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                    mb_id in stage_actions[s_id][I]
+                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
                 stage_actions[s_id][W].add(mb_id)
 
     for s_id in stage_actions:
@@ -1078,11 +1091,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
         use_full_backward: Optional[bool] = None,
+        scale_grads: bool = True,
     ):
         # Init parent
         super().__init__(
@@ -1120,11 +1134,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Deprecation warning: 'use_full_backward' is no longer supported. "
                 "Simply stop passing it, and everything should still work fine."
             )
+        self.scale_grads = scale_grads
 
-    def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
+    def _initialize_stages(self, args: tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
         # or real value (if this stage and next stage are on the same device)
-        next_stage_args: Tuple[Any, ...] = tuple()
+        next_stage_args: tuple[Any, ...] = tuple()
         for stage in self._stages:
             if stage.is_first:
                 next_stage_args = stage._prepare_forward_infra(
@@ -1257,13 +1272,21 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         stage = stage_index_to_stage[stage_index]
                         loss = self._maybe_get_loss(stage, mb_index)
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_one_chunk(
                             mb_index,
                             loss=loss,
                             full_backward=True,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
+
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_INPUT:
                         # perform backward computation
@@ -1280,11 +1303,18 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         # perform weight update
                         stage = stage_index_to_stage[stage_index]
                         backward_counter[stage_index] += 1
+                        last_backward = (
+                            backward_counter[stage_index] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_index]
-                            == self._n_microbatches,
+                            last_backward=last_backward,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -1483,8 +1513,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         ), "Must call _load_actions() before calling _step_microbatches()"
 
         # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: Dict[Tuple[int, int], Work] = {}
-        fwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+        bwd_recv_ops: Dict[tuple[int, int], Work] = {}
+        fwd_recv_ops: Dict[tuple[int, int], Work] = {}
 
         # send ops should be waited on before step() exists, mainly for hygeine
         send_ops: List[Work] = []
@@ -1616,13 +1646,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         bwd_recv_ops.pop((stage_idx, mb_index)).wait()
                     loss = self._maybe_get_loss(stage, mb_index)
                     backward_counter[stage_idx] += 1
+                    last_backward = backward_counter[stage_idx] == self._n_microbatches
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                     stage.backward_one_chunk(
                         mb_index,
                         loss=loss,
                         full_backward=True,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
+                        last_backward=last_backward,
                     )
+                    if last_backward:
+                        stage.scale_grads(grad_scale_factor)
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
                     if is_prev_stage_on_this_rank:
@@ -1633,7 +1666,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
 
-                    if not stage.is_last:
+                    if not stage.is_last and not is_next_stage_on_this_rank:
                         assert (
                             stage_idx,
                             mb_index,
@@ -1701,13 +1734,15 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -1908,9 +1943,10 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        scale_grads: bool = True,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -1920,6 +1956,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2015,10 +2052,20 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
-        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        scale_grads: bool = True,
     ):
+        # TODO: we don't support Zero Bubble with torch.compile so we
+        # should disable it for now
+        for stage in stages:
+            if isinstance(stage.submod, OptimizedModule):
+                raise RuntimeError(
+                    "The Zero Bubble schedule is not supported with \
+stage modules that have used torch.compile"
+                )
+
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2027,6 +2074,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2130,7 +2178,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
                 return (stage + 1, op, microbatch) not in seen_ops
             return False
 
-        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+        seen_ops: Set[tuple[int, _ComputationType, int]] = set()
         result: Dict[int, List[Optional[_Action]]] = {}
         next_pointer: Dict[int, int] = {}
         bubbles_added: Dict[int, int] = {}
@@ -2144,7 +2192,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         while True:
             should_stop = True
 
-            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+            temp_seen_ops: Set[tuple[int, _ComputationType, int]] = set()
 
             for rank in range(self.pp_group_size):
                 timestamp = next_pointer[rank]
@@ -2184,6 +2232,181 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         return result
 
 
+class ScheduleZBVZeroBubble(PipelineScheduleMulti):
+    """
+    The Zero Bubble schedule (ZBV variant).
+    See https://arxiv.org/pdf/2401.10241 Section 6 for details.
+
+    This schedules requires exactly two stages per rank.
+
+    This schedule will perform one forward and one backward on inputs for the microbatches in steady
+    state and supports multiple stages per rank. Uses backward with respect to weights to fill in
+    the pipeline bubble.
+
+    This ZB-V schedule would have the "zero bubble" property only if time forward == time backward input == time backward weights.
+    In practice, this is not likely true for real models so alternatively
+    a greedy scheduler could be implemented for unequal/unbalanced time.
+    """
+
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        stage_index_to_group_rank: Optional[Dict[int, int]] = None,
+        scale_grads: bool = True,
+    ):
+        self.pp_group_size = stages[0].group_size
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
+        )
+        self.n_local_stages = len(stages)
+        if self.n_local_stages != 2:
+            raise ValueError(
+                "ZBV requires exactly 2 stages per rank, but got "
+                f"{self.n_local_stages}."
+            )
+
+        self.rank = stages[0].group_rank
+        self.num_stages = stages[0].num_stages
+
+        # 1. Create the pipeline_order (all ranks do this calculation)
+        # This will be used to keep track of the current state of the entire pipeline
+        # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
+        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        for rank in range(self.pp_group_size):
+            rank_ops = self._calculate_single_rank_operations(rank)
+            self.pipeline_order[rank] = rank_ops
+
+    def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
+        # max(2 * self.pp_group_size - 1, ...) ensure the number of microbatches is at least
+        # as large of the number of microbatches needed to fully utilize the pipeline
+        n_micro = max(2 * self.pp_group_size - 1, self._n_microbatches)
+        rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
+
+        # Forward and backward action counts for stage chunk 0 and chunk 1
+        f0_cnt, f1_cnt, b0_cnt, b1_cnt = 0, 0, 0, 0
+        # warm-up phase
+        warmup_n1 = 2 * (self.pp_group_size - rank) - 1
+        stage_id_chunk0 = rank
+        stage_id_chunk1 = self.num_stages - 1 - rank
+
+        for _ in range(warmup_n1):
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=F, microbatch_index=f0_cnt)
+            )
+            f0_cnt += 1
+        warmup_n2 = rank
+        for _ in range(warmup_n2):
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=F, microbatch_index=f1_cnt)
+            )
+            f1_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=F, microbatch_index=f0_cnt)
+            )
+            f0_cnt += 1
+        warmup_n3 = self.pp_group_size - rank
+        for _ in range(warmup_n3):
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=F, microbatch_index=f1_cnt)
+            )
+            f1_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=I, microbatch_index=b1_cnt)
+            )
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=W, microbatch_index=b1_cnt)
+            )
+            b1_cnt += 1
+        # stable phase
+        while f1_cnt < f0_cnt or f0_cnt < n_micro:
+            if f0_cnt < n_micro:
+                rank_ops.append(
+                    _Action(
+                        stage_id_chunk0, computation_type=F, microbatch_index=f0_cnt
+                    )
+                )
+                f0_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=I, microbatch_index=b0_cnt)
+            )
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=W, microbatch_index=b0_cnt)
+            )
+            b0_cnt += 1
+
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=F, microbatch_index=f1_cnt)
+            )
+            f1_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=I, microbatch_index=b1_cnt)
+            )
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=W, microbatch_index=b1_cnt)
+            )
+            b1_cnt += 1
+        # cool-down phase
+        w0_cnt, w1_cnt = b0_cnt, b1_cnt
+        cooldown_n1 = rank
+        for _ in range(cooldown_n1):
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=I, microbatch_index=b0_cnt)
+            )
+            b0_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=I, microbatch_index=b1_cnt)
+            )
+            b1_cnt += 1
+        cooldown_n2 = self.pp_group_size - rank
+        for _ in range(cooldown_n2):
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=I, microbatch_index=b0_cnt)
+            )
+            b0_cnt += 1
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=W, microbatch_index=w0_cnt)
+            )
+            w0_cnt += 1
+        while w1_cnt < b1_cnt:
+            rank_ops.append(
+                _Action(stage_id_chunk1, computation_type=W, microbatch_index=w1_cnt)
+            )
+            w1_cnt += 1
+        while w0_cnt < b0_cnt:
+            rank_ops.append(
+                _Action(stage_id_chunk0, computation_type=W, microbatch_index=w0_cnt)
+            )
+            w0_cnt += 1
+
+        assert w0_cnt == b0_cnt and b0_cnt == f0_cnt
+        assert w1_cnt == b1_cnt and b1_cnt == f1_cnt
+        # We use max() in the n_micro computation above, so we may need to
+        # remove redundant microbatches
+        rank_ops = [
+            (
+                action
+                if action is not None
+                and action.microbatch_index is not None
+                and action.microbatch_index < self._n_microbatches
+                else None
+            )
+            for action in rank_ops
+        ]
+        return rank_ops
+
+
 def get_schedule_class(schedule_name: str):
     """
     Maps a schedule name (case insensitive) to its corresponding class object.
@@ -2199,6 +2422,7 @@ def get_schedule_class(schedule_name: str):
         "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
+        "ZBVZeroBubble": ScheduleZBVZeroBubble,
     }
     lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
     lowercase_schedule_name = schedule_name.lower()

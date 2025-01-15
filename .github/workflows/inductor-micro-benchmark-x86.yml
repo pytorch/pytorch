@@ -28,6 +28,7 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "linux.24xl.spr-metal" },
         ]}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-micro-benchmark-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -39,3 +40,4 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+    secrets: inherit
