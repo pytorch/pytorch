@@ -9,6 +9,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp
+import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -526,6 +527,17 @@ def view_copy_dtype(
     return self.to(dtype).clone()
 
 
+def get_like_layout(
+    tensor: torch.Tensor,
+    memory_format: Optional[torch.memory_format] = None,
+) -> torch.memory_format:
+    # TODO: _to_copy tensor to stride permutation
+    if memory_format is torch.preserve_format or memory_format is None:
+        return utils.suggest_memory_format(tensor)
+    else:
+        return memory_format
+
+
 @register_decomposition(aten.rand_like)
 def rand_like(
     self: torch.Tensor,
@@ -535,10 +547,12 @@ def rand_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    result = torch.empty_like(
-        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
-    )
-    return aten.copy(result, aten.uniform(result, 0, 1))
+    return torch.rand(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randn_like)
@@ -550,13 +564,12 @@ def randn_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    result = torch.empty_like(
-        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
-    )
-    return aten.copy(
-        result,
-        torch.randn(result.shape, dtype=result.dtype, device=result.device, **kwargs),
-    )
+    return torch.randn(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.full_like)
@@ -605,10 +618,14 @@ def randint_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    result = torch.empty_like(
-        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
-    )
-    return aten.copy(result, aten.random(result, 0, high))
+    return aten.randint.low(
+        0,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint_like.low_dtype)
@@ -622,10 +639,14 @@ def randint_like_low(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    result = torch.empty_like(
-        self, dtype=dtype, device=device, memory_format=memory_format, **kwargs
-    )
-    return aten.copy(result, aten.random(result, low, high))
+    return aten.randint.low(
+        low,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint.default)
