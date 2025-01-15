@@ -3245,7 +3245,9 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
-    if self.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(self.numel() == 0):
         # No need to worry about the output strides if self is empty.
         return out
 
