@@ -1426,15 +1426,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("per_channel_quant", [True, False])
     @parametrize("reshape_a", [True, False])
+    @parametrize("expand_a_scale", [True, False])
     @parametrize("dynamic", [True, False])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, per_channel_quant, reshape_a, dynamic
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
         when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
         The pattern is:
-            (no bias) _int_mm -> convert_element_type -> ([expand_a] -> mul) -> mul
+            (no bias) _int_mm -> convert_element_type -> ([maybe_expand_a_scale] -> mul) -> mul
         or
             (with bias) pattern_no_bias -> add
         Expansion of the scale of activation is optional.
@@ -1473,7 +1474,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     a_reshaped = a
                 c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
-                a_scale = self.a_scale.expand(c.shape)
+                if not expand_a_scale:
+                    a_scale = self.a_scale
+                else:
+                    a_scale = self.a_scale.expand(c.shape)
                 c = c * a_scale
                 c = c * self.b_scale
                 if self.has_bias:
