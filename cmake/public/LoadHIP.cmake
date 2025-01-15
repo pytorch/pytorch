@@ -179,7 +179,7 @@ if(HIP_FOUND)
       "    return 0;\n"
       "}\n"
       )
-    try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_BINARY_DIR} ${file}
       CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
       COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
       OUTPUT_VARIABLE hipblaslt_compile_output)
