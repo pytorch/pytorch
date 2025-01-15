@@ -596,6 +596,9 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> Dict[str, str]:
         ret = {}
+        if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            ret["unbacked_bindings"] = ",".join(str(u) for u in unbacked_bindings.keys())
+
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -1827,6 +1830,15 @@ class GraphModuleDeserializer(metaclass=Final):
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if "unbacked_bindings" in serialized_node.metadata:
+            self.shape_env.pending_fresh_unbacked_symbols = [
+                self.symbol_name_to_symbol[name]
+                for name in serialized_node.metadata["unbacked_bindings"].split(",")
+            ]
+            unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
+                self.shape_env, fx_node.meta["val"]
+            )
+            fx_node.meta["unbacked_bindings"] = unbacked_bindings
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
