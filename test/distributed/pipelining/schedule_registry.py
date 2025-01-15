@@ -36,12 +36,14 @@ class ScheduleVShaped(PipelineScheduleMulti):
         n_microbatches: int,
         stage_index_to_group_rank: Dict[int, int],
         loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
         )
 
         # Go through one microbatch
@@ -84,12 +86,14 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
         n_microbatches: int,
         stage_index_to_group_rank: Dict[int, int],
         loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
         )
 
         self.pipeline_order = {
@@ -134,11 +138,13 @@ class ScheduleWithW(PipelineScheduleMulti):
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         enable_zero_bubble: bool = True,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            scale_grads=scale_grads,
         )
 
         # Needs to be updated as part of all schedules using "W"
@@ -192,11 +198,13 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            scale_grads=scale_grads,
         )
         # Go through two microbatches
         self.pipeline_order_with_comms = {
