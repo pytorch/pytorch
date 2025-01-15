@@ -402,6 +402,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    def test_raise_GeneratorExit(self):
+        # GeneratorExit does not inherit from Exception
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise GeneratorExit
+            except Exception:
+                return t.sin()
+            except BaseException:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.cos())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
