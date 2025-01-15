@@ -777,6 +777,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_triton(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_triton_backend(self.device):
+            raise unittest.SkipTest("triton not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -791,6 +801,12 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_triton_backend(device):
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "triton"
+    return config.cuda_backend == "triton"
 
 
 def is_triton_cpu_backend(device):
@@ -5991,7 +6007,6 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
@@ -6033,20 +6048,25 @@ class CommonTemplate:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
-        inps = [
-            torch.rand([256, 256], device=self.device, dtype=torch.bfloat16)
-            for _ in range(2)
-        ]
-        for fn in fns:
+        device_interface = get_interface_for_device(self.device)
+
+        for lowp_dtype in [torch.float16, torch.bfloat16]:
+            if not device_interface.is_dtype_supported(lowp_dtype):
+                continue
+            inps = [
+                torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
+                for _ in range(2)
+            ]
+            for fn in fns:
+                out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+                self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+            # test broadcasted shape bail
+            fn = lambda x: x + torch.zeros(  # noqa: E731
+                [256, 256, 256], dtype=lowp_dtype, device=self.device
+            )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
-
-        # test broadcasted shape bail
-        fn = lambda x: x + torch.zeros(  # noqa: E731
-            [256, 256, 256], dtype=torch.bfloat16, device=self.device
-        )
-        out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-        self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_remove_noop_copy(self):
         def fn(x, y):
@@ -10525,7 +10545,7 @@ class CommonTemplate:
             self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
-    @xfail_if_triton_cpu  # bf16
+    @skip_if_triton  # No inductor data type propagation pass on scheduler nodes
     @skip_if_halide  # bf16
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
