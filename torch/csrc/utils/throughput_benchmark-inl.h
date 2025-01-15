@@ -69,6 +69,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     autocast_enabled[i] = at::autocast::is_autocast_enabled(DEVICES[i]);
     autocast_dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
   }
+  bool autocast_cache_enabled = at::autocast::is_autocast_cache_enabled();
   bool tls_grad_enabled = c10::GradMode::is_enabled();
   c10::impl::LocalDispatchKeySet tls_key_set =
       c10::impl::tls_local_dispatch_key_set();
@@ -83,6 +84,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         at::autocast::set_autocast_enabled(DEVICES[i], autocast_enabled[i]);
         at::autocast::set_autocast_dtype(DEVICES[i], autocast_dtype[i]);
       }
+      at::autocast::set_autocast_cache_enabled(autocast_cache_enabled);
 
       for (const auto j : c10::irange(config.num_warmup_iters)) {
         (void)j;
