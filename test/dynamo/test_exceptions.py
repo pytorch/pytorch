@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
+from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -401,6 +402,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d, "m")
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
+
+    def test_speculation_exception(self):
+        log = SpeculationLog()
+        log.next("fake", 555, "fake", "bad")
+        log.restart()
+        with self.assertRaises(SpeculationLogDivergence):
+            log.next("bad", 58, "bad", "different")
 
 
 if __name__ == "__main__":

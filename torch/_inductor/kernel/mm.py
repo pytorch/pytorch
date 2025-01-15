@@ -250,7 +250,7 @@ aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
 )
 
-aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm_out")
 
 aten__sparse_semi_structured_mm = ExternKernelChoice(
     torch._sparse_semi_structured_mm,

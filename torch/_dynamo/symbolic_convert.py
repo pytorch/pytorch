@@ -322,7 +322,7 @@ class BlockStackEntry:
             return self.with_context.exit(tx)
 
 
-class SpeculationLogDivergence(Exception):
+class SpeculationLogDivergence(AssertionError):
     pass
 
 
