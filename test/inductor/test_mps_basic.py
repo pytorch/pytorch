@@ -42,6 +42,8 @@ class MPSBasicTests(TestCase):
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
+    test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
+    test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
     test_div1 = CommonTemplate.test_div1
     test_div3 = CommonTemplate.test_div3
     test_cat_empty = CommonTemplate.test_cat_empty
@@ -58,6 +60,8 @@ class MPSBasicTests(TestCase):
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
     test_remainder = CommonTemplate.test_remainder
+    test_remove_no_ops = CommonTemplate.test_remove_no_ops
+    test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
     test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
     test_silu = CommonTemplate.test_silu
