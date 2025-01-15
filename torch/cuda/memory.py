@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
@@ -30,6 +30,7 @@ __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
     "caching_allocator_enable",
+    "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -184,6 +185,22 @@ def set_per_process_memory_fraction(
         raise ValueError(f"Invalid fraction value: {fraction}. Allowed range: 0~1")
 
     torch._C._cuda_setMemoryFraction(fraction, device)
+
+
+def get_per_process_memory_fraction(device: Union[Device, int] = None) -> float:
+    r"""Get memory fraction for a process.
+
+    Args:
+        device (torch.device or int, optional): selected device. If it is
+            ``None`` the default CUDA device is used.
+    Returns:
+        memory fraction, in range 0~1. Allowed memory equals total_memory * fraction.
+    """
+    _lazy_init()
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    return torch._C._cuda_getMemoryFraction(device)
 
 
 def empty_cache() -> None:
@@ -738,7 +755,9 @@ def _record_memory_history_legacy(
     )
 
 
-def _record_memory_history(enabled="all", *args, **kwargs):
+def _record_memory_history(
+    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.

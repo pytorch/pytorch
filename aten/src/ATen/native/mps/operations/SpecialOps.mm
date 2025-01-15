@@ -13,7 +13,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/SpecialOps_metallib.h>
 #endif
 
-static void i0_kernel_mps(TensorIteratorBase& iter) {
+static void unary_kernel_mps(TensorIteratorBase& iter, const std::string& name) {
   using namespace mps;
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
   auto input = iter.input();
@@ -26,14 +26,13 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
     output = output.contiguous();
   }
   auto i0PSO = lib.getPipelineStateForFunc(
-      fmt::format("i0_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
+      fmt::format("{}_{}_{}", name, scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:i0PSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_setArgs(computeEncoder, input, output);
       mtl_dispatch1DJob(computeEncoder, i0PSO, output.numel());
     }
   });
@@ -42,5 +41,14 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
   }
 }
 
+static void i0_kernel_mps(TensorIteratorBase& iter) {
+  unary_kernel_mps(iter, "i0");
+}
+
+static void i1_kernel_mps(TensorIteratorBase& iter) {
+  unary_kernel_mps(iter, "i1");
+}
+
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
+REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
 } // namespace at::native

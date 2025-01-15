@@ -282,7 +282,7 @@ void TypeParser::expect(const char* s) {
   advance();
 }
 
-// std::string_view::operator== may call memcmp to compare against the target
+// std::string_view::operator== calls memcmp to compare against the target
 // string; we can do better if we specialize for a single character.
 void TypeParser::expectChar(char c) {
   std::string_view token = cur();

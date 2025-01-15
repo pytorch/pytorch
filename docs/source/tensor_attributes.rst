@@ -75,7 +75,6 @@ Promotion Examples::
     >>> int_tensor = torch.ones(1, dtype=torch.int)
     >>> long_tensor = torch.ones(1, dtype=torch.long)
     >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
-    >>> double_tensor = torch.ones(1, dtype=torch.double)
     >>> bool_tensor = torch.ones(1, dtype=torch.bool)
     # zero-dim tensors
     >>> long_zerodim = torch.tensor(1, dtype=torch.long)

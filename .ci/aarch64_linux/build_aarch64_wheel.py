@@ -24,7 +24,9 @@ os_amis = {
     "ubuntu22_04": "ami-0c6c29c5125214c77",  # login_name: ubuntu
     "redhat8": "ami-0698b90665a2ddcf1",  # login_name: ec2-user
 }
+
 ubuntu18_04_ami = os_amis["ubuntu18_04"]
+ubuntu20_04_ami = os_amis["ubuntu20_04"]
 
 
 def compute_keyfile_path(key_name: Optional[str] = None) -> Tuple[str, str]:
@@ -57,7 +59,7 @@ def ec2_instances_by_id(instance_id):
 
 
 def start_instance(
-    key_name, ami=ubuntu18_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
+    key_name, ami=ubuntu20_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
 ):
     inst = ec2.create_instances(
         ImageId=ami,
@@ -619,9 +621,11 @@ def build_torchaudio(
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
+    host.run_cmd(
+        f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
         && ./packaging/ffmpeg/build.sh \
-        && {build_vars} python3 setup.py bdist_wheel")
+        && {build_vars} python3 setup.py bdist_wheel"
+    )
 
     wheel_name = host.list_dir("audio/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("audio", "dist", wheel_name))
@@ -930,9 +934,9 @@ def parse_arguments():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--test-only", type=str)
-    parser.add_argument(
-        "--os", type=str, choices=list(os_amis.keys()), default="ubuntu20_04"
-    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--os", type=str, choices=list(os_amis.keys()))
+    group.add_argument("--ami", type=str)
     parser.add_argument(
         "--python-version",
         type=str,
@@ -962,7 +966,13 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
-    ami = os_amis[args.os]
+    ami = (
+        args.ami
+        if args.ami is not None
+        else os_amis[args.os]
+        if args.os is not None
+        else ubuntu20_04_ami
+    )
     keyfile_path, key_name = compute_keyfile_path(args.key_name)
 
     if args.list_instances:

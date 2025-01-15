@@ -25,6 +25,7 @@ from torch.distributed.pipelining.schedules import (
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
+    _validate_schedule,
     B,
     F,
     get_schedule_class,
@@ -57,6 +58,7 @@ torch.manual_seed(0)
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
+        self.submod = None
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
@@ -136,7 +138,9 @@ class ScheduleTest(TestCase):
             # Add a small perturbation
             target = y + torch.randn(batch_size, d_hid, device=device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
         # Run reference
         for _ in range(2):
             ref_mod.zero_grad()
@@ -177,9 +181,9 @@ class ScheduleTest(TestCase):
         # Check output
         torch.testing.assert_close(out, ref_out)
         # Check loss
-        # Since the reduction used in the loss function above is "sum", we use
-        # "sum" here to reduce microbatch losses into a single value too.
-        pipe_loss = sum(losses)
+        # Since the reduction used in the loss function above is "mean", we use
+        # "mean" here to reduce microbatch losses into a single value too.
+        pipe_loss = torch.stack(losses).mean()
         torch.testing.assert_close(pipe_loss, ref_loss)
 
         # Check gradients
@@ -193,6 +197,30 @@ class ScheduleTest(TestCase):
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
+
+        torch.distributed.destroy_process_group()
+
+    def test_zero_bubble_schedule_errors_with_compile(self):
+        """
+        Test that zero bubble schedules raise an error when used with torch.compile.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        n_stages = 1
+        device = torch.device("cpu")
+        model = MultiMLP(8, n_layers=n_stages)
+        # full_mod
+        compiled_model = torch.compile(model)
+        stage = PipelineStage(
+            compiled_model,
+            0,
+            n_stages,
+            device,
+        )
+        with self.assertRaises(RuntimeError):
+            ScheduleInterleavedZeroBubble([stage], 2)
 
         torch.distributed.destroy_process_group()
 
@@ -263,7 +291,7 @@ class TestSchedulePlan(TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
+                _formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
 
@@ -304,10 +332,7 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
-                    schedule.pipeline_order
-                )
-                # print(formatted_pipeline_order)
+                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
@@ -696,6 +721,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
+            scale_grads=False,
         )
         schedule._load_actions(
             {
@@ -861,6 +887,46 @@ class TestScheduleLowering(TestCase):
                     raise
 
         torch.distributed.destroy_process_group()
+
+
+class TestValidateSchedule(TestCase):
+    def test_valid_schedule(self):
+        schedule_actions = [
+            {
+                0: [_Action(0, F, 0), _Action(0, B, 0)],
+                1: [_Action(1, F, 0), _Action(1, B, 0)],
+            },
+            {
+                0: [_Action(0, F, 0), _Action(0, I, 0), _Action(0, W, 0)],
+                1: [_Action(1, F, 0), _Action(1, I, 0), _Action(1, W, 0)],
+            },
+        ]
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        for actions in schedule_actions:
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+
+    def test_invalid_schedule_missing_rank(self):
+        actions = {
+            0: [_Action(0, F, 0), _Action(0, B, 0)],
+        }
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        with self.assertRaises(AssertionError):
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+
+    def test_invalid_schedule_missing_action(self):
+        actions = {
+            0: [_Action(0, F, 0)],
+            1: [_Action(1, F, 0)],
+        }
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        with self.assertRaises(AssertionError):
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)

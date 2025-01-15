@@ -11,23 +11,19 @@ namespace {
 
 TEST(VmapTest, TestBatchedTensor) {
   {
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    Tensor x = addBatchDim(ones({2, 3, 4}), /*lvl=*/1, /*dim=*/1);
+    Tensor x = addBatchDim(ones({2, 3, 4}), /*level=*/1, /*dim=*/1);
     std::vector<int64_t> expected_size = {2, 4};
     ASSERT_EQ(x.sizes(), expected_size);
     ASSERT_EQ(x.dim(), 2);
     ASSERT_EQ(x.numel(), 8);
     ASSERT_EQ(x.is_contiguous(), false);
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(x.storage(), c10::Error);
     ASSERT_EQ(x.storage_offset(), 0);
   }
   {
     // Test multiple batch dims
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    Tensor x = addBatchDim(ones({2, 3, 4}), /*lvl=*/1, /*dim=*/1);
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    x = addBatchDim(x, /*lvl=*/2, /*dim=*/1);
+    Tensor x = addBatchDim(ones({2, 3, 4}), /*level=*/1, /*dim=*/1);
+    x = addBatchDim(x, /*level=*/2, /*dim=*/1);
     std::vector<int64_t> expected_size = {2};
     ASSERT_EQ(x.sizes(), expected_size);
     ASSERT_EQ(x.dim(), 1);
@@ -38,14 +34,12 @@ TEST(VmapTest, TestBatchedTensor) {
 
     // Should not throw
     std::vector<int64_t> sizes(kVmapMaxTensorDims, 1);
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    Tensor x = addBatchDim(ones(sizes), /*lvl=*/1, /*dim=*/1);
+    Tensor x = addBatchDim(ones(sizes), /*level=*/1, /*dim=*/1);
 
     // Should throw
     std::vector<int64_t> too_many_sizes(kVmapMaxTensorDims + 1, 1);
     auto big_dim_tensor = ones(too_many_sizes);
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto,bugprone-argument-comment)
-    ASSERT_THROW(addBatchDim(big_dim_tensor, /*lvl=*/1, /*dim=*/1), c10::Error);
+    ASSERT_THROW(addBatchDim(big_dim_tensor, /*level=*/1, /*dim=*/1), c10::Error);
   }
   {
     // Create a "scalar" BatchedTensor. Should not crash.

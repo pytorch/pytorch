@@ -18,9 +18,7 @@
 #include <ATen/ops/layer_norm.h>
 #endif
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 namespace {
 Tensor linear_for_ffn(
@@ -147,5 +145,4 @@ Tensor transformer_encoder_layer_forward(
   return x;
 }
 
-} // namespace native
 } // namespace at

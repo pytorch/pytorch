@@ -26,7 +26,27 @@ Example(s):
         except SchemaUpdateError as e:
             self.fail(f"Failed to update schema: {e}\n{msg}")
 
-        self.assertEqual(commit.checksum_base, commit.checksum_result, msg)
+        self.assertEqual(commit.checksum_head, commit.checksum_next, msg)
+
+    def test_thrift_schema_unchanged(self):
+        msg = """
+Detected an unexpected change to schema.thrift. Please update schema.py instead and run the following script:
+Example(s):
+    python scripts/export/update_schema.py --prefix <path_to_torch_development_diretory>
+        """
+
+        if IS_FBCODE:
+            msg += """or
+    buck run caffe2:export_update_schema -- --prefix /data/users/$USER/fbsource/fbcode/caffe2/
+            """
+
+        try:
+            commit = update_schema()
+        except SchemaUpdateError as e:
+            self.fail(f"Failed to update schema: {e}\n{msg}")
+
+        self.assertEqual(commit.thrift_checksum_head, commit.thrift_checksum_real, msg)
+        self.assertEqual(commit.thrift_checksum_head, commit.thrift_checksum_next, msg)
 
     def test_schema_diff(self):
         additions, subtractions = _diff_schema(
@@ -105,12 +125,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -137,12 +164,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -172,12 +206,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -230,12 +271,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -258,12 +306,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -293,12 +348,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -325,12 +387,19 @@ Example(s):
 
         commit = _Commit(
             result=src,
-            checksum_result="",
-            path="",
+            checksum_next="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
-            checksum_base="",
+            checksum_head="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_checksum_head="",
+            thrift_checksum_real="",
+            thrift_checksum_next="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])

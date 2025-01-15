@@ -32,8 +32,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
     _reversed_padding_repeated_twice: List[int] = []
     N = len(padding)
     for idx in range(N):
-        for _ in range(2):
-            _reversed_padding_repeated_twice.append(padding[N - idx - 1])
+        _reversed_padding_repeated_twice.extend(padding[N - idx - 1] for _ in range(2))
     return _reversed_padding_repeated_twice
 
 
@@ -808,7 +807,7 @@ class _ConvTransposeNd(_ConvNd):
         )
         assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
-        weight_post_process = mod.qconfig.weight()
+        weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
         assert (
             weight_post_process.dtype == torch.qint8
@@ -834,7 +833,7 @@ class _ConvTransposeNd(_ConvNd):
         ):
             return qconv  # dynamic quantization doesn't need scale/zero_point
         else:
-            act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+            act_scale, act_zp = mod.activation_post_process.calculate_qparams()  # type: ignore[operator, union-attr]
             qconv.scale = float(act_scale)
             qconv.zero_point = int(act_zp)
             return qconv

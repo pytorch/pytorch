@@ -16,37 +16,27 @@ CURL_HASH=cf34fe0b07b800f1c01a499a6e8b2af548f6d0e044dca4a29d88a4bee146d131
 AUTOCONF_ROOT=autoconf-2.69
 AUTOCONF_HASH=954bd69b391edc12d6a4a51a2dd1476543da5c6bbf05a95b59dc0dd6fd4c2969
 
+# Dependencies for compiling Python that we want to remove from
+# the final image after compiling Python
+PYTHON_COMPILE_DEPS="zlib-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel libpcap-devel xz-devel libffi-devel"
+
+if [ "$(uname -m)" != "s390x" ] ; then
+    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} db4-devel"
+else
+    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} libdb-devel"
+fi
+
+# Libraries that are allowed as part of the manylinux1 profile
+MANYLINUX1_DEPS="glibc-devel libstdc++-devel glib2-devel libX11-devel libXext-devel libXrender-devel  mesa-libGL-devel libICE-devel libSM-devel ncurses-devel"
+
 # Get build utilities
 MY_DIR=$(dirname "${BASH_SOURCE[0]}")
 source $MY_DIR/build_utils.sh
 
-if [ "$(uname -m)" != "s390x" ] ; then
-    # Dependencies for compiling Python that we want to remove from
-    # the final image after compiling Python
-    PYTHON_COMPILE_DEPS="zlib-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel db4-devel libpcap-devel xz-devel libffi-devel"
-
-    # Libraries that are allowed as part of the manylinux1 profile
-    MANYLINUX1_DEPS="glibc-devel libstdc++-devel glib2-devel libX11-devel libXext-devel libXrender-devel  mesa-libGL-devel libICE-devel libSM-devel ncurses-devel"
-
-    # Development tools and libraries
-    yum -y install bzip2 make git patch unzip bison yasm diffutils \
-        automake which file cmake28 \
-        kernel-devel-`uname -r` \
-        ${PYTHON_COMPILE_DEPS}
-else
-    # Dependencies for compiling Python that we want to remove from
-    # the final image after compiling Python
-    PYTHON_COMPILE_DEPS="zlib1g-dev libbz2-dev libncurses-dev libsqlite3-dev libdb-dev libpcap-dev liblzma-dev libffi-dev"
-
-    # Libraries that are allowed as part of the manylinux1 profile
-    MANYLINUX1_DEPS="libglib2.0-dev libX11-dev libncurses-dev"
-
-    # Development tools and libraries
-    apt install -y bzip2 make git patch unzip diffutils \
-        automake which file cmake \
-        linux-headers-virtual \
-        ${PYTHON_COMPILE_DEPS}
-fi
+# Development tools and libraries
+yum -y install bzip2 make git patch unzip bison yasm diffutils \
+    automake which file \
+    ${PYTHON_COMPILE_DEPS}
 
 # Install newest autoconf
 build_autoconf $AUTOCONF_ROOT $AUTOCONF_HASH
@@ -92,16 +82,13 @@ ln -s $PY39_BIN/auditwheel /usr/local/bin/auditwheel
 
 # Clean up development headers and other unnecessary stuff for
 # final image
-if [ "$(uname -m)" != "s390x" ] ; then
-    yum -y erase wireless-tools gtk2 libX11 hicolor-icon-theme \
-        avahi freetype bitstream-vera-fonts \
-        ${PYTHON_COMPILE_DEPS} || true > /dev/null 2>&1
-    yum -y install ${MANYLINUX1_DEPS}
-    yum -y clean all > /dev/null 2>&1
-    yum list installed
-else
-    apt purge -y ${PYTHON_COMPILE_DEPS} || true > /dev/null 2>&1
-fi
+yum -y erase wireless-tools gtk2 libX11 hicolor-icon-theme \
+    avahi freetype bitstream-vera-fonts \
+    ${PYTHON_COMPILE_DEPS} || true > /dev/null 2>&1
+yum -y install ${MANYLINUX1_DEPS}
+yum -y clean all > /dev/null 2>&1
+yum list installed
+
 # we don't need libpython*.a, and they're many megabytes
 find /opt/_internal -name '*.a' -print0 | xargs -0 rm -f
 # Strip what we can -- and ignore errors, because this just attempts to strip

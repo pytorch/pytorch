@@ -376,12 +376,16 @@ def export(
     )
 
 
+DEFAULT_PICKLE_PROTOCOL = 2
+
+
 def save(
     ep: ExportedProgram,
     f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     """
 
@@ -404,6 +408,7 @@ def save(
         opset_version (Optional[Dict[str, int]]): A map of opset names
          to the version of this opset
 
+        pickle_protocol: can be specified to override the default protocol
 
     Example::
 
@@ -436,7 +441,7 @@ def save(
     from torch._export.serde.schema import SCHEMA_VERSION
     from torch._export.serde.serialize import serialize, SerializedArtifact
 
-    artifact: SerializedArtifact = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
 
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
@@ -474,8 +479,6 @@ def load(
     :func:`torch.export.save <torch.export.save>`.
 
     Args:
-        ep (ExportedProgram): The exported program to save.
-
         f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
@@ -589,22 +592,27 @@ def register_dataclass(
 
     Example::
 
+        import torch
+        from dataclasses import dataclass
+
         @dataclass
         class InputDataClass:
             feature: torch.Tensor
             bias: int
 
+        @dataclass
         class OutputDataClass:
             res: torch.Tensor
 
         torch.export.register_dataclass(InputDataClass)
         torch.export.register_dataclass(OutputDataClass)
 
-        def fn(o: InputDataClass) -> torch.Tensor:
-            res = res=o.feature + o.bias
-            return OutputDataClass(res=res)
+        class Mod(torch.nn.Module):
+            def forward(self, x: InputDataClass) -> OutputDataClass:
+                res = x.feature + x.bias
+                return OutputDataClass(res=res)
 
-        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1), ))
+        ep = torch.export.export(Mod(), (InputDataClass(torch.ones(2, 2), 1), ))
         print(ep)
 
     """

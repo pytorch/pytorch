@@ -2,6 +2,7 @@
 import logging
 
 import torch
+from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
 from ..select_algorithm import (
@@ -12,6 +13,8 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
+    use_ck_template,
+    use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
 )
@@ -118,7 +121,9 @@ bmm_template = TritonTemplate(
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
-aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
+aten_baddbmm = ExternKernelChoice(
+    torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
+)
 
 
 @L.register_lowering(aten.bmm)
@@ -178,6 +183,17 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
+    if use_cpp_bmm_template(layout, mat1, mat2):
+        from ..codegen.cpp_bmm_template import CppBmmTemplate
+
+        CppBmmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
+    if use_ck_template(layout):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")
         choices.append(aten_bmm.bind((mat1, mat2), layout))
@@ -185,8 +201,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
 
-# Don't register this since it is slower than decomposing it
-# @L.register_lowering(aten.baddbmm)
+@L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 

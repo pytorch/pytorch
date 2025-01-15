@@ -38,6 +38,31 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
+    def test_parse_settings_with_invalid_experiment_name_skips_experiment(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 25
+            -badExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,-badExp
+
+        """
+
+        settings = rd.parse_settings(settings_text)
+
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=25),
+            settings.experiments["lf"],
+            "lf settings not parsed correctly",
+        )
+        self.assertNotIn("-badExp", settings.experiments)
+
     def test_parse_settings_in_code_block(self) -> None:
         settings_text = """
 
@@ -160,6 +185,40 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
         prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf.", prefix, "Runner prefix not correct for User1")
+
+    def test_explicitly_opted_out_user(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+            otherExp:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,-lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", prefix, "Runner prefix not correct for User1")
+
+    def test_explicitly_opted_in_and_out_user_should_opt_out(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+            otherExp:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,-lf,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("", prefix, "Runner prefix not correct for User1")
 
     def test_opted_in_user_two_experiments(self) -> None:
         settings_text = """

@@ -171,12 +171,13 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
   //   are expected to check shapes before calling `add_owned_input` or `add_owned_output`.
   TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
-  static_shape_ = std::make_optional(DimVector(shape));
+  static_shape_ = DimVector(shape);
   return *this;
 }
 
 TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
+  TORCH_INTERNAL_ASSERT(static_shape_.has_value());
   if (static_shape_->empty()) return *this;
   for (const auto& squash_dim : squash_dims) {
     TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
@@ -496,10 +497,10 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
-      } else if (op.device.value() != common_device) {
+      } else if (op.device != common_device) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
-                    "found at least two devices, ", common_device, " and ", op.device.value(), "!");
+                    "found at least two devices, ", common_device, " and ", op.device, "!");
       }
     }
 
@@ -1041,10 +1042,15 @@ void TensorIteratorBase::build_borrowing_unary_op(const TensorBase& out, const T
       .add_const_input(a));
 }
 
-void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a) {
-  build(UNARY_OP_CONFIG()
-      .add_output(out)
-      .add_owned_const_input(a));
+void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(
+    const TensorBase& out,
+    const TensorBase& a) {
+  build(TensorIteratorConfig()
+            .set_check_mem_overlap(true)
+            .cast_common_dtype_to_outputs(true)
+            .enforce_safe_casting_to_output(true)
+            .add_output(out)
+            .add_owned_const_input(a));
 }
 
 // Helper to construct a unary op that forcibly promotes output to boolean.
@@ -1611,11 +1617,14 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
       TORCH_INTERNAL_ASSERT(!op.tensor_base().is_same(t));
       OptionalTensorRef tensor(op.tensor());
       at::native::resize_output(*tensor, sizes);
+      auto const memory_format_opt = options.memory_format_opt();
       if (!strides.empty()) {
-        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        TORCH_INTERNAL_ASSERT(!memory_format_opt.has_value());
         tensor->as_strided_(sizes, strides);
-      } else if (options.memory_format_opt().has_value()) {
-        tensor->unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+      } else{
+         if (memory_format_opt.has_value()) {
+          tensor->unsafeGetTensorImpl()->empty_tensor_restride(*memory_format_opt);
+        }
       }
     }
   }
@@ -1644,8 +1653,11 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor().as_strided_(sizes, strides);
-      } else if (options.memory_format_opt().has_value()) {
-        op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+      } else {
+        auto const memory_format = options.memory_format_opt();
+        if (memory_format.has_value()) {
+          op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
+        }
       }
   }
   if (!names.empty()) {

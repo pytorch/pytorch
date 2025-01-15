@@ -191,9 +191,11 @@ cxx_library(
 
 cxx_library(
     name = "miniz",
-    srcs = ["miniz-2.1.0/miniz.c"],
+    srcs = [
+        "miniz-3.0.2/miniz.c",
+    ],
     header_namespace = "",
-    exported_headers = {"miniz.h": "miniz-2.1.0/miniz.h"},
+    exported_headers = {"miniz.h": "miniz-3.0.2/miniz.h"},
     exported_preprocessor_flags = [
         "-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS",
     ],

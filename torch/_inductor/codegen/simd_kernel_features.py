@@ -7,11 +7,11 @@ from typing import Any, Dict, Iterable, List, Type, Union
 import sympy
 
 import torch
-from torch._inductor.scheduler import SchedulerNode
 
 from ...utils._ordered_set import OrderedSet
 from ..dependencies import Dep, MemoryDep
 from ..runtime.hints import ReductionHint
+from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
 
@@ -73,8 +73,13 @@ class SIMDKernelFeatures:
         reduction_numel: sympy.Expr = sympy.S.One,
     ):
         self.node_schedule = node_schedule
-        self.numel = V.graph.sizevars.simplify(numel)  # numel excludes reduction_numel
-        self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
+        # numel excludes reduction_numel
+        self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
+        self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
+
+    @cache_on_self
+    def is_reduction(self) -> bool:
+        return self.reduction_numel != 1
 
     @cache_on_self
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
@@ -104,7 +109,7 @@ class SIMDKernelFeatures:
         return bool(self.op_counts().get(op_name))
 
     def get_mutations(self) -> OrderedSet[str]:
-        mutations: OrderedSet[str] = OrderedSet()
+        mutations = OrderedSet[str]()
         for node in self.scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
@@ -113,7 +118,7 @@ class SIMDKernelFeatures:
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
-        buffer_names: OrderedSet[str] = OrderedSet()
+        buffer_names = OrderedSet[str]()
         for node in self.scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
@@ -148,6 +153,18 @@ class SIMDKernelFeatures:
         else:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
+
+    @cache_on_self
+    def buffer_read_counts(self) -> Dict[str, int]:
+        """Counts how many times each buffer is read within the kernel"""
+        read_counts: Dict[str, int] = collections.defaultdict(int)
+
+        for node in self.scheduler_nodes():
+            # node.read_writes.reads contains MemoryDep objects for each read
+            for read_dep in node.read_writes.reads:
+                read_counts[read_dep.name] += 1
+
+        return dict(read_counts)  # Convert defaultdict to regular dict
 
     def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
         pointwise_nodes = [

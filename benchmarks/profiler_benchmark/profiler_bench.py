@@ -97,7 +97,7 @@ if __name__ == "__main__":
                     with_stack=args.with_stack,
                     use_kineto=args.use_kineto,
                     use_cpu=not args.cuda_only,
-                ) as prof:
+                ):
                     x = workload(input_x)
                 return x
 

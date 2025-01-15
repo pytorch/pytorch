@@ -160,20 +160,19 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
 
         ref = fn(a, b)
 
-        optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
+        optimized_fn = torch.compile(fn, backend="aot_eager")
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
 
 
-class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
+class MPSSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-    def test_mps_not_supported(self):
+    def test_mps_supported(self):
         model = Seq().to("mps")
         example_input = torch.randn(1, 10).to("mps")
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.compile(model, backend="inductor")(example_input),
-        )
+        rc_eager = model(example_input)
+        rc = torch.compile(model, backend="inductor")(example_input)
+        self.assertEqual(rc, rc_eager)
 
 
 class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
@@ -267,9 +266,8 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_lookup_backend(self):
-        from torch._dynamo import list_backends, lookup_backend
+        from torch._dynamo import lookup_backend
 
-        backends = list_backends()
         backend_run = False
 
         def my_compiler(gm, example_inputs):

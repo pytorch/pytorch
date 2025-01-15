@@ -139,13 +139,14 @@ inline void _mul_reduce_max_fusion_kernel(
     tmp_max = std::max(tmp_max, tmp1);
     out[i] = tmp1;
   }
-  max = std::max(
-      tmp_max,
-      vec::vec_reduce_all<scalar_t>(
-          [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
-            return vec::maximum(x, y);
-          },
-          vec_tmp_max));
+  auto reduced_tmp_max = vec::vec_reduce_all<scalar_t>(
+      [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
+        return vec::maximum(x, y);
+      },
+      vec_tmp_max);
+  // Guard against Q*K^T being NaN
+  max = std::isnan(reduced_tmp_max) ? std::numeric_limits<scalar_t>::quiet_NaN()
+                                    : std::max(tmp_max, reduced_tmp_max);
 }
 
 template <typename scalar_t>
@@ -291,6 +292,104 @@ inline void pad_remain_row_col_zero(
 
 }
 
+
+// Transpose a [2, 32] matrix to [32, 2]
+// Note: the output leading dimension should be 2,
+// that is, the output must be contiguous
+static inline void transpose_pad_2x32_block(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int krem = 2,
+    int nrem = 32) {
+#if defined(CPU_CAPABILITY_AVX512)
+  __m512i r0, r1;
+  __m512i d0, d1;
+  // load
+  if (nrem < 32) {
+    __mmask32 mask_krem_v = (1LL << nrem) - 1;
+    r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
+    // if krem is not 2, pad with zeros
+    if (krem == 2) {
+      r1 = _mm512_maskz_loadu_epi16(mask_krem_v, src + ld_src);
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  } else {
+    r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
+    if (krem == 2) {
+      r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  }
+  // transpose
+  d0 = _mm512_unpacklo_epi16(r0, r1);
+  d1 = _mm512_unpackhi_epi16(r0, r1);
+  r0 = _mm512_shuffle_i32x4(d0, d1, 0x88);
+  r1 = _mm512_shuffle_i32x4(d0, d1, 0xdd);
+  d0 = _mm512_shuffle_i32x4(r0, r1, 0x88);
+  d1 = _mm512_shuffle_i32x4(r0, r1, 0xdd);
+
+  // store
+  if (nrem < 16) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
+    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
+  } else if (nrem == 16) {
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+  } else if (nrem < 32) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_mask_storeu_epi16(
+        reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
+  } else {
+    // normal store
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
+  }
+#else
+TORCH_CHECK(false, "transpose_pad_2x32_block is only supported when avx512 is supported")
+#endif
+}
+
+// To use AMX to accelerate GEMM,
+// reorder the memory format [K, N] -> [K/2, N, 2]
+// Note: If K % 2 != 0, pad K implicitly
+static inline void pack_vnni2(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int64_t K,
+    int64_t N) {
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t bk = 0;
+  int64_t _K = K / 2 * 2;
+  int64_t _N = N / 32 * 32;
+  for (; bk < _K; bk += 2) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 2, nrem);
+    }
+  }
+  if (K % 2 == 1) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1, nrem);
+    }
+  }
+#else
+TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
+#endif
+}
+
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size, bool with_pack=false>
 void cpu_flash_attention(
     const Tensor& output,
@@ -316,7 +415,7 @@ void cpu_flash_attention(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -377,53 +476,34 @@ void cpu_flash_attention(
 
   // Whether pack is needed
   bool need_pack = false;
-  // Block size of packing B matrix
-  int64_t packb_size = 64;
-  // Use packb_size due to the limitation:
-  // oneDNN pack only supports output leading dimention being one of (16, 32, 48, 64)
-  // For instance,
-  // for q @ k.T [qSplitSize, headSize] * [headSize, kvSplitSize] = [qSplitSize, kvSplitSize],
-  // we need to split kvSplitSize with packb_size for packing k.T,
-  // for (q @ k.T) @ v [qSplitSize, kvSplitSize] x [kvSplitSize, headSize] -> [qSplitSize, headSize],
-  // we need to split headSize with packb_size for packing v
-  // TODO Simplify the check when oneDNN supports fused pack with transpose and has better performance
   if (with_pack) {
-    need_pack = num_head >= 4 && headSize % packb_size == 0 && kvSize >= packb_size;
+    // BFloat16 requires larger size as the fallback implementation
+    // mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
+    int64_t thresh_size = (dtype == at::ScalarType::BFloat16) ? 64 : 16;
+    need_pack = kvSize >= thresh_size && qSize >= thresh_size;
+    // When the number of gemm is greater than the number of pack,
+    // the pack overhead can be overlaped.
     if (need_pack) {
-      float pack_size = batchSize * num_head * kvSize * headSize / 1024;
-      float gemm_size_per_thread =
-          (batchSize * num_head * qSlice + num_thread - 1) / num_thread *
-          qSplitSize * (is_causal ? qSize : kvSize) * headSize / 1024;
-      float gsize = gemm_size_per_thread / pack_size;
-      // When the number of gemm is much greater than the number of pack,
-      // the pack and padding overhead can be overlaped.
-      if (pack_size < 2688) {
-        need_pack = gsize >= 36 || (gsize >= 24 && headSize > packb_size);
-      } else if (pack_size < 16384) {
-        need_pack = gsize >= (is_causal ? 54 : 52);
-      } else {
-        need_pack = gsize >= (is_causal ? 54 : 40);
-      }
+      double pack_size = batchSize * num_head * kvSize * headSize;
+      double qs_per_thread = (batchSize * num_head * qSlice + num_thread - 1) / num_thread;
+      double gemm_size_per_thread = qs_per_thread * qSplitSize *
+          (is_causal ? std::min(qSize, kvSize) : kvSize) * headSize;
+      need_pack = gemm_size_per_thread / pack_size >= (dtype == at::ScalarType::BFloat16 ? 4 : 1);
     }
   }
 
-  int64_t rHeadSize = need_pack ? (headSize + packb_size - 1) / packb_size * packb_size : headSize;
-  int64_t rkvSplitSize = need_pack ? (kvSplitSize + packb_size - 1) / packb_size * packb_size : kvSplitSize;
-  int64_t rkvTail = need_pack ? (kvTail + packb_size - 1) / packb_size * packb_size : kvTail;
-  int64_t rkvSize = kv_split_size > kvSize ? rkvTail : rkvSplitSize * kvSlice + rkvTail;
-
-  // oneDNN pack does not support odd K now, we need also pad odd K
+  // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
   int64_t ekvSplitSize = need_pack && (kvSplitSize % 2 != 0) ? kvSplitSize + 1 : kvSplitSize;
   int64_t ekvTail = need_pack && (kvTail % 2 != 0) ? kvTail + 1 : kvTail;
 
-  // allocate per thread temp buf (accumulate type)
+  // Allocate per thread temp buf (accumulate type)
   int64_t size_per_thread =
-      /* qk     */ qSplitSize * rkvSplitSize +
+      /* qk     */ qSplitSize * kvSplitSize +
       /* qk_max */ qSplitSize +
       /* qk_sum */ qSplitSize +
-      /* dst    */ qSplitSize * rHeadSize;
+      /* dst    */ qSplitSize * headSize;
 
   at::Tensor buf = at::empty({num_thread, size_per_thread}, query.options().dtype(accumulate_dtype));
   at::Tensor buf_reduced = at::empty(
@@ -444,108 +524,76 @@ void cpu_flash_attention(
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
-  // Buffer to store padding query
-  scalar_t* query_padding_ptr = nullptr;
-  std::unique_ptr<scalar_t[]> query_padding_data;
-  if (!headSize_even && need_pack) {
-    query_padding_data = std::make_unique<scalar_t[]>(num_thread * qSplitSize * eheadSize);
-    query_padding_ptr = query_padding_data.get();
-  }
-  // Buffer to store Key and Value after transforms
+  // Buffer to store padding query and packing key/value
   scalar_t* key_reorder_ptr = nullptr;
-  std::unique_ptr<scalar_t[]> key_reorder_data;
   scalar_t* value_reorder_ptr = nullptr;
-  std::unique_ptr<scalar_t[]> value_reorder_data;
-  int kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
+  scalar_t* query_padding_ptr = nullptr;
+  int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
+  at::Tensor key_t_reorder;
+  at::Tensor value_t_reorder;
+  at::Tensor qeury_t_padding;
   if (need_pack) {
-    key_reorder_data = std::make_unique<scalar_t[]>(batchSize * num_head * eheadSize * rkvSize);
-    key_reorder_ptr = key_reorder_data.get();
-    value_reorder_data = std::make_unique<scalar_t[]>(batchSize * num_head * kv_padding_size * rHeadSize);
-    value_reorder_ptr = value_reorder_data.get();
+    key_t_reorder = at::empty(
+      {batchSize, num_head, eheadSize, kvSize},
+      c10::CppTypeToScalarType<scalar_t>::value);
+    value_t_reorder = at::empty(
+      {batchSize, num_head, kv_padding_size, headSize},
+      c10::CppTypeToScalarType<scalar_t>::value);
+    key_reorder_ptr = key_t_reorder.data_ptr<scalar_t>();
+    value_reorder_ptr = value_t_reorder.data_ptr<scalar_t>();
+  }
+
+  if (!headSize_even && need_pack) {
+    qeury_t_padding = at::empty(
+      {num_thread, qSplitSize, eheadSize},
+      c10::CppTypeToScalarType<scalar_t>::value);
+    query_padding_ptr = qeury_t_padding.data_ptr<scalar_t>();
   }
 
   // Reorder K, V
   if (need_pack) {
+    at::Tensor tranpose_t_reorder = at::empty(
+      {num_thread, kvSplitSize, headSize},
+      c10::CppTypeToScalarType<scalar_t>::value);
+    scalar_t* transpose_buffer_ptr = tranpose_t_reorder.data_ptr<scalar_t>();
     at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
+        int ompIdx = at::get_thread_num();
         int64_t i = 0, j = 0, l = 0, n = 0;
+        scalar_t* transpose_ptr = transpose_buffer_ptr + ompIdx * kvSplitSize * headSize;
         at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
-        std::unique_ptr<scalar_t[]> transpose_buffer = std::make_unique<scalar_t[]>(eheadSize * packb_size);
-        scalar_t* transpose_buffer_ptr = transpose_buffer.get();
-        std::unique_ptr<scalar_t[]> v_copy_buffer = std::make_unique<scalar_t[]>(ekvSplitSize * packb_size);
-        scalar_t* v_copy_buffer_ptr = v_copy_buffer.get();
         for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
           n = l * kvSplitSize;
           int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-          int64_t ekvBlockSize = kvBlockSize % 2 == 0 ? kvBlockSize : kvBlockSize + 1;
 
-          // Split kvSplitSize with packb_size
-          // [kvSplitSize, headSize] -> [div_up(kvSplitSize, packb_size), packb_size, headSize]
-          // Transpose [packb_size, headSize] -> [headSize, packb_size]
-          // Pack transposed buffer
+          // transpose [kvBlockSize, headSize] -> [headSize, kvBlockSize]
+          utils::transpose<uint16_t>(
+              kvBlockSize,
+              headSize,
+              /* src_ptr */
+              reinterpret_cast<const uint16_t*>(k_data + i * kStrideB + j * kStrideH + n * kStrideN),
+              /* ld_src */ kStrideN,
+              /* dst */ reinterpret_cast<uint16_t*>(transpose_ptr),
+              /* ld_dst */ kvBlockSize);
 
-          for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
-            bool tail = kvBlockSize - b < packb_size;
-            // TODO Use fused pack with transpose support when oneDNN supports such usage
-            utils::transpose<uint16_t>(
-                tail ? kvBlockSize - b : packb_size,
-                headSize,
-                /* src_ptr */
-                reinterpret_cast<const uint16_t*>(
-                    k_data + i * kStrideB + j * kStrideH + n * kStrideN +
-                    b * kStrideN),
-                /* ld_src */ kStrideN,
-                /* dst */ reinterpret_cast<uint16_t*>(transpose_buffer_ptr),
-                /* ld_dst */ packb_size);
-            // Pad [headSize, x] -> [eheadSize, x]
-            if (!headSize_even) {
-              pad_remain_row_col_zero<scalar_t>(
-                  transpose_buffer_ptr,
-                  headSize,
-                  packb_size,
-                  eheadSize,
-                  packb_size,
-                  packb_size);
-            }
-            // Pack
-            cpublas::pack(
-                /* K */ eheadSize,
-                /* N */ packb_size,
-                /* ld_in */ packb_size,
-                /* ld_out */ packb_size,
-                /* dt_in */ dtype,
-                /* dt_out */ dtype,
-                transpose_buffer_ptr,
-                key_reorder_ptr + i * num_head * eheadSize * rkvSize +
-                    j * eheadSize * rkvSize + n * eheadSize + b * eheadSize);
-          }
+          // Pack [headSize, kvBlockSize]
+          pack_vnni2(
+            /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
+            /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
+                    j * eheadSize * kvSize + n * eheadSize),
+            /* ld_src */ kvBlockSize,
+            /* K */ headSize,
+            /* N */ kvBlockSize);
 
-          // Split headSize with packb_size
-          // [kvSplitSize, headSize] -> [kvSplitSize,  div_up(headSize, packb_size), packb_size]
-          for (int64_t b = 0; b < headSize; b += packb_size) {
-            // Do copy due to the limitation of input_ld of oneDNN pack:
-            // Regarding packing [K, N], only input_ld == N is supported
-            // TODO: remove the copy when pack supports input_ld >= N
-            copy_value_with_pad<scalar_t>(
-                v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-                v_copy_buffer_ptr,
-                kvBlockSize,
-                (headSize - b < packb_size) ? headSize - b : packb_size,
-                ekvBlockSize,
-                packb_size,
-                vStrideN);
-            cpublas::pack(
-                ekvBlockSize,
-                packb_size,
-                packb_size,
-                packb_size,
-                dtype,
-                dtype,
-                v_copy_buffer_ptr,
-                value_reorder_ptr +
-                    i * num_head * kv_padding_size * rHeadSize +
-                    j * kv_padding_size * rHeadSize + n * rHeadSize +
-                    ekvBlockSize * b);
-          }
+          // Pack [kvBlockSize, headSize]
+          pack_vnni2(
+            /* src */ reinterpret_cast<const uint16_t*>(v_data + i * vStrideB + j * vStrideH + n * vStrideN),
+            /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
+                    i * num_head * kv_padding_size * headSize +
+                    j * kv_padding_size * headSize + n * headSize),
+            /* ld_src */ vStrideN,
+            /* K */ kvBlockSize,
+            /* N */ headSize);
+
           // Move to the next query
           at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
         }
@@ -558,7 +606,7 @@ void cpu_flash_attention(
     int ompIdx = at::get_thread_num();
     accum_t* buf_ptr = buf_data + ompIdx * size_per_thread;
     accum_t* qk_data = buf_ptr;
-    accum_t* qk_max_data = qk_data + qSplitSize * rkvSplitSize;
+    accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
     scalar_t* qk_reduced_data = is_reduced_type ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize : nullptr;
@@ -591,26 +639,23 @@ void cpu_flash_attention(
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
         int64_t ekvBlockSize = (need_pack && kvBlockSize % 2 != 0) ? kvBlockSize + 1 : kvBlockSize;
-        int64_t rkvBlockSize = kvBlockSize == kvSplitSize ? rkvSplitSize : rkvTail;
         // Calculate scale * q @ k.T
         if (need_pack) {
-          if constexpr (std::is_same_v<scalar_t, at::Half>) {
-            for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
-              cpublas::brgemm(
-                  qBlockSize,
-                  packb_size,
-                  eheadSize,
-                  headSize_even ? qStrideM : eheadSize,
-                  packb_size,
-                  rkvBlockSize,
-                  false,
-                  !headSize_even
-                      ? query_t_padding_ptr
-                      : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-                  key_reorder_ptr + i * num_head * eheadSize * rkvSize +
-                      j * eheadSize * rkvSize + n * eheadSize + b * eheadSize,
-                  qk_data + b);
-            }
+          if constexpr (is_reduced_floating_point_v<scalar_t>) {
+            cpublas::brgemm(
+                qBlockSize,
+                kvBlockSize,
+                eheadSize,
+                headSize_even ? qStrideM : eheadSize,
+                kvBlockSize,
+                kvBlockSize,
+                false,
+                !headSize_even
+                    ? query_t_padding_ptr
+                    : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                key_reorder_ptr + i * num_head * eheadSize * kvSize +
+                    j * eheadSize * kvSize + n * eheadSize,
+                qk_data);
           }
         } else {
           cpublas::gemm(
@@ -634,7 +679,7 @@ void cpu_flash_attention(
         if (is_causal && num_keys - n <= kvSplitSize) {
           for (const auto row : c10::irange(qBlockSize)) {
             int64_t last_col = m + row - n;
-            accum_t* row_ptr = qk_data + row * rkvBlockSize;
+            accum_t* row_ptr = qk_data + row * kvBlockSize;
             fill_stub(row_ptr + last_col + 1,
                 -std::numeric_limits<accum_t>::infinity(),
                 kvBlockSize - last_col - 1);
@@ -647,29 +692,29 @@ void cpu_flash_attention(
           for (int64_t row = 0; row < qBlockSize; ++row) {
 #if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
               _scale_attn_mask_fusion_kernel(
-                qk_data + row * rkvBlockSize,
+                qk_data + row * kvBlockSize,
                 mask_data + i * mStrideB + j * mStrideH +
                     (m + row) * mStrideM + (mStrideN == 0 ? 0 : n),
                 kvBlockSize,
-                qk_data + row * rkvBlockSize,
+                qk_data + row * kvBlockSize,
                 scaling_factor,
                 mStrideN == 0);
 #else
               if (mStrideN == 0) {
                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
-                  qk_data + row * rkvBlockSize,
+                  qk_data + row * kvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM,
                   kvBlockSize,
-                  qk_data + row * rkvBlockSize,
+                  qk_data + row * kvBlockSize,
                   scaling_factor);
               } else {
                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
-                  qk_data + row * rkvBlockSize,
+                  qk_data + row * kvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM + n,
                   kvBlockSize,
-                  qk_data + row * rkvBlockSize,
+                  qk_data + row * kvBlockSize,
                   scaling_factor);
               }
 #endif
@@ -682,15 +727,15 @@ void cpu_flash_attention(
             // max per row
             tmp_max = at::vec::reduce_all<accum_t>(
                 [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
-                qk_data + row * rkvBlockSize,
+                qk_data + row * kvBlockSize,
                 kvBlockSize);
           } else {
             // apply scaling factor and max per row in fusion
             _mul_reduce_max_fusion_kernel(
-                qk_data + row * rkvBlockSize,
+                qk_data + row * kvBlockSize,
                 scaling_factor,
                 kvBlockSize,
-                qk_data + row * rkvBlockSize,
+                qk_data + row * kvBlockSize,
                 tmp_max);
           }
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
@@ -702,7 +747,7 @@ void cpu_flash_attention(
             tmp_sum = tmp_max;
             // qk <- exp(qk - max) and sum per row
             _exp_reduce_sum_fusion_kernel(
-                qk_data + row * rkvBlockSize, kvBlockSize,
+                qk_data + row * kvBlockSize, kvBlockSize,
                 conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
                 tmp_sum);
             // exp_tmp <- exp(max[row] - max)
@@ -715,36 +760,33 @@ void cpu_flash_attention(
             if (n > 0) {
               vec::map<accum_t>(
                 [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-                dst_data + row * rHeadSize,
-                dst_data + row * rHeadSize,
+                dst_data + row * headSize,
+                dst_data + row * headSize,
                 headSize);
             }
           }
           if (need_pack && kvBlockSize % 2 != 0) {
-            // Pad: [qSplitSize,kvSplitSize] -> [qSplitSize,kvSplitSize + 1]
+            // Pad: [qSplitSize, kvBlockSize] -> [qSplitSize, kvBlockSize + 1]
             *(qk_reduced_data + row * (1 + kvBlockSize) + kvBlockSize) = scalar_t(0);
           }
         }
         // Calculate Softmax(q @ k.T) @ v
         if (need_pack) {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
-          if constexpr (std::is_same_v<scalar_t, at::Half>) {
-            for (int64_t b = 0; b < headSize; b += packb_size) {
-              cpublas::brgemm(
+          if constexpr (is_reduced_floating_point_v<scalar_t>) {
+            cpublas::brgemm(
                   qBlockSize,
-                  packb_size,
+                  headSize,
                   ekvBlockSize,
                   ekvBlockSize,
-                  packb_size,
-                  rHeadSize,
+                  headSize,
+                  headSize,
                   n > 0,
                   qk_reduced_data,
                   value_reorder_ptr +
-                      i * num_head * kv_padding_size * rHeadSize +
-                      j * kv_padding_size * rHeadSize + psize * rHeadSize +
-                      b * ekvBlockSize,
-                  dst_data + b);
-            }
+                      i * num_head * kv_padding_size * headSize +
+                      j * kv_padding_size * headSize + psize * headSize,
+                  dst_data);
           }
         } else {
           cpublas::gemm(
@@ -777,7 +819,7 @@ void cpu_flash_attention(
         vec::map<scalar_t>(
           [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
           out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
-          dst_data + row * rHeadSize,
+          dst_data + row * headSize,
           headSize);
       }
       // Store logsumexp for backward
@@ -814,7 +856,7 @@ void cpu_flash_attention_backward(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -1160,7 +1202,8 @@ void flash_attention_kernel_impl(
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-  bool could_pack = (query.scalar_type() == kHalf && cpublas::need_pack(kHalf));
+  bool could_pack = ((query.scalar_type() == kHalf && cpublas::could_pack(kHalf)) ||
+                     (query.scalar_type() == kBFloat16 && cpublas::could_pack(kBFloat16)));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {

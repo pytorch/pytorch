@@ -5,7 +5,7 @@
 namespace torch::distributed::autograd {
 
 CleanupAutogradContextReq::CleanupAutogradContextReq(int64_t context_id)
-    : context_id_(context_id){};
+    : context_id_(context_id) {}
 
 int64_t CleanupAutogradContextReq::getContextId() {
   return context_id_;
