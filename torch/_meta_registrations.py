@@ -3260,7 +3260,38 @@ def meta_index_Tensor(self, indices):
                 before_shape.append(self.shape[dim])
         else:
             replacement_shape = list(index.shape)
-    return self.new_empty(before_shape + replacement_shape + after_shape)
+
+    def _restride_src(self):
+        """
+        This follows restride_src in TensorAdvancedIndexing.cpp
+        """
+        shape = before_shape + replacement_shape + after_shape
+        strides = list(self.stride())
+        strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
+            replacement_shape
+        )
+        return self.as_strided(shape, strides)
+
+    out = self.new_empty(before_shape + replacement_shape + after_shape)
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(self.numel() == 0):
+        # No need to worry about the output strides if self is empty.
+        return out
+
+    # Try to follow eager to decide the output stride based on self.
+    # Note that perm here is the reverse of the 'perm_' decided by
+    # TensorIteratorBase::reorder_dimensions
+    restrided_self = _restride_src(self)
+    perm = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
+
+    # Follow TensorIteratorBase::allocate_or_resize_outputs
+    if list(perm) != list(range(len(perm))):
+        perm_shape = utils.apply_perm(out.shape, perm)
+        new_stride = utils.make_contiguous_strides_for(perm_shape)
+        new_stride = utils.apply_perm(new_stride, utils.invert_perm(perm))
+        out = out.as_strided(out.size(), new_stride)
+    return out
 
 
 @register_meta([aten.convolution_backward.default])
