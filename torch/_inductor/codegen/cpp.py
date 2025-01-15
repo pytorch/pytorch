@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Union
 
 import sympy
 
@@ -26,6 +26,7 @@ from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
+    ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     Scheduler,
@@ -36,6 +37,7 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     has_free_symbols,
+    is_multi_outputs_template,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
@@ -1839,11 +1841,11 @@ class CppKernel(Kernel):
         super().__init__(args)
         # Indicate when this kernel is active, for example
         # {x0, {24, 26}} -> this kernel is active when x0 >= 24 and x0 < 26
-        self.active_ranges: dict[sympy.Expr, Tuple[sympy.Expr, ...]] = {}
+        self.active_ranges: dict[sympy.Expr, tuple[sympy.Expr, ...]] = {}
         # Indicate this kernel will be moved under the inner for-loop
         # See move_code_under_inner_loop
         self.inner_itervars: List[sympy.Symbol] = []
-        self.call_ranges: Optional[Tuple[sympy.Expr, ...]] = None
+        self.call_ranges: Optional[tuple[sympy.Expr, ...]] = None
         self.ranges: List[sympy.Expr] = []
         self.itervars: List[sympy.Symbol] = []
         self.reduction_depth = None
@@ -1869,7 +1871,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
-        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self.reduction_omp_dec: Dict[tuple[str, str], str] = {}
         self.reduction_var_names: List[str] = []
 
     def _gen_parallel_reduction_buffers(
@@ -3412,7 +3414,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3469,7 +3471,7 @@ class TilingSelect:
         self,
         fn_list,
         var_sizes_list,
-    ) -> Tuple[List[int], List[int]]:
+    ) -> tuple[List[int], List[int]]:
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = _get_loop_body(fn_list)
         all_dtypes = _get_dtype_from_loopbodies(loop_bodies)
@@ -4440,6 +4442,18 @@ class CppScheduling(BaseScheduling):
 
         return self._can_fuse_horizontal_impl(node1, node2)
 
+    def can_fuse_multi_outputs_template(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        if template_buf := node1.get_template_node():
+            return (
+                isinstance(template_buf.layout, ir.MultiOutputLayout)
+                and isinstance(node2.node, ir.MultiOutput)
+                and len(node2.node.inputs) == 1
+                and node2.node.inputs[0].get_name() == template_buf.name
+            )
+        return False
+
     def _get_outer_loop_fusion_depth(self, node1, node2):
         DISABLE_OUTER_LOOP_FUSION = 0
         if not all(
@@ -4793,6 +4807,10 @@ class CppScheduling(BaseScheduling):
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
+                    for removed_buffer in scope.removed_buffers:
+                        # Restore the removed buffers by this context before
+                        # fallback to codegen without using Local Buffer
+                        V.graph.removed_buffers.remove(removed_buffer)
                     return False
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
@@ -4863,6 +4881,14 @@ class CppScheduling(BaseScheduling):
         Codegen a CPP template, possibly with fused epilogues
         """
         assert not prologue_nodes
+
+        # remove MultiOutput from epilogue_nodes
+        epilogue_nodes = [
+            epilogue_node
+            for epilogue_node in epilogue_nodes
+            if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))
+        ]
+
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4901,13 +4927,31 @@ class CppScheduling(BaseScheduling):
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
+            if not is_multi_outputs_template(template_node.node):
+                template_node.mark_run()  # type: ignore[attr-defined]
+            for node in epilogue_nodes:
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
+
+        if is_multi_outputs_template(template_node.node):
+            # For multi outputs template, allocate buffers for each output after the epilogue
+            # codegen to which determines if the buffer has been removed.
+            assert (
+                len(template_node.outputs) == 1
+            ), "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
+            for user in template_node.outputs[0].users:
+                assert isinstance(
+                    user.node, ExternKernelSchedulerNode
+                ), "Multi outputs template should be with ExternKernelSchedulerNode"
+                assert isinstance(
+                    user.node.node, ir.MultiOutput
+                ), "Multi outputs template has multi users with MultiOutput"
+                user.node.mark_run()
+
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()

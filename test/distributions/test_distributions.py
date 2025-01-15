@@ -5780,6 +5780,7 @@ class TestKL(DistributionsTestCase):
             ),
             0,
         )
+        self.assertEqual(kl_divergence(Uniform(0, 1), Beta(1, 1)), 0)
 
     def test_kl_shape(self):
         for Dist, params in _get_examples():
