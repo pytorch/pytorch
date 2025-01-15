@@ -115,6 +115,8 @@ inline Tensor new_qtensor(
   // TODO: why isn't this just using GetAllocator
   if (device.is_cuda()) {
     allocator = at::detail::getCUDAHooks().getCUDADeviceAllocator();
+  } else if (device.is_xpu()) {
+    allocator = GetAllocator(kXPU);
   } else if (device.is_cpu()) {
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
