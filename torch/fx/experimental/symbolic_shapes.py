@@ -1952,7 +1952,7 @@ def safe_expand(r: _SympyT) -> _SympyT:
 class _SymbolInfo(NamedTuple):
     k: sympy.Symbol
     vr: Optional[ValueRanges]
-    val: sympy.Integer
+    val: Optional[sympy.Integer]
     is_size_like: bool
     oblivious_upper_bound_exclusive: sympy.Integer
 
@@ -1981,6 +1981,7 @@ def _maybe_evaluate_static_worker(
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
+        assert vr is not None
         if size_oblivious and is_size_like:
             lower = max(2, vr.lower)
             # Clamping size-oblivious to some quantity below sys.maxsize
