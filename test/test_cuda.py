@@ -757,27 +757,28 @@ class TestCuda(TestCase):
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
 
+    @largeTensorTest("10GB", "cuda")
     def test_force_cudnn_conv(self):
         # hack to workaround cuBLAS handles causing an edge case OOM if
         # no handle was present before the first call
-        dummy = torch.randn(512, 512, dtype=torch.half, device='cuda')
+        dummy = torch.randn(512, 512, dtype=torch.half, device="cuda")
         torch.matmul(dummy, dummy)
         # same for cuDNN
-        dummy = torch.randn(1, 1, 1, 1, dtype = torch.half, device='cuda')
+        dummy = torch.randn(1, 1, 1, 1, dtype=torch.half, device="cuda")
         torch.nn.functional.conv2d(dummy, dummy)
 
-        x = torch.ones(1, 3, 512, 512, 512, dtype=torch.int8, device='cuda')
-        w = torch.ones(64, 3, 3, 3, 3, dtype=torch.int8, device='cuda')
-        with self.assertRaisesRegex(RuntimeError, 'GET was unable'):
+        x = torch.ones(1, 3, 512, 512, 512, dtype=torch.int8, device="cuda")
+        w = torch.ones(64, 3, 3, 3, 3, dtype=torch.int8, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "(GET was unable|CUDNN_STATUS)"):
             with torch.backends.cudnn.flags(enabled=True, force=True):
                 o = torch.nn.functional.conv3d(x, w)
 
     def test_force_cudnn_batchnorm(self):
         dtype = torch.float
-        x = torch.randn(1, 1, 1, 1, dtype=dtype, device='cuda')
-        mean = torch.randn(1, dtype=dtype, device='cuda')
-        var = torch.randn(1, dtype=dtype, device='cuda')
-        weight = torch.randn(1, dtype=dtype, device='cuda')
+        x = torch.randn(1, 1, 1, 1, dtype=dtype, device="cuda")
+        mean = torch.randn(1, dtype=dtype, device="cuda")
+        var = torch.randn(1, dtype=dtype, device="cuda")
+        weight = torch.randn(1, dtype=dtype, device="cuda")
         with torch.backends.cudnn.flags(enabled=True, force=False):
             torch.nn.functional.batch_norm(x, mean, var, weight)
 
@@ -788,12 +789,18 @@ class TestCuda(TestCase):
 
     def test_force_cudnn_sdpa(self):
         dtype = torch.half
-        q = torch.randn(85, 21, 36529, 8, dtype=dtype, device='cuda', requires_grad=True).permute(0, 1, 2, 3)
+        q = torch.randn(
+            85, 21, 36529, 8, dtype=dtype, device="cuda", requires_grad=True
+        ).permute(0, 1, 2, 3)
         # incorrect GQA setup
-        k = torch.randn(16209, 5, 85, 8, dtype=dtype, device='cuda', requires_grad=True).permute(2, 1, 0, 3)
-        v = torch.randn(16209, 7, 85, 8, dtype=dtype, device='cuda', requires_grad=True).permute(2, 1, 0, 3)
+        k = torch.randn(
+            16209, 5, 85, 8, dtype=dtype, device="cuda", requires_grad=True
+        ).permute(2, 1, 0, 3)
+        v = torch.randn(
+            16209, 7, 85, 8, dtype=dtype, device="cuda", requires_grad=True
+        ).permute(2, 1, 0, 3)
 
-        with self.assertRaisesRegex(RuntimeError, 'cuDNN'):
+        with self.assertRaisesRegex(RuntimeError, "cuDNN"):
             with torch.backends.cudnn.flags(enabled=True, force=True):
                 with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
                     out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
@@ -803,19 +810,23 @@ class TestCuda(TestCase):
         target_lengths = [30, 25, 500]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device="cuda").log_softmax(2).requires_grad_()
 
         log_probs_ref = log_probs.detach().clone().requires_grad_()
 
         try:
             with torch.backends.cudnn.flags(enabled=True, force=True):
-                res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+                res = torch.nn.functional.ctc_loss(
+                    log_probs, targets, input_lengths, target_lengths
+                )
                 res.backward()
         except RuntimeError as e:
             self.assertTrue(('CUDNN') in str(e))
 
         with torch.backends.cudnn.flags(enabled=True, force=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets.cuda().long(), input_lengths, target_lengths)
+            res2 = torch.nn.functional.ctc_loss(
+                log_probs_ref, targets.cuda().long(), input_lengths, target_lengths
+            )
             res2.backward()
 
     def test_type_conversions(self):
