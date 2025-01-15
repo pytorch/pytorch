@@ -297,6 +297,18 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_export_slice_unbacked_dim1(self):
+        class MySlice(torch.nn.Module):
+            def forward(self, x, seq_len):
+                l = seq_len.item()
+                torch._check_is_size(l, max=x.size(1))
+                x = x.narrow(1, 0, l)
+                return x
+
+        x = torch.randn(10, 7)
+        seq_len = torch.tensor(5)
+        torch.export.export(MySlice(), args=(x, seq_len))
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -2084,8 +2096,6 @@ graph():
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
-    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2096,8 +2106,6 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -7512,8 +7520,8 @@ graph():
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = export(mod, inp)
+        ep_non_strict = export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
