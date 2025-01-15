@@ -5671,7 +5671,9 @@ class CommonTemplate:
             return aten.pow(1000, x), aten.pow(x, 1000)
 
         # pow is broken in MPSGraph for MacOS before version 13.3
-        check_lowp = True if self.device != "mps" or MACOS_VERSION > 13.2 else False
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
+
         self.common(
             fn,
             (
@@ -5685,7 +5687,6 @@ class CommonTemplate:
             # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
             atol=1e-5,
             rtol=3e-05,
-            check_lowp=check_lowp,
         )
 
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8318
