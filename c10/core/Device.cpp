@@ -132,14 +132,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   try {
     if (!device_index_str.empty()) {
-      auto index = std::stoi(device_index_str);
-      TORCH_CHECK(
-          index <=
-              static_cast<int>(std::numeric_limits<c10::DeviceIndex>::max()),
-          "Device index '",
-          device_index_str,
-          "' is out of range");
-      index_ = static_cast<c10::DeviceIndex>(index);
+      index_ = static_cast<c10::DeviceIndex>(std::stoi(device_index_str));
     }
   } catch (const std::exception&) {
     TORCH_CHECK(
