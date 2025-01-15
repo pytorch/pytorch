@@ -332,7 +332,7 @@ class BlockMask:
             kv_indices (Tensor): Indices of key-value blocks in each Q_BLOCK_SIZE row tile.
             full_kv_num_blocks (Optional[Tensor]): Number of full kv_blocks in each Q_BLOCK_SIZE row tile.
             full_kv_indices (Optional[Tensor]): Indices of full key-value blocks in each Q_BLOCK_SIZE row tile.
-            BLOCK_SIZE (Union[int, Tuple[int, int]]): Size of KV_BLOCK_SIZE x Q_BLOCK_SIZE tiles.
+            BLOCK_SIZE (Union[int, tuple[int, int]]): Size of KV_BLOCK_SIZE x Q_BLOCK_SIZE tiles.
             mask_mod (Optional[Callable]): Function to modify the mask.
 
         Returns:
@@ -758,7 +758,7 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm: Tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+        full_bm: tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
             full_blocks
         )
     else:
@@ -845,7 +845,7 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -1024,7 +1024,7 @@ def create_nested_block_mask(
             constructed to operate on a "stacked sequence" of length ``sum(S)`` for sequence
             length ``S`` from the NJT. If this is None, ``q_nt`` is used to define the structure
             for key / value as well. Default: None
-        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is
+        BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is
             provided it is used for both query and key/value.
 
     Returns:
