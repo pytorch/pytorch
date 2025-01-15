@@ -1344,7 +1344,7 @@ class InstructionTranslatorBase(
 
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
-            raise NameError(f"name '{argval}' is not defined")
+            raise Unsupported(f"name '{argval}' is not defined")
         val = self.f_builtins[argval]
 
         if callable(val):
