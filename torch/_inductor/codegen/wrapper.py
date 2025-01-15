@@ -2193,9 +2193,12 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         self.allocated.add(name)
-        if isinstance(
-            buffer.get_defining_op(),
-            (ir.ExternKernelAlloc, ir.MultiOutput),
+        if (
+            isinstance(
+                buffer.get_defining_op(),
+                (ir.ExternKernelAlloc, ir.MultiOutput),
+            )
+            and not buffer.should_allocate()
         ):
             return
 

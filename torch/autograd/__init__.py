@@ -240,7 +240,7 @@ def _tensor_or_tensors_to_tuple(
 
 
 def backward(
-    tensors: _TensorOrTensors,
+    tensors: _TensorOrTensorsOrGradEdge,
     grad_tensors: Optional[_TensorOrTensors] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
@@ -284,8 +284,8 @@ def backward(
         See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
     Args:
-        tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
-            computed.
+        tensors (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or GradientEdge): Tensors of which
+            the derivative will be computed.
         grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
             the Jacobian-vector product, usually gradients w.r.t. each element of
             corresponding tensors. None values can be specified for scalar Tensors or
@@ -327,7 +327,12 @@ def backward(
     if inputs is not None and len(inputs) == 0:
         raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
-    tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
+    if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
+        tensors = cast(
+            Union[Tuple[torch.Tensor], Tuple[graph.GradientEdge]], (tensors,)
+        )
+    else:
+        tensors = tuple(tensors)
     inputs = (
         (inputs,)
         if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
