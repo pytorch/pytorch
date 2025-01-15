@@ -2988,6 +2988,12 @@ def _register_qlinear_post_op_fusion_pass(
                 other = kwargs["other"] if "other" in kwargs else kwargs["accum"]
                 x2_scale = 1.0
                 x2_zp = 0
+                # Change the post op from sum to binary add for the broadcast cases.
+                if (
+                    post_op_attr.binary_op_name == "sum"
+                    and match.nodes[0].meta["val"].size() != other.meta["val"].size()
+                ):
+                    post_op_attr.binary_op_name = "add"
                 computation_args = (
                     x,
                     x_scale,
