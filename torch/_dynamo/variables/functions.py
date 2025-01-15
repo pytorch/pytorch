@@ -364,16 +364,19 @@ class GeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    # def reconstruct(self, codegen):
-    #     from torch._dynamo.symbolic_convert import InstructionTranslator
-    #     tx = InstructionTranslator.current_tx()
-    #     try:
-    #         prev = tx.output.should_exit
-    #         tx.output.should_exit = False
-    #         items = self.force_unpack_var_sequence(tx)
-    #         variables.ListIteratorVariable(items, mutation_type=ValueMutationNew()).reconstruct(codegen)
-    #     finally:
-    #         tx.output.should_exit = prev
+    def reconstruct(self, codegen):
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        tracer = self._get_inline_tracer(tx)
+        try:
+            prev = tx.output.should_exit
+            tx.output.should_exit = False
+            if not tracer.generator_exhausted:
+                self.remaining_items = self.force_unpack_var_sequence(tx)
+            variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
+        finally:
+            tx.output.should_exit = prev
 
     def bind_args(self, tx, args, kwargs):
         return self.fn.bind_args(tx, args, kwargs)
@@ -466,6 +469,9 @@ class ContextlibContextManagerGeneratorObjectVariable(GeneratorObjectVariable):
     .. note::
 
         This is only used when the function is annotated with @contextlib.contextmanager
+
+        It is a special case of a generator function as we do not allow return a context manager
+        from a torch.compile function.
     """
 
 
@@ -510,13 +516,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
-
-        # This seems super odd but it is to prevent Dynamo on Python 3.11+ to
-        # trace a generator frame without going from this path (GeneratorFunctionVariable -> GeneratorObjectVariable)
-        # A good reproducer for this is to comment this code and run the
-        # test_generator.py::test_generator_with_side_effects test case.
-        # Dynamo will trace both "fn" and "whoo" frames.
-        torch._C._dynamo.eval_frame.skip_code(code)
 
         # calling a generator returns a generator object
         return self.generator_cls(
