@@ -501,8 +501,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
           auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+          seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(seed)), at::dtype(at::kUInt64));
+          offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(offset)), at::dtype(at::kUInt64));
         } else {
           seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
@@ -756,8 +756,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
           auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+          seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(seed)), at::dtype(at::kUInt64));
+          offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(offset)), at::dtype(at::kUInt64));
         } else {
           seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
@@ -992,7 +992,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         if (at::cuda::currentStreamCaptureStatus() ==
                 at::cuda::CaptureStatus::None)
         {
-            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
+            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<uint64_t>(), *philox_offset.data_ptr<uint64_t>());
         } else { // dropout + capture
             philox_args = at::PhiloxCudaState(
                 philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
@@ -1228,7 +1228,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         if (at::cuda::currentStreamCaptureStatus() ==
                 at::cuda::CaptureStatus::None)
         {
-            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
+            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<uint64_t>(), *philox_offset.data_ptr<uint64_t>());
         } else { // dropout + capture
             philox_args = at::PhiloxCudaState(
                 philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
