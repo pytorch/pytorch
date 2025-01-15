@@ -345,13 +345,19 @@ class MetadataKey:
 #
 # Therefore, we store what the end result should look like as serializable
 # metadata.
+#
+# When logging, this class should look like:
+#
+#     ViewMetaSequence(view, select_int, slice_Tensor)
+#
+# i.e. a parenthesized list of view operations within that ViewMeta sequence.
 class ViewMetaSequence:
     def __init__(self, tensor: FunctionalTensor) -> None:
         assert torch._is_functional_tensor(tensor.elem)
         self.sequence = _functionalization.get_view_meta_sequence(tensor.elem)
         self.metadata = MetadataKey.make(tensor)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         suffix = len("_ViewMeta")
         types = ", ".join(type(vm).__name__[:-suffix] for vm in self.sequence)
         return f"ViewMetaSequence({types})"

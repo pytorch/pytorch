@@ -6900,7 +6900,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         {
             "enable_autograd_cache": True,
             "strict_autograd_cache": True,
-            "view_replay_for_aliased_outputs": False,
         }
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
