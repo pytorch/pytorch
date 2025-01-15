@@ -315,14 +315,11 @@ compute_flex_attention = r"""
     stride_kv_idx_h = {{stride("KV_IDX", 1)}}
     stride_kv_idx_m = {{stride("KV_IDX", 2)}}
 
-    if IS_DIVISIBLE:
-        tl.static_assert(BLOCK_DMODEL == BLOCK_DMODEL_ROUNDED)
-
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
-    # TODO acc = tl.zeros([BLOCK_M, BLOCK_DMODEL_ROUNDED], dtype=tl.float32)
+    # acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
     offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
 
@@ -336,13 +333,13 @@ compute_flex_attention = r"""
         shape=(Q_LEN, QK_HEAD_DIM),
         strides=(stride_qm, stride_qk),
         offsets=(q_start * BLOCK_M, 0),
-        block_shape=(BLOCK_M, QK_HEAD_DIM),
-        # TODO block_shape=(BLOCK_M, BLOCK_DMODEL_ROUNDED),
+        # block_shape=(BLOCK_M, QK_HEAD_DIM),
+        block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
 
     # load q: it stays in SRAM throughout the inner loop.
-    if IS_DIVISIBLE:
+    if IS_DIVISIBLE and SAFE_HEAD_DIM:
         q = tl.load(Q_block_ptr)
     else:
         # boundary check is not free, so we only do it when necessary.
@@ -361,8 +358,8 @@ compute_flex_attention = r"""
         shape=(QK_HEAD_DIM, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, kv_start),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
-        # TODO block_shape=(BLOCK_DMODEL_ROUNDED, BLOCK_N),
+        # block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
@@ -370,8 +367,8 @@ compute_flex_attention = r"""
         shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(kv_start, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM),
-        # TODO block_shape=(BLOCK_N, BLOCK_DMODEL_ROUNDED),
+        # block_shape=(BLOCK_N, V_HEAD_DIM),
+        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
     offs_n = kv_start + tl.arange(0, BLOCK_N)
@@ -402,8 +399,8 @@ compute_flex_attention = r"""
             shape=(QK_HEAD_DIM, KV_LEN),
             strides=(stride_kk, stride_kn),
             offsets=(0, kv_start),
-            block_shape=(QK_HEAD_DIM, BLOCK_N),
-            # TODO block_shape=(BLOCK_DMODEL_ROUNDED, BLOCK_N),
+            # block_shape=(QK_HEAD_DIM, BLOCK_N),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
             order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
@@ -411,8 +408,8 @@ compute_flex_attention = r"""
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(kv_start, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM),
-            # TODO block_shape=(BLOCK_N, BLOCK_DMODEL_ROUNDED),
+            # block_shape=(BLOCK_N, V_HEAD_DIM),
+            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
             order=(1, 0)
         )
         offs_n = kv_start + tl.arange(0, BLOCK_N)
@@ -438,11 +435,11 @@ compute_flex_attention = r"""
     idx_zq = tl.program_id(1) // HQ
     idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
-    idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
-    # TODO idx_d = tl.arange(0, BLOCK_DMODEL_ROUNDED)[None, :]
+    # idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
+    idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
-    mask = idx_m < Q_LEN
-    # mask = (idx_m < Q_LEN) & (idx_d < BLOCK_DMODEL)
+    # mask = idx_m < Q_LEN
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
 
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
@@ -485,7 +482,7 @@ def forward_inner(
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
-        if IS_DIVISIBLE:
+        if IS_DIVISIBLE and SAFE_HEAD_DIM:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
@@ -539,12 +536,13 @@ def forward_block_mn(
     off_z, off_h, offs_m, offs_n,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
+
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    if IS_DIVISIBLE:
+    if IS_DIVISIBLE and not CHECK_BLOCK_BOUNDARY:
         k = tl.load(K_block_ptr)
     else:
         k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option = "zero")
@@ -617,7 +615,7 @@ def forward_block_mn(
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
 
-    if IS_DIVISIBLE:
+    if IS_DIVISIBLE and not CHECK_BLOCK_BOUNDARY:
         v = tl.load(V_block_ptr)
     else:
         v = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option = "zero")
@@ -1220,21 +1218,25 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
+
+    # QK dimensions and power of 2 variants
+    qk_head_dim_static = V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
     kernel_options.setdefault(
-        "QK_HEAD_DIM",
-        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
-    )
-    kernel_options.setdefault(
-        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
-    # # Triton requires that dot product dim to be power of 2, we round up and mask within the kernel
-    # TODO
-    # head_dim = query.get_size()[-1]
-    # kernel_options["BLOCK_DMODEL"] = head_dim
-    # kernel_options["BLOCK_DMODEL_ROUNDED"] = next_power_of_two(head_dim)
-    # if not is_power_of_2(head_dim):
-    #     kernel_options["IS_DIVISIBLE"] = False
+    # V dimensions and power of 2 variants
+    v_head_dim_static = V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
+    kernel_options.setdefault(
+        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
+    )
+
+    kernel_options.setdefault(
+        "SAFE_HEAD_DIM",
+        is_power_of_2(qk_head_dim_static) and is_power_of_2(v_head_dim_static),
+    )
 
     choices: List[Any] = []
     configs: List[tuple[int, int, int, int]] = []
@@ -1447,13 +1449,9 @@ flex_attention_backward_template = TritonTemplate(
     V += v_adj
     DV += dv_adj
 
-    if IS_DIVISIBLE:
-        tl.static_assert(BLOCK_DMODEL == BLOCK_DMODEL_ROUNDED)
-
     RCP_LN2 = 1.44269504
     offs_k = tl.arange(0, QK_HEAD_DIM)
     offs_v = tl.arange(0, V_HEAD_DIM)
-    # TODO offs_k = tl.arange(0, BLOCK_DMODEL_ROUNDED)
 
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
@@ -2333,23 +2331,22 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
+    # QK dimensions and power of 2 variants
+    qk_head_dim_static = V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
     kernel_options.setdefault(
-        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
+
+    # V dimensions and power of 2 variants
+    v_head_dim_static = V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
     kernel_options.setdefault(
-        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
     )
 
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-
-    # TODO
-    # # Triton requires that dot product dim to be power of 2, we round up and mask within the kernel
-    # head_dim = query.get_size()[-1]
-    # kernel_options["BLOCK_DMODEL"] = head_dim
-    # kernel_options["BLOCK_DMODEL_ROUNDED"] = next_power_of_two(head_dim)
-    # if not is_power_of_2(head_dim):
-    #     kernel_options["IS_DIVISIBLE"] = False
 
     choices: List[Any] = []
     configs: List[tuple[int, int, int, int]] = []
