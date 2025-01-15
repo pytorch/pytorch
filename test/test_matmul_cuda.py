@@ -658,9 +658,10 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape("Expected b.dtype() == at::kFloat8_e4m3fn to be true, but got false."),
+            re.compile("Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\."),
         ):
             torch._scaled_mm(
                 x_fp8,

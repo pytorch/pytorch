@@ -875,6 +875,21 @@ static bool _scaled_mm_allowed_device() {
 #endif
 }
 
+#ifdef USE_ROCM
+static bool _scaled_mm_is_fnuz() {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    std::string device_arch = dprops->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 namespace{
 
 enum class ScalingType {
@@ -1079,10 +1094,18 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     return out;
   }
 #else
-  // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
   if (scaling_choice == ScalingType::RowWise) {
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
     Tensor b = mat2;
-    TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+    if (_scaled_mm_is_fnuz()) {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
+    }
+    else {
+      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+    }
+    // Until more than bf16 is supported.
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
   }
 #endif
 
