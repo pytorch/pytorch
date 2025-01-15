@@ -1699,6 +1699,9 @@ class InsertTypePromotion(_pass.Transform):
         fake_args = self._fetch_fake_args()
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
+
+        # Use the python dispatcher to run through some python kernels which
+        # can better handle symints. Without this, some SymInts can become static.
         dispatcher_mode = torch._dispatch.python.enable_python_dispatcher()
         with fake_mode, dispatcher_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
