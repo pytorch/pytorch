@@ -25,6 +25,7 @@ import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
+from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
@@ -223,11 +224,14 @@ def _format_pipeline_order(
     return formatted_table
 
 
+loss_T = Optional[Union[_Loss, Callable[..., torch.Tensor]]]
+
+
 class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
-        loss_fn: Optional[Callable[..., torch.Tensor]] = None,
+        loss_fn: loss_T = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
@@ -235,6 +239,15 @@ class _PipelineSchedule(ABC):
         # From arguments
         self._n_microbatches = n_microbatches
         self._loss_fn = loss_fn
+        if isinstance(loss_fn, _Loss):
+            self._grad_reduce = loss_fn.reduction == "mean"
+        else:
+            logger.warning(
+                "`loss_fn` is not derived from `torch.nn._Loss`, so `reduction` type is not known. "
+                "pipelining will scale gradients by num_microbatches assuming loss uses `mean` reduction. To override "
+                "this, implement a `_Loss` class and specify the reduction type."
+            )
+
         # Chunking specification for positional inputs. (default: `None`)
         self._args_chunk_spec = args_chunk_spec
         # Chunking specification for keyword inputs. (default: `None`)
@@ -1733,7 +1746,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         self,
         stages: List[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
+        loss_fn: Optional[Union[Callable, _Loss]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
