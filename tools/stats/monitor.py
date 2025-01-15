@@ -183,13 +183,13 @@ class UsageLogger:
                 memory = psutil.virtual_memory().percent
                 cpu_percent = psutil.cpu_percent()
                 processes = self._get_process_info()
-                gpuList = self._collect_gpu_data()
+                gpu_list = self._collect_gpu_data()
 
                 data = UsageData(
                     cpu_percent=cpu_percent,
                     memory_percent=memory,
                     processes=processes,
-                    gpu_list=gpuList,
+                    gpu_list=gpu_list,
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
@@ -201,6 +201,22 @@ class UsageLogger:
                 self.shared_resource.add_error(e)
             finally:
                 time.sleep(self._data_collect_interval)
+
+    def _generate_stats(self, data_list) -> dict[str, Any]:
+        """
+        Generate stats from the data list.
+        """
+        if len(data_list) == 0:
+            return {}
+
+        total= sum(data_list)
+        avg = total / len(data_list)
+        maxi = max(data_list)
+        return {
+            "avg": round(avg, 2),
+            "max": round(maxi, 2),
+        }
+
 
     def _output_data(self) -> None:
         """
@@ -237,29 +253,17 @@ class UsageLogger:
                     }
                 )
 
-                # collect cpu and memory metrics
-                total_cpu = sum(usageData.cpu_percent for usageData in data_list)
-                avg_cpu = total_cpu / len(data_list)
-                max_cpu = max(usageData.cpu_percent for usageData in data_list)
-
-                max_memory = max(usageData.memory_percent for usageData in data_list)
-                total_memory = sum(usageData.memory_percent for usageData in data_list)
-                avg_memory = total_memory / len(data_list)
-
+                cpu_stats = self._generate_stats([data.cpu_percent for data in data_list])
+                memory_stats = self._generate_stats([data.memory_percent for data in data_list])
+                
                 # find all cmds during the interval
                 cmds = {
                     process["cmd"] for data in data_list for process in data.processes
                 }
                 stats.update(
                     {
-                        "cpu": {
-                            "avg": round(avg_cpu, 2),
-                            "max": round(max_cpu, 2),
-                        },
-                        "memory": {
-                            "avg": round(avg_memory, 2),
-                            "max": round(max_memory, 2),
-                        },
+                        "cpu": cpu_stats,
+                        "memory": memory_stats,
                         "cmds": list(cmds),
                         "count": len(data_list),
                     }
@@ -306,27 +310,13 @@ class UsageLogger:
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
 
         for gpu_uuid in gpu_utilization.keys():
-            max_gpu_utilization = max(gpu_utilization[gpu_uuid])
-            max_gpu_mem_utilization = max(gpu_mem_utilization[gpu_uuid])
-            total_gpu = sum(gpu_utilization[gpu_uuid])
-            avg_gpu_utilization = total_gpu / len(gpu_utilization[gpu_uuid])
-
-            total_mem = sum(gpu_mem_utilization[gpu_uuid])
-            avg_gpu_mem_utilization = total_mem / len(gpu_mem_utilization[gpu_uuid])
-
+            gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
+            gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
             calculate_gpu.append(
                 {
                     "uuid": gpu_uuid,
-                    "util_percent": {
-                        "count": len(gpu_utilization[gpu_uuid]),
-                        "avg": round(avg_gpu_utilization, 2),
-                        "max": round(max_gpu_utilization, 2),
-                    },
-                    "mem_util_percent": {
-                        "count": len(gpu_mem_utilization[gpu_uuid]),
-                        "avg": round(avg_gpu_mem_utilization, 2),
-                        "max": round(max_gpu_mem_utilization, 2),
-                    },
+                    "util_percent": gpu_util_stats,
+                    "mem_util_percent": gpu_mem_util_stats,
                 }
             )
         return calculate_gpu
