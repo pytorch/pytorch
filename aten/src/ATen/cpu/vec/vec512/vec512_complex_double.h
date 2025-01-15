@@ -459,14 +459,16 @@ inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::recipr
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::atan() const {
-  // atan(x) = i/2 * ln((i + z)/(i - z))
-  const __m512d i = _mm512_setr_pd(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
-  const Vectorized i_half = _mm512_setr_pd(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
+  // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+  // // atan(x) = i/2 * ln((i + z)/(i - z))
+  // const __m512d i = _mm512_setr_pd(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+  // const Vectorized i_half = _mm512_setr_pd(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
 
-  auto sum = Vectorized(_mm512_add_pd(i, values));                      // a        1+b
-  auto sub = Vectorized(_mm512_sub_pd(i, values));                      // -a       1-b
-  auto ln = (sum/sub).log();                                        // ln((i + z)/(i - z))
-  return i_half*ln;                                                 // i/2*ln()
+  // auto sum = Vectorized(_mm512_add_pd(i, values));                      // a        1+b
+  // auto sub = Vectorized(_mm512_sub_pd(i, values));                      // -a       1-b
+  // auto ln = (sum/sub).log();                                        // ln((i + z)/(i - z))
+  // return i_half*ln;                                                 // i/2*ln()
+  return map(std::atan);
 }
 
 template <>
