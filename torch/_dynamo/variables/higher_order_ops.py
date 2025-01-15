@@ -2581,7 +2581,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                                 "Can't infer the stride of the backward inputs during Dynamo tracing."
                             )
                     else:
-                        raise
+                        raise e
                 # Need to save the lifted freevars from the `discard_graph_changes` tracer,
                 # which will be used to later when we lift the bwd_freevars as inputs of the bwd_graph.
                 intermediate_lifted_freevars = dummy_tracer.lifted_freevars
