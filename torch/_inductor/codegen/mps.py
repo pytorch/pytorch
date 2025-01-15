@@ -257,6 +257,12 @@ class MetalOverrides(OpOverrides):
     def round(x: CSEVariable) -> str:
         return f"metal::round({x})"
 
+    @staticmethod
+    def pow(a: CSEVariable, b: CSEVariable) -> str:
+        cast_a = f"static_cast<decltype({a}+{b})>({a})"
+        cast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::pow({cast_a}, {cast_b})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
