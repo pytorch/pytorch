@@ -316,6 +316,24 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        # Workaround slim-wheel CUDA-12.4+ dependency bug in libcusparse by preloading nvjitlink
+        # In those versions of cuda cusparse depends on nvjitlink, but does not have rpath when
+        # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
+        # if `LD_LIBRARY_PATH` is defined
+        # See https://github.com/pytorch/pytorch/issues/138460
+        if version.cuda not in ["12.4", "12.6"]:  # type: ignore[name-defined]
+            return
+        try:
+            with open("/proc/self/maps") as f:
+                _maps = f.read()
+            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
+            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+                return
+            # If all abovementioned conditions are met, preload nvjitlink
+            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+        except Exception:
+            pass
+
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -1148,7 +1166,7 @@ def set_default_device(
     .. note::
 
         This doesn't affect functions that create tensors that share the same memory as the input, like:
-        :func:`torch.from_numpy` and :func:`torch.frombuffer`. Using :func:`torch.Tensor.to` move tensor to desired device.
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
         device (device or string): the device to set as default
@@ -1637,11 +1655,17 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_is_size(i, message=None):
+def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over _check(i >= 0) because we can use the semantic
-    information (that i is a size) to make some further inferences in case
-    i is an unbacked SymInt.
+    You should use this over ``_check(i >= 0)`` because it can prevent
+    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
+    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
+    equivalently to all other values.
+
+    When max is not None, this specifies an upper bound equivalent to
+    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
+    in ``guard_size_oblivious`` tests, we assume that the max bound is treated
+    equivalently to all other values.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
@@ -1652,6 +1676,13 @@ def _check_is_size(i, message=None):
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
     _advise_is_size(i)
+
+    if max is not None:
+        _check(i <= max, message)
+
+        from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
+
+        _advise_is_bounded(i, max)
 
 
 def _check_index(cond, message=None):  # noqa: F811
