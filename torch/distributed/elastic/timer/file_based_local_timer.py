@@ -13,7 +13,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 from torch.distributed.elastic.timer.debug_info_logging import (
@@ -41,7 +41,7 @@ def _retry(max_retries: int, sleep_time: float) -> Callable:
             for i in range(max_retries):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
+                except Exception:
                     logger.exception("Error running %s. Retrying...", func.__name__)
                     if i < max_retries - 1:
                         time.sleep(sleep_time)
@@ -201,7 +201,7 @@ class FileTimerServer:
         self._run_id = run_id
         self._max_interval = max_interval
         self._daemon = daemon
-        self._timers: Dict[Tuple[int, str], FileTimerRequest] = {}
+        self._timers: Dict[tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
         self._watchdog_thread: Optional[threading.Thread] = None
 
@@ -277,7 +277,7 @@ class FileTimerServer:
         #     thread, which will not block the process to stop.
         try:
             fd = open(self._file_path)
-        except Exception as e:
+        except Exception:
             logger.exception("Could not open the FileTimerServer pipe")
             raise
 

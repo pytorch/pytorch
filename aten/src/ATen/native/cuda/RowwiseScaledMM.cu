@@ -3,9 +3,15 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/macros/Macros.h>
+
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 // Determine if the architecture supports rowwise scaled mm
-// Currenlty failing on windows with: https://github.com/NVIDIA/cutlass/issues/1571
+// Currently failing on windows with:
+// https://github.com/NVIDIA/cutlass/issues/1571
 #if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 
 #define BUILD_ROWWISE_FP8_KERNEL
@@ -53,9 +59,13 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/util/host_tensor.h>
 
 // Rename the global function symbol
+#if CUTLASS_VERSION == 351
+#include <cute/tensor.hpp>
+#else
 #define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
 #include <cute/tensor.hpp>
 #undef cuTensorMapEncodeTiled
+#endif
 // Set everything back to normal
 
 #include <cutlass/gemm/collective/collective_builder.hpp>
@@ -197,6 +207,7 @@ void f8f8bf16_rowwise_impl(
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
   #if CUTLASS_VERSION == 351
+  #define FLIPPED_SCALES ;
   using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
               Multiply,
               WScale,
@@ -269,6 +280,23 @@ void f8f8bf16_rowwise_impl(
   StrideOutput stride_output = cutlass::make_cute_packed_stride(
       StrideOutput{}, cute::make_shape(M, static_cast<int>(out.stride(0)), 1));
 
+#ifdef FLIPPED_SCALES
+  typename Gemm::Arguments arguments{
+      cutlass::gemm::GemmUniversalMode::kGemm,
+      {M, N, K},
+      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+       stride_a,
+       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       stride_b},
+      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
+                           : nullptr},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output,
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output}};
+#else
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
@@ -284,6 +312,7 @@ void f8f8bf16_rowwise_impl(
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
+#endif
 
   Gemm gemm;
 

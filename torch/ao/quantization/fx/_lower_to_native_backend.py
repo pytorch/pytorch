@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -296,7 +296,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
 STATIC_LOWER_FUSED_MODULE_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
+    Type[nn.Module], tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
 ] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
     # TODO: LinearLeakyReLU is registered as global but it is only fused and
@@ -315,7 +315,7 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
 STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
+    Type[nn.Module], tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
 ] = {
     nni.ConvAdd2d: (nnqr.Conv2d, nniq.ConvAdd2d),
     nni.ConvAddReLU2d: (nnqr.Conv2d, nniq.ConvAddReLU2d),
@@ -325,7 +325,7 @@ STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[
 #   1) The inner reference module class
 #   2) The replacement dynamic quantized module class for lowering
 DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[nn.Module]]
+    Type[nn.Module], tuple[Type[nn.Module], Type[nn.Module]]
 ] = {
     nni.LinearReLU: (nnqr.Linear, nniqd.LinearReLU),
 }
@@ -333,7 +333,7 @@ DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Optional[Callable]]] = {
+STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, tuple[Callable, Optional[Callable]]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
     F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
@@ -359,7 +359,7 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
 DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[
-    Callable, Dict[Tuple[torch.dtype, torch.dtype], Tuple[Callable, Optional[Callable]]]
+    Callable, Dict[tuple[torch.dtype, torch.dtype], tuple[Callable, Optional[Callable]]]
 ] = {
     F.linear: {
         (torch.quint8, torch.qint8): (
@@ -443,7 +443,9 @@ def _load_packed_weight(
 
 
 def fold_weight(
-    quantized_model: GraphModule, node_name_to_scope: Dict[str, Tuple[str, type]]
+    quantized_model: GraphModule,
+    node_name_to_scope: Dict[str, tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """
     Trace back from the weight node util we hit getattr, reconstruct the
@@ -453,6 +455,8 @@ def fold_weight(
     packed_weights = {}
     # map from folded node name to the prepacked weight name
     folded_nodes = {}
+    original_weights_lookup: Dict[str, List] = {}
+    lookup_counter = 0
     # get packed weights
     for node in quantized_model.graph.nodes:
         if node.op == "call_function" and node.target in WEIGHT_PREPACK_OPS:
@@ -466,6 +470,16 @@ def fold_weight(
                 )
                 packed_weight = prepacking_module()
                 packed_weights[node.name] = packed_weight
+                if keep_original_weights:
+                    original_weights = list(prepacking_module.state_dict().values())
+                    original_weights_lookup[str(lookup_counter)] = sorted(
+                        original_weights, key=lambda x: x.numel(), reverse=True
+                    )
+                    if len(original_weights_lookup[str(lookup_counter)]) == 1:
+                        # bias is None
+                        original_weights_lookup[str(lookup_counter)].append(None)
+                    lookup_counter += 1
+    lookup_counter = 0
 
     # remove folded nodes and replace the prepacking node with getattr
     folded_graph = Graph()
@@ -490,6 +504,18 @@ def fold_weight(
             env[node.name] = folded_graph.create_node(
                 "get_attr", packed_weight_name, (), {}
             )
+            if keep_original_weights:
+                key_name = (
+                    packed_weight_name.replace(":", "_")
+                    .replace("/", "_")
+                    .replace("|", "_")
+                    .lower()
+                )
+                original_weights_lookup[key_name] = original_weights_lookup[
+                    str(lookup_counter)
+                ]
+                del original_weights_lookup[str(lookup_counter)]
+                lookup_counter += 1
         elif prepack_node is not None:
             # remove the foled node
             continue
@@ -500,6 +526,12 @@ def fold_weight(
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
     quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
+
+    if keep_original_weights:
+        setattr(  # noqa: B010
+            quantized_model, "original_weights_lookup", original_weights_lookup
+        )
+
     return quantized_model
 
 
@@ -520,7 +552,7 @@ def _match_static_pattern(
     qconfig_map: Dict[str, QConfigAny],
     matching_modules_or_ops: List[Callable],
     dequantize_node_arg_indices: List[int],
-) -> Union[Tuple[Node, Node, Node], Tuple[None, None, None]]:
+) -> Union[tuple[Node, Node, Node], tuple[None, None, None]]:
     """
     Match the pattern (dequantize - ref node - quantize) against the node provided.
 
@@ -597,7 +629,7 @@ def _match_static_pattern_with_two_inputs(
     modules: Dict[str, nn.Module],
     qconfig_map: Dict[str, QConfigAny],
     matching_modules_or_ops: List[Callable],
-) -> Union[Tuple[Node, Node], Tuple[None, None]]:
+) -> Union[tuple[Node, Node], tuple[None, None]]:
     """
                       (dequantize \
     Match the pattern (dequantize - ref node - quantize) against the node provided.
@@ -1295,7 +1327,8 @@ def _lower_get_tensor_info_op(model: GraphModule):
 def _lower_to_native_backend(
     model: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    node_name_to_scope: Dict[str, tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
@@ -1312,7 +1345,7 @@ def _lower_to_native_backend(
     _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
-    model = fold_weight(model, node_name_to_scope)
+    model = fold_weight(model, node_name_to_scope, keep_original_weights)
     model.graph.eliminate_dead_code()
     model.recompile()
     model.graph.lint()

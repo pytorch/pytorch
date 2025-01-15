@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import contextlib
 import functools
 import inspect
 import itertools
@@ -70,6 +71,14 @@ def update_global(x):
     _variable += 1
     # Check that updated global variable value is picked up
     return x * _variable
+
+
+@contextlib.contextmanager
+def update_global_ctx(x):
+    try:
+        yield update_global(x)
+    finally:
+        pass
 
 
 def func_with_default(a, b, some_default_arg=True):
@@ -3536,8 +3545,6 @@ class GraphModule(torch.nn.Module):
     def test_map_max(a, b):
         return max(map(lambda x: x.sum(), [a, b]))
 
-    # max(map(...)) graph breaks
-    @unittest.expectedFailure
     @make_test
     def test_map_max_const(a):
         return max(map(lambda x: x, [1, 2, 3])), a + 1
