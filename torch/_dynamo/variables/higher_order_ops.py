@@ -2582,6 +2582,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             )
                     else:
                         raise
+                # Need to save the lifted freevars from the `discard_graph_changes` tracer,
+                # which will be used to later when we lift the bwd_freevars as inputs of the bwd_graph.
                 intermediate_lifted_freevars = dummy_tracer.lifted_freevars
 
             # Collect the unbacked SymInt nodes from grad_out's stride.
@@ -2637,6 +2639,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # we have to manually add the bwd_freevars as output of fwd_graph.
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
         # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
+        # The bwd tracer now inherits from discard_graph_changes (the intermediate tracer),
+        # which in turn inherits from the fwd tracer. Therefore, there are two ways to get the Proxies in the fwd_graph:
+        #  - Locate the proxies in the fwd_graph via fwd tracer’s proxy map directly;
+        #  - Traverse through the intermediate tracer’s proxy map to get the proxies in the fwd_graph indirectly;
         intermediate_lifted_freevars_swapped = {
             value: key for key, value in intermediate_lifted_freevars.items()
         }
