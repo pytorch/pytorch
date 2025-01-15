@@ -14,6 +14,10 @@ inputs:
     description: Works as stated in actions/checkout, but the default value is 0
     required: false
     default: "0"
+  token:
+    description: GitHub token to use for cloning.
+    required: false
+    default: ${{ github.token }}
 
 runs:
   using: composite
@@ -48,3 +52,4 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         quiet-checkout: true
+        token: ${{ inputs.token }}
