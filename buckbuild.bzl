@@ -353,10 +353,10 @@ def get_aten_generated_files(enabled_backends):
     # and is intentionally omitted from here
     src_files = [
         "RegisterBackendSelect.cpp",
-        "RegisterCompositeImplicitAutograd.cpp",
-        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
-        "RegisterCompositeExplicitAutograd.cpp",
-        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
+        "RegisterCompositeImplicitAutograd_0.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor_0.cpp",
+        "RegisterCompositeExplicitAutograd_0.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional_0.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -409,20 +409,22 @@ def get_aten_generated_files(enabled_backends):
 
 def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
-        ":{}[{}]".format(aten_rule_name, "Register" + backend + ".cpp")
-        for backend in enabled_backends
-    ]
+        ":{}[{}]".format(aten_rule_name, "Register" + backend + "_0.cpp")
+        for backend in enabled_backends if backend != "CPU"
+    ] + ([
+        ":{}[RegisterCPU_{}.cpp]".format(aten_rule_name, x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd_0.cpp", "RegisterCompositeImplicitAutogradNestedTensor_0.cpp", "RegisterCompositeExplicitAutograd_0.cpp", "RegisterCompositeExplicitAutogradNonFunctional_0.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
     return [
-        "Register" + derived_type + ".cpp"
-        for derived_type in enabled_backends
+        "Register" + derived_type + "_0.cpp"
+        for derived_type in enabled_backends if derived_type != "CPU"
     ] + [
         derived_type + "Functions.h"
         for derived_type in enabled_backends
@@ -431,7 +433,9 @@ def get_aten_derived_type_srcs(enabled_backends):
         derived_type + "Functions_inl.h"
         for derived_type in enabled_backends
         if derived_type in PT_BACKEND_HEADERS or derived_type in get_static_dispatch_backend()
-    ]
+    ] + ([
+        "RegisterCPU_{}.cpp".format(x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def gen_aten_files(
         name,
