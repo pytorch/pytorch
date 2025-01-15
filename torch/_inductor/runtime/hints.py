@@ -67,7 +67,7 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+    else:
         from triton.compiler.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
