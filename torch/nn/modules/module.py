@@ -776,7 +776,7 @@ class Module:
         if target == "":
             raise ValueError("Cannot set the submodule without a target name!")
 
-        atoms: List[str] = target.split(".")
+        atoms: list[str] = target.split(".")
         if not isinstance(module, torch.nn.Module):
             raise ValueError(
                 "`" + "module" + f"` is not an nn.Module, found {type(module)}"
