@@ -21,7 +21,6 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "docker.io/s390x/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-s390x-binary-manywheel
