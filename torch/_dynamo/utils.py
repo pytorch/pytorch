@@ -3072,9 +3072,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             if op == "call_function":
                 return node.target(*args, **kwargs)
             elif op == "call_method":
-                if not hasattr(arg[0], node.target):
+                if not hasattr(args[0], node.target):
                     from .exc import unimplemented
-                    unimplemented(make_error_message(f'attribute not defined'))
+
+                    unimplemented(make_error_message("attribute not defined"))
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":
                 assert nnmodule is not None
