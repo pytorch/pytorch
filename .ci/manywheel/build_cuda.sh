@@ -187,15 +187,14 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
             '$ORIGIN/../../cusparselt/lib'
-            '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
-        export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
+        export USE_STATIC_NCCL=1
+        export USE_SYSTEM_NCCL=0
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
@@ -262,8 +261,8 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
         export FORCE_RPATH="--force-rpath"
-        export USE_STATIC_NCCL=0
-        export USE_SYSTEM_NCCL=1
+        export USE_STATIC_NCCL=1
+        export USE_SYSTEM_NCCL=0
         export ATEN_STATIC_CUDA=0
         export USE_CUDA_STATIC_LINK=0
         export USE_CUPTI_SO=1
