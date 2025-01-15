@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import comms
-from torch._inductor.utils import is_fallback_op, run_and_get_code
+from torch._inductor.utils import is_fallback_op, run_and_get_code_before_compile
 from torch.distributed._tensor import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
@@ -743,7 +743,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph
                 else None
             ):
-                _, triton_codes = run_and_get_code(
+                _, triton_codes = run_and_get_code_before_compile(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
                             fwd_fullgraph=fwd_fullgraph
@@ -751,7 +751,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -829,12 +829,12 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         self.skipTestForOldSm()
-        _, triton_codes = run_and_get_code(
+        _, triton_codes = run_and_get_code_before_compile(
             lambda: self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fwd_fullgraph=False),
                 "inductor",
                 fwd_fullgraph=False,
-            )
+            ),
         )
         # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
         # there are several recompiles, need to figure out why.
@@ -969,7 +969,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph
                 else None
             ):
-                _, triton_codes = run_and_get_code(
+                _, triton_codes = run_and_get_code_before_compile(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(
                             all_requires_grad=all_requires_grad,
@@ -978,7 +978,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -1063,7 +1063,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
             with self._maybe_add_graph_break_to_sdpa(fwd_fullgraph):
-                _, triton_codes = run_and_get_code(
+                _, triton_codes = run_and_get_code_before_compile(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(
                             all_requires_grad=all_requires_grad,
@@ -1071,7 +1071,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
-                    )
+                    ),
                 )
             # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
             # there are several recompiles, need to figure out why.

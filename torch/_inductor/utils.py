@@ -51,6 +51,7 @@ from torch._inductor.runtime.hints import DeviceProperties
 if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from .codegen.common import WorkspaceArg
+    from .graph import SaveOutputCodeContext
 
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
@@ -1462,19 +1463,40 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
-    from .graph import GraphLowering, SaveOutputCodeContext
+def _run_and_get_code_for_context(
+    fn: Callable[P, _T],
+    for_context: SaveOutputCodeContext,
+    args: P.args,
+    kwargs: P.kwargs,
+) -> tuple[_T, List[str]]:
+    from .graph import GraphLowering
 
     source_codes: List[str] = []
 
     def save_output_code(code: str, context: SaveOutputCodeContext):
-        if context == SaveOutputCodeContext.AFTER_COMPILE:
+        if context == for_context:
             source_codes.append(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
     return result, source_codes
+
+
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+    from .graph import SaveOutputCodeContext
+
+    return _run_and_get_code_for_context(
+        fn, SaveOutputCodeContext.AFTER_COMPILE, args, kwargs
+    )
+
+
+def run_and_get_code_before_compile(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+    from .graph import SaveOutputCodeContext
+
+    return _run_and_get_code_for_context(
+        fn, SaveOutputCodeContext.BEFORE_COMPILE, args, kwargs
+    )
 
 
 def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, List[str]]:
@@ -1822,6 +1844,31 @@ def pass_execution_and_save(func, gm, inp, msg):
             t,
             time_elapsed,
         )
+
+
+def is_multi_outputs_template(input_buf) -> bool:
+    """
+    Check if input buffer is a multi-outputs template buffer
+    """
+    from . import ir
+
+    return isinstance(input_buf, ir.CppTemplateBuffer) and isinstance(
+        input_buf.layout, ir.MultiOutputLayout
+    )
+
+
+def is_output_of_multi_outputs_template(input_buf) -> bool:
+    """
+    Check if input buffer is a output of multi-outputs template buffer
+    """
+    from . import ir
+
+    return (
+        isinstance(input_buf, ir.MultiOutput)
+        and len(input_buf.inputs) == 1
+        and isinstance(input_buf.inputs[0], ir.CppTemplateBuffer)
+        and isinstance(input_buf.inputs[0].layout, ir.MultiOutputLayout)
+    )
 
 
 def is_collective(node, op=None):

@@ -177,6 +177,8 @@ def get_plain_tensors(
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -186,6 +188,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, FunctionalTensor):
+        return is_fake(x.elem)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
@@ -197,6 +201,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
 
 def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
@@ -207,6 +213,8 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, FunctionalTensor):
+        return maybe_get_fake_mode(t.elem)
     elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
@@ -713,10 +721,10 @@ class FakeTensor(Tensor):
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
+            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            if getattr(torch, device.type).is_initialized():
+            if device.type != "mps" and getattr(torch, device.type).is_initialized():
                 device = torch.device(
                     f"{device.type}:{getattr(torch, device.type).current_device()}"
                 )
