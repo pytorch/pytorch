@@ -165,15 +165,14 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
 
-class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
+class MPSSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-    def test_mps_not_supported(self):
+    def test_mps_supported(self):
         model = Seq().to("mps")
         example_input = torch.randn(1, 10).to("mps")
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.compile(model, backend="inductor")(example_input),
-        )
+        rc_eager = model(example_input)
+        rc = torch.compile(model, backend="inductor")(example_input)
+        self.assertEqual(rc, rc_eager)
 
 
 class TestExplainWithBackend(torch._dynamo.test_case.TestCase):

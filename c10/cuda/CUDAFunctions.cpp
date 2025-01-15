@@ -172,7 +172,7 @@ std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
 }
 
 namespace _internal {
-bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
+static bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
 static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
