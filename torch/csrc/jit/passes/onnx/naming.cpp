@@ -79,7 +79,7 @@ namespace {
 
 class NodeNameGenerator {
  public:
-  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(std::move(g)){};
+  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(std::move(g)) {}
   virtual ~NodeNameGenerator() = 0;
   void PopulateNodeNames();
 
@@ -105,7 +105,7 @@ NodeNameGenerator::~NodeNameGenerator() = default;
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
   ScopedNodeNameGenerator(std::shared_ptr<Graph> g)
-      : NodeNameGenerator(std::move(g)){};
+      : NodeNameGenerator(std::move(g)) {}
 
  protected:
   void CreateNodeName(Node* n) override;

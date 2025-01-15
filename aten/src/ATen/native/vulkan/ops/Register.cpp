@@ -149,15 +149,7 @@ TORCH_LIBRARY(vulkan, m) {
           },
           // __setstate__
           [](Conv2dOpContext::State state) {
-            return conv2d_clamp_prepack(
-                std::move(std::get<0>(state)),
-                std::move(std::get<1>(state)),
-                std::move(std::get<2>(state)),
-                std::move(std::get<3>(state)),
-                std::move(std::get<4>(state)),
-                std::get<5>(state),
-                std::get<6>(state),
-                std::get<7>(state));
+            return std::apply(conv2d_clamp_prepack, std::move(state));
           });
 }
 

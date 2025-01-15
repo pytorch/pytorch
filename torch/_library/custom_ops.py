@@ -1,10 +1,21 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import logging
 import weakref
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    overload,
+    Sequence,
+    Set,
+    Union,
+)
 
 import torch
 from torch import _C, _ops, Tensor
@@ -17,6 +28,32 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 log = logging.getLogger(__name__)
 
 
+@overload
+def custom_op(
+    name: str,
+    fn: Literal[None] = None,
+    /,
+    *,
+    mutates_args: Union[str, Iterable[str]],
+    device_types: device_types_t = None,
+    schema: Optional[str] = None,
+) -> Callable[[Callable[..., object]], "CustomOpDef"]:
+    ...
+
+
+@overload
+def custom_op(
+    name: str,
+    fn: Callable[..., object],
+    /,
+    *,
+    mutates_args: Union[str, Iterable[str]],
+    device_types: device_types_t = None,
+    schema: Optional[str] = None,
+) -> "CustomOpDef":
+    ...
+
+
 @exposed_in("torch.library")
 def custom_op(
     name: str,
@@ -26,7 +63,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable:
+) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -114,7 +151,7 @@ def custom_op(
 
     """
 
-    def inner(fn):
+    def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
         if schema is None:
@@ -493,6 +530,10 @@ class CustomOpDef:
         they may not directly access :meth:`torch.Tensor.data_ptr` and they must
         not depend on or mutate global state. If you need a non-traceable backward,
         you can make it a separate custom_op that you call inside ``backward_fn``.
+
+        If you need different autograd behavior on different devices, then we
+        recommend creating two different custom operators, one for each device
+        that needs different behavior, and switching between them at runtime.
 
         Examples:
             >>> import torch

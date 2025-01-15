@@ -202,7 +202,7 @@ register submodules from a list or dict:
      def forward(self, x, act):
        for linear in self.linears:
          x = linear(x)
-       x = self.activations[act](x)
+         x = self.activations[act](x)
        x = self.final(x)
        return x
 

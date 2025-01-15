@@ -6,9 +6,9 @@ on:
       workflow_id:
         description: workflow_id of the run
         required: true
-      workflow_run_attempt:
-        description: workflow_run_attempt of the run
-        required: true
+
+permissions:
+  id-token: write
 
 jobs:
   intermediate_upload_test_stats:
@@ -28,16 +28,18 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
+          pip3 install requests==2.32.2 boto3==1.35.42
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_upload_test_stats_intermediate_workflow
+          aws-region: us-east-1
 
       - name: Upload test stats
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_RUN_ID: ${{ inputs.workflow_id }}
-          WORKFLOW_RUN_ATTEMPT: ${{ inputs.workflow_run_attempt }}
         run: |
           python3 -m tools.stats.upload_test_stats_intermediate \
-            --workflow-run-id "${WORKFLOW_RUN_ID}" \
-            --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" \
+            --workflow-run-id "${WORKFLOW_RUN_ID}"

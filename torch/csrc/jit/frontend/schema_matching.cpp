@@ -16,7 +16,7 @@
 
 namespace torch::jit {
 
-static inline TypePtr unwrapOptional(TypePtr opt_type) {
+static TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
     return unwrapOptional(dyn->fallback());
   }
@@ -26,9 +26,7 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
-static inline bool isIntOrFloatUsedAsList(
-    const Value* value,
-    const Argument& arg) {
+static bool isIntOrFloatUsedAsList(const Value* value, const Argument& arg) {
   // Look for int[N] or float[N]
   const auto& v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())

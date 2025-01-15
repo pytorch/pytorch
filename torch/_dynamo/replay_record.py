@@ -1,6 +1,6 @@
 import dataclasses
 from dataclasses import field
-from types import CodeType, ModuleType
+from types import CellType, CodeType, ModuleType
 from typing import Any, BinaryIO, Dict, IO
 from typing_extensions import Self
 
@@ -29,6 +29,7 @@ class DummyModule:
 @dataclasses.dataclass
 class ExecutionRecord:
     code: CodeType
+    closure: tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
@@ -49,6 +50,7 @@ class ExecutionRecorder:
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
+    closure: tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
@@ -82,6 +84,7 @@ class ExecutionRecorder:
     def get_record(self) -> ExecutionRecord:
         return ExecutionRecord(
             self.code,
+            self.closure,
             ExecutionRecorder._resolve_modules(self.globals),
             ExecutionRecorder._resolve_modules(self.locals),
             self.builtins.copy(),

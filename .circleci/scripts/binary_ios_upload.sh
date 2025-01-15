@@ -14,7 +14,7 @@ mkdir -p ${ZIP_DIR}/src
 cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
 # build a FAT bianry
 cd ${ZIP_DIR}/install/lib
-target_libs=(libc10.a libclog.a libcpuinfo.a libeigen_blas.a libpthreadpool.a libpytorch_qnnpack.a libtorch_cpu.a libtorch.a libXNNPACK.a)
+target_libs=(libc10.a libclog.a libcpuinfo.a libeigen_blas.a libpthreadpool.a libpytorch_qnnpack.a libtorch_cpu.a libtorch.a libXNNPACK.a libmicrokernels-prod.a)
 for lib in ${target_libs[*]}
 do
     if [ -f "${ARTIFACTS_DIR}/x86_64/lib/${lib}" ] && [ -f "${ARTIFACTS_DIR}/arm64/lib/${lib}" ]; then

@@ -52,7 +52,7 @@ Features described in this documentation are classified by release status:
 
 .. toctree::
    :glob:
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Python API
 
    torch
@@ -71,6 +71,7 @@ Features described in this documentation are classified by release status:
    mps
    xpu
    mtia
+   mtia.memory
    meta
    torch.backends <backends>
    torch.export <export>
@@ -79,6 +80,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
+   torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.optim <distributed.optim>
    torch.distributed.pipelining <distributed.pipelining>

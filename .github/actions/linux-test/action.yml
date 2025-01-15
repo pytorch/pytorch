@@ -47,7 +47,14 @@ inputs:
   GITHUB_TOKEN:
     description: GitHub token
     required: true
-
+  disable-monitor:
+    description: |
+      [Experimental] Disable utilization monitoring for tests.
+      Currently, by default we disable the monitor job and only look for specific tests,
+      since we are investigating the behaviour of the monitor script with different tests.
+    required: false
+    type: boolean
+    default: true
 #env:
 #  GIT_DEFAULT_BRANCH: ${{ inputs.default_branch }}
 
@@ -115,6 +122,7 @@ runs:
 
     - name: Start monitoring script
       id: monitor-script
+      if: ${{ !inputs.disable-monitor }}
       shell: bash
       continue-on-error: true
       run: |
@@ -289,7 +297,7 @@ runs:
         cat test/**/*_toprint.log || true
 
     - name: Stop monitoring script
-      if: always() && steps.monitor-script.outputs.monitor-script-pid
+      if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
       shell: bash
       continue-on-error: true
       env:

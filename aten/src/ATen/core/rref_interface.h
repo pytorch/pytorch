@@ -17,6 +17,7 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   // counting.
   RRefInterface(const RRefInterface& other) = delete;
   RRefInterface(RRefInterface&& other) = delete;
+  RRefInterface& operator=(const RRefInterface& other) = delete;
   RRefInterface& operator=(RRefInterface&& other) = delete;
 
   ~RRefInterface() override = default;

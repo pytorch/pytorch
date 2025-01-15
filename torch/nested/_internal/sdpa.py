@@ -567,6 +567,7 @@ def _sdpa_nested_preprocessing(query, key, value):
 
     output_nt_info = {
         "offsets": q_t.offsets(),
+        "lengths": q_t.lengths(),
         "max_seqlen": q_t._get_max_seqlen(),
         "min_seqlen": q_t._get_min_seqlen(),
     }
@@ -692,7 +693,9 @@ def jagged_scaled_dot_product_attention(
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
     )
-    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets_lengths,
+    )
 
     # Special path for non-ragged sequence length (e.g. for SAM where we have a ragged
     # second batch dim instead). For this case, we can just send the dense buffers through
@@ -709,9 +712,10 @@ def jagged_scaled_dot_product_attention(
             is_causal=is_causal,
             scale=scale,
         )
-        return nested_view_from_values_offsets(
+        return nested_view_from_values_offsets_lengths(
             output,
             query.offsets(),
+            query.lengths(),
             min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
             max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
         )
@@ -768,7 +772,7 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = nested_view_from_values_offsets(
+        attention = nested_view_from_values_offsets_lengths(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
             **output_nt_info,
         ).transpose(1, 2)
@@ -807,7 +811,7 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        return nested_view_from_values_offsets(
+        return nested_view_from_values_offsets_lengths(
             attention.squeeze(0),
             **output_nt_info,
         ).transpose(1, 2)
@@ -816,6 +820,7 @@ def jagged_scaled_dot_product_attention(
         # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]
         offsets = query.offsets()
+        q_lengths = query.lengths()
         min_seqlen = query._maybe_min_seqlen
         max_seqlen = query._maybe_max_seqlen
         d1 = query._size[1]
@@ -842,9 +847,10 @@ def jagged_scaled_dot_product_attention(
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, d1, d2)
-        attn_out = nested_view_from_values_offsets(
+        attn_out = nested_view_from_values_offsets_lengths(
             attn_out,
             offsets,
+            lengths=q_lengths,
             min_seqlen=min_seqlen,
             max_seqlen=max_seqlen,
         ).transpose(1, 2)
