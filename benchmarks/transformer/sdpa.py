@@ -11,7 +11,14 @@ import torch
 import torch.utils.benchmark as benchmark
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
+from torch._inductor.utils import do_bench_using_profiling
 
+
+def benchmark_cuda_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
+    """Thin wrapper around do_bench_using_profiling"""
+    no_args = lambda: func(*args, **kwargs)
+    time = do_bench_using_profiling(no_args)
+    return time * 1e3
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -97,7 +104,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
     with context:
-        forward_time = benchmark_torch_function_in_microseconds(
+        forward_time = benchmark_cuda_function_in_microseconds(
             scaled_dot_product_attention,
             q,
             k,
@@ -109,7 +116,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             q, k, v, is_causal=is_causal, attn_mask=None
         )
         dOut = torch.randn_like(out_torch)
-        backward_time = benchmark_torch_function_in_microseconds(
+        backward_time = benchmark_cuda_function_in_microseconds(
             out_torch.backward, dOut, retain_graph=True
         )
 
@@ -123,11 +130,12 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     batch_sizes = [
         1,
         8,
+        16
     ]
     num_heads = [16]
-    q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024)]
+    q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
     embed_dims = [2048]
-    backends = [None]  # If set to None, all backends are enabled
+    backends = [SDPBackend.FLASH_ATTENTION]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
@@ -170,6 +178,40 @@ def print_results(experiments: List[Experiment]):
         del table_data["backend"]
     print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
+def write_results_to_csv(experiments: List[Experiment], output_dir: str = "benchmark_results"):
+    """
+    Write experiment results to a CSV file in the specified directory.
+    The filename includes a timestamp for uniqueness.
+    """
+    import os
+    import csv
+    from datetime import datetime
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(output_dir, f"benchmark_results_{timestamp}.csv")
+    
+    # Get all fields from the first experiment
+    if not experiments:
+        return
+    
+    fieldnames = list(experiments[0].asdict().keys())
+    if "device" in fieldnames:
+        fieldnames.remove("device")  # Remove device field as it's always cuda
+    
+    # Write results to CSV
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for experiment in experiments:
+            row = experiment.asdict()
+            if "device" in row:
+                del row["device"]  # Remove device field
+            writer.writerow(row)
+    
+    print(f"Results written to: {filename}")
 
 def main():
     seed = 123
@@ -179,7 +221,7 @@ def main():
         results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
-
+    write_results_to_csv(results, "../benchmark_results")
 
 if __name__ == "__main__":
     main()
