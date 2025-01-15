@@ -4,10 +4,15 @@ A Python script that logging the system-level utilization usage in json format.
 Data collected: CPU, memory, GPU memeory utilzation, and GPU utilization if available.
 
 Usage:
-    python3 monitor.py --log-interval 10
+- To run the script with default data collect time setting, use the following command:
+    python3 monitor.py
+
+- To run the script in the local machine with debug mode and customized data collect time, use the following command:
+    python3 monitor.py --debug --log-interval 10 --data-collect-interval 0.5
 
 - To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
+
 - To gracefully exit the script in the local machine, press ctrl+c, or kill the process using:
     kill <pid>
 """
@@ -255,7 +260,7 @@ class UsageLogger:
 
                 cpu_stats = self._generate_stats([data.cpu_percent for data in data_list])
                 memory_stats = self._generate_stats([data.memory_percent for data in data_list])
-                
+
                 # find all cmds during the interval
                 cmds = {
                     process["cmd"] for data in data_list for process in data.processes
