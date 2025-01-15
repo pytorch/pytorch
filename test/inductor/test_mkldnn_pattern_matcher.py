@@ -1440,10 +1440,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.add(self.conv(x1), x2)
 
         bias_list = [True, False]
-        for bias in bias_list:
+        input_shapes = [[2, 32, 9, 9]]
+        other_shapes = [[2, 32, 1, 1], [1, 32, 1, 1], [1, 1, 1, 1]]
+        for bias, x_shape, other_shape in itertools.product(
+            bias_list, input_shapes, other_shapes
+        ):
             mod = M(bias).eval()
-            x1 = torch.randn((2, 32, 9, 9))
-            x2 = torch.randn((2, 32, 1, 1))
+            x1 = torch.randn(x_shape)
+            x2 = torch.randn(other_shape)
 
             def matcher_check_fn():
                 # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 1
@@ -2442,7 +2446,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for bias in bias_list:
             mod = M(bias).eval()
             x1 = torch.randn((4, 4))
-            x2 = torch.randn((4, 1))
+            x2 = torch.randn((1, 4))
 
             def matcher_check_fn():
                 # 1. Dequant-Linear pattern matched in quantization weight prepack * 1

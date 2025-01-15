@@ -671,14 +671,36 @@ def _is_valid_quantized_op_binary_optimization_pattern(
                 else match.kwargs["accum_after_dequant"]
             )
         )
-        # the two inputs of binary node should have the same dimensions, and only supports extra_input for broadcasting
+
+        # Check if the tensor shape of the 'other' node is the same as or
+        # can be broadcasted to the tensor shape of the computation node.
+        compute_op = compute_node.target
+        compute_node_size = compute_node.meta.get("val", None).size()
+        if compute_op is torch.ops.onednn.qlinear_pointwise.default:
+            broadcast_sizes = []
+            if len(compute_node_size) >= 2:
+                broadcast_sizes = [
+                    torch.Size(
+                        [1 for _ in range(len(compute_node_size) - 1)]
+                        + [compute_node_size[-1]]
+                    ),
+                ]
+        else:
+            assert compute_op is torch.ops.onednn.qconv2d_pointwise.default
+            broadcast_sizes = [
+                torch.Size(
+                    [compute_node_size[0], compute_node_size[1]]
+                    + [1 for _ in range(len(compute_node_size) - 2)]
+                ),
+                torch.Size(
+                    [1, compute_node_size[1]]
+                    + [1 for _ in range(len(compute_node_size) - 2)]
+                ),
+                torch.Size([1 for _ in range(len(compute_node_size))]),
+            ]
         if (
-            binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
-            != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
-        ) or not all(
-            binary_node_inputs[0].meta["val"].size(i) == binary_node_inputs[1].meta["val"].size(i)  # type: ignore[union-attr]
-            or extra_input_of_pattern.meta["val"].size(i) == 1  # type: ignore[union-attr]
-            for i in range(binary_node_inputs[0].meta["val"].dim())  # type: ignore[union-attr]
+            extra_input_of_pattern.meta.get("val", None).size()
+            not in [compute_node_size] + broadcast_sizes
         ):
             return False
 
