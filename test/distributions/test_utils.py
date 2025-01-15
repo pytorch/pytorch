@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import run_tests
         (2, 2, 4, 4),
     ],
 )
-def test_tril_matrix_to_vec(shape):
+def test_tril_matrix_to_vec(shape: tuple[int, ...]) -> None:
     mat = torch.randn(shape)
     n = mat.shape[-1]
     for diag in range(-n, n):

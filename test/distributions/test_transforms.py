@@ -1,16 +1,18 @@
 # Owner(s): ["module: distributions"]
 
 import io
-from numbers import Number
+from typing import TypeVar
 
 import pytest
 
 import torch
+from torch import Tensor
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import (
     constraints,
     Dirichlet,
+    Distribution,
     Independent,
     Normal,
     TransformedDistribution,
@@ -38,10 +40,14 @@ from torch.distributions.transforms import (
 )
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 from torch.testing._internal.common_utils import run_tests
+from torch.types import _Number
 
 
-def get_transforms(cache_size):
-    transforms = [
+T = TypeVar("T", bound=Transform)
+
+
+def get_transforms(cache_size: int) -> list[Transform]:
+    transforms: list[Transform] = [
         AbsTransform(cache_size=cache_size),
         ExpTransform(cache_size=cache_size),
         PowerTransform(exponent=2, cache_size=cache_size),
@@ -97,11 +103,14 @@ def get_transforms(cache_size):
     return transforms
 
 
-def reshape_transform(transform, shape):
+def reshape_transform(transform: Transform, shape: tuple[int, ...]) -> Transform:
     # Needed to squash batch dims for testing jacobian
     if isinstance(transform, AffineTransform):
-        if isinstance(transform.loc, Number):
+        if isinstance(transform.loc, _Number):
             return transform
+
+        assert isinstance(transform.loc, Tensor)
+        assert isinstance(transform.scale, Tensor)
         try:
             return AffineTransform(
                 transform.loc.expand(shape),
@@ -127,7 +136,7 @@ def reshape_transform(transform, shape):
 
 
 # Generate pytest ids
-def transform_id(x):
+def transform_id(x: Transform) -> str:
     assert isinstance(x, Transform)
     name = (
         f"Inv({type(x._inv).__name__})"
@@ -137,7 +146,7 @@ def transform_id(x):
     return f"{name}(cache_size={x._cache_size})"
 
 
-def generate_data(transform):
+def generate_data(transform: Transform) -> Tensor:
     torch.manual_seed(1)
     while isinstance(transform, IndependentTransform):
         transform = transform.base_transform
@@ -202,13 +211,13 @@ ALL_TRANSFORMS = (
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_inv_inv(transform, ids=transform_id):
+def test_inv_inv(transform: Transform) -> None:
     assert transform.inv.inv is transform
 
 
 @pytest.mark.parametrize("x", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 @pytest.mark.parametrize("y", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_equality(x, y):
+def test_equality(x: Transform, y: Transform) -> None:
     if x is y:
         assert x == y
     else:
@@ -217,7 +226,7 @@ def test_equality(x, y):
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_with_cache(transform):
+def test_with_cache(transform: Transform) -> None:
     if transform._cache_size == 0:
         transform = transform.with_cache(1)
     assert transform._cache_size == 1
@@ -232,7 +241,7 @@ def test_with_cache(transform):
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
 @pytest.mark.parametrize("test_cached", [True, False])
-def test_forward_inverse(transform, test_cached):
+def test_forward_inverse(transform: Transform, test_cached: bool) -> None:
     x = generate_data(transform).requires_grad_()
     assert transform.domain.check(x).all()  # verify that the input data are valid
     try:
@@ -272,7 +281,7 @@ def test_forward_inverse(transform, test_cached):
         )
 
 
-def test_compose_transform_shapes():
+def test_compose_transform_shapes() -> None:
     transform0 = ExpTransform()
     transform1 = SoftmaxTransform()
     transform2 = LowerCholeskyTransform()
@@ -323,7 +332,11 @@ base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
         ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform1])),
     ],
 )
-def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
+def test_transformed_distribution_shapes(
+    batch_shape: tuple[int, ...],
+    event_shape: tuple[int, ...],
+    dist: Distribution,
+) -> None:
     assert dist.batch_shape == batch_shape
     assert dist.event_shape == event_shape
     x = dist.rsample()
@@ -334,10 +347,10 @@ def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
 
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_fwd(transform):
+def test_jit_fwd(transform: Transform) -> None:
     x = generate_data(transform).requires_grad_()
 
-    def f(x):
+    def f(x: Tensor) -> Tensor:
         return transform(x)
 
     try:
@@ -351,10 +364,10 @@ def test_jit_fwd(transform):
 
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_inv(transform):
+def test_jit_inv(transform: Transform) -> None:
     y = generate_data(transform.inv).requires_grad_()
 
-    def f(y):
+    def f(y: Tensor) -> Tensor:
         return transform.inv(y)
 
     try:
@@ -368,10 +381,10 @@ def test_jit_inv(transform):
 
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_jacobian(transform):
+def test_jit_jacobian(transform: Transform) -> None:
     x = generate_data(transform).requires_grad_()
 
-    def f(x):
+    def f(x: Tensor) -> Tensor:
         y = transform(x)
         return transform.log_abs_det_jacobian(x, y)
 
@@ -386,7 +399,7 @@ def test_jit_jacobian(transform):
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_jacobian(transform):
+def test_jacobian(transform: Transform) -> None:
     x = generate_data(transform)
     try:
         y = transform(x)
@@ -456,7 +469,7 @@ def test_jacobian(transform):
 @pytest.mark.parametrize(
     "event_dims", [(0,), (1,), (2, 3), (0, 1, 2), (1, 2, 0), (2, 0, 1)], ids=str
 )
-def test_compose_affine(event_dims):
+def test_compose_affine(event_dims: tuple[int, ...]) -> None:
     transforms = [
         AffineTransform(torch.zeros((1,) * e), 1, event_dim=e) for e in event_dims
     ]
@@ -478,7 +491,7 @@ def test_compose_affine(event_dims):
 
 
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
-def test_compose_reshape(batch_shape):
+def test_compose_reshape(batch_shape: tuple[int, ...]) -> None:
     transforms = [
         ReshapeTransform((), ()),
         ReshapeTransform((2,), (1, 2)),
@@ -503,10 +516,14 @@ def test_compose_reshape(batch_shape):
 @pytest.mark.parametrize("base_event_dim", [0, 1, 2])
 @pytest.mark.parametrize("num_transforms", [0, 1, 2, 3])
 def test_transformed_distribution(
-    base_batch_dim, base_event_dim, transform_dim, num_transforms, sample_shape
-):
+    base_batch_dim: int,
+    base_event_dim: int,
+    transform_dim: int,
+    num_transforms: int,
+    sample_shape: tuple[int, ...],
+) -> None:
     shape = torch.Size([2, 3, 4, 5])
-    base_dist = Normal(0, 1)
+    base_dist: Distribution = Normal(0, 1)
     base_dist = base_dist.expand(shape[4 - base_batch_dim - base_event_dim :])
     if base_event_dim:
         base_dist = Independent(base_dist, base_event_dim)
@@ -543,7 +560,7 @@ def test_transformed_distribution(
     assert log_prob.shape == d.batch_shape
 
 
-def test_save_load_transform():
+def test_save_load_transform() -> None:
     # Evaluating `log_prob` will create a weakref `_inv` which cannot be pickled. Here, we check
     # that `__getstate__` correctly handles the weakref, and that we can evaluate the density after.
     dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
@@ -560,7 +577,7 @@ def test_save_load_transform():
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_transform_sign(transform: Transform):
+def test_transform_sign(transform: Transform) -> None:
     try:
         sign = transform.sign
     except NotImplementedError:
