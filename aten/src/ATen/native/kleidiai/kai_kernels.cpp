@@ -4,12 +4,12 @@
 
 #include <ATen/Parallel.h>
 
-#include <cpuinfo.h>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <unordered_map>
 #if AT_KLEIDIAI_ENABLED()
+#include <cpuinfo.h>
 
 namespace at::native::kleidiai {
 

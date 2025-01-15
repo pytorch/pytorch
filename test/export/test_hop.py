@@ -83,7 +83,7 @@ class TestHOP(TestCase):
             input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
             args = (*input, *inp.args)
             kwargs = inp.kwargs
-            ep = export(model, args, kwargs)
+            ep = export(model, args, kwargs, strict=True)
             self._compare(model, ep, args, kwargs)
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))

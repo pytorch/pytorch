@@ -111,8 +111,8 @@ class TestTypes(TestCase):
                 assert_equal(
                     c_scalar.dtype,
                     c_array.dtype,
-                    "error with types (%d/'%s' + %d/'%s')"
-                    % (k, np.dtype(atype).name, l, np.dtype(btype).name),
+                    "error with types "
+                    f"({k:d}/'{np.dtype(atype).name}' + {l:d}/'{np.dtype(btype).name}')",
                 )
 
     def test_type_create(self):
