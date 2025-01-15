@@ -86,37 +86,35 @@ Tensor& addmm_out(
   Tensor bias = Tensor();
   onednn::Attr attr;
   float beta_ = beta.to<float>();
+  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
   if (beta_ == 0.f) {
-    if (alpha.to<float>() != 1.f) {
+    attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+  } else if (alpha_ == 1.f && beta_ == 1.f) {
+    bias = self;
+  } else {
+    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    bool inplace = binary.is_same(result);
+    if (inplace) {
       attr.append_post_eltwise(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-    }
-  } else {
-    if (alpha.to<float>() == 1.f && beta_ == 1.f) {
-      bias = self;
+      attr.append_post_sum(beta_);
     } else {
-      Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
-      bool inplace = binary.is_same(result);
-      if (inplace) {
-        attr.append_post_eltwise(
-            1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-        attr.append_post_sum(beta_);
-      } else {
-        if (at::native::onednn::is_broadcast(binary)) {
-          at::native::onednn::undo_broadcast(binary);
-        }
-        // Tensor binary = self.expand_as(result);
-        // For post-binary-add, onednn needs binary scale=1.f
-        // Thus we need the following transformation
-        // alpha * matmul(mat1, mat2) + beta * binary
-        // beta * (alpha/beta * matmul(src, wei) + binary)
-        float alpha_ = alpha.to<float>() / beta_;
-        if (alpha_ != 1.f)
-          attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
-        attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
-        if (beta_ != 1.f)
-          attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
+      if (at::native::onednn::is_broadcast(binary)) {
+        at::native::onednn::undo_broadcast(binary);
       }
+      // in test_addmv_rowmajor_colmajor_incx_incy_lda, binary is a tensor with
+      // shape (5, 1) but stride(2, 2)
+      binary = at::native::onednn::is_onednn_matmul_strides(binary)
+          ? binary
+          : binary.contiguous();
+      // Tensor binary = self.expand_as(result);
+      // For post-binary-add, onednn needs binary scale=1.f
+      // Thus we need the following transformation
+      // alpha * matmul(mat1, mat2) + beta * binary
+      // beta * (alpha/beta * matmul(src, wei) + binary)
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
+      attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
   onednn::matmul(result, mat1, mat2, bias, true, attr);
@@ -231,12 +229,10 @@ Tensor& baddbmm_out(
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
+  float alpha_ = beta_ == 0.f ? alpha.to<float>() : alpha.to<float>() / beta_;
   Tensor binary;
   if (beta_ == 0.f) {
-    if (alpha.to<float>() != 1.f) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-    }
+    attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
     binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
@@ -249,12 +245,12 @@ Tensor& baddbmm_out(
       if (at::native::onednn::is_broadcast(binary)) {
         at::native::onednn::undo_broadcast(binary);
       }
-      float alpha_ = alpha.to<float>() / beta_;
-      if (alpha_ != 1.f)
-        attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      binary = at::native::onednn::is_onednn_matmul_strides(binary)
+          ? binary
+          : binary.contiguous();
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_binary<true>(attr.kind_with_binary_add, binary);
-      if (beta_ != 1.f)
-        attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
     }
   }
   onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
