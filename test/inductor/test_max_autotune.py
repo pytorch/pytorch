@@ -10,6 +10,7 @@ from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import same
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -24,7 +25,6 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch._higher_order_ops.out_dtype import out_dtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -188,15 +188,21 @@ class TestMaxAutotune(TestCase):
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
+    @skipIfRocm
     @parametrize("in_dtype_val", test_dtypes)
     @parametrize("out_dtype_val", test_dtypes)
-    def test_max_autotune_matmul(self, in_dtype_val, out_dtype_val):
+    @parametrize("max_autotune", ("max-autotune", "max-autotune-no-cudagraphs"))
+    def test_max_autotune_matmul(self, in_dtype_val, out_dtype_val, max_autotune):
         def quantized_matmul(x_vals, x_scales, w_vals):
-            return out_dtype(torch.ops.aten.mm.default, out_dtype_val, x_vals, w_vals) * x_scales
-        x_vals = torch.randn(65536, 144).to(dtype=in_dtype_val).cuda()
-        x_scales = torch.randn(65536, 1).to(dtype=torch.float32).cuda()
-        w_vals = torch.randn(432, 144).to(dtype=in_dtype_val).cuda().t()
-        qcm = torch.compile(quantized_matmul, mode='max-autotune-no-cudagraphs')
+            return (
+                out_dtype(torch.ops.aten.mm.default, out_dtype_val, x_vals, w_vals)
+                * x_scales
+            )
+
+        x_vals = torch.randn(65536, 144).to(dtype=in_dtype_val, device=GPU_TYPE)
+        x_scales = torch.randn(65536, 1).to(dtype=torch.float32, device=GPU_TYPE)
+        w_vals = torch.randn(432, 144).to(dtype=in_dtype_val, device=GPU_TYPE).t()
+        qcm = torch.compile(quantized_matmul, mode=max_autotune)
         qcm(x_vals, x_scales, w_vals)
 
     @parametrize("dynamic", (False, True))
