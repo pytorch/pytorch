@@ -254,8 +254,8 @@ void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
   const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
-    LOG(INFO) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
-              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
+    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
     return;
   }
 #endif
