@@ -3388,14 +3388,6 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
-    def test_normal_default_device(self, device):
-        try:
-            torch.set_default_device(device)
-            t = torch.normal(0, 1, (10, 10))
-        finally:
-            torch.set_default_device(None)
-        self.assertEqual(str(t.device), device)
-
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
@@ -3510,6 +3502,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
         n_max = int(0.75 * 2 ** 32)
