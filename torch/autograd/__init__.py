@@ -9,7 +9,8 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 
 import warnings
-from typing import cast, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import _vmap_internals
@@ -60,7 +61,7 @@ def _calculate_shape(
     output: Union[torch.Tensor, graph.GradientEdge],
     grad: torch.Tensor,
     is_grads_batched: bool,
-) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
+) -> tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     # is_same_size ensures that both tensors are either nested or non nested
     # circular import
     from torch.nested._internal.nested_tensor import NestedTensor
@@ -89,8 +90,8 @@ def _make_grads(
     outputs: Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
-) -> Tuple[_OptionalTensor, ...]:
-    new_grads: List[_OptionalTensor] = []
+) -> tuple[_OptionalTensor, ...]:
+    new_grads: list[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
@@ -231,7 +232,7 @@ def _make_grads(
 
 def _tensor_or_tensors_to_tuple(
     tensors: Optional[_TensorOrTensors], length: int
-) -> Tuple[_OptionalTensor, ...]:
+) -> tuple[_OptionalTensor, ...]:
     if tensors is None:
         return (None,) * length
     if isinstance(tensors, torch.Tensor):
@@ -370,7 +371,7 @@ def grad(
     allow_unused: Optional[bool] = None,
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
