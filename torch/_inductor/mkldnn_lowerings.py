@@ -540,9 +540,7 @@ def register_onednn_fusion_ops():
                     torch.tensor(0, dtype=torch.int32), name="x_zp"
                 )
 
-            assert (
-                len(x_zp.get_layout().size) == 0
-            ), "x_zp is incompatible with oneDNN qlinear"
+            assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to https://github.com/pytorch/pytorch/blob
