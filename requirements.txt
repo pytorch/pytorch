@@ -1,0 +1,21 @@
+# Python dependencies required for development
+astunparse
+cmake
+expecttest>=0.3.0
+filelock
+fsspec
+hypothesis
+jinja2
+lintrunner ; platform_machine != "s390x"
+networkx
+ninja
+numpy
+optree>=0.13.0
+packaging
+psutil
+pyyaml
+requests
+setuptools
+sympy==1.13.3
+types-dataclasses
+typing-extensions>=4.10.0
