@@ -3689,18 +3689,20 @@ class TestRandomTensorCreation(TestCase):
             return generator
 
         tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
-        gen = torch.Generator()
+        gen = torch.Generator(device=device)
 
         # Using default generator
         generator = seed(None)
-        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
         generator = seed(None)
         res2 = torch.randint_like(tensor, *RANGE, generator=generator)
         self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
 
         # Using explicit generator
         generator = seed(gen)
-        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
         generator = seed(gen)
         res2 = torch.randint_like(tensor, *RANGE, generator=generator)
         self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
@@ -3725,7 +3727,7 @@ class TestRandomTensorCreation(TestCase):
             return generator
 
         tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
-        gen = torch.Generator()
+        gen = torch.Generator(device=device)
 
         # Using default generator
         generator = seed(None)
@@ -3760,7 +3762,7 @@ class TestRandomTensorCreation(TestCase):
             return generator
 
         tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
-        gen = torch.Generator()
+        gen = torch.Generator(device=device)
 
         # Using default generator
         generator = seed(None)
