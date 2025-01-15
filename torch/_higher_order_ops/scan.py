@@ -441,7 +441,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_input
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_unwrapped_xs_sliced = [

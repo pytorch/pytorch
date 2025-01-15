@@ -177,6 +177,8 @@ def get_plain_tensors(
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -186,6 +188,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, FunctionalTensor):
+        return is_fake(x.elem)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
@@ -197,6 +201,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
 
 def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
@@ -207,6 +213,8 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, FunctionalTensor):
+        return maybe_get_fake_mode(t.elem)
     elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
@@ -542,7 +550,7 @@ class FakeTensorConfig:
 #
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to ensure access to FakeTensor during access, which is
-# required for testing version counter and epoch validity.​
+# required for testing version counter and epoch validity.
 class SymNumberMemoDescriptor:
     _name: str
 
@@ -713,10 +721,10 @@ class FakeTensor(Tensor):
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
+            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            if getattr(torch, device.type).is_initialized():
+            if device.type != "mps" and getattr(torch, device.type).is_initialized():
                 device = torch.device(
                     f"{device.type}:{getattr(torch, device.type).current_device()}"
                 )
@@ -763,7 +771,7 @@ class FakeTensor(Tensor):
 
     @classmethod
     @count
-    def __torch_dispatch__(
+    def __torch_dispatch__(  # type: ignore[override] # TODO
         cls,
         func: OpOverload,
         types: Sequence[Type],
@@ -1311,7 +1319,8 @@ class FakeTensorMode(TorchDispatchMode):
             maybe_prev_only_lift_cpu_tensors,
         ) = self.enter_stack.pop()
         if live:
-            out = super().__exit__(a, b, c)
+            super().__exit__(a, b, c)
+
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
@@ -1803,7 +1812,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             # NOTE: incr is intentionally unused for a RAII pattern
-            incr = IncrementRecursionCount()
+            incr = IncrementRecursionCount()  # noqa: F841
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]

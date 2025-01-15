@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10/core/QScheme.h>
@@ -15,7 +16,7 @@ struct THPQScheme {
   char name[QSCHEME_NAME_LEN + 1];
 };
 
-extern PyTypeObject THPQSchemeType;
+TORCH_PYTHON_API extern PyTypeObject THPQSchemeType;
 
 inline bool THPQScheme_Check(PyObject* obj) {
   return Py_TYPE(obj) == &THPQSchemeType;

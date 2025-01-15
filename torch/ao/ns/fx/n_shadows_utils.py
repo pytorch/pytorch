@@ -2,7 +2,7 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 import torch.fx
@@ -109,7 +109,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[Tuple[str, _MatchResult]] = []
+    matches_items_reversed: List[tuple[str, _MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 
@@ -296,8 +296,6 @@ def create_submodule_from_subgraph(
     #
 
     cur_node_orig = first_node
-    cur_args_orig = cur_node_orig.args
-    cur_kwargs_orig = cur_node_orig.kwargs
 
     cur_name_idx = 0
 
@@ -433,9 +431,6 @@ def create_submodule_from_subgraph(
             len(cur_node_orig.users.keys()) == 1
         ), f"{cur_node_orig} has more than 1 users, not supported yet"
         cur_node_orig = next(iter(cur_node_orig.users.keys()))
-        cur_args_orig = cur_node_orig.args
-        cur_kwargs_orig = cur_node_orig.kwargs
-
         cur_iteration += 1
         if cur_iteration > iteration_limit:
             raise AssertionError("iteration limit exceeded")

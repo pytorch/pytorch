@@ -65,8 +65,7 @@ CopySlices::CopySlices(
     at::TensorGeometry view_,
     std::unique_ptr<ViewFunc> view_fn_,
     std::shared_ptr<Node> fn_)
-    : Node(),
-      base(base_var),
+    : base(base_var),
       view(std::move(view_)),
       view_fn(std::move(view_fn_)),
       fn(std::move(fn_)) {
