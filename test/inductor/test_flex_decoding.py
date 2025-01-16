@@ -954,19 +954,19 @@ class TestFlexDecoding(InductorTestCase):
     @supported_platform
     def test_non_divisible_offset_mask(self):
         KV_S = S - 3
-        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+        offset_tensor = torch.tensor(S // 2 - 3, device=self.device, dtype=torch.int32)
 
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S, device=self.device)
         self.run_test(KV_S=KV_S, block_mask=block_mask)
 
     @supported_platform
     def test_non_divisible_offset_mask_with_captured_buffer(self):
         KV_S = S - 3
-        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
-        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+        offset_kv = torch.randn(KV_S, device=self.device, dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device=self.device, dtype=torch.int32)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_kv[kv]
@@ -974,28 +974,29 @@ class TestFlexDecoding(InductorTestCase):
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, 1, KV_S, device=self.device)
         self.run_test(KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
 
     @supported_platform
     def test_non_divisible_multi_token_offset_mask(self):
         KV_S = S - 3
         Q_S = 3
-        offset_tensor = torch.tensor(S // 2 - 1, device="cuda", dtype=torch.int32)
+        offset_tensor = torch.tensor(S // 2 - 1, device=self.device, dtype=torch.int32)
 
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=self.device)
         self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask)
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self):
         KV_S = S - 3
         Q_S = 3
-        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
-        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
-        offset_tensor = torch.tensor(S // 2 - 3, device="cuda", dtype=torch.int32)
+        offset_kv = torch.randn(KV_S, device=self.device, dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device=self.device, dtype=torch.bfloat16)
+        offset_tensor = torch.tensor(S // 2 - 3, device=self.device, dtype=torch.int32)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_kv[kv] + offset_q[q]
@@ -1003,7 +1004,7 @@ class TestFlexDecoding(InductorTestCase):
         def mask_mod(b, h, q, kv):
             return kv >= q + offset_tensor
 
-        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
+        block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=self.device)
         self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
 
     @supported_platform
@@ -1781,7 +1782,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             1,
             max_seq_len,
             max_seq_len,
-            device="cuda",
+            device=self.device,
             BLOCK_SIZE=page_size,
         )
 
@@ -1794,7 +1795,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 1,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1803,7 +1804,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1812,7 +1813,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 n_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=self.device,
                 dtype=dtype,
                 requires_grad=False,
             )
@@ -1841,12 +1842,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         golden_outs = torch.cat(golden_outs)
 
         # init paged attention
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device="cuda")
-        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device="cuda"))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device="cuda"))
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, device=self.device
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([100, 200, 50, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([100, 512, 300, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 300, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 512, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 512, 512], device=self.device)
+        )
 
         # allocate paged kv cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -1855,7 +1868,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             n_heads,
             MAX_CACHED_SEQ_LEN,
             head_dim,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         )
         v_cache = torch.zeros(
@@ -1863,25 +1876,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             n_heads,
             MAX_CACHED_SEQ_LEN,
             head_dim,
-            device="cuda",
+            device=self.device,
             dtype=dtype,
         )
 
         # prefill paged kv cache
         for i, seq_len in enumerate(prefill_length):
-            batch_idx = torch.tensor([i], device="cuda", dtype=torch.int32)
-            input_pos = torch.arange(seq_len, device="cuda", dtype=torch.int32).view(
-                1, seq_len
-            )
+            batch_idx = torch.tensor([i], device=self.device, dtype=torch.int32)
+            input_pos = torch.arange(
+                seq_len, device=self.device, dtype=torch.int32
+            ).view(1, seq_len)
             paged_cache.assign(
                 batch_idx, input_pos, keys[i], values[i], k_cache, v_cache
             )
 
         # get paged out and check correctness
-        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
-        input_pos = torch.tensor(prefill_length, device="cuda", dtype=torch.int32).view(
-            max_batch_size, 1
-        )
+        batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
+        input_pos = torch.tensor(
+            prefill_length, device=self.device, dtype=torch.int32
+        ).view(max_batch_size, 1)
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(

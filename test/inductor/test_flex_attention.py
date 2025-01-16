@@ -1850,7 +1850,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
 
         (
             k_cache1,
@@ -2115,9 +2115,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @unittest.skipIf(TEST_ON_CUDA, "TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
-        head_scale = torch.randn(H, device="cuda")
-        batch_scale = torch.randn(B, device="cuda")
-        tok_scale = torch.randn(S, device="cuda")
+        head_scale = torch.randn(H, device=self.device)
+        batch_scale = torch.randn(B, device=self.device)
+        tok_scale = torch.randn(S, device=self.device)
 
         def bias_mod(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_q]
