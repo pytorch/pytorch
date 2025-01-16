@@ -776,11 +776,11 @@ def _create_sparse_block_from_block_mask(
 
 
 def create_mask(
-    mod_fn: Optional[Union[_score_mod_signature, _mask_mod_signature]] = None,
-    B: int = 1,
-    H: int = 1,
-    Q_LEN: int = 4096,
-    KV_LEN: int = 4096,
+    mod_fn: Optional[Union[_score_mod_signature, _mask_mod_signature]],
+    B: Optional[int],
+    H: Optional[int],
+    Q_LEN: int,
+    KV_LEN: int,
     device: str = "cuda",
     *,
     mask_mod: Optional[_mask_mod_signature] = None,
@@ -793,8 +793,8 @@ def create_mask(
         mod_fn (Optional[Union[_score_mod_signature, _mask_mod_signature]]): Function to modify attention scores.
             If provided, the type of function will be infered from the number of arguments.
             The type can be specified via mod_type or pass mask_mod/score_mod instead.
-        B (int): Batch size.
-        H (int): Number of query heads.
+        B (Optional[int]): Batch size.
+        H (Optional[int]): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
@@ -819,6 +819,11 @@ def create_mask(
         assert (
             mask_mod is None or score_mod is None
         ), "cannot provide both mask_mod and score_mod"
+
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
 
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
