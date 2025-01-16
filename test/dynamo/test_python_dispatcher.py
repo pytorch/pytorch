@@ -18,6 +18,31 @@ class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(fn(x).raw_repr() == torch._C._dispatch_keys(x + 1).raw_repr())
 
     def test_dispatch_key2(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            x = x.sin()
+            return torch._C._dispatch_keys(x)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = TwoTensor(x, y)
+        self.assertTrue(fn(z).raw_repr() == torch._C._dispatch_keys(z.sin()).raw_repr())
+
+    def test_dispatch_key3(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            key_set = torch._C._dispatch_tls_local_include_set()
+            return torch.sin(x + 1), key_set
+
+        x = torch.randn(2, 3)
+        self.assertEqual(fn(x)[0], torch.sin(x + 1))
+        self.assertTrue(
+            fn(x)[1].raw_repr() == torch._C._dispatch_tls_local_include_set().raw_repr()
+        )
+
+    def test_dispatch_key4(self):
         eager = EagerAndRecordGraphs()
 
         @torch.compile(backend=eager, fullgraph=True)
