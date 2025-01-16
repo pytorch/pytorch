@@ -6553,9 +6553,9 @@ class CommonTemplate:
             )
             with ctx:
                 self.common(
-                    fn, 
+                    fn,
                     (make_tensor(8, dtype=dtype, device=self.device),),
-                    check_lowp=False
+                    check_lowp=False,
                 )
 
     def test_full_boolean(self):
