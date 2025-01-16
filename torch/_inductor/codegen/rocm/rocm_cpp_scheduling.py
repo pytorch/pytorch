@@ -46,6 +46,7 @@ class ROCmCPPScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
+            assert isinstance(config.triton.descriptive_names, str)
             fused_name = (
                 get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names

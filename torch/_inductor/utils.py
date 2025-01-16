@@ -1851,7 +1851,7 @@ def pass_execution_and_save(
         )
 
 
-def is_multi_outputs_template(input_buf: Buffer) -> bool:
+def is_multi_outputs_template(input_buf: Buffer | Operation | None) -> bool:
     """
     Check if input buffer is a multi-outputs template buffer
     """
@@ -1862,7 +1862,7 @@ def is_multi_outputs_template(input_buf: Buffer) -> bool:
     )
 
 
-def is_output_of_multi_outputs_template(input_buf: Buffer) -> bool:
+def is_output_of_multi_outputs_template(input_buf: Buffer | Operation | None) -> bool:
     """
     Check if input buffer is a output of multi-outputs template buffer
     """

@@ -4967,6 +4967,7 @@ class CppScheduling(BaseScheduling):
 
     def define_kernel(self, src_code, nodes, kernel_args=None):
         wrapper = V.graph.wrapper_code
+        assert isinstance(config.cpp.descriptive_names, str)
         fused_name = (
             get_fused_kernel_name(nodes, config.cpp.descriptive_names)
             if config.cpp.descriptive_names
