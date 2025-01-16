@@ -23,9 +23,7 @@ namespace at::accelerator {
 TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 
 // Check if the given device type is an accelerator.
-TORCH_API inline bool isAccelerator(c10::DeviceType device_type) {
-  return c10::isAccelerator(device_type);
-}
+TORCH_API bool isAccelerator(c10::DeviceType device_type);
 
 // Check if the given device type is an accelerator, not an excluded one.
 TORCH_API inline bool isAcceleratorExcluded(
