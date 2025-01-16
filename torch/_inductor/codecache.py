@@ -688,7 +688,6 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
-                    "codegen/aoti_runtime/implementation.cpp",
                     "codegen/cpp_prefix.h",
                     "script.ld",
                 )
