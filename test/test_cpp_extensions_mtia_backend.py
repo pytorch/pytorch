@@ -26,13 +26,13 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 @unittest.skipIf(
     # Skip this UT since we disable the MTIA backend in getAccelerator temporarily,
     # see https://github.com/pytorch/pytorch/pull/144368.
-    IS_ARM64
+    True
+    or IS_ARM64
     or not IS_LINUX
     or TEST_CUDA
     or TEST_PRIVATEUSE1
     or TEST_ROCM
-    or TEST_XPU
-    or True,
+    or TEST_XPU,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
