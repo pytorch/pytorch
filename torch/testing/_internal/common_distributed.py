@@ -948,7 +948,9 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store
         )
-        return c10d.get_default_backend_for_device()
+        if "nccl" in c10d.get_default_backend_for_device(device):
+            torch.cuda.set_device(self.rank)
+        return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
