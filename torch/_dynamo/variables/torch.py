@@ -826,6 +826,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _unsafe_set_version_counter
             ).call_function(tx, [*args], kwargs)
 
+        @register(torch._C._functorch.peek_interpreter_stack)
+        def handle_functorch_peek_interpreter_stack(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # Wrap C++ interpreter (torch._C._functorch.CInterpreter) as UserDefinedObjectVariable,
+            # but Python interpreter (torch._functorch.pyfunctorch.FuncTorchInterpreter) as FuncTorchInterpreterVariable.
+            return UserDefinedObjectVariable(
+                torch._C._functorch.peek_interpreter_stack()
+            )
+
+        @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
+        def handle_functorch_pyfunctorch_coerce_cinterpreter(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            cinterpreter = args[0].value
+            return FuncTorchInterpreterVariable(
+                torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
+            )
+
         @register(torch.tensor)
         def handle_torch_tensor(self, tx: "InstructionTranslator", *args, **kwargs):
             def check_any_unspec(x):
@@ -1259,4 +1278,32 @@ class DispatchKeySetVariable(BaseTorchVariable):
             )
         elif name == "highestPriorityTypeId":
             return variables.EnumVariable(self.value.highestPriorityTypeId())
+        return super().call_method(tx, name, args, kwargs)
+
+
+class FuncTorchInterpreterVariable(BaseTorchVariable):
+    """represents torch._functorch.pyfunctorch.FuncTorchInterpreter"""
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return cls(value, source=source)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "key":
+            return variables.EnumVariable(self.value.key())
+        elif name == "process":
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(self.value.process.__func__),
+                [self] + args,
+                kwargs,
+            )
+        elif name in ["level", "batch_size", "randomness"]:
+            return variables.ConstantVariable.create(getattr(self.value, name)())
         return super().call_method(tx, name, args, kwargs)

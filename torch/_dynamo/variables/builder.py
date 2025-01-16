@@ -217,6 +217,7 @@ from .tensor import (
 )
 from .torch import (
     DispatchKeySetVariable,
+    FuncTorchInterpreterVariable,
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
 )
@@ -668,7 +669,9 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
             return FrozensetVariable(items, source=self.source)
-        elif isinstance(value, (enum.Enum, torch.DispatchKey)):
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
@@ -857,6 +860,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch._functorch.pyfunctorch.FuncTorchInterpreter):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -2960,7 +2966,9 @@ class SourcelessBuilder:
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, (enum.Enum, torch.DispatchKey)):
+        elif isinstance(
+            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+        ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
@@ -3023,6 +3031,11 @@ class SourcelessBuilder:
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         handlers[torch.DispatchKeySet] = lambda tx, value: DispatchKeySetVariable(
+            value, mutation_type=ValueMutationNew()
+        )
+        handlers[
+            torch._functorch.pyfunctorch.FuncTorchInterpreter
+        ] = lambda tx, value: FuncTorchInterpreterVariable(
             value, mutation_type=ValueMutationNew()
         )
 
