@@ -574,8 +574,27 @@ class _PipelineStageBase(ABC):
             out_val = self.submod(*args, **kwargs)
         return out_val
 
+    def scale_grads(self, grad_scale_factor: int) -> None:
+        """Scale gradients model gradients by `grad_scale_factor`, which should be specified in coordination with the
+        loss function used with pipelining.  For loss functions which perform 'mean' loss reduction, `grad_scale_factor`
+        should be set to num_microbatches.  For loss functions that use `sum` reduction, `grad_scale_factor` should
+        be set to 1.
+
+        Should only be called once per pipeline schedule step, after all backwards passes have completed.
+        """
+
+        # PP scales only for its own contribution (microbatches), but relies on DP to scale further
+        # for DP degree.
+        if grad_scale_factor != 1:
+            for name, p in self.submod.named_parameters():
+                assert p.grad is not None, name
+                p.grad.div_(grad_scale_factor)
+
     def backward_maybe_with_nosync(
-        self, backward_type, bwd_kwargs: Dict, last_backward=False
+        self,
+        backward_type,
+        bwd_kwargs: Dict,
+        last_backward: bool = False,
     ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
@@ -655,6 +674,7 @@ class _PipelineStageBase(ABC):
                     fsdp_state._root_post_backward_final_callback()
 
                 run_post_backward(self.submod)
+
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
@@ -783,7 +803,9 @@ class _PipelineStageBase(ABC):
             # TODO: We may want to change our semantics so we are allowed to ignore
             # the 'dw_builder' and call full_backward directly when it is a full_backward op.
             grads_input, _ = self.backward_maybe_with_nosync(
-                "full", bwd_kwargs, last_backward=last_backward
+                "full",
+                bwd_kwargs,
+                last_backward=last_backward,
             )
             if full_backward:
                 self.dw_builder()()
