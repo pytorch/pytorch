@@ -42,8 +42,10 @@ def get_filenames(self, subname):
     test_file = os.path.realpath(sys.modules[module_id].__file__)
     base_name = os.path.join(os.path.dirname(test_file), "../serialized", munged_id)
 
+    subname_output = ""
     if subname:
         base_name += "_" + subname
+        subname_output = f" ({subname})"
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
@@ -110,13 +112,14 @@ class TestSerialization(TestCase):
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
-        # can't use weights_only when _use_new_zipfile_serialization=False
-        input_tensor = torch.load(input_file, weights_only=new_zipfile_serialization)
+        # weights_only=False as file was saved in .tar format
+        input_tensor = torch.load(input_file, weights_only=False)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
-        expected = torch.load(expected_file)
+        # weights_only=False as file was saved in .tar format
+        expected = torch.load(expected_file, weights_only=False)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
@@ -142,7 +145,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            _,
+            state_dict_file,
             scripted_module_file,
             traced_module_file,
             expected_file,
@@ -193,7 +196,7 @@ class TestSerialization(TestCase):
             input_file,
             state_dict_file,
             _,
-            _,
+            traced_module_file,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -217,7 +220,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            _,
+            state_dict_file,
             _scripted_module_file,
             _traced_module_file,
             expected_file,
