@@ -19,7 +19,7 @@ class CacheArtifactType(Enum):
 
     INDUCTOR = 0
     AUTOTUNE = 1
-    AOT_AUTOGRAD = 2  # NYI
+    AOT_AUTOGRAD = 2
     PGO = 3
 
 
@@ -128,6 +128,7 @@ class CacheArtifactManager:
             return None
 
         from torch._dynamo.pgo import write_local_impl
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
         from torch._inductor.codecache import FxGraphCache
         from torch._inductor.runtime.autotune_cache import _LocalAutotuneCacheBackend
 
@@ -144,7 +145,7 @@ class CacheArtifactManager:
                 key = os.path.join(cache_dir(), artifact.key)
                 autotune_cache._put(key, artifact.content)
             elif artifact.type == CacheArtifactType.AOT_AUTOGRAD:
-                raise AssertionError("not yet implemented")
+                AOTAutogradCache._write_to_local_cache(artifact.key, artifact.content)
             elif artifact.type == CacheArtifactType.PGO:
                 meta = write_local_impl(artifact.key, artifact.content)
                 assert meta is not None

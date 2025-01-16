@@ -56,11 +56,6 @@ from torch.testing._internal.common_cuda import (
     tf32_enabled,
 )
 
-if not IS_FBCODE:
-    from test_cpp_extensions_open_device_registration import (
-        generate_faked_module
-    )
-
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
@@ -4016,6 +4011,8 @@ class TestAttnBias(NNTestCase):
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
+        import pytorch_openreg  # noqa: F401
+
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -4026,10 +4023,6 @@ class TestSDPAPrivateUse1Only(NNTestCase):
             extra_cflags=["-g"],
             verbose=True,
         )
-        # register torch.foo module and foo device to torch
-        torch.utils.rename_privateuse1_backend("foo")
-        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        torch._register_device_module("foo", generate_faked_module())
 
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_privateuseone(self):
@@ -4037,9 +4030,9 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
         assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1) == SDPBackend.OVERRIDEABLE.value
 
     def test_scaled_dot_product_fused_attention_overrideable(self):
@@ -4047,9 +4040,9 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
         torch.nn.functional.scaled_dot_product_attention(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
 
@@ -4059,16 +4052,16 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         shape = (batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
         attn_mask = make_tensor((batch_size, num_heads, seq_len, seq_len))
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
-        attn_mask_privateuse1 = attn_mask.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
+        attn_mask_privateuse1 = attn_mask.to("openreg")
         output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = \
             torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
                 q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
 
         rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
-        rand_upward_privateuse1 = rand_upward.to("foo")
+        rand_upward_privateuse1 = rand_upward.to("openreg")
         grad_input_mask = [True, True, True, True]
         grad_q, grad_k, grad_v, grad_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
             rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1,

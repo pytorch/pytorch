@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 if IS_WINDOWS and IS_CI:
@@ -267,6 +268,46 @@ class AOTInductorTestsTemplate:
 
         with self.assertRaisesRegex(RuntimeError, "Expected extern kernel"):
             self.check_model(m, args)
+
+    def test_boxed_run_inputs_clearing(self):
+        # Borrowed from test_torchinductor
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.custom_add(x, y)
+
+        inps = [
+            torch.rand(5, 5, device=self.device),
+            torch.rand(5, 5, device=self.device),
+        ]
+        model = Model().to(device=self.device)
+        # NOTE: There are additional references to inps if we use
+        # strict=True here, which will cause inps not deallocated
+        # in time later in this test.
+        ep = torch.export.export(model, tuple(inps), strict=False)
+        package = torch._inductor.aoti_compile_and_package(ep)
+        fn_compiled = torch._inductor.aoti_load_package(package)
+
+        test_self = self
+        sentinel_seen = False
+
+        class TestRefMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                nonlocal inps
+                nonlocal test_self
+                nonlocal sentinel_seen
+                if func is torch.ops.aoti_custom_ops.custom_add.default:
+                    # inputs should be deallocated by this point
+                    sentinel_seen = True
+                    test_self.assertEqual(len(inps), 0)
+
+                return func(*args, **kwargs)
+
+        with TestRefMode():
+            fn_compiled.loader.boxed_run(inps)
+
+        self.assertEqual(len(inps), 0)
+        self.assertTrue(sentinel_seen)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

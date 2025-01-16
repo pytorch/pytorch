@@ -3,7 +3,7 @@
 import importlib
 import math
 import warnings
-from typing import Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -440,7 +440,7 @@ def fractional_max_pool2d_with_indices(
     output_ratio: Optional[BroadcastingList2[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -552,7 +552,7 @@ def fractional_max_pool3d_with_indices(
     output_ratio: Optional[BroadcastingList3[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -669,7 +669,7 @@ def max_pool1d_with_indices(
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -759,7 +759,7 @@ def max_pool2d_with_indices(
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -849,7 +849,7 @@ def max_pool3d_with_indices(
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -933,11 +933,11 @@ max_pool3d = boolean_dispatch(
 
 def _unpool_output_size(
     input: Tensor,
-    kernel_size: List[int],
-    stride: List[int],
-    padding: List[int],
-    output_size: Optional[List[int]],
-) -> List[int]:
+    kernel_size: list[int],
+    stride: list[int],
+    padding: list[int],
+    output_size: Optional[list[int]],
+) -> list[int]:
     input_size = input.size()
     default_size = torch.jit.annotate(List[int], [])
     for d in range(len(kernel_size)):
@@ -1187,7 +1187,7 @@ def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool1d(input, output_size, return_indices=False)
 
@@ -1242,7 +1242,7 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
@@ -1298,7 +1298,7 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
     return_indices: bool = False,
-) -> Tuple[Tensor, Tensor]:  # noqa: D400
+) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool3d(input, output_size, return_indices=False)
 
@@ -2430,7 +2430,7 @@ def _no_grad_embedding_renorm_(
     input: Tensor,
     max_norm: float,
     norm_type: float,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
 
@@ -2769,7 +2769,7 @@ if embedding_bag.__doc__:
     embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
-def _verify_batch_size(size: List[int]) -> None:
+def _verify_batch_size(size: list[int]) -> None:
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size
     # check to a simple equivalent for loop
@@ -2832,7 +2832,7 @@ def batch_norm(
     )
 
 
-def _verify_spatial_size(size: List[int]) -> None:
+def _verify_spatial_size(size: list[int]) -> None:
     # Verify that there is > 1 spatial element for instance norm calculation.
     size_prods = 1
     for i in range(2, len(size)):
@@ -2888,7 +2888,7 @@ def instance_norm(
 
 def layer_norm(
     input: Tensor,
-    normalized_shape: List[int],
+    normalized_shape: list[int],
     weight: Optional[Tensor] = None,
     bias: Optional[Tensor] = None,
     eps: float = 1e-5,
@@ -2914,7 +2914,7 @@ def layer_norm(
 
 def rms_norm(
     input: Tensor,
-    normalized_shape: List[int],
+    normalized_shape: list[int],
     weight: Optional[Tensor] = None,
     eps: Optional[float] = None,
 ) -> Tensor:
@@ -4301,7 +4301,7 @@ def upsample(  # noqa: F811
 @_overload
 def upsample(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
+    size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
@@ -4402,7 +4402,7 @@ def _is_integer(x) -> bool:
 def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
-    scale_factor: Optional[List[float]] = None,
+    scale_factor: Optional[list[float]] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
@@ -4414,8 +4414,8 @@ def interpolate(  # noqa: F811
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
-    scale_factor: Optional[List[float]] = None,
+    size: Optional[list[int]] = None,
+    scale_factor: Optional[list[float]] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
@@ -4440,7 +4440,7 @@ def interpolate(  # noqa: F811
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
+    size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
@@ -4453,7 +4453,7 @@ def interpolate(  # noqa: F811
 def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
-    scale_factor: Optional[List[float]] = None,
+    scale_factor: Optional[list[float]] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
@@ -4744,7 +4744,7 @@ def upsample_nearest(  # noqa: F811
 @_overload
 def upsample_nearest(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
+    size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
 ) -> Tensor:
     pass
@@ -4794,7 +4794,7 @@ def upsample_bilinear(  # noqa: F811
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
+    size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
 ) -> Tensor:
     pass
@@ -4804,7 +4804,7 @@ def upsample_bilinear(  # noqa: F811
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
-    scale_factor: Optional[List[float]] = None,
+    scale_factor: Optional[list[float]] = None,
 ) -> Tensor:
     pass
 
@@ -4812,8 +4812,8 @@ def upsample_bilinear(  # noqa: F811
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[List[int]] = None,
-    scale_factor: Optional[List[float]] = None,
+    size: Optional[list[int]] = None,
+    scale_factor: Optional[list[float]] = None,
 ) -> Tensor:
     pass
 
@@ -5025,7 +5025,7 @@ def grid_sample(
 
 def affine_grid(
     theta: Tensor,
-    size: List[int],
+    size: list[int],
     align_corners: Optional[bool] = None,
 ) -> Tensor:
     r"""Generate 2D or 3D flow field (sampling grid), given a batch of affine matrices :attr:`theta`.
@@ -5127,7 +5127,7 @@ def affine_grid(
 
 def pad(
     input: Tensor,
-    pad: List[int],
+    pad: list[int],
     mode: str = "constant",
     value: Optional[float] = None,
 ) -> Tensor:
@@ -5490,7 +5490,7 @@ def normalize(
         return torch.div(input, denom, out=out)
 
 
-def assert_int_or_pair(arg: List[int], arg_name: str, message: str) -> None:
+def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
@@ -5579,7 +5579,7 @@ def _in_projection_packed(
     v: Tensor,
     w: Tensor,
     b: Optional[Tensor] = None,
-) -> List[Tensor]:
+) -> list[Tensor]:
     r"""Perform the in-projection step of the attention operation, using packed weights.
 
     Output is a triple containing projection tensors for query, key and value.
@@ -5658,7 +5658,7 @@ def _in_projection(
     b_q: Optional[Tensor] = None,
     b_k: Optional[Tensor] = None,
     b_v: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     r"""Perform the in-projection step of the attention operation.
 
     This is simply a triple of linear projections,
@@ -6019,7 +6019,7 @@ def multi_head_attention_forward(
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
-) -> Tuple[Tensor, Optional[Tensor]]:
+) -> tuple[Tensor, Optional[Tensor]]:
     r"""Forward method for MultiHeadAttention.
 
     .. note::
