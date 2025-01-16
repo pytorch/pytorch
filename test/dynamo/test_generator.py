@@ -383,14 +383,14 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             g1, g2 = whoo(t), whoo(t + 1)
-            return (g1, g2)
+            return (g1, g2), t.sin()
 
         t = torch.randn(2)
-        g1, g2 = fn(t)
+        (g1, g2), _ = fn(t)
         self.assertEqual(next(g1), t.sin())
-        self.assertEqual(next(g2), t.sin())
+        self.assertEqual(next(g2), (t + 1).sin())
         self.assertEqual(next(g1), t.cos())
-        self.assertEqual(next(g2), t.cos())
+        self.assertEqual(next(g2), (t + 1).cos())
 
     def test_return_advanced_generator(self):
         def whoo(t):
