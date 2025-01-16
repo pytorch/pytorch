@@ -1327,7 +1327,7 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
-        elif isinstance(obj, variables.GeneratorObjectVariable):
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
             return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
