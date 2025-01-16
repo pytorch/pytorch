@@ -1385,7 +1385,6 @@ class PipelineStage(_PipelineStageBase):
 
         # set attributes needed for forward
         with torch.no_grad():
-            logger.debug("Shape inference: stage %s running forward", self.stage_index)
             outputs = self.submod(*args, **kwargs)
 
         # if single tensor, convert so it is always a list
@@ -1397,6 +1396,12 @@ class PipelineStage(_PipelineStageBase):
         # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
         outputs_meta = tuple(
             tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        )
+        logger.debug(
+            "Shape inference: stage %s inputs %s, outputs %s",
+            self.stage_index,
+            self.inputs_meta,
+            outputs_meta,
         )
         self._configure_outputs_meta(outputs_meta)
 
