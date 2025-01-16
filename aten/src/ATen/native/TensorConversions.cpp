@@ -343,7 +343,8 @@ Tensor _to_copy(
   }
 
   bool pin_out =
-      (non_blocking && at::accelerator::isAccelerator(self.device().type()) &&
+      (non_blocking &&
+       at::accelerator::isAcceleratorExcluded(self.device().type(), at::kMPS) &&
        options.device().is_cpu() && (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
