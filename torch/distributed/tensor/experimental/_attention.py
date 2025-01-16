@@ -32,6 +32,7 @@ class _CausalBehavior(Enum):
 class _RotateMethod(Enum):
     ALL_TO_ALL = auto()
     ALL_GATHER = auto()
+    PRE_ALL_GATHER = auto()
 
 
 aten = torch.ops.aten
@@ -250,22 +251,18 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> tuple[torch.Tensor, ...]:
-        ...
+    ) -> tuple[torch.Tensor, ...]: ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
-        ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor:
-        ...
+    def next_buffer(self) -> torch.Tensor: ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -341,6 +338,12 @@ def _ring_rotate(
         else [size - 1] + list(range(0, size - 1))
     )
     return ft_c.permute_tensor(block, dsts, pg)
+
+
+def _cp_allgather(buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int) -> torch.Tensor:
+    all_buffers = [torch.empty_like(buffer) for _ in range(mesh.size())]
+    ft_c.all_gather_inplace(all_buffers, buffer, group=mesh.get_group())
+    return torch.cat(all_buffers, dim=seq_dim)
 
 
 def _templated_ring_attention(
@@ -534,22 +537,38 @@ def _sdpa_handler(
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
 
-    if op_call == aten._scaled_dot_product_flash_attention.default:
-        local_results = _scaled_dot_product_ring_flash_attention(
-            op_info.mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_efficient_attention.default:
-        local_results = _scaled_dot_product_ring_efficient_attention(
-            op_info.mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
+    if _cp_options.rotate_method == _RotateMethod.PRE_ALL_GATHER:
+        seq_dim = 2
+
+        def inner(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            key = _maybe_wait(_cp_allgather(key, op_info.mesh, seq_dim))
+            value = _maybe_wait(_cp_allgather(value, op_info.mesh, seq_dim))
+            return op_call(query, key, value, *args, **kwargs)
+
+        local_results = inner(*op_info.local_args, **op_info.local_kwargs)
     else:
-        raise NotImplementedError(
-            "CP only supports flash attention and memory efficient attention now."
-        )
+        if op_call == aten._scaled_dot_product_flash_attention.default:
+            local_results = _scaled_dot_product_ring_flash_attention(
+                op_info.mesh,
+                *op_info.local_args,  # type: ignore[arg-type]
+                **op_info.local_kwargs,  # type: ignore[arg-type]
+            )
+        elif op_call == aten._scaled_dot_product_efficient_attention.default:
+            local_results = _scaled_dot_product_ring_efficient_attention(
+                op_info.mesh,
+                *op_info.local_args,  # type: ignore[arg-type]
+                **op_info.local_kwargs,  # type: ignore[arg-type]
+            )
+        else:
+            raise NotImplementedError(
+                "CP only supports flash attention and memory efficient attention now."
+            )
 
     return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
 
@@ -573,20 +592,58 @@ def _sdpa_backward_handler(
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
 
-    if op_call == aten._scaled_dot_product_flash_attention_backward.default:
-        local_results = _scaled_dot_product_ring_flash_attention_backward(
-            op_info.mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
+    if _cp_options.rotate_method == _RotateMethod.PRE_ALL_GATHER:
+        seq_dim = 2
+        mesh = op_info.mesh
+
+        def inner(
+            grad_out: torch.Tensor,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            key = _maybe_wait(_cp_allgather(key, mesh, seq_dim))
+            value = _maybe_wait(_cp_allgather(value, mesh, seq_dim))
+            return op_call(grad_out, query, key, value, *args, **kwargs)
+
+        local_results = inner(*op_info.local_args, **op_info.local_kwargs)
+        grad_key, grad_value = local_results[1].to(torch.float32), local_results[2].to(
+            torch.float32
         )
-    elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
-        local_results = _scaled_dot_product_ring_efficient_attention_backward(
-            op_info.mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
+        grad_key = _maybe_wait(ft_c.all_reduce_inplace(grad_key, group=mesh)).to(
+            torch.bfloat16
         )
+        grad_value = _maybe_wait(ft_c.all_reduce_inplace(grad_value, group=mesh)).to(
+            torch.bfloat16
+        )
+        grad_key = (
+            grad_key.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
+            .detach()
+            .clone()
+        )
+        grad_value = (
+            grad_value.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
+            .detach()
+            .clone()
+        )
+        local_results = local_results[:1] + (grad_key, grad_value) + local_results[3:]
     else:
-        raise NotImplementedError(f"{op_call=}")
+        if op_call == aten._scaled_dot_product_flash_attention_backward.default:
+            local_results = _scaled_dot_product_ring_flash_attention_backward(
+                op_info.mesh,
+                *op_info.local_args,  # type: ignore[arg-type]
+                **op_info.local_kwargs,  # type: ignore[arg-type]
+            )
+        elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
+            local_results = _scaled_dot_product_ring_efficient_attention_backward(
+                op_info.mesh,
+                *op_info.local_args,  # type: ignore[arg-type]
+                **op_info.local_kwargs,  # type: ignore[arg-type]
+            )
+        else:
+            raise NotImplementedError(f"{op_call=}")
 
     return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
 
@@ -1094,15 +1151,13 @@ class _LoadBalancer(ABC):
     @abstractmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     @classmethod
     @abstractmethod
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 class _SequentialSharder(_LoadBalancer):
@@ -1234,6 +1289,14 @@ def context_parallel(
         `torch.distributed._tensor.experimental.attention.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
+    if _cp_options.enable_load_balance:
+        if _cp_options.rotate_method == _RotateMethod.PRE_ALL_GATHER:
+            _cp_options.enable_load_balance = False
+            logger.info(
+                "Load balance feature is not implemented yet for PRE_ALL_GATHER. "
+                "Fall back to the enable_load_balance=False."
+            )
+
     buffers = [] if buffers is None else buffers
     buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
     no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
@@ -1310,6 +1373,8 @@ def set_rotate_method(rotate_method: str) -> None:
         _cp_options.rotate_method = _RotateMethod.ALL_GATHER
     elif rotate_method == "alltoall":
         _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
+    elif rotate_method == "pre_allgather":
+        _cp_options.rotate_method = _RotateMethod.PRE_ALL_GATHER
     else:
         raise NotImplementedError(
             "Context Parallel does not support "

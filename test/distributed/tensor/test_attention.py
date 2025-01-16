@@ -52,6 +52,7 @@ if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
+    _RotateMethod.PRE_ALL_GATHER: "pre_allgather",
 }  # mapping from _RotateMethod enum to string
 
 
@@ -74,7 +75,14 @@ class RingAttentionTest(DTensorTestBase):
     @parametrize("compiled", [True, False])
     @parametrize("backend", backends)
     @parametrize("load_balance", [True, False])
-    @parametrize("rotater", [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER])
+    @parametrize(
+        "rotater",
+        [
+            _RotateMethod.ALL_TO_ALL,
+            _RotateMethod.ALL_GATHER,
+            _RotateMethod.PRE_ALL_GATHER,
+        ],
+    )
     def test_ring_attention_sdpa(
         self,
         is_causal: bool,
@@ -173,17 +181,17 @@ class RingAttentionTest(DTensorTestBase):
                 [cp_out, cp_q.grad, cp_k.grad, cp_v.grad],
                 [2, 2, 2, 2],
             )
+
             atol = (
                 1e-08
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 1e-3 * self.world_size
             )
             self.assertTrue(torch.allclose(out, cp_out, atol=atol))
-
             atol = (
-                2e-06
+                1e-08
                 if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 8e-3 * self.world_size
+                else 1e-3 * self.world_size
             )
             self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
             self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
