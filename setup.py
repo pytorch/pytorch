@@ -529,7 +529,7 @@ def build_deps():
 
 missing_pydep = """
 Missing build dependency: Unable to `import {importname}`.
-Please install it via `conda install {module}` or `pip install {module}`
+Please install it via `pip install {module}`
 """.strip()
 
 
@@ -699,7 +699,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
