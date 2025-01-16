@@ -1061,9 +1061,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
 
-    def generate_maybe_resolve_tensor_flags(self, tensor):
-        self.writeline()
-
     def generate_c_shim_fallback_kernel(self, fallback_kernel, args):
         output_args = []
         output_raii_handles = []
