@@ -84,7 +84,7 @@ static void bind_function(
   // This is the function that can be called from Python.
   auto py_func = py::cpp_function(
       [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
-          std::vector<c10::optional<at::Tensor>>& inputs,
+          std::vector<std::optional<at::Tensor>>& inputs,
           const py::args& py_args) -> py::object {
         // py_args is a tuple of PyObject*.
         // We need to reconstruct a vector<IValue> to invoke `fn`.
@@ -96,7 +96,7 @@ static void bind_function(
         auto tuple_args = jit::tuple_slice(py_args);
         for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
           args.emplace_back(jit::toIValue(
-              tuple_args[idx], packed_args_schema[idx], c10::nullopt));
+              tuple_args[idx], packed_args_schema[idx], std::nullopt));
         }
         // None in Python corresponds to undefined Tensor in C++
         auto inputs_ = toTensorList(inputs);
@@ -204,7 +204,7 @@ static variable_list validate_outputs(
     const variable_list& outputs,
     const ivalue_list& args) {
   auto r = PackedArgs(args);
-  auto value = r.unpack<std::vector<c10::optional<InputMetadata>>>();
+  auto value = r.unpack<std::vector<std::optional<InputMetadata>>>();
   auto new_outputs = outputs;
 
   torch::autograd::validate_outputs(
@@ -863,7 +863,7 @@ static CacheNode* _compiled_autograd_impl(
       static c10::once_flag flag;
       c10::call_once(flag, [&]() {
         auto schema = std::vector<at::TypePtr>{IValuePacker<
-            std::vector<c10::optional<InputMetadata>>>::packed_type()};
+            std::vector<std::optional<InputMetadata>>>::packed_type()};
         bind_function(
             py_compiler.get(), "validate_outputs", validate_outputs, schema);
       });
