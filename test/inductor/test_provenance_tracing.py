@@ -84,9 +84,8 @@ class TestProvenanceTracingArtifact(TestCase):
                             optimized = AOTIRunnerUtil.load("cuda", so_path)
                             optimized(*example_inputs)
                         else:
-                            compiled = torch.compile(gm, backend=backend)(
-                                *example_inputs
-                            )
+                            compiled = torch.compile(gm, backend=backend)
+                            compiled(*example_inputs)
                     self.assertEqual(len(cm.output), 1)
                     m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
                     self.assertTrue(m)
