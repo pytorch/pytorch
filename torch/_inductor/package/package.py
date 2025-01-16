@@ -224,7 +224,7 @@ def package_aoti(
                     file,
                 )
 
-    if isinstance(archive_file, io.IOBase):
+    if isinstance(archive_file, (io.IOBase, IO)):
         archive_file.seek(0)
     return archive_file
 
@@ -286,5 +286,6 @@ def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel
             loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
+    path = os.fspath(path)
     loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

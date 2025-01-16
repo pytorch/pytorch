@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, IO, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
@@ -105,7 +105,7 @@ def aoti_compile_and_package(
 
     assert (
         package_path is None
-        or isinstance(package_path, io.IOBase)
+        or isinstance(package_path, (io.IOBase, IO))
         or (
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
