@@ -32,40 +32,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfHpu,
-    TEST_CUDA,
-    TEST_HPU,
     TestCase,
 )
 
 
-# NOTE: Instructions for adding new device types to this test file
-#
-# This test file contains two types of tests:
-# 1. Tests that run on both CPUs and accelerators
-# 2. Tests that run only on accelerators
-#
-# We use two variables to manage device types:
-# - `devices`: A list containing device types for both CPU and accelerator tests
-# - `DEVICE`: A string containing only the accelerator type for accelerator-only tests
-#
-# To add a new device type:
-# 1. Add a new `elif` statement in the if-else ladder below
-# 2. Check for the presence of your device (e.g., TEST_NEW_DEVICE)
-# 3. Append your device type to the `devices` list
-# 4. Assign your device type string to `DEVICE`
-#
-# Example:
-# elif TEST_NEW_DEVICE:
-#     devices.append("new_device")
-#     DEVICE = "new_device"
-
-DEVICE = "cuda"
-devices = ["cpu"]
-if TEST_HPU:
-    devices.append("hpu")
-    DEVICE = "hpu"
-elif TEST_CUDA:
-    devices.append("cuda")
+devices = ("cpu", "cuda", "hpu")
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -466,26 +437,10 @@ class TestMakeFx(TestCase):
         )
 
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-
-# Adding support for HCCL backend
-# To add a different backend
-# add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
-# And then set the BACKEND variable appropriately.
-if TEST_HPU:
-    BACKEND = dist.Backend.HCCL
-
-
-# allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format
-# and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
-    if TEST_CUDA:
-        if torch.cuda.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
-    elif TEST_HPU:
-        if torch.hpu.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
+# allows you to check count for multiple accelerator irrespective of device type
+def exit_if_lt_x_accelerators(x, device):
+    if torch.get_device_module(device).device_count() < x:
+        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
 def with_comms(func=None):
@@ -494,11 +449,10 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        device = kwargs.get("device", None)
+        exit_if_lt_x_accelerators(self.world_size, device)
 
-        kwargs["device"] = DEVICE
-        self.pg = self.create_pg(device=DEVICE)
+        self.pg = self.create_pg(device=device)
         try:
             return func(self, *args, **kwargs)
         finally:
@@ -510,7 +464,7 @@ def with_comms(func=None):
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
+        exit_if_lt_x_accelerators(self.world_size, device)
         tensors = [
             torch.ones([4], device=device),
             torch.ones([4], device=device) + 1,
@@ -582,8 +536,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_tracing_with_fakepg(self, device=DEVICE):
-        exit_if_lt_x_accelerators(self.world_size)
+    def test_tracing_with_fakepg(self, device):
+        exit_if_lt_x_accelerators(self.world_size, device)
 
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
@@ -618,7 +572,41 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_func(torch.ones((100,), device=device), self.process_group, self.rank)
         dist.barrier()
 
+    @with_comms()
+    def test_permute_tensor_with_sub_group(self, device):
+        self.world_size = 4
+        print("world_size=", self.world_size)
 
+        exit_if_lt_x_accelerators(self.world_size, device)
+        mesh_dim_names = ["dp", "tp"]
+
+        mesh_2d = dt.init_device_mesh(
+            torch.device(device).type,
+            (2, self.world_size // 2),
+            mesh_dim_names=mesh_dim_names,
+        )
+
+        for mesh_name in mesh_dim_names:
+            mesh = mesh_2d[mesh_name]
+            rank = mesh.get_local_rank()
+
+            # rank0: [0., 1.], rank1: [2., 3.]
+            send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
+            recvd_tensor = ft_c.permute_tensor(send_tensor, [1, 0], group=mesh)
+
+            # rank0: [2., 3.], rank1: [0., 1.]
+            expected = torch.arange(2, dtype=torch.float32, device=device) + 2 * (
+                (rank - 1 + 2) % 2
+            )
+            self.assertEqual(
+                recvd_tensor,
+                expected,
+                msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
+                f"but received {recvd_tensor} instead.",
+            )
+
+
+"""
 class TestDistributedBackendCollectivesWithWorldSize4(
     TestCollectivesWithDistributedBackend
 ):
@@ -628,7 +616,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
 
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
+        exit_if_lt_x_accelerators(self.world_size, device)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
@@ -653,6 +641,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
                 msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
                 f"but received {recvd_tensor} instead.",
             )
+"""
 
 
 @instantiate_parametrized_tests
@@ -809,15 +798,17 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-# Update the supported devices in DEVICE
+accelerator_only = ("cuda", "hpu")
 instantiate_device_type_tests(
-    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE
+    TestCollectivesWithDistributedBackend, globals(), only_for=accelerator_only
 )
+"""
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE
 )
+"""
 instantiate_device_type_tests(
-    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE
+    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=accelerator_only
 )
 
 if __name__ == "__main__":

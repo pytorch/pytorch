@@ -590,6 +590,9 @@ class MultiProcessTestCase(TestCase):
     def world_size(self) -> int:
         return DEFAULT_WORLD_SIZE
 
+    @world_size.setter
+    def world_size(self, value):
+        self._world_size = value
     def join_or_run(self, fn):
         @wraps(fn)
         def wrapper(self):
@@ -936,26 +939,16 @@ class DistributedTestBase(MultiProcessTestCase):
         except OSError:
             pass
 
-    def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device :   # intel gaudi
-            return "hccl"
-        else :
-            return "gloo"
-
     def create_pg(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
         torch.distributed.init_process_group(
-            backend=self.backend(device),
+            backend=c10d.get_default_backend_for_device(device),
             world_size=self.world_size,
             rank=self.rank,
             store=store
         )
-        if "nccl" in self.backend(device):
-            torch.cuda.set_device(self.rank)
-        return torch.distributed.distributed_c10d._get_default_group()
+        return c10d.get_default_backend_for_device()
 
     def rank_to_device(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
