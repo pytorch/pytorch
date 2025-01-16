@@ -34,7 +34,7 @@ def maybe_time(
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         start_t = time.perf_counter()
-        result = fn(*args, **kwargs)
+        result = fn(self, *args, **kwargs)
         logger.debug(
             "Call `benchmarking.%s.%s(*args=%r, **kwargs=%r)` took %f milliseconds.",
             self.__class__.__name__,
