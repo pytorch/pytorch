@@ -175,7 +175,7 @@ class InPlaceCompilationTests(TestCase):
 
         x = torch.randn(10, 10)
         with self.assertRaises(NameError):
-        fn(x)
+            fn(x)
 
     def test_compilation_tensor_invalid_method(self):
         @torch.compile(backend="eager")
