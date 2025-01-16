@@ -358,9 +358,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
     cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops,
 ):
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
+        _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
         _fakify_params_buffers,
         _ignore_backend_decomps,
@@ -477,6 +479,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
                     _check_autograd_state=False,
+                    decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
 
                 # aten_export_artifact.constants contains only fake script objects, we need to map them back
@@ -537,9 +540,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
+    custom_triton_ops_decomposition_ctx = (
+        contextlib.nullcontext
+        if decompose_custom_triton_ops
+        else _disable_custom_triton_op_functional_decomposition
+    )
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
         cia_to_decomp
-    ):
+    ), custom_triton_ops_decomposition_ctx():
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
@@ -633,14 +641,47 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
 
-    output_specs = [
-        OutputSpec(
-            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
-            update_arg(spec.arg, new_outputs[i]),
-            old_new_placeholder_map.get(spec.target, spec.target),
+    output_specs = []
+
+    # handle buffer & input mutations; these appear before loss output & gradients
+    # (1) ep.graph_signature.input_specs tells us types of inputs
+    # (2) graph_signature.user_inputs tells us node input names in order
+    # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
+    # map (3) -> (2) for input order, -> (1) for input type
+    user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
+    assert mutation_names == [node.name for node in new_outputs[: len(mutation_names)]]
+    for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
+        i = user_inputs_index[input_name]
+        input_spec = ep.graph_signature.input_specs[i]
+        assert input_spec.kind in (InputKind.USER_INPUT, InputKind.BUFFER)
+        output_kind = (
+            OutputKind.BUFFER_MUTATION
+            if input_spec.kind == InputKind.BUFFER
+            else OutputKind.USER_INPUT_MUTATION
         )
-        for i, spec in enumerate(ep.graph_signature.output_specs)
-    ]
+        target = (
+            input_spec.target
+            if input_spec.kind == InputKind.BUFFER
+            else input_spec.arg.name
+        )
+        output_specs.append(
+            OutputSpec(
+                kind=output_kind,
+                arg=TensorArgument(name=output_name),
+                target=target,
+            )
+        )
+
+    # handle actual user outputs
+    for i, spec in enumerate(ep.graph_signature.output_specs):
+        output_specs.append(
+            OutputSpec(
+                OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
+                update_arg(spec.arg, new_outputs[len(mutation_names) + i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
+        )
 
     if joint_loss_index is not None:
         assert graph_signature.backward_signature is not None
@@ -776,6 +817,7 @@ def _decompose_exported_program(
     cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops: bool,
 ):
     (
         gm,
@@ -786,6 +828,7 @@ def _decompose_exported_program(
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
+        decompose_custom_triton_ops=decompose_custom_triton_ops,
     )
 
     # The signatures of ep.module_call_graph refer to input / output nodes of
@@ -1249,6 +1292,7 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
+        decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1312,6 +1356,7 @@ class ExportedProgram:
             cia_to_decomp=cia_to_decomp,
             python_decomp_table=python_decomp_table,
             joint_loss_index=None,
+            decompose_custom_triton_ops=decompose_custom_triton_ops,
         )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
