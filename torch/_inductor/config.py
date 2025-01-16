@@ -15,7 +15,7 @@ from typing import (
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import _Config, get_tristate_env, install_config_module
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -320,7 +320,11 @@ inter_node_bw = 25
 # to benchmark kernels during autotuning, otherwise fall back to
 # Triton's `do_bench`. the experimental benchmarker may produce
 # results that are not consistent with `do_bench`'s results
-use_experimental_benchmarker = True
+use_experimental_benchmarker = _Config(
+    justknob="pytorch/inductor:use_experimental_benchmarker",
+    default=True,
+    env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER"
+)
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
