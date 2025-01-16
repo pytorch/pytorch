@@ -4,5 +4,4 @@
     * Added poolside tag to version name [PR](https://github.com/poolsideai/pytorch/pull/2)
     * Made cuda\_arch list configurable during CI build [PR](https://github.com/poolsideai/pytorch/pull/3)
     * Added a custom CI workflow [PR](https://github.com/poolsideai/pytorch/pull/4)
-
-
+* [16th Jan 2025] Switched to [Poolside NCCL fork](https://github.com/poolsideai/nccl)
