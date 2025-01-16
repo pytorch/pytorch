@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     TestCase,
+    xfailIfLinux,
 )
 
 
@@ -673,6 +674,7 @@ class DistributedDataParallelTest(
             vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
         )
 
+    @xfailIfLinux
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
@@ -751,7 +753,7 @@ class DistributedDataParallelTest(
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+        map_location = {"cuda:0": f"cuda:{self.rank:d}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:

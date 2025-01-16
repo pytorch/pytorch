@@ -358,9 +358,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
     cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops,
 ):
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
+        _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
         _fakify_params_buffers,
         _ignore_backend_decomps,
@@ -378,6 +380,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
+
+        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        # [NOTE] Unwrapping subclasses AOT
+        # In torch.compile, the subclass unwrapping/wrapping happen at runtime
+        # but at export, this is impossible as it is intented to be run on
+        # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
+        # ExportedProgram state_dict won't be same as eager model because eager model
+        # could have subclass weights while ExportedProgram will have desugared versions.
+        # This is fine because run_decompositions is supposed to specialize to post-autograd
+        # graph where the subclass desugaring is supposed to happen.
+        unwrap_tensor_subclass_parameters(mod)
+        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
@@ -459,6 +479,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
                     _check_autograd_state=False,
+                    decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
 
                 # aten_export_artifact.constants contains only fake script objects, we need to map them back
@@ -485,7 +506,27 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+            gm, new_graph_signature
+        )
+
+        # When we apply parameterixzation rule to unwrap
+        # subclasses, the state dict will now have different
+        # desugared parameters. We need to manually filter those
+        # and update the ep.state_dict. Ideally, we should just return
+        # the state dict of ep.module but ep.module only stores params
+        # buffers that participate in forward. If we undo this behaviour,
+        # it would break some downstream users.
+        for name, p in unwrapped_params.items():
+            if name not in wrapped_params:
+                ep.state_dict[name] = p
+
+        for name, p in wrapped_params.items():
+            assert name in ep.state_dict
+            if name not in unwrapped_params:
+                ep.state_dict.pop(name)
+
+        return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -499,9 +540,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
+    custom_triton_ops_decomposition_ctx = (
+        contextlib.nullcontext
+        if decompose_custom_triton_ops
+        else _disable_custom_triton_op_functional_decomposition
+    )
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
         cia_to_decomp
-    ):
+    ), custom_triton_ops_decomposition_ctx():
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
@@ -595,14 +641,47 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
 
-    output_specs = [
-        OutputSpec(
-            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
-            update_arg(spec.arg, new_outputs[i]),
-            old_new_placeholder_map.get(spec.target, spec.target),
+    output_specs = []
+
+    # handle buffer & input mutations; these appear before loss output & gradients
+    # (1) ep.graph_signature.input_specs tells us types of inputs
+    # (2) graph_signature.user_inputs tells us node input names in order
+    # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
+    # map (3) -> (2) for input order, -> (1) for input type
+    user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
+    assert mutation_names == [node.name for node in new_outputs[: len(mutation_names)]]
+    for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
+        i = user_inputs_index[input_name]
+        input_spec = ep.graph_signature.input_specs[i]
+        assert input_spec.kind in (InputKind.USER_INPUT, InputKind.BUFFER)
+        output_kind = (
+            OutputKind.BUFFER_MUTATION
+            if input_spec.kind == InputKind.BUFFER
+            else OutputKind.USER_INPUT_MUTATION
         )
-        for i, spec in enumerate(ep.graph_signature.output_specs)
-    ]
+        target = (
+            input_spec.target
+            if input_spec.kind == InputKind.BUFFER
+            else input_spec.arg.name
+        )
+        output_specs.append(
+            OutputSpec(
+                kind=output_kind,
+                arg=TensorArgument(name=output_name),
+                target=target,
+            )
+        )
+
+    # handle actual user outputs
+    for i, spec in enumerate(ep.graph_signature.output_specs):
+        output_specs.append(
+            OutputSpec(
+                OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
+                update_arg(spec.arg, new_outputs[len(mutation_names) + i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
+        )
 
     if joint_loss_index is not None:
         assert graph_signature.backward_signature is not None
@@ -651,7 +730,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unneccessary_copy_op_pass(
@@ -738,12 +817,18 @@ def _decompose_exported_program(
     cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
+    decompose_custom_triton_ops: bool,
 ):
-    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+    (
+        gm,
+        new_graph_signature,
+        state_dict,
+    ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
+        decompose_custom_triton_ops=decompose_custom_triton_ops,
     )
 
     # The signatures of ep.module_call_graph refer to input / output nodes of
@@ -769,7 +854,7 @@ def _decompose_exported_program(
         root=gm,
         graph=gm.graph,
         graph_signature=new_graph_signature,
-        state_dict=ep.state_dict,
+        state_dict=state_dict,
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
@@ -1207,6 +1292,7 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
+        decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1270,6 +1356,7 @@ class ExportedProgram:
             cia_to_decomp=cia_to_decomp,
             python_decomp_table=python_decomp_table,
             joint_loss_index=None,
+            decompose_custom_triton_ops=decompose_custom_triton_ops,
         )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":

@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -38,7 +38,7 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
+        keys: tuple[str, ...],
         additional_files: List[str],
     ):
         super().__init__(line_template)
@@ -94,7 +94,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[List[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -203,9 +203,6 @@ class CppWrapperGpu(CppWrapperCpu):
             return
 
         super().write_header()
-
-        self.header.splice("#include <filesystem>")
-        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
@@ -514,7 +511,8 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if (
-            config.triton.autotune_at_compile_time
+            triton
+            and config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
@@ -613,7 +611,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
-                casted.append(f"({arg_type}){new_arg}")
+                casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 

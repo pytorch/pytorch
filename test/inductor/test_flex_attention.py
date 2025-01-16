@@ -565,7 +565,11 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device=self.device, dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
@@ -978,7 +982,6 @@ class TestFlexAttention(InductorTestCase):
         if self.device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
 
-        MAX_S = S
         block_mask1 = create_block_mask(noop_mask, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
         # The first eager batch, shape (B, H, S, D)
@@ -3490,7 +3493,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Run forward pass
             x = torch.randn(batch_shape, sequence_len, 512).cuda()
-            y = model(x, block_mask=block_mask)
+            model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
@@ -3661,7 +3664,7 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         attention = torch.compile(flex_attention)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._inductor.exc.InductorError,
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
@@ -3678,7 +3681,7 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         attention = torch.compile(flex_attention)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._inductor.exc.InductorError,
             r"`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. Found input tensors are `torch.float16`.",
         ):
             attention(query, key, value)
@@ -4070,8 +4073,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("compile", [False, True])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_no_q_info(self, compile: bool, dtype):
         device = torch.device(self.device)
 
@@ -4149,7 +4152,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         device = self.device
         max_seq_len, doc_count = 128, 4
-        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
+        SEQ_LEN = max_seq_len
 
         lengths = generate_random_lengths(max_seq_len, doc_count)
         offsets = length_to_offsets(lengths, device)
@@ -4179,7 +4182,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             lengths = generate_random_lengths(1024 + i, 5)
             offsets = length_to_offsets(lengths, self.device)
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
-            total_seq_len = 1024 + i
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
                 return (
@@ -4513,7 +4515,11 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
             device=self.device,
@@ -4664,7 +4670,11 @@ class TestPagedAttention(InductorTestCase):
         )
 
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)

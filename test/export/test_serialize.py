@@ -542,6 +542,8 @@ class TestDeserialize(TestCase):
                 # Check "val" metadata
                 val1 = node1.meta.get("val", None)
                 val2 = node2.meta.get("val", None)
+                self.assertEqual(len(node1.args), len(node2.args))
+                self.assertEqual(set(node1.kwargs.keys()), set(node2.kwargs.keys()))
                 if val1 is None or val2 is None:
                     # Either both are None
                     self.assertEqual(val1, val2)
@@ -665,7 +667,11 @@ class TestDeserialize(TestCase):
 
             for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
                 self.assertEqual(type(orig), type(loaded))
-                if isinstance(orig, torch.Tensor):
+                # torch.allclose doesn't work for float8
+                if isinstance(orig, torch.Tensor) and orig.dtype not in [
+                    torch.float8_e4m3fn,
+                    torch.float8_e5m2,
+                ]:
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
                     else:
@@ -776,6 +782,23 @@ class TestDeserialize(TestCase):
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
 
+    def test_hoo_symint_input(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                num = c.item()
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda a, b: a + b + num,
+                    false_fn=lambda a, b: a - b - num,
+                    operands=(a, b),
+                )
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
+        self.check_graph(Mod(), inp, use_pre_dispatch=False)
+
     def test_multi_return(self) -> None:
         """
         Test multiple return from a single node (ex. layer_norm has 2 outputs)
@@ -842,6 +865,29 @@ class TestDeserialize(TestCase):
 
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
+
+    def test_sym_bool_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z == 2)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0]),))
+
+    def test_sym_int_torch_check_equal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.size(0)
+                torch._check_is_size(z)
+                torch._check(z % 3 == 0)
+                torch._check(z == 3)
+                return y
+
+        self.check_graph(Module(), (torch.Tensor([1, 0, 1, 0, 1, 0]),))
 
     def test_shape(self):
         class Foo(torch.nn.Module):
@@ -937,6 +983,20 @@ class TestDeserialize(TestCase):
         g = Module()
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
         self.check_graph(g, inputs, _check_meta=False)
+
+    def test_positional_argument_with_default_value(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.randn(10, 10)
+                self.bias = torch.randn(10)
+
+            def forward(self, x):
+                # bias has an default value here but it should be preserved
+                # as a positional argument.
+                return torch.ops.aten.linear.default(x, self.weight, self.bias)
+
+        self.check_graph(MyLinear(), (torch.randn(10, 10),))
 
     def test_tensor_tensor_list(self):
         with torch.library._scoped_library("_export", "FRAGMENT") as lib:
@@ -1148,6 +1208,17 @@ def forward(self, x):
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
+    def test_serialize_float8(self):
+        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    return x.to(dtype)
+
+            m = MyModule()
+            inputs = (torch.ones(2, 3),)
+            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)
