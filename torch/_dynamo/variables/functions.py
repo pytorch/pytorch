@@ -621,8 +621,9 @@ class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVaria
 
     def _build_inline_tracer(self, tx, args, kwargs):
         # NOTE: This only exists to not break support for context manager when
-        # config.enable_faithful_generator_behavior is False. We can safely remove this
-        # once generators are fully supported
+        # config.enable_faithful_generator_behavior = False and
+        # config.enable_trace_contextlib = True. In case the former is false,
+        # Dynamo should still be able to trace through @contextmanager functions
         tracer = super()._build_inline_tracer(tx, args, kwargs)
         assert isinstance(
             tracer,
