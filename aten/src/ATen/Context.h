@@ -337,6 +337,8 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
+  int SMCarveout() const;
+  void setSMCarveout(int);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -418,6 +420,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
+  int sm_carveout = 0;
   bool enabled_mkldnn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =

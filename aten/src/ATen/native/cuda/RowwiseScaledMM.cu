@@ -320,6 +320,9 @@ void f8f8bf16_rowwise_impl(
   // multiplication computation
   size_t workspace_size = Gemm::get_workspace_size(arguments);
 
+  // Ensure persistent kernels leave enough free SMs for NCCL background ops.
+  arguments.hw_info.sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount - at::globalContext().SMCarveout();
+
   // Set the swizzle size
   arguments.scheduler.max_swizzle_size = swizzle;
 

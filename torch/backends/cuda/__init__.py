@@ -133,6 +133,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
+        elif name == "sm_carveout":
+            return torch._C._get_sm_carveout()
         raise AttributeError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -142,6 +144,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
+        elif name == "sm_carveout":
+            return torch._C._set_sm_carveout(value)
         raise AttributeError("Unknown attribute " + name)
 
 
