@@ -41,8 +41,8 @@ install_pip_dependencies() {
 
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
   # numba and scipy version used in PyTorch CI
-  conda_run pip uninstall numba scipy
-  
+  conda_run pip uninstall -y numba scipy
+
   popd
 }
 
