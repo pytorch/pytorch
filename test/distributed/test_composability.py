@@ -3,6 +3,7 @@ import copy
 import os
 import sys
 import tempfile
+from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -35,7 +36,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
 )
-from typing import List, Tuple
+
 
 # MLP Layer
 class MLPModule(torch.nn.Module):
@@ -87,9 +88,11 @@ class MLPModuleEven(torch.nn.Module):
         x = F.relu(self.net3(x))
         return x
 
+
 # Copied Transformer from torchtitan.
 # Note: prefer to use common_dtensor variant, but easier to do PP splitting on torchtitan variant.
 # as a TODO, update the common variant to support the same PP splitting.
+
 
 def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
     """
@@ -119,6 +122,7 @@ def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
         return FusedRMSNorm(dim, eps=eps)
     else:
         raise NotImplementedError(f"Unknown norm_type: '{norm_type}'")
+
 
 class RMSNorm(nn.Module):
     """
@@ -151,10 +155,9 @@ class RMSNorm(nn.Module):
 
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 
@@ -601,11 +604,13 @@ class Transformer(nn.Module):
         """
         return cls(model_args)
 
+
 # --- end copied from torchtitan ---
 
 llama3_debugmodel_args = ModelArgs(dim=256, n_layers=8, n_heads=16, vocab_size=8)
 
 # copied/modified from torchtitan
+
 
 # TODO(whc) should this be a utility inside torch.pipelining?
 def stage_ids_this_rank(
@@ -627,6 +632,7 @@ def stage_ids_this_rank(
         )
         x: tuple = stage_v_pairs[pp_rank]
         return x
+
 
 def pipeline_llama_manual_split(
     whole_model: Transformer,
@@ -1013,7 +1019,11 @@ class ComposabilityTest(MultiProcContinousTest):
     )
     def test_pp_cp(self, ScheduleClass, cp_rotate_method):
         """Focuses on context parallelism + PP
-        note: FSDP is still used for any layers outside of CP region
+
+        note: FSDP is still used for any layers outside of CP region.
+        This test uses fsdp + cp for the ref model becuase (1) it is expected that CP introduces some numerical
+        difference from non-CP, (2) FSDP is required if CP is used.  Therefore, the
+        validation portion is written differently from the other tests.
         """
         if TEST_WITH_ROCM:
             return
@@ -1022,49 +1032,11 @@ class ComposabilityTest(MultiProcContinousTest):
         pp_mesh = device_mesh["pp"]
         pp_group = pp_mesh.get_group()
         dp_mesh = cp_mesh = device_mesh["cp"]
-        dp_type = "FSDP_MP"
-
-        # fsdp_mixed-precision dtype
-        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
-
-        # create "entire model"
-        num_microbatches = 8
-        total_layers = llama3_debugmodel_args.n_layers
-        full_model = Transformer(llama3_debugmodel_args)
-        ref_model = copy.deepcopy(full_model)
-        # full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
-        # ref_model = nn.Sequential(*copy.deepcopy(full_model))
-        ref_model.to(self.device)
-        if dp_type == "FSDP_MP":
-            ref_model.to(dtype=mp_dtype)
-
-        # Prepare inputs
-        # TODO: why do we use step_microbatches api and manually prepare microbatches? we could use the normal step API
-        seq_len = 128
-        inputs = [
-            torch.randint(0, llama3_debugmodel_args.vocab_size, (num_microbatches, seq_len), device=self.device, dtype=torch.long)
-            for _ in range(dp_mesh.size())
-        ]
-        input_local = inputs[dp_mesh.get_local_rank()]
-        input_mb = [[input_local[i].reshape((1, seq_len))] for i in range(num_microbatches)]
-
-        targets = [
-            torch.randint(0, llama3_debugmodel_args.vocab_size, (num_microbatches, seq_len), device=self.device, dtype=torch.long)
-            for _ in range(dp_mesh.size())
-        ]
-        target_local = targets[dp_mesh.get_local_rank()]
-        target_mb = [target_local[i].reshape((1, seq_len)) for i in range(num_microbatches)]
-
-        # apply context parallelism if cp is enabled
-        set_rotate_method(cp_rotate_method)
-
-        def build_cp_context(model, input_ids, labels):
-            return 
 
         # Apply FSDP to stage module
         def apply_dp(partial_model):
             mp_policy = MixedPrecisionPolicy(
-                param_dtype=mp_dtype,
+                param_dtype=torch.bfloat16,
                 reduce_dtype=torch.float32,
             )
             fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
@@ -1076,65 +1048,108 @@ class ComposabilityTest(MultiProcContinousTest):
                 )
             return fully_shard(partial_model, **fsdp_config)
 
+        # create "entire model"
+        num_microbatches = 8
+        total_layers = llama3_debugmodel_args.n_layers
+        full_model = Transformer(llama3_debugmodel_args)
+        ref_model = copy.deepcopy(full_model)
+        ref_model.to(self.device)
+        apply_dp(ref_model)
+
+        # Prepare inputs
+        seq_len = 128
+        inputs = [
+            torch.randint(
+                0,
+                llama3_debugmodel_args.vocab_size,
+                (num_microbatches, seq_len),
+                device=self.device,
+                dtype=torch.long,
+            )
+            for _ in range(dp_mesh.size())
+        ]
+        input_local = inputs[dp_mesh.get_local_rank()]
+
+        targets = [
+            torch.randint(
+                0,
+                llama3_debugmodel_args.vocab_size,
+                (num_microbatches, seq_len),
+                device=self.device,
+                dtype=torch.long,
+            )
+            for _ in range(dp_mesh.size())
+        ]
+        target_local = targets[dp_mesh.get_local_rank()]
+
+        # apply context parallelism if cp is enabled
+        set_rotate_method(cp_rotate_method)
+
+        def llm_loss_fn(y, target, scale=1e-1):
+            # Scale the loss to simulate a small learning rate and avoid exploding grads
+            return (
+                torch.nn.functional.cross_entropy(
+                    y.flatten(0, 1).float(), target.flatten(0, 1)
+                )
+                * scale
+            )
+
         assert total_layers == 8, "Tune pp_split_points for different total_layers"
         pp_split_points = ["layers.2", "layers.4", "layers.6"]
-        stages, pp_models = pipeline_llama_manual_split(full_model, pp_mesh, self.device, llama3_debugmodel_args, num_microbatches, pp_split_points)
+        stages, pp_models = pipeline_llama_manual_split(
+            full_model,
+            pp_mesh,
+            self.device,
+            llama3_debugmodel_args,
+            num_microbatches,
+            pp_split_points,
+        )
         for s in stages:
             s.submod = apply_dp(s.submod)
         pipeline_schedule = ScheduleClass(
             stages,
             n_microbatches=num_microbatches,
-            loss_fn=loss_fn,
+            loss_fn=llm_loss_fn,
         )
 
-        # Run the pipeline
-        pp_cp_buffers = [input_local, target_local]
-        pp_cp_seq_dims = [1, 1]
-        for m in pp_models:
-            if m.freqs_cis is not None:
-                pp_cp_buffers.append(m.freqs_cis)
-                pp_cp_seq_dims.append(0)
-        
+        # Run the test model (PP + FSDP + CP)
+        pp_losses: List[torch.Tensor] = []
         with context_parallel(
             cp_mesh,
-            buffers=pp_cp_buffers,
-            buffer_seq_dims=pp_cp_seq_dims,
-            no_restore_buffers={input_local, target_local},
+            buffers=[input_local, target_local] + [m.freqs_cis for m in pp_models],
+            buffer_seq_dims=[1, 1] + [0 for _ in pp_models],
         ):
-            # Run the pipeline
             if pp_group.rank() == 0:
-                pipeline_schedule._step_microbatches(arg_mbs=input_mb)
+                pipeline_schedule.step(input_local)
             else:
-                pipeline_schedule._step_microbatches(target_mbs=target_mb)
+                pipeline_schedule.step(target=target_local, losses=pp_losses)
+        pp_loss = torch.mean(torch.stack(pp_losses)) if len(pp_losses) else -1.0
 
-        # Ref model runs on 2 different inputs, accumulating grads across them.
-        # this ensures that we detect if the FSDP reduce becomes a no-op.
-        # (in fsdp case, we use one of these inputs on each DP rank)
+        # Run reference model (FSDP + CP)
+        with context_parallel(
+            cp_mesh,
+            buffers=[input_local, target_local, ref_model.freqs_cis],
+            buffer_seq_dims=[1, 1, 0],
+        ):
+            ref_loss = llm_loss_fn(ref_model(input_local), target_local)
+            ref_loss.backward()
+            print(f"Ref loss: {ref_loss}")
 
-        for sim_dp_rank in range(dp_mesh.size()):
-            with context_parallel(
-                cp_mesh,
-                buffers=[input_local, target_local, ref_model.freqs_cis],
-                buffer_seq_dims=[1, 1, 0],
-                no_restore_buffers={input_local, target_local},
-            ):
-                loss_fn(ref_model(inputs[sim_dp_rank]), targets[sim_dp_rank]).backward()
-        ref_model.to(torch.float32)
-        for p in ref_model.parameters():
-            p.grad = p.grad.to(torch.float32)
-            p.grad /= dp_mesh.size()
+        if pp_loss != -1.0:
+            print(f"Loss difference: {ref_loss - pp_loss}")
+            torch.testing.assert_close(pp_loss, ref_loss)
 
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
         ref_parameters = dict(ref_model.named_parameters())
-        for partial_model, offset in zip(partial_models, offsets):
+        for partial_model in pp_models:
             for name, p in partial_model.named_parameters():
-                parts = name.split(".")
-                parts[0] = str(int(parts[0]) + offset)
-                name = ".".join(parts)
                 ref_p = ref_parameters[name]
                 self.assertTrue(isinstance(p.grad, DTensor))
-                torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
+                self.assertTrue(isinstance(ref_p.grad, DTensor))
+                torch.testing.assert_close(
+                    p.grad.full_tensor(), ref_p.grad.full_tensor()
+                )
 
 
 instantiate_parametrized_tests(ComposabilityTest)
