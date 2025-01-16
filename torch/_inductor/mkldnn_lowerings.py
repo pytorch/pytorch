@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from typing import List, Optional
+from collections import OrderedDict
 
 import torch
 import torch.utils._pytree as pytree
@@ -577,6 +578,7 @@ def register_onednn_fusion_ops():
                             torch.float32,
                             torch.bfloat16,
                             torch.uint8,
+                            torch.int8,
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
@@ -658,7 +660,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype == torch.uint8:
+                        elif output_dtype in OrderedDict([torch.uint8, torch.int8]):
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -669,11 +671,16 @@ def register_onednn_fusion_ops():
                                     1.0 / scale, zero_point, dtype=torch.float32
                                 )
                                 val = ops.round(input * inv_scale) + zero_point
-                                qmin, qmax = _create_constants(
-                                    0, 255, dtype=torch.float32
-                                )
+                                if output_dtype == torch.uint8:
+                                    qmin, qmax = _create_constants(
+                                        0, 255, dtype=torch.float32
+                                    )
+                                else:
+                                    qmin, qmax = _create_constants(
+                                        -128, 127, dtype=torch.float32
+                                    )
                                 clamped = ops.minimum(ops.maximum(val, qmin), qmax)
-                                return ops.to_dtype(clamped, torch.uint8)
+                                return ops.to_dtype(clamped, output_dtype)
 
                             output_buf = ir.Pointwise(
                                 device=output_buf.get_device_or_error(),
@@ -688,7 +695,7 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    assert x.get_dtype() == torch.uint8
+                    assert x.get_dtype() in OrderedDict([torch.uint8, torch.int8])
                     CppGemmTemplate.add_choices(
                         choices,
                         layout,
@@ -857,6 +864,7 @@ def register_onednn_fusion_ops():
                             torch.float32,
                             torch.bfloat16,
                             torch.uint8,
+                            torch.int8,
                         ]
 
                         input_loader = input_buffer.make_loader()
@@ -955,7 +963,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype == torch.uint8:
+                        elif output_dtype in {torch.uint8, torch.int8}:
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -966,9 +974,14 @@ def register_onednn_fusion_ops():
                                     1.0 / scale, zero_point, dtype=torch.float32
                                 )
                                 val = ops.round(input * inv_scale) + zero_point
-                                qmin, qmax = _create_constants(
-                                    0, 255, dtype=torch.float32
-                                )
+                                if output_dtype == torch.uint8:
+                                    qmin, qmax = _create_constants(
+                                        0, 255, dtype=torch.float32
+                                    )
+                                else:
+                                    qmin, qmax = _create_constants(
+                                        -128, 127, dtype=torch.float32
+                                    )
                                 clamped = ops.minimum(ops.maximum(val, qmin), qmax)
                                 return ops.to_dtype(clamped, torch.uint8)
 
