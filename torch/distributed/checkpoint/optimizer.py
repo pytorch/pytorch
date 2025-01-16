@@ -1,16 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.distributed as dist
 from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
+from torch.distributed._shard.sharded_tensor.metadata import (
+    TensorProperties as ShardTensorProperties,
+)
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import (
@@ -19,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
@@ -36,8 +38,10 @@ from torch.distributed.checkpoint.utils import (
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
+from torch.distributed.tensor import DTensor
 
-STATE_DICT_2D_LAYOUT = Dict[str, Tuple[Optional[Sequence[int]], Sequence[int]]]
+
+STATE_DICT_2D_LAYOUT = Dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
 
 
 # TODO: Update docstrings for optimizer.py
@@ -95,19 +99,26 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
 def _alloc_tensor(
     props: TensorProperties, size: Sequence[int], device_type: str = "cuda"
 ) -> torch.Tensor:
+    if device_type == "cpu":
+        device = cast(torch.device, _get_device_module(device_type).current_device())
+    else:
+        device = torch.device(
+            device_type, _get_device_module(device_type).current_device()
+        )
+
     return torch.empty(
         size=size,
         dtype=props.dtype,
         layout=props.layout,
         requires_grad=props.requires_grad,
         pin_memory=props.pin_memory,
-        device=cast(torch.device, _get_device_module(device_type).current_device()),
+        device=device,
     )
 
 
 def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
+) -> tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
     """
     Load the right TP slice of the optimizer state.
 
@@ -300,9 +311,15 @@ def load_sharded_optimizer_state_dict(
             spec_key = key_path[2]
             alloc_size = layout_specs.get(spec_key, (None, value.size))[1]
 
-            st_md = sharding_spec.build_metadata(
-                torch.Size(alloc_size), value.properties
+            properties = ShardTensorProperties(
+                dtype=value.properties.dtype,
+                layout=value.properties.layout,
+                requires_grad=value.properties.requires_grad,
+                memory_format=value.properties.memory_format,
+                pin_memory=value.properties.pin_memory,
             )
+
+            st_md = sharding_spec.build_metadata(torch.Size(alloc_size), properties)
             local_shards = []
             current_rank = dist.get_rank(dp_pg)
             for shard_md in st_md.shards_metadata:

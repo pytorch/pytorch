@@ -4,7 +4,6 @@
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 #include <torch/csrc/utils/pybind.h>
 
-#include <array>
 #include <tuple>
 
 namespace {
@@ -22,11 +21,11 @@ version_tuple getCompileVersion() {
 
 version_tuple getRuntimeVersion() {
 #ifndef USE_STATIC_CUDNN
-  auto version = cudnnGetVersion();
-  auto major = version / 1000;
-  auto minor = (version % 1000) / 100;
-  auto patch = version % 10;
-  return version_tuple(major, minor, patch);
+  int major = 0, minor = 0, patch = 0;
+  cudnnGetProperty(MAJOR_VERSION, &major);
+  cudnnGetProperty(MINOR_VERSION, &minor);
+  cudnnGetProperty(PATCH_LEVEL, &patch);
+  return version_tuple((size_t)major, (size_t)minor, (size_t)patch);
 #else
   return getCompileVersion();
 #endif
@@ -66,8 +65,7 @@ version_tuple getRuntimeVersion() {
 
 size_t getVersionInt() {
   // miopen version is MAJOR*1000000 + MINOR*1000 + PATCH
-  size_t major, minor, patch;
-  std::tie(major, minor, patch) = getRuntimeVersion();
+  auto [major, minor, patch] = getRuntimeVersion();
   return major * 1000000 + minor * 1000 + patch;
 }
 

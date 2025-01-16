@@ -8,6 +8,7 @@ import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
+
 try:
     from torchvision.models import resnet18
 
@@ -23,7 +24,10 @@ except ImportError:
     from common import PackageTestCase
 
 
-@skipIf(True, "Does not work with recent torchvision, see https://github.com/pytorch/pytorch/issues/81115")
+@skipIf(
+    True,
+    "Does not work with recent torchvision, see https://github.com/pytorch/pytorch/issues/81115",
+)
 @skipIfNoTorchVision
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
@@ -55,7 +59,7 @@ class ModelTest(PackageTestCase):
         self.assertEqual(r2(input), ref)
 
         # functions exist also to get at the private modules in each package
-        torchvision = i.import_module("torchvision")
+        torchvision = i.import_module("torchvision")  # noqa: F841
 
         f2 = BytesIO()
         # if we are doing transfer learning we might want to re-save
@@ -88,7 +92,6 @@ class ModelTest(PackageTestCase):
 
     @skipIfNoTorchVision
     def test_model_save(self):
-
         # This example shows how you might package a model
         # so that the creator of the model has flexibility about
         # how they want to save it but the 'server' can always

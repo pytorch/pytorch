@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest
-from typing import Dict
 
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
-
 from torchgen.gen_executorch import (
     ComputeCodegenUnboxedKernels,
     gen_functions_declarations,
@@ -23,6 +23,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
+
 
 TEST_YAML = """
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -332,8 +333,20 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             loc=Location(__file__, 1),
             valid_tags=set(),
         )
+        (
+            self.custom_3_native_function,
+            custom_3_backend_index,
+        ) = NativeFunction.from_yaml(
+            {
+                "func": "custom_3::op_3(Tensor(a!) self, Tensor x) -> Tensor(a!)",
+                "dispatch": {"CPU": "kernel_3"},
+                "variants": "method",
+            },
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }
@@ -412,6 +425,29 @@ TORCH_API inline bool op_1(torch::executor::KernelRuntimeContext & context) {
             in declarations
         )
 
+    def test_aten_lib_method_variant(self) -> None:
+        declarations = gen_functions_declarations(
+            native_functions=[
+                self.custom_3_native_function,
+            ],
+            kernel_index=self.kernel_index,
+            selector=SelectiveBuilder.get_nop_selector(),
+            use_aten_lib=True,
+        )
+        self.assertTrue(
+            """
+namespace custom_3 {
+
+// custom_3::op_3(Tensor(a!) self, Tensor x) -> Tensor(a!)
+TORCH_API inline at::Tensor & op_3(torch::executor::KernelRuntimeContext & context, at::Tensor & self, const at::Tensor & x) {
+    return self.op_3(x);
+}
+
+} // namespace custom_3
+        """
+            in declarations
+        )
+
 
 class TestComputeCodegenUnboxedKernels(unittest.TestCase):
     def setUp(self) -> None:
@@ -467,7 +503,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
@@ -554,7 +590,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
@@ -590,7 +626,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);

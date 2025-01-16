@@ -81,7 +81,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   return std::make_tuple(selected_objects, selected_indices);
 }
 
-static int find_factor(ForPtr loop) {
+static int find_factor(const ForPtr& loop) {
   // Find valid factors
   ExprPtr loop_stop = loop->stop();
   auto loop_imm = intValue(loop_stop);
@@ -108,7 +108,9 @@ std::string join(std::vector<T> indices, char sep = ',') {
   return s;
 }
 
-static std::string join(std::vector<std::string> indices, char sep = ',') {
+static std::string join(
+    const std::vector<std::string>& indices,
+    char sep = ',') {
   std::string s = "";
   for (const auto& index : indices) {
     s += index + sep;
@@ -288,9 +290,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
             break;
           }
           int n_pivots = (std::rand() % (int)stmts.size()) + 1;
-          std::vector<StmtPtr> pivots;
-          std::vector<int> chosen_indices;
-          std::tie(pivots, chosen_indices) =
+          auto [pivots, chosen_indices] =
               randomization_helper::select_n_randomly<StmtPtr>(
                   stmts, n_pivots, random_engine);
           std::unordered_set<StmtPtr> pivots_set(pivots.begin(), pivots.end());
@@ -371,9 +371,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           int num_loops_to_fuse =
               std::max(2, (int)(std::rand() % (int)loops.size()));
 
-          std::vector<ForPtr> loops_to_fuse;
-          std::vector<int> chosen_indices;
-          std::tie(loops_to_fuse, chosen_indices) =
+          auto [loops_to_fuse, chosen_indices] =
               randomization_helper::select_n_randomly<ForPtr>(
                   loops, num_loops_to_fuse, random_engine);
 
@@ -482,7 +480,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           }
 
           int index = rand() % (int)all_nested_loops.size();
-          auto nested_loops = all_nested_loops.at(index);
+          auto const& nested_loops = all_nested_loops.at(index);
           if (nested_loops.size() < 2) {
             break;
           }
@@ -556,7 +554,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Randomly pick a set of consecutive loops to flatten
           int index = rand() % (int)all_nested_loops.size();
-          auto nested_loops = all_nested_loops.at(index);
+          auto const& nested_loops = all_nested_loops.at(index);
 
           // Generate a good history message
           std::vector<std::string> indices;

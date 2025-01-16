@@ -11,7 +11,7 @@ namespace c10d {
 class TORCH_API ProcessGroupWrapper : public Backend {
  public:
   explicit ProcessGroupWrapper(
-      c10::intrusive_ptr<Backend> backend,
+      const c10::intrusive_ptr<Backend>& backend,
       c10::intrusive_ptr<Backend> glooBackend);
 
   const std::string getBackendName() const override;

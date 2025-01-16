@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from torch.utils._pytree import tree_map
 from typing import Iterator, List, Optional
@@ -9,6 +11,7 @@ from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
+logger = logging.getLogger("LoggingTensor")
 
 _dtype_abbrs = {
     torch.bfloat16: "bf16",
@@ -24,6 +27,10 @@ _dtype_abbrs = {
     torch.int64: "i64",
     torch.bool: "b8",
     torch.uint8: "u8",
+    torch.float8_e4m3fn: "f8e4m3fn",
+    torch.float8_e5m2: "f8e5m2",
+    torch.float8_e4m3fnuz: "f8e4m3fnuz",
+    torch.float8_e5m2fnuz: "f8e5m2fnuz",
 }
 
 # How the chain of calls works for LoggingTensor:
@@ -47,8 +54,6 @@ class LoggingTensor(torch.Tensor):
     __slots__ = ['elem']
 
     context = contextlib.nullcontext
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
@@ -79,7 +84,7 @@ class LoggingTensor(torch.Tensor):
 
         with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
         return rs
 
 class LoggingTensorMode(TorchDispatchMode):
@@ -87,7 +92,7 @@ class LoggingTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         rs = func(*args, **kwargs)
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
         return rs
 
 class LoggingTensorReentrant(LoggingTensor):
@@ -135,8 +140,8 @@ class LoggingTensorHandler(logging.Handler):
         if self.tracebacks_list is not None:
             self.tracebacks_list.append(record.traceback)
 
-def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), {}, var)
+def log_input(name: str, var: object) -> None:
+    logger.info("input", (name,), {}, var)  # noqa: PLE1205
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):
@@ -151,7 +156,6 @@ class GatherTraceback(logging.Filter):
 @contextlib.contextmanager
 def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[List[str]]:
     collect_traceback = python_tb or script_tb or cpp_tb
-    logger = logging.getLogger("LoggingTensor")
     log_list: List[str] = []
     tracebacks_list: List[str] = []
     handler = LoggingTensorHandler(

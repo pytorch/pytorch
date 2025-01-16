@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Optional, Tuple
 
 import torch
@@ -6,9 +7,7 @@ from torch import _prims
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
-
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
-from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -16,15 +15,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.types import _device, _dtype
-
-
-rngprim_namespace = "rngprims"
-rngprim = torch.library.Library(rngprim_namespace, "DEF")
-rngprim_impl = torch.library.Library(
-    rngprim_namespace, "IMPL", "CompositeExplicitAutograd"
-)
-rngprim_autograd_impl = torch.library.Library(rngprim_namespace, "IMPL", "Autograd")
-rngprim_meta_impl = torch.library.Library(rngprim_namespace, "IMPL", "Meta")
 
 
 def throw_on_non_cuda(device):
@@ -36,22 +26,21 @@ def throw_on_non_cuda(device):
 
 
 def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
-    rngprim.define(schema)
-    rngprim_impl.impl(name, impl_aten)
-    rngprim_meta_impl.impl(name, impl_meta)
+    rngprim_def = torch.library.custom_op(
+        "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
+    )
+    rngprim_def.register_fake(impl_meta)
 
     prim_packet = getattr(torch._ops.ops.rngprims, name)
     prim = prim_packet.default
     if tags:
         prim._tags = tags
 
-    rngprim_autograd_impl.impl(name, backwards_not_supported(prim))
-
     for p in (prim_packet, prim):
         p.__doc__ = doc
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
-        p.schema = schema
+        p.schema = name + schema
         p.impl_aten = impl_aten
         p.prim_meta_impl = impl_meta
 
@@ -90,7 +79,7 @@ def philox_rand_offset(
 
 def register_philox_rand():
     name = "philox_rand"
-    schema = "philox_rand(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> (Tensor, Tensor)"  # noqa: B950
+    schema = "(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> (Tensor, Tensor)"  # noqa: B950
 
     def _philox_rand_meta(
         shape: torch.Size,
@@ -153,13 +142,24 @@ def get_device(args, kwargs):
     devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
     if any(dev == "cuda" for dev in devices):
         return "cuda"
+    elif any(dev == "xpu" for dev in devices):
+        return "xpu"
+    elif any(dev == "hpu" for dev in devices):
+        return "hpu"
     elif any(dev == "cpu" for dev in devices):
         return "cpu"
     return None
 
 
 def register_run_and_save_rng_state_op():
-    run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
+    class RunAndSaveRngState(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_and_save_rng_state")
+
+        def __call__(self, op, *args, **kwargs):
+            return super().__call__(op, *args, **kwargs)
+
+    run_and_save_rng_state = RunAndSaveRngState()
 
     run_and_save_rng_state.py_impl(DispatchKey.Autograd)(
         autograd_not_implemented(run_and_save_rng_state, deferred_error=True)
@@ -173,9 +173,24 @@ def register_run_and_save_rng_state_op():
     def impl_cpu(op, *args, **kwargs):
         return torch.get_rng_state(), op(*args, **kwargs)
 
+    @run_and_save_rng_state.py_impl(DispatchKey.HPU)
+    def impl_hpu(op, *args, **kwargs):
+        if hasattr(torch, "hpu"):
+            return torch.hpu.get_rng_state(), op(*args, **kwargs)
+        raise RuntimeError("functionalize a hpu RNG operator is not supported.")
+
+    @run_and_save_rng_state.py_impl(DispatchKey.XPU)
+    def impl_xpu(op, *args, **kwargs):
+        return torch.xpu.get_rng_state(), op(*args, **kwargs)
+
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
-        impl_map = {"cuda": impl_cuda, "cpu": impl_cpu}
+        impl_map = {
+            "cuda": impl_cuda,
+            "cpu": impl_cpu,
+            "hpu": impl_hpu,
+            "xpu": impl_xpu,
+        }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"
         impl = impl_map[device]
@@ -189,22 +204,26 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, **kwargs):
-        if mode.enable_tracing:
-            out = impl_backend_select(op, *args, **kwargs)
-            proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
-            proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-            out_proxy = mode.tracer.create_proxy(
-                "call_function", run_and_save_rng_state, proxy_args, proxy_kwargs
-            )
-            return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-        else:
-            return run_and_save_rng_state(op, *args, **kwargs)
+        out = impl_backend_select(op, *args, **kwargs)
+        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+        out_proxy = mode.tracer.create_proxy(
+            "call_function", run_and_save_rng_state, proxy_args, proxy_kwargs
+        )
+        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
 
     return run_and_save_rng_state
 
 
 def register_run_with_rng_state_op():
-    run_with_rng_state = HigherOrderOperator("run_with_rng_state")
+    class RunWithRngState(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_with_rng_state")
+
+        def __call__(self, rng_state, op, *args, **kwargs):
+            return super().__call__(rng_state, op, *args, **kwargs)
+
+    run_with_rng_state = RunWithRngState()
 
     run_with_rng_state.py_impl(DispatchKey.Autograd)(
         autograd_not_implemented(run_with_rng_state, deferred_error=True)
@@ -226,25 +245,45 @@ def register_run_with_rng_state_op():
         torch.set_rng_state(current_state)
         return out
 
+    @run_with_rng_state.py_impl(DispatchKey.HPU)
+    def impl_hpu(rng_state, op, *args, **kwargs):
+        if hasattr(torch, "hpu"):
+            current_state = torch.hpu.get_rng_state()
+            torch.hpu.set_rng_state(rng_state)
+            out = op(*args, **kwargs)
+            torch.hpu.set_rng_state(current_state)
+            return out
+        raise RuntimeError("functionalize a hpu RNG operator is not supported.")
+
+    @run_with_rng_state.py_impl(DispatchKey.XPU)
+    def impl_xpu(rng_state, op, *args, **kwargs):
+        current_state = torch.xpu.get_rng_state()
+        torch.xpu.set_rng_state(rng_state)
+        out = op(*args, **kwargs)
+        torch.xpu.set_rng_state(current_state)
+        return out
+
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, rng_state, op, *args, **kwargs):
-        if mode.enable_tracing:
-            with disable_proxy_modes_tracing():
-                out = run_with_rng_state(rng_state, op, *args, **kwargs)
-            proxy_args = pytree.tree_map(
-                mode.tracer.unwrap_proxy, (rng_state, op, *args)
-            )
-            proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-            out_proxy = mode.tracer.create_proxy(
-                "call_function", run_with_rng_state, proxy_args, proxy_kwargs
-            )
-            return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-        else:
-            return run_with_rng_state(rng_state, op, *args, **kwargs)
+        # TODO: you don't need to do this, the dispatch here already disabled
+        # it
+        with disable_proxy_modes_tracing():
+            out = run_with_rng_state(rng_state, op, *args, **kwargs)
+        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (rng_state, op, *args))
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+        out_proxy = mode.tracer.create_proxy(
+            "call_function", run_with_rng_state, proxy_args, proxy_kwargs
+        )
+        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
 
     @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(rng_state, op, *args, **kwargs):
-        impl_map = {"cuda": impl_cuda, "cpu": impl_cpu}
+        impl_map = {
+            "cuda": impl_cuda,
+            "cpu": impl_cpu,
+            "hpu": impl_hpu,
+            "xpu": impl_xpu,
+        }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"
         impl = impl_map[device]
@@ -256,6 +295,18 @@ def register_run_with_rng_state_op():
         # And it does not matter for the fake tensor mode.
         with mode:
             return op(*args, **kwargs)
+
+    @run_with_rng_state.py_functionalize_impl
+    def impl_functional(ctx, rng_state, op, *args, **kwargs):
+        unwrapped_rng_state = ctx.unwrap_tensors(rng_state)
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+        with ctx.redispatch_to_next():
+            out = run_with_rng_state(
+                unwrapped_rng_state, op, *unwrapped_args, **unwrapped_kwargs
+            )
+            return ctx.wrap_tensors(out)
 
     return run_with_rng_state
 

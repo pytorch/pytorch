@@ -20,5 +20,5 @@ inline namespace CPU_CAPABILITY {
     } // spherical_bessel_j0_kernel(TensorIteratorBase& iterator)
 } // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &CPU_CAPABILITY::spherical_bessel_j0_kernel);
+REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &CPU_CAPABILITY::spherical_bessel_j0_kernel)
 } // namespace at::native

@@ -10,11 +10,6 @@
 #include <ATen/native/vulkan/impl/Common.h>
 #include <ATen/native/vulkan/ops/Convert.h>
 
-#define VK_KERNEL(shader_name) \
-  ::at::native::vulkan::get_shader_info(#shader_name)
-#define VK_LOOKUP_KERNEL(op_name) \
-  ::at::native::vulkan::look_up_shader_info(#op_name)
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -81,18 +76,22 @@ uint32_t get_dim(const vTensor& v_in) {
   return get_dim<N>(v_in.sizes());
 }
 
-inline c10::optional<Tensor> get_optional_tensor(
+inline std::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,
     const uint32_t idx) {
   return gen_list.get(idx).isTensor() ? gen_list.get(idx).toTensor()
-                                      : c10::optional<Tensor>();
+                                      : std::optional<Tensor>();
 }
 
-inline c10::optional<Scalar> get_optional_scalar(
+inline std::optional<Scalar> get_optional_scalar(
     const c10::impl::GenericList& gen_list,
     const uint32_t idx) {
   return gen_list.get(idx).isScalar() ? gen_list.get(idx).toScalar()
-                                      : c10::optional<Scalar>();
+                                      : std::optional<Scalar>();
+}
+
+inline float roundevenf(float v) {
+  return (float)nearbyint(v);
 }
 
 } // namespace ops

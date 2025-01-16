@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import types
 from contextlib import contextmanager
+
 
 # The idea for this parameter is that we forbid bare assignment
 # to torch.backends.<cudnn|mkldnn>.enabled and friends when running our
@@ -41,9 +43,8 @@ class ContextProp:
             self.setter(val)
         else:
             raise RuntimeError(
-                "not allowed to set %s flags "
+                f"not allowed to set {obj.__name__} flags "
                 "after disable_global_flags; please use flags() context manager instead"
-                % obj.__name__
             )
 
 
@@ -60,6 +61,8 @@ from torch.backends import (
     cpu as cpu,
     cuda as cuda,
     cudnn as cudnn,
+    cusparselt as cusparselt,
+    kleidiai as kleidiai,
     mha as mha,
     mkl as mkl,
     mkldnn as mkldnn,

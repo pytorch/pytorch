@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 
@@ -28,6 +29,7 @@
 #include <ATen/ops/_foreach_neg_native.h>
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
+#include <ATen/ops/_foreach_rsqrt_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
 #include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
@@ -237,7 +239,7 @@ void floating_half_bfloat16_(TensorList tensors) {
   OP_CUSTOM_FUNCTOR(function, op_name, functor_name);
 
 OP(floating_half_bfloat16, erfc, Erfc);
-OP(floating_half, lgamma, Lgamma);
+OP(floating_half_bfloat16, lgamma, Lgamma);
 OP(floating_half_bfloat16, trunc, Truncf);
 OP(floating_half_bfloat16, floor, Floor);
 OP(floating_half_bfloat16, ceil, Ceil);
@@ -304,11 +306,35 @@ struct Sign {
   }
 };
 
-OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
+template <typename T>
+struct Rsqrt {
+  C10_DEVICE T operator()(T t) const {
+    return c10::cuda::compat::rsqrt(t);
+  }
+};
+
+template <>
+struct Rsqrt<c10::complex<float>> {
+  C10_DEVICE c10::complex<float> operator()(c10::complex<float> t) const {
+    const auto one = c10::complex<float>(1.0, 0);
+    return one / std::sqrt(t);
+  }
+};
+
+template <>
+struct Rsqrt<c10::complex<double>> {
+  C10_DEVICE c10::complex<double> operator()(c10::complex<double> t) const {
+    const auto one = c10::complex<double>(1.0, 0);
+    return one / std::sqrt(t);
+  }
+};
+
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, sigmoid, Sigmoid)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sign, Sign)
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, rsqrt, Rsqrt)
 
 // note(mkozuki): tensor dtype checks of `neg` kernels.
 // Since `check_foreach_api_restrictions` don't require all the tensors to have
@@ -388,9 +414,10 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
+      ScalarType::Bool,
       tensors[0].scalar_type(),
       "foreach_zero_cuda_",
       [&]() {

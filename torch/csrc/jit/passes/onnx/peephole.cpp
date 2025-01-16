@@ -16,15 +16,14 @@
 #include <ATen/ops/ones_like_native.h>
 #endif
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -101,18 +100,18 @@ std::vector<size_t> getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurrences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(
+std::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
   if (from.size() > to.size()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   for (const auto i : c10::irange(from.size())) {
     auto fdim = from[from.size() - 1 - i];
     auto tdim = to[to.size() - 1 - i];
     if (fdim != 1 && fdim != tdim) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -156,7 +155,7 @@ void fuseBroadcast(Block* b) {
       }
 
       // Not all broadcasts are supported by ONNX broadcast.
-      c10::optional<size_t> axis = fusibleExpandTo(
+      std::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
               ->expectRef<TensorType>()
               .sizes()
@@ -168,7 +167,7 @@ void fuseBroadcast(Block* b) {
               .sizes()
               .concrete_sizes()
               .value()); // to
-      if (axis == c10::nullopt) {
+      if (axis == std::nullopt) {
         continue;
       }
 
@@ -547,7 +546,7 @@ void fixDefaultRnnHiddenState(Block* b, int opset_version) {
       continue;
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
-    // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    // See https://pytorch.org/docs/main/nn.html#torch.nn.RNN
     if (n->inputs().size() < 6) {
       continue;
     }
@@ -566,7 +565,7 @@ void fixDefaultLstmCellState(Block* b, int opset_version) {
       continue;
     }
     // Cell state is the seventh input for LSTM.
-    // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    // See https://pytorch.org/docs/main/nn.html#torch.nn.LSTM
     if (n->inputs().size() < 7) {
       continue;
     }
@@ -710,7 +709,7 @@ static void eraseListUnpack(Node* n, int opset_version) {
       // onnx::SequenceAt was introduced in onnx opset version 11
       throw std::runtime_error(
           "Unsupported: ONNX export of prim::ListUnpack in opset " +
-          c10::to_string(opset_version) + ". Please try opset version 11.");
+          std::to_string(opset_version) + ". Please try opset version 11.");
     }
 
     auto g = n->owningGraph();
@@ -818,8 +817,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Node* origLogSoftmaxNode;
+      Node* origLogSoftmaxNode = nullptr;
 
       // Check for patterns especially in cases with autocasting enabled
       // in which a cast node is inserted before the NegativeLogLikelihoodLoss
@@ -1069,5 +1067,4 @@ void PeepholeOptimizeONNX(
   GRAPH_DUMP("After PeepholeOptimizeONNX", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

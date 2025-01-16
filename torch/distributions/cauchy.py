@@ -1,11 +1,14 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number
 
 import torch
-from torch import inf, nan
+from torch import inf, nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
+
 
 __all__ = ["Cauchy"]
 
@@ -49,22 +52,22 @@ class Cauchy(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return torch.full(
             self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device
         )
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return torch.full(
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()
         return self.loc + eps * self.scale

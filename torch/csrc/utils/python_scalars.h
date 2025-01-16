@@ -7,8 +7,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 template <typename T>
 inline T unpackIntegral(PyObject* obj, const char* type) {
@@ -101,7 +100,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   }
 }
 
-inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
+inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
   switch (scalarType) {
     case at::kByte:
       return THPUtils_packInt64(*(uint8_t*)data);
@@ -127,18 +126,20 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kDouble:
       return PyFloat_FromDouble(*(double*)data);
     case at::kComplexHalf: {
-      auto data_ = reinterpret_cast<c10::complex<at::Half>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<at::Half>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexFloat: {
-      auto data_ = reinterpret_cast<c10::complex<float>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<float>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexDouble:
       return PyComplex_FromCComplex(
           *reinterpret_cast<Py_complex*>((c10::complex<double>*)data));
     case at::kBool:
-      return PyBool_FromLong(*(bool*)data);
+      // Don't use bool*, since it may take out-of-range byte as bool.
+      // Instead, we cast explicitly to avoid ASAN error.
+      return PyBool_FromLong(static_cast<bool>(*(uint8_t*)data));
     case at::kBFloat16:
       return PyFloat_FromDouble(
           at::convert<double, at::BFloat16>(*(at::BFloat16*)data));
@@ -152,12 +153,11 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
       return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
           *(at::Float8_e5m2fnuz*)data));
     case at::kFloat8_e4m3fnuz:
-      return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
-          *(at::Float8_e5m2fnuz*)data));
+      return PyFloat_FromDouble(at::convert<double, at::Float8_e4m3fnuz>(
+          *(at::Float8_e4m3fnuz*)data));
     default:
       throw std::runtime_error("invalid type");
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

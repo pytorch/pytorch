@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -6,17 +7,18 @@
 
 import binascii
 from base64 import b64decode, b64encode
-from typing import Optional, Tuple, cast
+from typing import cast, Optional
 
 import urllib3.exceptions  # type: ignore[import]
-from etcd import Client as EtcdClient  # type: ignore[import]
-from etcd import (
+from etcd import (  # type: ignore[import]
+    Client as EtcdClient,
     EtcdAlreadyExist,
     EtcdCompareFailed,
     EtcdException,
     EtcdKeyNotFound,
     EtcdResult,
 )
+
 from torch.distributed import Store
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
@@ -72,7 +74,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         """See base class."""
         return "etcd-v2"
 
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> Optional[tuple[bytes, Token]]:
         """See base class."""
         try:
             result = self._client.read(self._key)
@@ -87,7 +89,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+    ) -> Optional[tuple[bytes, Token, bool]]:
         """See base class."""
         base64_state = b64encode(state).decode()
 
@@ -128,7 +130,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         tmp = *self._decode_state(result), True
         return tmp
 
-    def _decode_state(self, result: EtcdResult) -> Tuple[bytes, Token]:
+    def _decode_state(self, result: EtcdResult) -> tuple[bytes, Token]:
         base64_state = result.value.encode()
 
         try:
@@ -182,7 +184,7 @@ def _create_etcd_client(params: RendezvousParameters) -> EtcdClient:
         ) from exc
 
 
-def create_backend(params: RendezvousParameters) -> Tuple[EtcdRendezvousBackend, Store]:
+def create_backend(params: RendezvousParameters) -> tuple[EtcdRendezvousBackend, Store]:
     """Create a new :py:class:`EtcdRendezvousBackend` from the specified parameters.
 
     +--------------+-----------------------------------------------------------+
@@ -206,7 +208,9 @@ def create_backend(params: RendezvousParameters) -> Tuple[EtcdRendezvousBackend,
     """
     client = _create_etcd_client(params)
 
-    backend = EtcdRendezvousBackend(client, params.run_id, key_prefix="/torch/elastic/rendezvous")
+    backend = EtcdRendezvousBackend(
+        client, params.run_id, key_prefix="/torch/elastic/rendezvous"
+    )
 
     store = EtcdStore(client, "/torch/elastic/store")
 

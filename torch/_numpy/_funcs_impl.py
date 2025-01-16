@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """A thin pytorch / numpy compat layer.
 
 Things imported from here have numpy-compatible signatures but operate on
@@ -10,20 +12,23 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
 
 import torch
 
 from . import _dtypes_impl, _util
-from ._normalizations import (
-    ArrayLike,
-    ArrayLikeOrScalar,
-    CastingModes,
-    DTypeLike,
-    NDArray,
-    NotImplementedType,
-    OutArray,
-)
+
+
+if TYPE_CHECKING:
+    from ._normalizations import (
+        ArrayLike,
+        ArrayLikeOrScalar,
+        CastingModes,
+        DTypeLike,
+        NDArray,
+        NotImplementedType,
+        OutArray,
+    )
 
 
 def copy(
@@ -215,7 +220,7 @@ def _split_helper_int(tensor, indices_or_sections, axis, strict=False):
     l, n = tensor.shape[axis], indices_or_sections
 
     if n <= 0:
-        raise ValueError()
+        raise ValueError
 
     if l % n == 0:
         num, sz = n, l // n
@@ -744,7 +749,7 @@ def indices(dimensions, dtype: Optional[DTypeLike] = int, sparse=False):
     N = len(dimensions)
     shape = (1,) * N
     if sparse:
-        res = tuple()
+        res = ()
     else:
         res = torch.empty((N,) + dimensions, dtype=dtype)
     for i, dim in enumerate(dimensions):
@@ -887,22 +892,22 @@ def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
 
 def put(
     a: NDArray,
-    ind: ArrayLike,
-    v: ArrayLike,
+    indices: ArrayLike,
+    values: ArrayLike,
     mode: NotImplementedType = "raise",
 ):
-    v = v.type(a.dtype)
-    # If ind is larger than v, expand v to at least the size of ind. Any
+    v = values.type(a.dtype)
+    # If indices is larger than v, expand v to at least the size of indices. Any
     # unnecessary trailing elements are then trimmed.
-    if ind.numel() > v.numel():
-        ratio = (ind.numel() + v.numel() - 1) // v.numel()
+    if indices.numel() > v.numel():
+        ratio = (indices.numel() + v.numel() - 1) // v.numel()
         v = v.unsqueeze(0).expand((ratio,) + v.shape)
     # Trim unnecessary elements, regardless if v was expanded or not. Note
-    # np.put() trims v to match ind by default too.
-    if ind.numel() < v.numel():
+    # np.put() trims v to match indices by default too.
+    if indices.numel() < v.numel():
         v = v.flatten()
-        v = v[: ind.numel()]
-    a.put_(ind, v)
+        v = v[: indices.numel()]
+    a.put_(indices, v)
     return None
 
 
@@ -937,7 +942,7 @@ def choose(
     return choices[idx_list].squeeze(0)
 
 
-# ### unique et al ###
+# ### unique et al. ###
 
 
 def unique(
@@ -1017,7 +1022,7 @@ def resize(a: ArrayLike, new_shape=None):
     return reshape(a, new_shape)
 
 
-# ### diag et al ###
+# ### diag et al. ###
 
 
 def diagonal(a: ArrayLike, offset=0, axis1=0, axis2=1):
@@ -2006,7 +2011,7 @@ def min_scalar_type(a: ArrayLike, /):
     from ._dtypes import DType
 
     if a.numel() > 1:
-        # numpy docs: "For non-scalar array a, returns the vector’s dtype unmodified."
+        # numpy docs: "For non-scalar array a, returns the vector's dtype unmodified."
         return DType(a.dtype)
 
     if a.dtype == torch.bool:

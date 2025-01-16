@@ -3,6 +3,7 @@
 from torch.package._digraph import DiGraph
 from torch.testing._internal.common_utils import run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -79,8 +80,7 @@ class TestDiGraph(PackageTestCase):
         g.add_node(3)
 
         nodes = set()
-        for n in g:
-            nodes.add(n)
+        nodes.update(g)
 
         self.assertEqual(nodes, {1, 2, 3})
 

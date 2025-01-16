@@ -155,9 +155,8 @@ void initONNXBindings(PyObject* module) {
           "_jit_pass_onnx_unpack_quantized_weights",
           ::torch::wrap_pybind_function(
               [](std::shared_ptr<Graph>& graph,
-                 std::map<std::string, IValue>& paramsDict,
-                 bool caffe2) {
-                UnpackQuantizedWeights(graph, paramsDict, caffe2);
+                 std::map<std::string, IValue>& paramsDict) {
+                UnpackQuantizedWeights(graph, paramsDict);
                 return paramsDict;
               }),
           pybind11::return_value_policy::move)
@@ -219,7 +218,7 @@ void initONNXBindings(PyObject* module) {
                   &std::cerr, [](std::ostream*) {});
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
-                        << "are supported as `stream_name`" << std::endl;
+                        << "are supported as `stream_name`" << '\n';
             }
             ::torch::jit::onnx::set_log_output_stream(out);
           },
@@ -232,7 +231,7 @@ void initONNXBindings(PyObject* module) {
               for (auto arg : args) {
                 out << ::c10::str(arg);
               }
-              out << std::endl;
+              out << '\n';
             }
           },
           "Write `args` to the previously specified ONNX log stream.")
@@ -274,7 +273,11 @@ void initONNXBindings(PyObject* module) {
       .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128)
       .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16)
       .value("FLOAT8E4M3FN", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN)
-      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2);
+      .value(
+          "FLOAT8E4M3FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FNUZ)
+      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2)
+      .value(
+          "FLOAT8E5M2FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
       .value("ONNX", OperatorExportTypes::ONNX)
@@ -288,11 +291,5 @@ void initONNXBindings(PyObject* module) {
       .value("TRAINING", TrainingMode::TRAINING);
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
-
-#ifdef BUILD_CAFFE2
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = true;
-#else
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
-#endif
 }
 } // namespace torch::onnx

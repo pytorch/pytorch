@@ -36,7 +36,12 @@ function install_ucc() {
   git submodule update --init --recursive
 
   ./autogen.sh
-  ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-cuda=$with_cuda
+  # We only run distributed tests on Tesla M60 and A10G
+  NVCC_GENCODE="-gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_86,code=compute_86"
+  ./configure --prefix=$UCC_HOME          \
+    --with-ucx=$UCX_HOME                  \
+    --with-cuda=$with_cuda                \
+    --with-nvcc-gencode="${NVCC_GENCODE}"
   time make -j
   sudo make install
 

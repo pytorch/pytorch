@@ -2,7 +2,7 @@
 #include <ATen/native/Pow.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -26,13 +26,13 @@ static inline __host__ __device__ at::BFloat16 pow_(at::BFloat16 base, at::BFloa
 }
 // pow (floating, floating/int)
 template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
+static inline __host__ __device__ typename std::enable_if_t<std::is_floating_point_v<Base_type> && (std::is_same_v<Base_type, Exp_type> || std::is_same_v<Exp_type, int>), Base_type>
   pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
 // pow (Otherwise)
 template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
+static inline __host__ __device__ typename std::enable_if_t<!std::is_same_v<Base_type, Exp_type> && !std::is_same_v<Exp_type, int>, Base_type>
   pow_(Base_type base, Exp_type exp) {
   return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
 }
@@ -44,7 +44,7 @@ static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
 #endif
 
 template <typename T>
-static inline __host__ __device__ std::enable_if_t<std::is_integral<T>::value, T> pow_(
+static inline __host__ __device__ std::enable_if_t<std::is_integral_v<T>, T> pow_(
     T base, T exp) {
   return at::native::powi(base, exp);
 }
@@ -55,4 +55,4 @@ static inline __host__ __device__ c10::complex<T> pow_(c10::complex<T> base, c10
 }
 
 } // namespace
-}} // namespace at::native
+} // namespace at::native

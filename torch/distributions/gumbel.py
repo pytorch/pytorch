@@ -1,12 +1,15 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
+
 
 __all__ = ["Gumbel"]
 
@@ -62,19 +65,19 @@ class Gumbel(TransformedDistribution):
         return (y - y.exp()) - self.scale.log()
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc + self.scale * euler_constant
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return (math.pi / math.sqrt(6)) * self.scale
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.stddev.pow(2)
 
     def entropy(self):

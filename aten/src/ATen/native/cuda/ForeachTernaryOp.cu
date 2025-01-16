@@ -27,7 +27,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
     TensorList tensors2,
     TensorList tensors3) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  if (!can_use_fast_route({tensors1, tensors2, tensors3})) {
+  if (!can_use_fast_route({tensors1, tensors2, tensors3}, {}, true)) {
     return foreach_tensor_ternary_lerp_slow(tensors1, tensors2, tensors3);
   }
 
@@ -64,7 +64,7 @@ void foreach_tensor_lerp_ternary_cuda_(
     TensorList tensors2,
     TensorList tensors3) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  if (!can_use_fast_route({tensors1, tensors2, tensors3})) {
+  if (!can_use_fast_route({tensors1, tensors2, tensors3}, {}, true)) {
     return foreach_tensor_ternary_lerp_slow_(tensors1, tensors2, tensors3);
   }
 
@@ -94,7 +94,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
     TensorList tensors2,
     const Scalar& weight) {
   check_foreach_api_restrictions(tensors1, tensors2);
-  if (!can_use_fast_route({tensors1, tensors2})) {
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true)) {
     return foreach_tensor_lerp_list_kernel_slow(tensors1, tensors2, weight);
   }
 
@@ -132,7 +132,7 @@ void foreach_tensor_lerp_list_cuda_(
     TensorList tensors2,
     const Scalar& weight) {
   check_foreach_api_restrictions(tensors1, tensors2);
-  if (!can_use_fast_route({tensors1, tensors2})) {
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true)) {
     return foreach_tensor_lerp_list_kernel_slow_(tensors1, tensors2, weight);
   }
 
@@ -154,6 +154,77 @@ void foreach_tensor_lerp_list_cuda_(
                 /* res_arg_index */ 0>(),
             LerpFunctor<opmath_t>(),
             weight.to<opmath_t>());
+      });
+}
+
+std::vector<at::Tensor> foreach_tensor_lerp_scalarlist_cuda(
+    TensorList tensors1,
+    TensorList tensors2,
+    at::ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2, scalars);
+  if (!can_use_fast_route({tensors1, tensors2}, scalars, true)) {
+    return foreach_tensor_lerp_scalarlist_kernel_slow(
+        tensors1, tensors2, scalars);
+  }
+
+  std::vector<at::Tensor> vec_res;
+  vec_res.reserve(tensors1.size());
+  for (const auto& t : tensors1) {
+    vec_res.emplace_back(at::native::empty_like(t));
+  }
+  std::vector<std::vector<at::Tensor>> tensor_lists{
+      tensors1.vec(), tensors2.vec(), vec_res};
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensors1[0].scalar_type(),
+      "foreach_tensor_lerp_scalarlist_cuda",
+      [&]() {
+        using opmath_t = typename at::opmath_type<scalar_t>;
+        multi_tensor_apply<3, opmath_t>(
+            tensor_lists,
+            scalars,
+            TernaryOpScalarListFunctor<
+                scalar_t,
+                /* depth */ 3,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 2>(),
+            LerpFunctor<opmath_t>());
+      });
+
+  return tensor_lists[2];
+}
+
+void foreach_tensor_lerp_scalarlist_cuda_(
+    TensorList tensors1,
+    TensorList tensors2,
+    at::ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2, scalars);
+  if (!can_use_fast_route({tensors1, tensors2}, scalars, true)) {
+    return foreach_tensor_lerp_scalarlist_kernel_slow_(
+        tensors1, tensors2, scalars);
+  }
+
+  std::vector<std::vector<at::Tensor>> tensor_lists{
+      tensors1.vec(), tensors2.vec()};
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensors1[0].scalar_type(),
+      "foreach_tensor_lerp_scalarlist_cuda_",
+      [&]() {
+        using opmath_t = typename at::opmath_type<scalar_t>;
+        multi_tensor_apply<2, opmath_t>(
+            tensor_lists,
+            scalars,
+            TernaryOpScalarListFunctor<
+                scalar_t,
+                /* depth */ 2,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 0>(),
+            LerpFunctor<opmath_t>());
       });
 }
 } // namespace at::native

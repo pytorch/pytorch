@@ -139,6 +139,6 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size, con
 }
 } // anonymous namespace
 
-REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
-REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
+REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel)
+REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda)
 } // namespace at::native

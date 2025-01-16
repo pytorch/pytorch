@@ -4,23 +4,28 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at {
-  class Tensor;
+class Tensor;
 namespace native {
 bool to_will_alias(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
     bool copy,
-    c10::optional<c10::MemoryFormat> optional_memory_format);
+    std::optional<c10::MemoryFormat> optional_memory_format);
 
 Tensor to_meta(const Tensor& tensor);
-c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor);
+std::optional<Tensor> to_meta(const std::optional<Tensor>& tensor);
 std::vector<Tensor> to_meta(at::ITensorListRef t_list);
-Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt);
+Tensor dense_to_sparse_with_mask(
+    const Tensor& self,
+    const Tensor& mask,
+    std::optional<c10::Layout> layout,
+    OptionalIntArrayRef blocksize,
+    std::optional<int64_t> dense_dim_opt);
 
 } // namespace native
 } // namespace at

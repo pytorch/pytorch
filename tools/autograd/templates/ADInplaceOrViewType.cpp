@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/autograd/generated/ViewFuncs.h"
 
 #include <torch/library.h>
 #include <ATen/FunctionalInverses.h>

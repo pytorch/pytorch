@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import os
 import sys
-from typing import Optional
 
 
-def which(thefile: str) -> Optional[str]:
+def which(thefile: str) -> str | None:
     path = os.environ.get("PATH", os.defpath).split(os.pathsep)
     for d in path:
         fname = os.path.join(d, thefile)

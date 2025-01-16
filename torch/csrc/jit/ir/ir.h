@@ -20,7 +20,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <functional>
 #include <iosfwd>
@@ -33,8 +33,7 @@ class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace utils {
 TORCH_API std::string getNodesModuleHierarchy(const Node& n);
 } // namespace utils
@@ -165,7 +164,7 @@ struct OperatorMap;
 // access the same graph
 template <typename T>
 struct Wrap {
-  explicit Wrap(T* p) : elem(p), clear_cb(nullptr) {}
+  explicit Wrap(T* p) : elem(p) {}
   void clear() {
     if (clear_cb) {
       clear_cb(elem);
@@ -173,7 +172,7 @@ struct Wrap {
     elem = nullptr;
   }
   T* elem;
-  void (*clear_cb)(void*);
+  void (*clear_cb)(void*){nullptr};
 };
 
 struct Value {
@@ -224,7 +223,7 @@ struct Value {
     if (hasDebugName()) {
       return unique_name_;
     }
-    return c10::to_string(unique());
+    return std::to_string(unique());
   }
   TORCH_API std::string debugNameBase() const;
   Node* node() {
@@ -332,9 +331,9 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  c10::optional<SourceRange> source_range_;
+  std::optional<SourceRange> source_range_;
   ScopePtr scope_;
-  c10::optional<InlinedCallStackPtr> callstack_;
+  std::optional<InlinedCallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -348,7 +347,7 @@ struct TORCH_API Node {
   // is changed, we need to rely on this name
   // to retrieve old schemas to successfully apply upgraders
   // for this operator.
-  c10::optional<std::string> historic_schema_name_ = c10::nullopt;
+  std::optional<std::string> historic_schema_name_ = std::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -373,7 +372,7 @@ struct TORCH_API Node {
     return wrap_;
   }
 
-  const c10::optional<std::string> getHistoricSchemaName() {
+  const std::optional<std::string> getHistoricSchemaName() {
     return historic_schema_name_;
   }
 
@@ -442,7 +441,7 @@ struct TORCH_API Node {
     return this;
   }
 
-  c10::optional<InlinedCallStackPtr> callstack() const {
+  std::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
   void setCallStack(InlinedCallStackPtr cs) {
@@ -527,14 +526,14 @@ struct TORCH_API Node {
   Value* namedInput(const std::string& unqualName) const;
   Value* namedInput(Symbol name) const;
 
-  c10::optional<IValue> get(Symbol name) const;
+  std::optional<IValue> get(Symbol name) const;
 
   template <typename T>
-  c10::optional<T> get(Symbol name) const {
+  std::optional<T> get(Symbol name) const {
     if (auto v = get(name)) {
       return v->template to<T>();
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // Returns true if the value of input name is statically known
@@ -1192,7 +1191,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   std::unordered_set<const Node*> all_nodes;
   std::unordered_set<const Value*> all_values;
   std::unordered_set<const Block*> all_blocks;
-  size_t next_unique_;
+  size_t next_unique_{0};
 
   std::unordered_map<std::string, Value*> unique_names_;
   // name_base_suffix tracks largest suffix currently used by all names sharing
@@ -1208,12 +1207,11 @@ struct Graph : std::enable_shared_from_this<Graph> {
   Node* insert_before_;
   int64_t predicted_insert_count_ = 0;
 
-  c10::optional<size_t> op_version_;
+  std::optional<size_t> op_version_;
 
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
-      : next_unique_(0),
-        current_scope_(std::move(scope_root)),
+      : current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
@@ -1261,11 +1259,11 @@ struct Graph : std::enable_shared_from_this<Graph> {
     return current_scope_;
   }
 
-  void set_op_version(c10::optional<size_t> version) {
+  void set_op_version(std::optional<size_t> version) {
     op_version_ = version;
   }
 
-  c10::optional<size_t> get_op_version() {
+  std::optional<size_t> get_op_version() {
     return op_version_;
   }
 
@@ -1368,8 +1366,8 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
       const IValue& val,
-      c10::optional<SourceRange> loc = c10::nullopt,
-      c10::optional<ScopePtr> scope = c10::nullopt);
+      std::optional<SourceRange> loc = std::nullopt,
+      std::optional<ScopePtr> scope = std::nullopt);
 
   // Schema-driven insert:
   // This inserts a node into the graph with inputs determined from args and
@@ -1382,7 +1380,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},
-      const c10::optional<SourceRange>& range = {});
+      const std::optional<SourceRange>& range = {});
 
   Node* appendNode(Node* n) {
     return block_->appendNode(n);
@@ -1591,7 +1589,7 @@ struct TORCH_API PythonOp : public Node {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+  virtual std::optional<THPObjectPtr> autogradFunction() const = 0;
 
   virtual void lint_python() const = 0;
 };
@@ -1730,23 +1728,23 @@ struct OperatorMap {
     return n->maybeOperator() && contains(n->getOperator());
   }
 
-  c10::optional<T> find(const Operator& op) {
+  std::optional<T> find(const Operator& op) {
     const auto it = map.find(Symbol::fromQualString(op.schema().name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first->schema() == op.schema()) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator
   std::vector<OpMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {
@@ -1806,23 +1804,23 @@ struct FunctionSchemaMap {
     return false;
   }
 
-  c10::optional<T> find(const FunctionSchema& schema) const {
+  std::optional<T> find(const FunctionSchema& schema) const {
     const auto it = map.find(Symbol::fromQualString(schema.name()));
     if (it == map.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     for (auto vit = it->second.begin(); vit != it->second.end(); ++vit) {
       if (vit->first == schema) {
         return vit->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // TODO: return iterator
   std::vector<FuncSchemaMapType> getAllKeysAndValues() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<FuncSchemaMapType> keys_values;
+    keys_values.reserve(map.size());
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
       for (auto& pair : vec) {
@@ -1837,5 +1835,4 @@ struct FunctionSchemaMap {
   MapType map;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -55,13 +55,13 @@ struct Slice {
     T& operator[](int i) const {
         return begin_[i];
     }
-    c10::optional<int> index(const T& value) {
+    std::optional<int> index(const T& value) {
         for (int i : enumerate()) {
             if (begin_[i] == value) {
                 return i;
             }
         }
-        return c10::nullopt;
+        return std::nullopt;
     }
     bool contains(const T& value) {
         return index(value).has_value();

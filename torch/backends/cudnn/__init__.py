@@ -1,10 +1,13 @@
+# mypy: allow-untyped-defs
 import os
 import sys
 import warnings
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+
 
 try:
     from torch._C import _cudnn
@@ -17,7 +20,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version = None
+__cudnn_version: Optional[int] = None
 
 if _cudnn is not None:
 

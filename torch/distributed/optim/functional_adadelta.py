@@ -1,11 +1,16 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+from torch.distributed.optim._deprecation_warning import (
+    _scripted_functional_optimizer_deprecation_warning,
+)
+
 
 __all__: List[str] = []
+
 
 # Define a TorchScript compatible Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
@@ -29,6 +34,7 @@ class _FunctionalAdadelta:
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
+        _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
             "rho": rho,
@@ -53,6 +59,7 @@ class _FunctionalAdadelta:
         grads = []
         square_avgs = []
         acc_deltas = []
+        state_steps = []
         lr = self.defaults["lr"]
         rho = self.defaults["rho"]
         eps = self.defaults["eps"]
@@ -85,6 +92,7 @@ class _FunctionalAdadelta:
                 state = self.state[param]
                 square_avgs.append(state["square_avg"])
                 acc_deltas.append(state["acc_delta"])
+                state_steps.append(state["step"])
 
         with torch.no_grad():
             F.adadelta(
@@ -92,11 +100,12 @@ class _FunctionalAdadelta:
                 grads,
                 square_avgs,
                 acc_deltas,
+                state_steps,
                 lr=lr,
                 rho=rho,
                 eps=eps,
                 weight_decay=weight_decay,
                 foreach=self.foreach,
                 maximize=self.maximize,
-                has_complex=has_complex
+                has_complex=has_complex,
             )

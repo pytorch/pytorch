@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 TORCH_API void metalInsertPrePackedOps(std::shared_ptr<Graph>& graph);
 TORCH_API void metalInsertPrePackedOps(script::Module& module);
 TORCH_API void metalFusePrePackedConvWithClamp(script::Module& module);
@@ -13,5 +12,4 @@ TORCH_API void metalFoldPrePackingOps(script::Module& module);
 TORCH_API script::Module metalOptimizeForMobile(
     const script::Module& module,
     const std::vector<std::string>& preserved_methods);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -7,8 +7,10 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
+#if defined(CPU_CAPABILITY_SVE256)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#endif
 #include <ATen/cpu/vec/vec256/vec256_float.h>
-#include <ATen/cpu/vec/vec256/vec256_float_neon.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
@@ -21,6 +23,9 @@
 #include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
+
+#include <ATen/cpu/vec/vec256/vec256_convert.h>
+#include <ATen/cpu/vec/vec256/vec256_mask.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -69,7 +74,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -94,7 +99,8 @@ inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) 
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
@@ -106,9 +112,10 @@ std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
@@ -122,7 +129,7 @@ inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Only works for inputs in the range: [-2^51, 2^51]
@@ -141,6 +148,30 @@ template<>
 Vectorized<int32_t>
 inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
+}
+
+// From: https://stackoverflow.com/a/41148578
+template<>
+Vectorized<double>
+inline convert_to_fp_of_same_size<double>(const Vectorized<int64_t> &src) {
+  __m256i magic_i_lo   = _mm256_set1_epi64x(0x4330000000000000); /* 2^52 */
+  __m256i magic_i_hi32 = _mm256_set1_epi64x(0x4530000080000000); /* 2^84 + 2^63 */
+  __m256i magic_i_all  = _mm256_set1_epi64x(0x4530000080100000); /* 2^84 + 2^63 + 2^52 */
+  __m256d magic_d_all  = _mm256_castsi256_pd(magic_i_all);
+
+  __m256i v_lo         = _mm256_blend_epi32(magic_i_lo, src, 0b01010101); /* v_low = low32 + 2^52 */
+  __m256i v_hi         = _mm256_srli_epi64(src, 32);
+          v_hi         = _mm256_xor_si256(v_hi, magic_i_hi32); /* v_hi = high32*2^32 + 2^84 + 2^63 */
+  /* int64 = low32 + high32*2^32 = v_hi + v_lo - 2^52 - 2^63 - 2^84 */
+  __m256d v_hi_dbl     = _mm256_sub_pd(_mm256_castsi256_pd(v_hi), magic_d_all);
+  __m256d result       = _mm256_add_pd(v_hi_dbl, _mm256_castsi256_pd(v_lo));
+  return result;
+}
+
+template<>
+Vectorized<float>
+inline convert_to_fp_of_same_size<float>(const Vectorized<int32_t> &src) {
+  return _mm256_cvtepi32_ps(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -284,6 +315,17 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
-#endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+inline Vectorized<bool> operator&&(
+    const Vectorized<bool>& self,
+    const Vectorized<bool>& other) {
+  const __m256i* self_ = reinterpret_cast<const __m256i*>(self.as_bytes());
+  const __m256i* other_ = reinterpret_cast<const __m256i*>(other.as_bytes());
+  __m256i out = _mm256_and_si256(*self_, *other_);
+  Vectorized<bool> ret;
+  std::memcpy(ret, &out, ret.size() * sizeof(bool));
+  return ret;
+}
+
+#endif // (defined(CPU_CAPABILITY_AVX2)
 
 }} // namepsace at::vec::CPU_CAPABILITY

@@ -18,6 +18,8 @@ struct IncrementRAII final {
   ~IncrementRAII() {
     _counter->fetch_sub(1);
   }
+  IncrementRAII(IncrementRAII&&) = delete;
+  IncrementRAII& operator=(IncrementRAII&&) = delete;
 
  private:
   std::atomic<int32_t>* _counter;
@@ -55,8 +57,7 @@ class LeftRight final {
       : _counters{{{0}, {0}}},
         _foregroundCounterIndex(0),
         _foregroundDataIndex(0),
-        _data{{T{args...}, T{args...}}},
-        _writeMutex() {}
+        _data{{T{args...}, T{args...}}} {}
 
   // Copying and moving would not be threadsafe.
   // Needs more thought and careful design to make that work.
@@ -201,6 +202,7 @@ class RWSafeLeftRightWrapper final {
   RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
   RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
   RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
+  ~RWSafeLeftRightWrapper() = default;
 
   template <typename F>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)

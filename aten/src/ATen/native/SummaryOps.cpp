@@ -5,6 +5,8 @@
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -24,26 +26,37 @@ Tensor _bincount_cpu_template(
     const Tensor& weights,
     int64_t minlength) {
   if (minlength < 0) {
-    AT_ERROR("minlength should be >= 0");
+    TORCH_CHECK(false, "minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros({minlength}, kLong);
   }
   if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
-    AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
+    TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
+  }
+
+  // Ensure max_val < 2 ^ 63 - 1 (9223372036854775807)
+  auto max_val = *self.max().data_ptr<input_t>();
+  if (max_val >= std::numeric_limits<int64_t>::max()) {
+    TORCH_CHECK(false,
+        "maximum value of input overflowed, it should be < ",
+        std::numeric_limits<int64_t>::max(),
+        " but got ",
+        max_val
+    );
   }
 
   bool has_weights = weights.defined();
   if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
-    AT_ERROR("weights should be 1-d and have the same length as input");
+    TORCH_CHECK(false, "weights should be 1-d and have the same length as input");
   }
 
   Tensor output;
   int64_t self_size = self.size(0);
-  int64_t nbins = static_cast<int64_t>(*self.max().data_ptr<input_t>()) + 1L;
+  int64_t nbins = static_cast<int64_t>(max_val) + 1L;
   nbins = std::max(nbins, minlength); // at least minlength # of bins
 
-  const input_t* self_p = self.data_ptr<input_t>();
+  const input_t* self_p = self.const_data_ptr<input_t>();
   if (has_weights) {
     output = at::zeros(
         {nbins},
@@ -52,7 +65,7 @@ Tensor _bincount_cpu_template(
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
     weights_t* output_p = output.data_ptr<weights_t>();
-    const weights_t* weights_p = weights.data_ptr<weights_t>();
+    const weights_t* weights_p = weights.const_data_ptr<weights_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += weights_p[i];
     }
@@ -68,7 +81,7 @@ Tensor _bincount_cpu_template(
 } // namespace
 
 Tensor
-_bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
+_bincount_cpu(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;

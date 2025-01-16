@@ -168,22 +168,17 @@ class Context final {
     }
   }
 
- private:
-  DescriptorSet submit_compute_prologue(
-      CommandBuffer&,
+  DescriptorSet get_descriptor_set(const ShaderInfo&, const utils::uvec3&);
+
+  void register_shader_dispatch(
+      const DescriptorSet&,
+      PipelineBarrier&,
       const ShaderInfo&,
       const utils::uvec3&);
 
-  void submit_compute_epilogue(
-      CommandBuffer&,
-      const DescriptorSet&,
-      const PipelineBarrier&,
-      const utils::uvec3&);
-
- public:
   template <class S, class D>
   bool submit_copy(
-      const PipelineBarrier&,
+      PipelineBarrier&,
       const S&,
       const D&,
       const api::utils::uvec3&,
@@ -194,7 +189,7 @@ class Context final {
   template <typename... Arguments>
   bool submit_compute_job(
       const ShaderInfo&,
-      const PipelineBarrier&,
+      PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
       VkFence fence_handle,
@@ -210,6 +205,7 @@ class Context final {
 class UniformParamsBuffer final {
  private:
   Context* context_p_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
@@ -218,6 +214,7 @@ class UniformParamsBuffer final {
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
+        nbytes_(sizeof(block)),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
@@ -236,6 +233,21 @@ class UniformParamsBuffer final {
   VulkanBuffer& buffer() {
     return vulkan_buffer_;
   }
+
+  template <typename Block>
+  void update(const Block& block) {
+    if (sizeof(block) != nbytes_) {
+      VK_THROW(
+          "Attempted to update UniformParamsBuffer with data of different size");
+    }
+    // Fill the uniform buffer with data in block
+    {
+      MemoryMap mapping(vulkan_buffer_, MemoryAccessType::WRITE);
+      Block* data_ptr = mapping.template data<Block>();
+
+      *data_ptr = block;
+    }
+  }
 };
 
 class StorageBuffer final {
@@ -243,6 +255,7 @@ class StorageBuffer final {
   Context* context_p_;
   ScalarType dtype_;
   size_t numel_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
@@ -254,8 +267,9 @@ class StorageBuffer final {
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
+        nbytes_(element_size(dtype_) * numel_),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            element_size(dtype_) * numel_,
+            nbytes_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
@@ -274,6 +288,14 @@ class StorageBuffer final {
 
   inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
+  }
+
+  inline size_t numel() {
+    return numel_;
+  }
+
+  inline size_t nbytes() {
+    return nbytes_;
   }
 };
 
@@ -389,7 +411,7 @@ inline void record_copy<VulkanBuffer, VulkanImage>(
  */
 template <class S, class D>
 inline bool Context::submit_copy(
-    const PipelineBarrier& pipeline_barrier,
+    PipelineBarrier& pipeline_barrier,
     const S& source,
     const D& destination,
     const api::utils::uvec3& copy_range,
@@ -456,7 +478,7 @@ inline bool Context::submit_copy(
 template <typename... Arguments>
 inline bool Context::submit_compute_job(
     const ShaderInfo& shader,
-    const PipelineBarrier& pipeline_barrier,
+    PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
     VkFence fence_handle,
@@ -502,23 +524,16 @@ inline bool Context::submit_compute_job(
 
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set =
-      submit_compute_prologue(cmd_, shader, local_work_group_size);
+      get_descriptor_set(shader, local_work_group_size);
 
   detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
 
-  // Adjust the global workgroup size based on the output tile size
-  const utils::uvec3 effective_global_wg = {
-      utils::div_up(global_work_group.data[0u], shader.out_tile_size.data[0u]),
-      utils::div_up(global_work_group.data[1u], shader.out_tile_size.data[1u]),
-      utils::div_up(global_work_group.data[2u], shader.out_tile_size.data[2u]),
-  };
-
   // Factor out template parameter independent code to minimize code bloat.
-  submit_compute_epilogue(
-      cmd_, descriptor_set, pipeline_barrier, effective_global_wg);
+  register_shader_dispatch(
+      descriptor_set, pipeline_barrier, shader, global_work_group);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   if (enable_op_profiling_) {

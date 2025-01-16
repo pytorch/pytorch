@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -33,9 +34,9 @@ def get_logger(name: Optional[str] = None):
 
 
 def _setup_logger(name: Optional[str] = None):
-    log = logging.getLogger(name)
-    log.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
-    return log
+    logger = logging.getLogger(name)
+    logger.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
+    return logger
 
 
 def _derive_module_name(depth: int = 1) -> Optional[str]:

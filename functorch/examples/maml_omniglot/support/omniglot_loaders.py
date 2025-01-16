@@ -22,11 +22,11 @@ import os
 import os.path
 
 import numpy as np
+from PIL import Image
+from torchvision import transforms
 
 import torch
 import torch.utils.data as data
-import torchvision.transforms as transforms
-from PIL import Image
 
 
 class Omniglot(data.Dataset):
@@ -169,9 +169,7 @@ class OmniglotNShot:
                 ),
             )
 
-            temp = (
-                {}
-            )  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
+            temp = {}  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
             for img, label in self.x:
                 if label in temp.keys():
                     temp[label].append(img)

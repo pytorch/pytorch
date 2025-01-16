@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Optional, Set
+from typing import TYPE_CHECKING
 
 import torchgen.api.cpp as aten_cpp
+from torchgen.executorch.api.types.types import contextArg
 
-from torchgen.api.types import Binding, CType
-from torchgen.model import FunctionSchema, NativeFunction
 
-from .types import contextArg
+if TYPE_CHECKING:
+    from torchgen.api.types import Binding, CType
+    from torchgen.model import FunctionSchema, NativeFunction
 
 
 @dataclass(frozen=True)
@@ -22,14 +25,14 @@ class ExecutorchCppSignature:
     func: FunctionSchema
 
     # The set of C++ arguments which should not have defaults applied to them
-    cpp_no_default_args: Set[str]
+    cpp_no_default_args: set[str]
 
     # Allows you to prepend an arbitrary prefix to the signature name.
     # This is useful for parts of the codegen that generate wrappers around kernels,
     # and need to avoid naming collisions.
     prefix: str = ""
 
-    def arguments(self, *, include_context: bool = True) -> List[Binding]:
+    def arguments(self, *, include_context: bool = True) -> list[Binding]:
         return ([contextArg] if include_context else []) + et_cpp.arguments(
             self.func.arguments,
             faithful=True,  # always faithful, out argument at the end
@@ -43,7 +46,7 @@ class ExecutorchCppSignature:
             faithful_name_for_out_overloads=True,
         )
 
-    def decl(self, name: Optional[str] = None, *, include_context: bool = True) -> str:
+    def decl(self, name: str | None = None, *, include_context: bool = True) -> str:
         args_str = ", ".join(
             a.decl() for a in self.arguments(include_context=include_context)
         )
@@ -51,7 +54,7 @@ class ExecutorchCppSignature:
             name = self.name()
         return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
-    def defn(self, name: Optional[str] = None) -> str:
+    def defn(self, name: str | None = None) -> str:
         args = [a.defn() for a in self.arguments()]
         args_str = ", ".join(args)
         if name is None:
@@ -64,7 +67,7 @@ class ExecutorchCppSignature:
     @staticmethod
     def from_native_function(
         f: NativeFunction, *, prefix: str = ""
-    ) -> "ExecutorchCppSignature":
+    ) -> ExecutorchCppSignature:
         return ExecutorchCppSignature(
             func=f.func, prefix=prefix, cpp_no_default_args=f.cpp_no_default_args
         )

@@ -44,7 +44,7 @@ LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
 LLGA_NOT_ENABLED = not torch.backends.mkldnn.is_available() or IS_WINDOWS or IS_MACOS
 
 def warmup_forward(f, *args, profiling_count=3):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -68,7 +68,7 @@ class JitLlgaTestCase(JitTestCase):
         with torch.no_grad(), torch._jit_internal._disable_emit_hooks():
             if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
-                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", cache_enabled=False, dtype=torch.bfloat16):
                     traced = torch.jit.trace(m, x)
                     if isinstance(m, torch.nn.Module):
                         traced = torch.jit.freeze(traced)
@@ -127,7 +127,7 @@ def get_eltwise_fn(name):
     elif name == 'hardswish_':
         return torch.nn.Hardswish(inplace=True)
     else:
-        raise NameError('Eltwise function %s not found' % name)
+        raise NameError(f'Eltwise function {name} not found')
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
@@ -486,7 +486,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_clamp(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
@@ -507,7 +507,7 @@ class TestFusionPattern(JitLlgaTestCase):
                 x = torch.clamp(x, max=2)
                 return x
 
-        for inplace in [False, True]:
+        for inplace in [False, True]:  # noqa: F841
             for memory_format in [torch.contiguous_format, torch.channels_last]:
                 x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
                 m = M()
@@ -519,7 +519,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
@@ -541,7 +541,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn_relu(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
@@ -645,7 +645,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_wildcard(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = nn.ReLU()
@@ -722,7 +722,7 @@ class TestFusionPattern(JitLlgaTestCase):
         # The output of the second partition is input to adaptive_avg_pool2d, which is
         # unsupported by LLGA, so it must be handled by PyTorch, which should receive
         # correct strides info of the channels-last tensor.
-        graph, _ = self.checkTrace(m, [x, y], dtype)
+        self.checkTrace(m, [x, y], dtype)
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestEnableDisableLlgaFuser(JitTestCase):
@@ -773,7 +773,7 @@ class TestEnableDisableLlgaFuser(JitTestCase):
 class TestDynamoAOT(JitTestCase):
     def test_dynamo_aot_ts_onednn(self):
         class Seq(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = nn.Sequential(
                     nn.Linear(10, 10),
@@ -788,7 +788,7 @@ class TestDynamoAOT(JitTestCase):
         mod = Seq()
 
         import torch._dynamo
-        aot_mod = torch._dynamo.optimize("aot_ts", nopython=True)(mod)
+        aot_mod = torch.compile(mod, backend="aot_ts", fullgraph=True)
 
         for _ in range(10):
             with torch.jit.fuser("fuser3"):

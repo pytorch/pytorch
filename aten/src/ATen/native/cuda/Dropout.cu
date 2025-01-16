@@ -45,31 +45,26 @@ template <
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
-fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
+fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
                          PhiloxCudaState philox_args) {
-  // make sure we don't break assumption that we can't have > 4 elements / thread
-  static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
-
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
 
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
   // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
   // in the vec=2 and vec=4 cases.
   bool gridxvec_loop_state = 0;
   accscalar_t scale = 1.0 / p;
 
-  float4 rand;
+  constexpr int RAND_SIZE = (VEC + 4 - 1) / 4;
+  float4 rand[RAND_SIZE];
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -83,37 +78,52 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
     // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
-    if ((VEC == 4) || (gridxvec_loop_state == 0)) {
-      rand = curand_uniform4(&state);
+    if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
+      #pragma unroll
+      for (int ii = 0; ii < RAND_SIZE; ii++) {
+        rand[ii] = curand_uniform4(&state);
+      }
     } else {
       // sets up the last two values we generated last iteration to be used this iteration.
-      rand.x = rand.z;
-      rand.y = rand.w;
+      rand[0].x = rand[0].z;
+      rand[0].y = rand[0].w;
       gridxvec_loop_state ^= 1;
     }
 
-    rand.x = rand.x < p;
-    rand.y = rand.y < p;
-    if (VEC == 4) {
-      rand.z = rand.z < p;
-      rand.w = rand.w < p;
+    rand[0].x = rand[0].x < p;
+    rand[0].y = rand[0].y < p;
+    if constexpr (VEC >= 4) {
+      rand[0].z = rand[0].z < p;
+      rand[0].w = rand[0].w < p;
+    }
+
+    #pragma unroll
+    for (int ii = 1; ii < RAND_SIZE; ii++) {
+      rand[ii].x = rand[ii].x < p;
+      rand[ii].y = rand[ii].y < p;
+      rand[ii].z = rand[ii].z < p;
+      rand[ii].w = rand[ii].w < p;
     }
 
     // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
     // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
     // ordering.
     // Single vectorized load
-    *value = *reinterpret_cast<LoadT*>(&a.data[linearIndex]);
+    *value = *reinterpret_cast<const LoadT*>(&a.data[linearIndex]);
 
     scalar_t r[VEC];
     mask_t mask[VEC];
 
     // Perform the actual computation
     #pragma unroll
-    for (int ii = 0; ii < VEC; ii++) {
-      r[ii] = src[ii]*(&rand.x)[ii]*scale;
-      mask[ii] = (mask_t)(&rand.x)[ii];
+    for (int jj = 0; jj < RAND_SIZE; jj++) {
+      #pragma unroll
+      for (int ii = 0; ii < std::min(VEC, 4); ii++) {
+        r[jj * 4 + ii] = src[jj * 4 + ii]*(&rand[jj].x)[ii]*scale;
+        mask[jj * 4 + ii] = (mask_t)(&rand[jj].x)[ii];
+      }
     }
+
     // Vectorized writes for both mask & result
     *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
     *(reinterpret_cast<MaskLoadT*>(&c.data[linearIndex])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
@@ -133,18 +143,15 @@ template <
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
-fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
+fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
                      cuda::detail::TensorInfo<mask_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
                      PhiloxCudaState philox_args) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
   accscalar_t scale = 1.0 / p;
 
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
@@ -164,7 +171,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `a`
                const IndexType aOffset =
-                   cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(li, a);
+                   cuda::detail::IndexToOffset<const scalar_t, IndexType, ADims>::get(li, a);
                src[ii] = a.data[aOffset];
            }
        }
@@ -187,8 +194,8 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tenso
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
      .add_output(ret)
-     .add_input(src)
-     .add_input(mask)
+     .add_const_input(src)
+     .add_const_input(mask)
      .build();
 
    at::native::gpu_kernel(
@@ -205,7 +212,14 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   if (!self.is_non_overlapping_and_dense() || !ret.is_non_overlapping_and_dense() || !mask.is_non_overlapping_and_dense()) {
     vec_size = 1;
   } else {
-    vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
+    vec_size = memory::can_vectorize_up_to<scalar_t>((const char*)self.const_data_ptr());
+#ifdef USE_ROCM
+    // make sure we don't break assumption that we can't have > 16 elements / thread
+    TORCH_INTERNAL_ASSERT(vec_size <= 16, "Value of VEC must be in [2, 4, 8, 16]");
+#else
+    // make sure we don't break assumption that we can't have > 4 elements / thread
+    TORCH_INTERNAL_ASSERT(vec_size <= 4, "Value of VEC must be in [2, 4]");
+#endif
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
@@ -236,7 +250,7 @@ inline void launcher(
         using accscalar_t = acc_type<scalar_t, true>;
         accscalar_t pa = (accscalar_t)(p);
         auto self_info =
-            cuda::detail::getTensorInfo<scalar_t, index_type>(self);
+            cuda::detail::getTensorInfo<const scalar_t, index_type>(self);
         auto ret_info =
             cuda::detail::getTensorInfo<scalar_t, index_type>(ret);
         auto mask_info =
@@ -250,6 +264,38 @@ inline void launcher(
 
         if (vec_size > 1) {
           switch (vec_size) {
+            case 16:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  16>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
+            case 8:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  8>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
             case 4:
               fused_dropout_kernel_vec<
                   scalar_t,
@@ -282,6 +328,8 @@ inline void launcher(
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
+            default:
+              TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
           }
         } else {
           switch (self_info.dims) {
@@ -366,7 +414,7 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
 }
 
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
+native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
   // short-cut for train == false
   if (train.has_value() && !train.value()) {
     return std::make_tuple(self.clone(), at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)));
@@ -380,14 +428,14 @@ native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
     return std::tuple<Tensor,Tensor>(ret, mask);
   }
 
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
   return dropout_cuda<bool>(gen, self, p1m);
 }
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+fused_dropout_cuda(const Tensor& self, double p, std::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   return dropout_cuda<uint8_t>(gen, self, p);
 }

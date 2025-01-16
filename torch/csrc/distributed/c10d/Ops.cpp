@@ -168,7 +168,7 @@ IMPL_BROADCAST(PrivateUse1)
           at::TensorList tensors,                                             \
           const c10::intrusive_ptr<ProcessGroup>& process_group,              \
           const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
-          const c10::optional<at::Tensor>& sparse_indices,                    \
+          const std::optional<at::Tensor>& sparse_indices,                    \
           int64_t timeout) {                                                  \
     auto tensor_vec = tensors.vec();                                          \
     auto work = process_group->getBackend(c10::DeviceType::DEV) -> allreduce( \
@@ -220,6 +220,7 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
             output_tensors, work);                                             \
   }
 
+// NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
 IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
@@ -426,6 +427,7 @@ IMPL_ALLTOALL_BASE(CPU)
 IMPL_ALLTOALL_BASE(CUDA)
 IMPL_ALLTOALL_BASE(PrivateUse1)
 
+// NOLINTBEGIN(performance-unnecessary-value-param)
 #define IMPL_BARRIER(DEV)                                                    \
   c10::intrusive_ptr<Work> barrier##DEV(                                     \
       at::Tensor /* unused */,                                               \
@@ -440,8 +442,11 @@ IMPL_ALLTOALL_BASE(PrivateUse1)
 IMPL_BARRIER(CPU)
 IMPL_BARRIER(CUDA)
 IMPL_BARRIER(PrivateUse1)
+// NOLINTEND(performance-unnecessary-value-param)
+// NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 
 void monitored_barrier_CPU(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor /* unused */,
     const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -458,14 +463,14 @@ allreduce_sparse_cuda_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    const c10::optional<at::Tensor>& sparse_indices,
+    const std::optional<at::Tensor>& sparse_indices,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->getBackend(c10::DeviceType::CUDA)
                   ->allreduce_sparse(
                       tensor_vec,
                       AllreduceOptions{
-                          *reduce_op.get(),
+                          *reduce_op,
                           std::chrono::milliseconds(timeout),
                           sparse_indices});
 

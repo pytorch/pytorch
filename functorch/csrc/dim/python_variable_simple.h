@@ -26,7 +26,7 @@ struct THPVariable {
 TORCH_PYTHON_API extern PyObject *THPVariableClass;
 TORCH_PYTHON_API extern PyObject *ParameterClass;
 
-TORCH_PYTHON_API PyObject * THPVariable_Wrap(at::TensorBase var);
+TORCH_PYTHON_API PyObject * THPVariable_Wrap(const at::TensorBase& var);
 
 inline bool THPVariable_Check(PyObject *obj)
 {

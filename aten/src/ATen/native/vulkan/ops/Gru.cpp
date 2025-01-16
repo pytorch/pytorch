@@ -135,7 +135,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::vector<c10::intrusive_ptr<LinearPackedContext>> pack_linear_op_contexts(
+static std::vector<c10::intrusive_ptr<LinearPackedContext>>
+pack_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
   TORCH_CHECK(

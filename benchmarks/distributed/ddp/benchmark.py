@@ -18,11 +18,12 @@ import sys
 import time
 
 import numpy as np
+import torchvision
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
 
 
 def allgather_object(obj):
@@ -108,17 +109,17 @@ def sweep(benchmark):
 
     def print_header():
         local_print("\n")
-        local_print("%22s" % "")
-        for p in [50, 75, 90, 95]:
-            local_print("%14s%10s" % ("sec/iter", "ex/sec"))
+        local_print(" " * 22)
+        for _ in [50, 75, 90, 95]:
+            local_print(f"{'sec/iter':14s}{'ex/sec':10s}")
         local_print("\n")
 
     def print_measurements(prefix, nelem, measurements):
         measurements = sorted(measurements)
-        local_print("%8s:" % prefix)
+        local_print(f"{prefix:8s}:")
         for p in [50, 75, 90, 95]:
             v = np.percentile(measurements, p)
-            local_print("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+            local_print(f"  p{p:02d}:  {v:1.3f}s  {nelem / v:6d}/s")
         local_print("\n")
 
     # Every process runs once by themselves to warm up (CUDA init, etc).
@@ -132,7 +133,7 @@ def sweep(benchmark):
 
     # Multi-machine benchmarks
     for i in range(1, (dist.get_world_size() // 8) + 1):
-        append_benchmark("   %dM/8G" % i, range(i * 8))
+        append_benchmark(f"   {i:d}M/8G", range(i * 8))
 
     # Run benchmarks in order of increasing number of GPUs
     print_header()
@@ -225,20 +226,20 @@ def main():
         print("-----------------------------------")
         print("PyTorch distributed benchmark suite")
         print("-----------------------------------")
-        print("")
+        print()
         print(f"* PyTorch version: {torch.__version__}")
         print(f"* CUDA version: {torch.version.cuda}")
         print(f"* Distributed backend: {args.distributed_backend}")
         print(f"* Maximum bucket size: {args.bucket_size}MB")
-        print("")
+        print()
         print("--- nvidia-smi topo -m ---")
-        print("")
+        print()
         print(output[0])
         print("--------------------------")
-        print("")
+        print()
 
     torch.cuda.set_device(dist.get_rank() % 8)
-    device = torch.device("cuda:%d" % (dist.get_rank() % 8))
+    device = torch.device(f"cuda:{dist.get_rank() % 8:d}")
 
     benchmarks = []
     if args.model:

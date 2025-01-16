@@ -8,7 +8,7 @@ namespace at {
 namespace {
 
 // Verifies the requested type is the same as the Tensor's type.
-void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type_name) {
+void check_type(const TensorBase& tensor, ScalarType type, std::string_view type_name) {
   TORCH_CHECK(
       tensor.scalar_type() == type
       || (isQIntType(tensor.scalar_type())
@@ -23,6 +23,12 @@ void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type
    TORCH_API const T* TensorBase::const_data_ptr() const {           \
      check_type(*this, ScalarType::name, #name);                     \
      return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
+   }                                                                 \
+                                                                     \
+   template <>                                                       \
+   TORCH_API const T* TensorBase::const_data_ptr<const T>() const {  \
+     check_type(*this, ScalarType::name, #name);                     \
+     return this->unsafeGetTensorImpl()->data_ptr_impl<std::remove_const_t<T>>(); \
    }                                                                 \
                                                                      \
    template <>                                                       \

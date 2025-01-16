@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 from typing import Callable, Dict, Optional, Set, Union
 
@@ -6,7 +7,12 @@ from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
 
-__all__ = ['FoldedGraphModule', 'get_unique_attr_name_in_module', 'split_const_subgraphs']
+__all__ = [
+    "FoldedGraphModule",
+    "get_unique_attr_name_in_module",
+    "split_const_subgraphs",
+]
+
 
 class FoldedGraphModule(torch.fx.GraphModule):
     """
@@ -60,7 +66,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
         def _create_param(i):
             return torch.nn.Parameter(
-                i
+                i.detach().clone()
                 if not isinstance(i, int)
                 else torch.Tensor([i]).to(device=self.device_for_folded_attrs),
                 requires_grad=i.requires_grad if isinstance(i, torch.Tensor) else False,
@@ -92,6 +98,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     # Now actually do the swap. Note that we have to keep track of new nodes that are
     # copied into `gm` -- we do this via replacement_mapping.
     call_mod_args = call_mod_node_to_replace.args
+    call_mod_kwargs = call_mod_node_to_replace.kwargs
+
     replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
@@ -102,7 +110,12 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
     for inline_node in inline_mod.graph.nodes:
         if inline_node.op == "placeholder":
-            replacement_mapping[inline_node] = call_mod_args[ph_count]
+            replacement_mapping[inline_node] = (
+                call_mod_kwargs[inline_node.name]
+                if inline_node.name in call_mod_kwargs
+                else call_mod_args[ph_count]
+            )
+
             ph_count += 1
             continue
 
@@ -197,13 +210,14 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
-    const_gm, non_const_gm = split.submod_0, split.submod_1
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
+    # Safely get submod_1 in case there are no non-const nodes
+    const_gm, non_const_gm = split.submod_0, getattr(split, non_const_mod_name, None)
 
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `split` as it's the owning module now.
-    for node in non_const_gm.graph.nodes:
+    for node in non_const_gm.graph.nodes if non_const_gm else []:
         if node.op == "call_module":
             setattr(split, node.target, getattr(non_const_gm, node.target))
     for node in const_gm.graph.nodes:
@@ -258,12 +272,12 @@ def split_const_subgraphs(
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
     fx_const_folded_attrs_name = get_unique_attr_name_in_module(
-        split, "_FX_CONST_FOLDED_ATTRS"
+        mod_traced, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(
         split,
         fx_const_folded_attrs_name,
-        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),
+        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),  # type: ignore[possibly-undefined]
     )
     for node in split.graph.nodes:
         if node.op == "call_module" and node.target == const_mod_name:
@@ -273,12 +287,13 @@ def split_const_subgraphs(
             node.replace_all_uses_with(folded_attrs)
             break
 
-    split.graph.eliminate_dead_code()
+    # Finally, inline the non-constant submod (if it exists) into the split submod.
+    # This is so that the original caller who may have passed in a graph module will
+    # get back out a graph module whose graph is traced to the same granularity.
+    if hasattr(split, non_const_mod_name):
+        _inline_module(split, non_const_mod_name)
 
-    # Finally, inline the non-constant submod into the split submod. This is so that the
-    # original caller who may have passed in a graph module will get back out a graph
-    # module whose graph is traced to the same granularity.
-    _inline_module(split, non_const_mod_name)
+    split.graph.eliminate_dead_code()
 
     return FoldedGraphModule(
         split,

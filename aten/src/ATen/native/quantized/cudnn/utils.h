@@ -27,7 +27,7 @@ C10_DIAGNOSTIC_POP()
 struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       c10::QScheme q_scheme)
       : orig_weight(std::move(orig_weight)),
         bias_(std::move(bias)),
@@ -53,19 +53,19 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
     "parameter type");
   }
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
  private:
   at::Tensor orig_weight;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   c10::QScheme q_scheme;
 
   template <bool ReluFused>
@@ -85,7 +85,7 @@ template <int kSpatialDim = 2>
 struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -96,10 +96,10 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
       int64_t output_channels)
       : maybe_padded_weight_(std::move(orig_weight)),
         bias_(std::move(bias)),
-        stride_(std::move(stride)),
-        padding_(std::move(padding)),
-        output_padding_(std::move(output_padding)),
-        dilation_(std::move(dilation)),
+        stride_(stride),
+        padding_(padding),
+        output_padding_(output_padding),
+        dilation_(dilation),
         groups_(groups),
         transpose_(transpose),
         q_scheme_(q_scheme),
@@ -127,11 +127,11 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
     TORCH_CHECK(false, "apply_dynamic_relu is currently not reported");
   }
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -171,7 +171,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   // convention "maybe"_padded_weight.
   // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end and rename this to orig_weight_
   at::Tensor maybe_padded_weight_;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;
@@ -195,20 +195,19 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
 };
 
 namespace cudnn_utils {
-namespace {
 
 // TODO: we can remove this function when cuDNN enables pass by value support for
 // pointwise multiplication operations. the only reason why we need this right now is
 // we use broadcasting scalar multiplication in conv, linear, and add ops, and cuDNN requires
 // the scalar to be a scalar tensor with the same number of dimensions (num_dim) as the tensor we're multiplying to
-at::Tensor getRequantMultiplierTensor(double requant_multiplier, uint8_t num_dim) {
+inline at::Tensor getRequantMultiplierTensor(double requant_multiplier, uint8_t num_dim) {
   at::SmallVector<int64_t, 4> requantize_multiplier_tensor_size(num_dim, 1);
   at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requant_multiplier);
   return requantize_multiplier_tensor;
 }
 
-uint8_t getAlignment(const at::Tensor &t) {
+inline uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
@@ -225,7 +224,7 @@ uint8_t getAlignment(const at::Tensor &t) {
 // backend cudnn will no longer directly save to the tensor, allowing us to omit this tensor from the variant pack.
 // See third_party/cudnn_frontend/samples/fusion_sample.cpp for other examples
 
-cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment, bool is_virtual = false) {
+inline cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment, bool is_virtual = false) {
   auto shape = t.sizes();
   auto strides = t.strides();
   if (is_virtual) {
@@ -247,7 +246,7 @@ cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint
     .build();
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment, bool is_virtual = false) {
+inline cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment, bool is_virtual = false) {
   if (is_virtual) {
     return cudnn_frontend::TensorBuilder()
       .setDim(shape.size(), shape.data())
@@ -269,7 +268,7 @@ cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const 
 
 // TODO: there is a table from input dtype to operator dtype, we can derive
 // the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
+inline cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::PointWiseDescBuilder()
     .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_MUL)
     .setMathPrecision(dataType)
@@ -278,7 +277,7 @@ cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataT
 
 // TODO: there is a table from input dtype to operator dtype, we can derive
 // the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataType) {
+inline cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::PointWiseDescBuilder()
     .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_ADD)
     .setMathPrecision(dataType)
@@ -287,7 +286,7 @@ cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataT
 
 // TODO: there is a table from input dtype to operator dtype, we can derive
 // the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t dataType) {
+inline cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::PointWiseDescBuilder()
     .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_RELU_FWD)
     .setMathPrecision(dataType)
@@ -295,7 +294,7 @@ cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t data
 }
 
 
-void filterEngineConfigs(
+inline void filterEngineConfigs(
   cudnn_frontend::EngineConfigList &from,
   cudnn_frontend::EngineConfigList &to,
   bool deterministic, bool allow_tf32, c10::ScalarType scalar_type)
@@ -313,41 +312,6 @@ void filterEngineConfigs(
   cudnn_frontend::filter(from, to, filter);
 }
 
-
-cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opGraph, cudnnHandle_t handle_) {
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-    .setOperationGraph(opGraph)
-    .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-    .build();
-
-  // std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
-  auto& engine_config = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-
-  // Try engine configs returned by the heuristics and pick up the first one that works.
-  for (auto& ecfg : engine_config) {
-    try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle_)
-        .setEngineConfig(ecfg, opGraph.getTag())
-        .build();
-      return plan;
-    } catch (cudnn_frontend::cudnnException& e) {
-      continue;
-    }
-  }
-
-  {
-    // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
-    auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
-    // std::cout << engine.describe() << std::endl;
-
-    auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
-    // std::cout << engine_config.describe() << std::endl;
-
-    return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
-  }
-}
-} // anonymous
 } // cudnn_utils
 
 #endif  // AT_CUDNN_ENABLED

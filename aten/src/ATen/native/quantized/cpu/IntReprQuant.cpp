@@ -15,8 +15,7 @@
 #include <ATen/ops/int_repr_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // When input Tensor is non-dense, i.e. the allocated memory
 // is larger than the memory used by all the elements, we'll
@@ -32,7 +31,7 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           {out_size},
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
-      const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
+      const underlying_t* qdata = reinterpret_cast<const underlying_t*>(self.const_data_ptr<scalar_t>());
       for (const auto i : c10::irange(dst.numel())) {
         dst[i] = static_cast<underlying_t>(qdata[i]);
       }
@@ -52,5 +51,4 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
   return dst;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.nn as nn
@@ -13,9 +14,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -107,8 +110,6 @@ class TestFSDPMemory(FSDPTest):
 
     def _dist_train(self, with_checkpoint, expected, model_hidden_dim, iterations):
         gpu_id = self.rank
-        world_size = self.world_size
-
         batch = torch.randn(size=(2, 3, 224, 224)).cuda()
 
         model = create_model(
@@ -157,6 +158,7 @@ class TestFSDPMemory(FSDPTest):
         output = cmp(results, expected)
         self.assertEqual(output, "")
 
+    @unittest.skipIf(TEST_HPU, "Memory will be differnt for CUDA and HPU, skipping")
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
     def test_fsdp_memory(self, ckpt):
@@ -228,7 +230,5 @@ class TestFSDPMemory(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFSDPMemory)
-
-
 if __name__ == "__main__":
     run_tests()

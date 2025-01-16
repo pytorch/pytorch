@@ -6,6 +6,7 @@
 // Doesn't work on ROCm or Windows yet
 // TODO: Add compiler warning? Add PyTorch config flag?
 #else
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/tensor_ref.h>
@@ -29,8 +30,7 @@
   }
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 // Doesn't work on ROCm or Windows yet or old compiler
@@ -157,7 +157,7 @@ template<typename ElementInputA, typename ElementInputB>
 Tensor
 mixed_dtypes_linear_dispatch_bias_activation(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
-    const Tensor& bias, const c10::string_view& activation) {
+    const Tensor& bias, const std::string_view& activation) {
     if (bias.numel() == 0) {
       if (activation == "none") {
         return mixed_dtypes_linear_cutlass<
@@ -165,7 +165,7 @@ mixed_dtypes_linear_dispatch_bias_activation(
           ElementInputB,
           fastertransformer::EpilogueOpNoBias>(input, weight, scale, bias);
       }
-      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+      TORCH_CHECK(false, "mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
                activation, "\" is not supported");
       return Tensor{};
     }
@@ -186,7 +186,7 @@ mixed_dtypes_linear_dispatch_bias_activation(
             ElementInputB,
             fastertransformer::EpilogueOpBiasSilu>(input, weight, scale, bias);
       }
-      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+      TORCH_CHECK(false, "mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
                activation, "\" is not supported");
       return Tensor{};
     }
@@ -196,10 +196,10 @@ mixed_dtypes_linear_dispatch_bias_activation(
 Tensor
 _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
-                     const c10::optional<Tensor>& bias_opt,
-                     const c10::optional<c10::string_view> activation_opt) {
+                     const std::optional<Tensor>& bias_opt,
+                     const std::optional<std::string_view> activation_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_mixed_dtypes_linear: not compiled for this platform");
+  TORCH_CHECK(false, "_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};
 #else
   const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};
@@ -350,5 +350,4 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
 #endif
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

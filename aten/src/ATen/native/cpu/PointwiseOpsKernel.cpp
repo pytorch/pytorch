@@ -117,10 +117,9 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& no
         // 1        if  x >= beta
         // -1       if x <= -beta
         // x / beta if |x| < beta
-        Vectorized<float> input0, input1, target0, target1, grad_output0, grad_output1;
-        std::tie(input0, input1) = convert_bfloat16_float(input);
-        std::tie(target0, target1) = convert_bfloat16_float(target);
-        std::tie(grad_output0, grad_output1) = convert_bfloat16_float(grad_output);
+        auto [input0, input1] = convert_bfloat16_float(input);
+        auto [target0, target1] = convert_bfloat16_float(target);
+        auto [grad_output0, grad_output1] = convert_bfloat16_float(grad_output);
         auto x = input0 - target0;
         auto pos_or_neg_1_vec = Vectorized<float>::blendv(
             neg_1_vec, pos_1_vec, x > zero_vec);
@@ -218,7 +217,7 @@ static void huber_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, 
 
 static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES(dtype, "mse_backward_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "mse_backward_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vectorized<scalar_t>(scalar_val);
     cpu_kernel_vec(
@@ -236,10 +235,10 @@ static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
-REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
-REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
-REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
-REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
+REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel)
+REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel)
+REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel)
+REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel)
+REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel)
 
 } // namespace at::native

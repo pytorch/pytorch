@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Dict, Optional, Set, Tuple, List, Type
+from typing import Any, Dict, List, Optional, Set, Type
 
 import torch
 from torch import nn
@@ -9,20 +10,19 @@ from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import type_before_parametrizations
 
 from .utils import (
-    module_contains_param,
-    swap_module,
     FakeSparsity,
     get_arg_info_from_tensor_fqn,
+    module_contains_param,
     module_to_fqn,
+    swap_module,
 )
+
 
 __all__ = ["BaseSparsifier"]
 
 SUPPORTED_MODULES = {nn.Linear}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
-
-__all__ = ["BaseSparsifier"]
 
 
 # TODO update desc with new config args
@@ -146,7 +146,7 @@ class BaseSparsifier(abc.ABC):
         stack = [model]
         while stack:
             module = stack.pop()
-            for name, child in module.named_children():
+            for _name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
                     module_fqn = module_to_fqn(model, child)
                     assert isinstance(module_fqn, str)  # for mypy
@@ -200,9 +200,7 @@ class BaseSparsifier(abc.ABC):
                             and "." + info_from_tensor_fqn[key] == local_args[key]
                         )
                         # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
-                    ), (
-                        f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
-                    )
+                    ), f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
             local_args.update(info_from_tensor_fqn)
             self.groups.append(local_args)
         self._prepare()
@@ -221,8 +219,8 @@ class BaseSparsifier(abc.ABC):
 
     def squash_mask(
         self,
-        params_to_keep: Optional[Tuple[str, ...]] = None,
-        params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
+        params_to_keep: Optional[tuple[str, ...]] = None,
+        params_to_keep_per_layer: Optional[Dict[str, tuple[str, ...]]] = None,
         *args,
         **kwargs,
     ):

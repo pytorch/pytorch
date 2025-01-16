@@ -37,7 +37,7 @@ class TestGenerator(JitTestCase):
 
         # Run this 3 times to ensure that the generator is being manually seeded
         # each time the traced function is run
-        for i in range(3):
+        for _ in range(3):
             torch.manual_seed(1)
 
             eager_tensor = f()
@@ -64,7 +64,7 @@ class TestGenerator(JitTestCase):
 
         # Run this 3 times to ensure that the generator is being manually seeded
         # each time the traced function is run
-        for i in range(3):
+        for _ in range(3):
             torch.manual_seed(1)
 
             eager_tensor = f()
@@ -127,7 +127,7 @@ class TestGenerator(JitTestCase):
 
     def test_save_load(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2, bias=False)
                 self.bar = torch.nn.Linear(2, 2, bias=False)

@@ -251,6 +251,34 @@ public:
     return *this;
   }
   Vectorized<int32_t> neg() const;
+  int32_t reduce_add() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_si256(v, v, 0x1);
+    v = _mm256_add_epi32(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0x4E);
+    v = _mm256_add_epi32(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0xB1);
+    v = _mm256_add_epi32(v, v1);
+    __m128i lo = _mm256_castsi256_si128(v);
+    return _mm_cvtsi128_si32(lo);
+  }
+  int32_t reduce_max() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_si256(v, v, 0x1);
+    v = _mm256_max_epi32(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0x4E);
+    v = _mm256_max_epi32(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0xB1);
+    v = _mm256_max_epi32(v, v1);
+    __m128i lo = _mm256_castsi256_si128(v);
+    return _mm_cvtsi128_si32(lo);
+  }
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
   }
@@ -494,7 +522,7 @@ public:
 template <typename T>
 class Vectorized8 : public Vectorizedi {
   static_assert(
-    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
     "Only int8_t/uint8_t are supported");
 protected:
   static const Vectorized<T> ones;
@@ -1382,7 +1410,7 @@ Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vect
   return c;
 }
 
-template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
 Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b) {
   // No vector instruction for shifting int8_t/uint8_t, so emulating
   // it instead.

@@ -37,6 +37,8 @@ quantized 8-bit integer (unsigned)      ``torch.quint8``
 quantized 8-bit integer (signed)        ``torch.qint8``
 quantized 32-bit integer (signed)       ``torch.qint32``
 quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``
+8-bit floating point, e4m3 [5]_         ``torch.float8_e4m3fn`` (limited support)
+8-bit floating point, e5m2 [5]_         ``torch.float8_e5m2`` (limited support)
 ======================================= ===========================================
 
 .. [1]
@@ -54,6 +56,11 @@ quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``
   torch.compile); if you need eager support and the extra range is not needed,
   we recommend using their signed variants instead.  See
   https://github.com/pytorch/pytorch/issues/58734 for more details.
+.. [5]
+  ``torch.float8_e4m3fn`` and ``torch.float8_e5m2`` implement the spec for 8-bit
+  floating point types from https://arxiv.org/abs/2209.05433. The op support
+  is very limited.
+
 
 For backwards compatibility, we support the following alternate class names
 for these data types:
@@ -205,6 +212,37 @@ Tensor class reference
      (see :ref:`tensor-creation-ops`).
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
+   - There is a legacy constructor ``torch.Tensor`` whose use is discouraged.
+     Use :func:`torch.tensor` instead.
+
+.. method:: Tensor.__init__(self, data)
+
+   This constructor is deprecated, we recommend using :func:`torch.tensor` instead.
+   What this constructor does depends on the type of ``data``.
+
+   * If ``data`` is a Tensor, returns an alias to the original Tensor.  Unlike
+     :func:`torch.tensor`, this tracks autograd and will propagate gradients to
+     the original Tensor.  ``device`` kwarg is not supported for this ``data`` type.
+
+   * If ``data`` is a sequence or nested sequence, create a tensor of the default
+     dtype (typically ``torch.float32``) whose data is the values in the
+     sequences, performing coercions if necessary.  Notably, this differs from
+     :func:`torch.tensor` in that this constructor will always construct a float
+     tensor, even if the inputs are all integers.
+
+   * If ``data`` is a :class:`torch.Size`, returns an empty tensor of that size.
+
+   This constructor does not support explicitly specifying ``dtype`` or ``device`` of
+   the returned tensor.  We recommend using :func:`torch.tensor` which provides this
+   functionality.
+
+   Args:
+       data (array_like): The tensor to construct from.
+
+   Keyword args:
+       device (:class:`torch.device`, optional): the desired device of returned tensor.
+           Default: if None, same :class:`torch.device` as this tensor.
+
 
 .. autoattribute:: Tensor.T
 .. autoattribute:: Tensor.H
@@ -535,6 +573,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.module_load
     Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
@@ -740,4 +779,5 @@ Tensor class reference
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_
+    Tensor.xpu
     Tensor.zero_

@@ -2,10 +2,10 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static void sanityCheckNotFunctional(const c10::OperatorHandle& op, torch::jit::Stack* stack, size_t num_args) {
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
+  foreachTensorInplace(*stack, static_cast<std::ptrdiff_t>(stack->size() - num_args), static_cast<std::ptrdiff_t>(stack->size()),
       [](const Tensor& tensor) {
         TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensor));
         return tensor;
@@ -28,7 +28,7 @@ void FunctionalizeInterpreterPtr::processImpl(
   op.callBoxed(stack);
 
   auto ret_size = op.schema().returns().size();
-  foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(),
+  foreachTensorInplace(*stack, static_cast<std::ptrdiff_t>(stack->size() - ret_size), static_cast<std::ptrdiff_t>(stack->size()),
     [&](const Tensor& tensor) {
       if (at::functionalization::impl::isFunctionalTensor(tensor)) {
         auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
@@ -64,4 +64,4 @@ void FunctionalizeInterpreterPtr::sendToNextInterpreterImpl(
   sanityCheckNotFunctional(op, stack, ret_size);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch

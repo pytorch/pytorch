@@ -1,14 +1,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <c10/util/error.h>
 #include <torch/csrc/profiler/perf-inl.h>
 #include <torch/csrc/profiler/perf.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-
-namespace linux_perf {
+namespace torch::profiler::impl::linux_perf {
 
 #if defined(__ANDROID__) || defined(__linux__)
 
@@ -67,7 +64,6 @@ void PerfEvent::Init() {
   }
 
   struct perf_event_attr attr {};
-  memset(&attr, 0, sizeof(attr));
 
   attr.size = sizeof(perf_event_attr);
   attr.type = it->second.first;
@@ -91,7 +87,9 @@ void PerfEvent::Init() {
   fd_ = static_cast<int>(perf_event_open(&attr, pid, cpu, group_fd, flags));
   if (fd_ == -1) {
     TORCH_CHECK(
-        false, "perf_event_open() failed, error: ", std::strerror(errno));
+        false,
+        "perf_event_open() failed, error: ",
+        c10::utils::str_error(errno));
   }
   Reset();
 }
@@ -104,7 +102,7 @@ uint64_t PerfEvent::ReadCounter() const {
       "Read failed for Perf event fd, event : ",
       name_,
       ", error: ",
-      std::strerror(errno));
+      c10::utils::str_error(errno));
   TORCH_CHECK(
       counter.time_enabled == counter.time_running,
       "Hardware performance counter time multiplexing is not handled yet",
@@ -123,13 +121,13 @@ uint64_t PerfEvent::ReadCounter() const {
  * value
  */
 
-PerfEvent::~PerfEvent(){};
+PerfEvent::~PerfEvent() {}
 
-void PerfEvent::Init(){};
+void PerfEvent::Init() {}
 
 uint64_t PerfEvent::ReadCounter() const {
   return 0;
-};
+}
 
 #endif /* __ANDROID__ || __linux__ */
 
@@ -193,7 +191,4 @@ void PerfProfiler::Disable(perf_counters_t& vals) {
     StartCounting();
   }
 }
-} // namespace linux_perf
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl::linux_perf

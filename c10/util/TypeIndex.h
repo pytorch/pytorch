@@ -9,56 +9,12 @@
 #include <string>
 #include <type_traits>
 
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
 namespace c10::util {
-
-// TODO Make it work for more compilers
-
-// Intel compiler works
-#if defined(__INTEL_COMPILER)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-
-// Clang works
-#elif defined(__clang__)
-
-// except for NVCC
-#if defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// Windows works
-#elif defined(_MSC_VER)
-
-// except for NVCC
-#if defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// GCC works
-#elif defined(__GNUC__)
-
-// except when gcc < 9
-#if (__GNUC__ < 9) || defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
-// some other compiler we don't know about
-#else
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
 
 struct type_index final : IdWrapper<type_index, uint64_t> {
   constexpr explicit type_index(uint64_t checksum) : IdWrapper(checksum) {}
@@ -76,24 +32,13 @@ struct type_index final : IdWrapper<type_index, uint64_t> {
 
 namespace detail {
 
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 5
-// Getting __PRETTY_FUNCTION__ at compile time only works with GCC >= 5
-#error "You're running a too old version of GCC. We need GCC 5 or later."
-#endif
-
-#if defined(__clang__) && __clang_major__ < 4
-// Getting __PRETTY_FUNCTION__ at compile time only works with Clang >= 4
-#error "You're running a too old version of Clang. We need Clang 4 or later."
-#endif
-
-inline constexpr string_view extract(
-    string_view prefix,
-    string_view suffix,
-    string_view str) {
+inline constexpr c10::c10_string_view extract(
+    c10::c10_string_view prefix,
+    c10::c10_string_view suffix,
+    c10::c10_string_view str) {
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::logic_error in device code
   return (!str.starts_with(prefix) || !str.ends_with(suffix))
-      ? (throw std::logic_error("Invalid pattern"), string_view())
+      ? (throw std::logic_error("Invalid pattern"), c10::c10_string_view())
       : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
 #else
   return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
@@ -101,7 +46,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
+inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
 #if defined(__NVCC__)
   return extract(
@@ -116,17 +61,13 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
 #endif
 #elif defined(__clang__)
   return extract(
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
+      "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
       "]",
       __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
-      "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-#else
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-#endif
-      "; c10::string_view = c10::basic_string_view<char>]",
+      "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+      "; c10::c10_string_view = c10::basic_string_view<char>]",
       __PRETTY_FUNCTION__);
 #endif
 }
@@ -181,16 +122,11 @@ inline constexpr type_index get_type_index<std::string>() {
 #endif
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view
-get_fully_qualified_type_name() noexcept {
-#if C10_TYPENAME_SUPPORTS_CONSTEXPR
-  constexpr
-#else
-  static
-#endif
-      string_view name = detail::fully_qualified_type_name_impl<T>();
+inline constexpr c10::c10_string_view get_fully_qualified_type_name() noexcept {
+  constexpr c10::c10_string_view name =
+      detail::fully_qualified_type_name_impl<T>();
   return name;
 }
 } // namespace c10::util
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index);
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index)

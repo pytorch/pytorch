@@ -1,16 +1,15 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/library.h>
+#include <optional>
 
 using namespace at;
 
-namespace torch {
-namespace TraceType {
+namespace torch::TraceType {
 
 namespace {
 
@@ -51,7 +50,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
 const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
     if (jit::tracer::ArgumentStash::hasIntArrayRef("size")) {
       jit::tracer::ArgumentStash::popIntArrayRef("size");
@@ -70,7 +69,7 @@ const Tensor& resize_(
 const Tensor& resize_as_(
     const Tensor& self,
     const Tensor& the_template,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
@@ -120,7 +119,7 @@ Tensor& detach_(Tensor& self) {
     self.detach_();
   }
 
-  if (jit::tracer::isTracing()) {
+  if (jit::tracer::isTracing() && node) {
     jit::tracer::addOutput(node, self);
   }
   return self;
@@ -152,11 +151,9 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
 
 } // namespace
 
-} // namespace TraceType
-} // namespace torch
+} // namespace torch::TraceType
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 static void general_trace_function(
     const c10::OperatorHandle& op,
     Stack* stack) {
@@ -298,5 +295,4 @@ TORCH_LIBRARY_IMPL(_, Tracer, m) {
   m.fallback(CppFunction::makeFromBoxedFunction<&general_trace_function>());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -2,9 +2,7 @@
 
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 inline Tensor bilinear(
     const Tensor& input1,
@@ -32,6 +30,4 @@ inline Tensor linear(
   }
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

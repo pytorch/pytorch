@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 from functorch.experimental.control_flow import _unstack_pytree
@@ -18,6 +19,7 @@ from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
+from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts, compute_unbacked_bindings
 
 
 __all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
@@ -31,6 +33,7 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 _TORCH_SYM_OPS: Set[Callable] = {
     torch.sym_int,
+    torch.sym_float,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
@@ -65,7 +68,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.fake_tensor_mode: Optional[FakeTensorMode] = None
             self.submodules: Dict[torch.nn.Module, str] = {}
 
-        def trace(self) -> None:
+        def trace(self) -> None:  # type: ignore[override]
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
         def create_arg(self, a: Argument) -> torch.fx.Node:
@@ -157,8 +160,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def placeholder(
             self,
-            target: str,
-            args: Tuple[Argument, ...],
+            target: str,  # type: ignore[override]
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
             arg = super().placeholder(target, args, kwargs)
@@ -167,15 +170,15 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def output(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
-            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data
+            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data  # type: ignore[return-value]
 
         def call_function(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
@@ -183,7 +186,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) in {"_operator", "math"}:
+            elif getattr(target, "__module__", None) in {"_operator", "builtins", "math"}:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif target in _TORCH_SYM_OPS:
@@ -215,20 +218,20 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
         def get_attr(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
         def call_module(
             self,
             target: torch.fx.node.Target,
-            args: Tuple[Argument, ...],
+            args: tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> None:
             raise ExportPassBaseError("call_module is not supported.")
 
         def call_method(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -238,7 +241,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             return super().run_node(n)
 
     def __init__(self) -> None:
-        self.interpreter = torch.fx.Interpreter(
+        self.interpreter = PropagateUnbackedSymInts(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())
@@ -250,7 +253,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         self,
         kind: str,
         target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
@@ -268,6 +271,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
         res_proxy.node.meta.update(meta.data)
+        if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
+            if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
+                res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
@@ -320,7 +326,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_operator(
         self,
         op,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
@@ -329,7 +335,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_sym(
         self,
         target: Fn,
-        args: Tuple[Argument, ...],
+        args: tuple[Argument, ...],
         meta: NodeMetadata,
     ) -> ProxyValue:
         return self._fx("call_function", target, args, {}, meta)
@@ -381,14 +387,14 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         return self._fx("output", "output", (results,), {}, meta)
 
     def call_submodule(
-        self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
+        self, graph_module: fx.GraphModule, inputs: tuple[Argument, ...]
     ) -> PassResult:
         prev_tracer, self.tracer = self.tracer, self.ExportTracer(
             self, graph_module.graph._codegen
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
+        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(  # type: ignore[assignment]
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)

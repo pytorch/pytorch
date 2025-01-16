@@ -119,7 +119,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
         OpType opType,
         uint64_t seq,
         const char* prof_title,
-        const c10::optional<std::vector<at::Tensor>>& inputs,
+        const std::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
         : Work(-1, opType, prof_title, inputs), logger_(logger), seq_(seq) {}
     ~WorkUCC();
@@ -230,6 +230,11 @@ class TORCH_API ProcessGroupUCC : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> alltoall_base(

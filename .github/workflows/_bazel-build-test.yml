@@ -27,6 +27,11 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+      runner:
+        required: false
+        type: string
+        default: "linux.large"
+        description: Runner type
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -34,7 +39,7 @@ env:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: ${{ inputs.runner }}
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
@@ -86,9 +91,14 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Check if in a container runner
+        shell: bash
+        id: check_container_runner
+        run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
+
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.cuda-version != 'cpu' }}
+        if: ${{ inputs.cuda-version != 'cpu' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
       - name: Output disk space left
         run: |
@@ -127,6 +137,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
@@ -140,6 +151,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e AWS_DEFAULT_REGION \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GITHUB_REPOSITORY \
@@ -153,6 +165,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e REENABLED_ISSUES \
             -e TORCH_CUDA_ARCH_LIST \

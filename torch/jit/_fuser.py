@@ -1,5 +1,5 @@
+# mypy: allow-untyped-defs
 import contextlib
-from typing import List, Tuple
 
 import torch
 
@@ -65,13 +65,13 @@ def fuser(name):
         torch._C._jit_set_nvfuser_enabled(False)
         torch._C._jit_set_llga_enabled(False)
     else:
-        raise Exception(f"unrecognized fuser option (name: {name})")
+        raise Exception(f"unrecognized fuser option (name: {name})")  # noqa: TRY002
     try:
         yield
     finally:
         if name in ["fuser1", "fuser3"]:  # NNC or oneDNN Graph
-            torch._C._jit_set_profiling_executor(old_profiling_executor)
-            torch._C._get_graph_executor_optimize(old_profiling_mode)
+            torch._C._jit_set_profiling_executor(old_profiling_executor)  # type: ignore[possibly-undefined]
+            torch._C._get_graph_executor_optimize(old_profiling_mode)  # type: ignore[possibly-undefined]
         # recover the previous values
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
@@ -105,7 +105,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
 
         # graph_executor_states for differentiable node
         fw_states = eps[0].code.differentiable_op_executor_states()
-        diff_nodes: List[torch._C.Node] = []
+        diff_nodes: list[torch._C.Node] = []
         for n in graph.nodes():
             _get_differentiable_graph_node(n, diff_nodes)
 
@@ -127,7 +127,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         return last_executed_optimized_graph()
 
 
-def set_fusion_strategy(strategy: List[Tuple[str, int]]):
+def set_fusion_strategy(strategy: list[tuple[str, int]]):
     """Set the type and number of specializations that can occur during fusion.
 
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"

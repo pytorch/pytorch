@@ -4,7 +4,6 @@ import itertools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
-
 import pytest
 from pytest import raises as assert_raises
 
@@ -16,8 +15,9 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -411,37 +411,48 @@ class TestArgmax(TestCase):
         )
     ]
     nan_arr = darr + [
-        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xpassIfTorchDynamo]),
-        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
         subtest(
-            ([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]
+            ([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xpassIfTorchDynamo_np]
+        ),
+        subtest(
+            ([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xpassIfTorchDynamo_np]
+        ),
+        subtest(
+            ([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xpassIfTorchDynamo_np]
+        ),
+        subtest(
+            ([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xpassIfTorchDynamo_np]
+        ),
+        subtest(
+            ([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo_np]
+        ),
+        subtest(
+            ([complex(np.nan, np.nan), 0, 1, 2, 3], 0),
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(0, 0), complex(0, 2), complex(0, 1)], 1),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(1, 0), complex(0, 2), complex(0, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         subtest(
             ([complex(1, 0), complex(0, 2), complex(1, 1)], 2),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xpassIfTorchDynamo_np],
         ),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
@@ -466,14 +477,14 @@ class TestArgmax(TestCase):
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.min(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
     def test_maximum_signed_integers(self):
         a = np.array([1, 2**7 - 1, -(2**7)], dtype=np.int8)
@@ -573,20 +584,20 @@ class TestArgmin(TestCase):
         #            sup.filter(RuntimeWarning, "invalid value encountered in reduce")
         min_val = np.min(arr)
 
-        assert_equal(np.argmin(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmin(arr)], min_val, err_msg="%r" % arr)
+        assert_equal(np.argmin(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmin(arr)], min_val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.max(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
     def test_minimum_signed_integers(self):
         a = np.array([1, -(2**7), -(2**7) + 1, 2**7 - 1], dtype=np.int8)

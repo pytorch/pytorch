@@ -179,7 +179,7 @@ TEST(LLVM, CharToFloatCastTest) {
 }
 
 TEST(LLVM, BitCast) {
-  constexpr int16_t ref16 = 1337;
+  /* constexpr int16_t ref16 = 1337; */
   constexpr int32_t ref32 = 1337;
   constexpr int64_t ref64 = 1337;
   constexpr float reff32 = 1337.0f;
@@ -1395,7 +1395,6 @@ TEST(LLVM, EliminatedStmt) {
 TEST(LLVM, SimpleReduction) {
   int M = 128;
   int N = 64;
-  const int kTotalSize = M * N;
 
   BufHandle a("a", {1, M, N}, kFloat);
 
@@ -1429,7 +1428,6 @@ TEST(LLVM, SimpleReduction) {
 TEST(LLVM, RFactorReduction) {
   int M = 128;
   int N = 64;
-  const int kTotalSize = M * N;
 
   BufHandle a("a", {1, M, N}, kFloat);
 
@@ -1474,7 +1472,6 @@ TEST(LLVM, RFactorReduction) {
 TEST(LLVM, RFactorVectorizedReduction) {
   int M = 128;
   int N = 64;
-  const int kTotalSize = M * N;
 
   BufHandle a("a", {1, M, N}, kFloat);
 

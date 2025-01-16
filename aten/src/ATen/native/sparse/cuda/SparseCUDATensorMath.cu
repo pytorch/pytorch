@@ -296,9 +296,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  if (is_same_tensor(r, dense_buffer)) {
-    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-  } else {
+  if (!is_same_tensor(r, dense_buffer)) {
     r.resize_as_(dense);
     r.copy_(dense_buffer);
   }
@@ -315,7 +313,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     // TODO benchmark to decide whether to remove this special case
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
-    int curDevice = -1;
+    c10::DeviceIndex curDevice = -1;
     c10::cuda::GetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
@@ -513,7 +511,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
     const TensorInfo<int64_t, int64_t> input_indices_pos_ti,
     const TensorInfo<scalar_t, int64_t> grad_values_expand_ti,
     TensorInfo<scalar_t, int64_t> grad_input_values_ti) {
-  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t i = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = input_indices_pos_ti.data[i];
 
@@ -612,7 +610,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       grad_input_values = grad_values_expand;
     }
     else {
-      int curDevice = -1;
+      c10::DeviceIndex curDevice = -1;
       c10::cuda::GetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
       at::cuda::ThrustAllocator allocator;
@@ -681,43 +679,35 @@ __global__ void search_end_matrix_indices_cuda_kernel(
   const TensorInfo<int64_t, int64_t> indices_1D_ti,
   const int64_t num_elements
 ){
-  const int64_t target_mat_num = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t target_mat_num = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (target_mat_num >= num_matrices) return;
 
   const int64_t* indices_1D = indices_1D_ti.data;
   const int64_t indices_1D_stride = indices_1D_ti.strides[0];
   int64_t start_idx = 0;
   int64_t end_idx = num_elements - 1;
-  int64_t mid_idx = (start_idx + end_idx) >> 1;
-  int64_t mid_val = indices_1D[mid_idx*indices_1D_stride];
-  bool found;
 
-  while (
-    start_idx <= end_idx
-  ) {
-    bool trim_right = mid_val > target_mat_num;
-    int64_t mid_idx_minus_1 = mid_idx - 1;
-    int64_t mid_idx_plus_1 = mid_idx + 1;
-
-    end_idx = trim_right ? mid_idx_minus_1 : end_idx;
-    start_idx = trim_right ? start_idx : mid_idx_plus_1;
-    mid_idx = (start_idx + end_idx) >> 1;
-    mid_val = indices_1D[mid_idx*indices_1D_stride];
+  while (start_idx < end_idx) {
+    int64_t mid_idx = (start_idx + end_idx + 1) >> 1;
+    int64_t mat_num = indices_1D[mid_idx*indices_1D_stride];
+    if (mat_num > target_mat_num) {
+      end_idx = mid_idx - 1;
+    } else {
+      start_idx = mid_idx;
+    }
   }
 
-  found = (mid_val == target_mat_num)
-    && (
-      (mid_idx == (num_elements-1))
-      || (indices_1D[(mid_idx+1)*indices_1D_stride] != target_mat_num)
-    );
-
-  mat_el_end_indices[target_mat_num] = found ? mid_idx : -1;
+  if (indices_1D[start_idx*indices_1D_stride] == target_mat_num) {
+    mat_el_end_indices[target_mat_num] = start_idx;
+  } else {
+    mat_el_end_indices[target_mat_num] = -1;
+  }
 }
 
 // Search through a 1D tensor of sorted sparse matrix
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
-  int curDevice = -1;
+  c10::DeviceIndex curDevice = -1;
   c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 

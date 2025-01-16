@@ -158,17 +158,17 @@ void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
 }
 
 void Module::to(at::ScalarType dtype, bool non_blocking) {
-  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
+  to_impl(/*device=*/std::nullopt, dtype, non_blocking);
 }
 
 void Module::to(at::Device device, bool non_blocking) {
-  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
+  to_impl(device, /*dtype=*/std::nullopt, non_blocking);
 }
 
 static void module_state_to(
     const autograd::Variable& variable,
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   // Use the data's original device or dtype if not supplied here.
@@ -180,8 +180,8 @@ static void module_state_to(
 }
 
 void Module::to_impl(
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   for (at::Tensor e : parameters()) {
     module_state_to(e, device, dtype, non_blocking);
@@ -196,6 +196,9 @@ Method::Method(ModulePtr owner, Function* function)
 
 Module Method::owner() const {
   return Module(owner_);
+}
+ObjectPtr Method::raw_owner() const {
+  return owner_;
 }
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue()); // self
@@ -314,13 +317,13 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy(c10::optional<at::Device> device) const {
+Module Module::deepcopy(std::optional<at::Device> device) const {
   return Module(_ivalue()->deepcopy(device));
 }
 
 Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   const std::unordered_set<std::string> ignored_methods;
   const std::unordered_set<std::string> ignored_attributes;
   return clone_impl(
@@ -332,7 +335,7 @@ Module Module::clone(
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   return clone_impl(
       type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
@@ -340,7 +343,7 @@ Module Module::clone(
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
-    IValue::HashAliasedIValueMap memo,
+    IValue::HashIdentityIValueMap memo,
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.
@@ -448,7 +451,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   const auto classType =
       _ivalue()->compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Could not find class with name: '",
         name.qualifiedName(),
         "' in module.");
@@ -473,7 +477,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    const c10::optional<std::vector<std::string>>& preserved_attrs,
+    const std::optional<std::vector<std::string>>& preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),
@@ -561,47 +565,46 @@ std::string Module::dump_to_str(
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
   std::stringstream methods_ss;
-  std::stringstream submodules_ss;
 
   for (const NameTensor& p : named_parameters(/*recurse=*/false)) {
     parameters_ss << p.name << " = ";
     if (print_param_values) {
-      parameters_ss << p.value << std::endl;
+      parameters_ss << p.value << '\n';
     } else {
-      parameters_ss << "..." << std::endl;
+      parameters_ss << "..." << '\n';
     }
   }
 
   for (const NameValue& p : named_attributes(/*recurse=*/false)) {
     attributes_ss << p.name << " = ";
     if (!p.value.isTensor() || print_attr_values) {
-      attributes_ss << p.value << std::endl;
+      attributes_ss << p.value << '\n';
     } else {
-      attributes_ss << "..." << std::endl;
+      attributes_ss << "..." << '\n';
     }
   }
 
   for (const Method& method : get_methods()) {
-    methods_ss << "  method " << method.name() << " {" << std::endl;
+    methods_ss << "  method " << method.name() << " {" << '\n';
     if (print_method_bodies) {
       methods_ss << torch::jit::jit_log_prefix(
                         "    ", method.graph()->toString())
-                 << std::endl;
+                 << '\n';
     }
-    methods_ss << "  }" << std::endl;
+    methods_ss << "  }" << '\n';
   }
 
-  ss << "module " << type()->name()->qualifiedName() << " {" << std::endl;
-  ss << "  parameters {" << std::endl;
+  ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
+  ss << "  parameters {" << '\n';
   ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  attributes {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  attributes {" << '\n';
   ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  methods {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  methods {" << '\n';
   ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  submodules {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
     // We do 4 spaces here, because one level of indentation comes from
     // 'submodules' scope and the other one goes from a specific submodule we're
@@ -611,8 +614,8 @@ std::string Module::dump_to_str(
         s.value.dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
-  ss << "  }" << std::endl;
-  ss << "}" << std::endl;
+  ss << "  }" << '\n';
+  ss << "}" << '\n';
 
   return ss.str();
 }
@@ -623,7 +626,7 @@ void Module::dump(
     bool print_param_values = true) const {
   std::cout << dump_to_str(
                    print_method_bodies, print_attr_values, print_param_values)
-            << std::endl;
+            << '\n';
 }
 
 } // namespace torch::jit

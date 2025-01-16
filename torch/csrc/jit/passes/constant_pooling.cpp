@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -71,5 +70,4 @@ void ConstantPooling(const std::shared_ptr<Graph>& graph) {
   std::unordered_set<Node*, HashNode, EqualNode> constants;
   ConstantPooling(graph->block(), constants, aliasDb);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

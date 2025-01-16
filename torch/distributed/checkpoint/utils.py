@@ -1,8 +1,12 @@
+# mypy: allow-untyped-defs
 import cProfile
+import inspect
 import io
 import itertools
 import os
+import warnings
 from contextlib import contextmanager
+from functools import wraps
 from pstats import Stats
 from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
 
@@ -10,7 +14,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed._tensor import DTensor
 
 from .api import (
     _is_wrapped_exception,
@@ -19,6 +22,7 @@ from .api import (
     WRAPPED_EXCEPTION,
 )
 from .metadata import MetadataIndex, STATE_DICT_TYPE
+
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]
 
@@ -35,12 +39,14 @@ def _get_failure_dict(
     )
 
 
-def _all_gather_keys(local_dict: Dict[Any, Any]) -> List[Any]:
+def _all_gather_keys(
+    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+) -> List[Any]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
-    gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+    gathered_keys: List[List[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
-    dist.all_gather_object(gathered_keys, keys)
+    dist.all_gather_object(gathered_keys, keys, group=group)
     return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 
@@ -296,8 +302,9 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 
 
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
-    if isinstance(tensor, DTensor):
-        return tensor.to_local()
+    if hasattr(tensor, "__get_tensor_shard__"):
+        # DTensor implements _Checkpointable
+        return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:
@@ -340,13 +347,13 @@ class _ReaderView(io.IOBase):
         self.base_stream = base_stream
         self.seek(0)
 
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return self.base_stream.seek(__offset, __whence)
+    def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
+        if whence == os.SEEK_SET:
+            offset = self.offset + offset
+        elif whence == os.SEEK_END:
+            whence = os.SEEK_SET
+            offset = (self.offset + self.len) - offset
+        return self.base_stream.seek(offset, whence)
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
@@ -358,9 +365,17 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
+        max_size = self.len - self.tell()
+        if max_size == 0:
+            return 0
+        if len(b) > max_size:
+            b = memoryview(b)[:max_size]
         return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
+        max_size = self.len - self.tell()
+        if size == -1 or size > max_size:
+            size = max_size
         return self.base_stream.read(size)
 
 
@@ -395,3 +410,30 @@ def _profile():
             stats.sort_stats("time").print_stats(10)
     else:
         yield
+
+
+def _api_bc_check(func):
+    @wraps(func)
+    def inner_func(*args, **kwargs) -> Any:
+        if len(args) == 2:
+            warnings.warn(
+                f"The argument order of {func.__name__} has been changed. "
+                "Please check the document to avoid future breakages."
+            )
+            sig = inspect.signature(func)
+            kwonlyargs = [
+                p.name for p in sig.parameters.values() if p.kind == p.KEYWORD_ONLY
+            ]
+            if "storage_writer" in kwonlyargs:
+                assert "storage_writer" not in kwargs, (args, kwargs)
+                kwargs["storage_writer"] = args[1]
+            elif "storage_reader" in kwonlyargs:
+                assert "storage_reader" not in kwargs, (args, kwargs)
+                kwargs["storage_reader"] = args[1]
+            else:
+                raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")
+            return func(args[0], **kwargs)
+        else:
+            return func(*args, **kwargs)
+
+    return inner_func

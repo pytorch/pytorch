@@ -2,22 +2,22 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+
 
 _variable = 0
 _variable_2 = 0
 
 
 def user_function():
-    return torch._utils.is_compiling()
+    return torch.compiler.is_compiling()
 
 
 def user_generator():
     for _ in range(1):
-        yield torch._utils.is_compiling()
+        yield torch.compiler.is_compiling()
     return
 
 
@@ -38,7 +38,7 @@ class MyModule(torch.nn.Module):
         global _variable, _variable_2
 
         if self.mode == 1:
-            if torch._utils.is_compiling():
+            if torch.compiler.is_compiling():
                 _variable += 1
             else:
                 _variable_2 += 1
@@ -46,7 +46,7 @@ class MyModule(torch.nn.Module):
             if user_function():
                 _variable += 1
         elif self.mode == 3:
-            lambda_f = lambda: torch._utils.is_compiling()  # noqa: E731
+            lambda_f = lambda: torch.compiler.is_compiling()  # noqa: E731
             if lambda_f():
                 _variable += 1
         elif self.mode == 4:
@@ -147,10 +147,10 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         class Foo(list):
             def __iter__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
             def __len__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
         x = Foo()
         x.append(torch.randn(4))
@@ -163,18 +163,20 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
     def test_do_not_skip_side_effects(self):
         # https://github.com/pytorch/pytorch/issues/110765
 
-        # By invoking torch._utils.is_compiling(),
+        # By invoking torch.compiler.is_compiling(),
         # there may be side-effects inconsistent with eager when
         # compiling. Thus we force dynamo to commit the graph,
         # even if it does not perform any tensor operation
         global _variable, _variable_2
 
         for mode in range(1, 7):
+            torch._dynamo.reset()
+
             _variable = 0
             _variable_2 = 0
 
             mod = MyModule(mode=mode)
-            model = torch._dynamo.optimize(backend="eager", nopython=mode != 6)(mod)
+            model = torch.compile(mod, backend="eager", fullgraph=mode != 6)
             assert _variable == 0
             assert _variable_2 == 0
 

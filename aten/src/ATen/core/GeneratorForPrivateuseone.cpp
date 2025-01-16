@@ -1,17 +1,23 @@
-#include <mutex>
 #include <ATen/core/GeneratorForPrivateuseone.h>
+
+#include <mutex>
 
 namespace at {
 
 static std::mutex _generator_mutex_lock;
 
-c10::optional<GeneratorFuncType>& GetGeneratorPrivate() {
-  static c10::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
+std::optional<GeneratorFuncType>& GetGeneratorPrivate() {
+  static std::optional<GeneratorFuncType> generator_privateuse1 = std::nullopt;
   return generator_privateuse1;
 }
 
 _GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
   std::lock_guard<std::mutex> lock(_generator_mutex_lock);
+
+  TORCH_WARN_DEPRECATION(
+      "REGISTER_GENERATOR_PRIVATEUSE1 is deprecated. \
+      Please derive PrivateUse1HooksInterface to implememt getNewGenerator instead.")
+
   TORCH_CHECK(
       !GetGeneratorPrivate().has_value(),
       "Only can register a generator to the PrivateUse1 dispatch key once!");
@@ -21,6 +27,10 @@ _GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
 }
 
 at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index) {
+  TORCH_WARN_DEPRECATION(
+      "GetGeneratorForPrivateuse1() is deprecated. Please use \
+      globalContext().getAcceleratorHooksInterface(device_type).getNewGenerator() instead.")
+
   TORCH_CHECK(
       GetGeneratorPrivate().has_value(),
       "Please register a generator to the PrivateUse1 dispatch key, \

@@ -2,9 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Functor which is invoked to process an RPC message. This is an abstract class
 // with some common functionality across all request handlers. Users need to
@@ -31,6 +29,4 @@ class TORCH_API RequestCallback {
       std::vector<c10::Stream> streams) const = 0;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

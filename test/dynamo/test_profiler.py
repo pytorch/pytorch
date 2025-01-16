@@ -2,23 +2,19 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-
-from torch._dynamo.testing import same
 from torch._dynamo.utils import dynamo_timed
-
 from torch.testing._internal.common_utils import TemporaryFileName
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
     def test_dynamo_timed_profiling_isolated(self):
-        # @dynamo_timed functions should appear in profile traces.
-        @dynamo_timed
+        # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
-            return x.sin()
+            with dynamo_timed("inner_fn"):
+                return x.sin()
 
         def outer_fn(x, y):
             return inner_fn(x) * y
@@ -33,7 +29,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_dynamo_timed_profiling_backend_compile(self):
-        # @dynamo_timed functions should appear in profile traces.
+        # dynamo_timed functions should appear in profile traces.
         # this checks whether these actually appear in actual dynamo execution.
         # "backend_compile" is just chosen as an example; if it gets renamed
         # this test can be replaced or deleted
@@ -46,7 +42,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
-            torch._dynamo.optimize("aot_eager")(fn)(x, y)
+            torch.compile(fn, backend="aot_eager")(x, y)
 
         self.assertTrue(
             any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
@@ -57,7 +53,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = [
             (torch.rand(a, b), torch.rand(b, c), torch.rand(a, c))
@@ -75,7 +71,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(15, 16), torch.rand(16, 17), torch.rand(15, 17))
 
@@ -87,7 +83,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.cat([x, y], dim=0) + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(4, 16), torch.rand(12, 16), torch.rand(16, 16))
 
@@ -105,7 +101,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with TemporaryFileName() as fname:
             et.register_callback(fname)
             et.start()
-            out = opt_fn(*inputs)
+            opt_fn(*inputs)
             et.stop()
             et.unregister_callback()
 
@@ -136,7 +132,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 )
             )
 
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertTrue(
                 len(events) == 1,
                 "Expected one lookup profiler event for one opt_fn run",
@@ -146,7 +142,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager")
 
         (
             x,
@@ -167,20 +163,34 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_profiler_dynamo_compiled_region(self):
-        def fn(x, y, z):
-            return x @ y + z
-
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-
-        inputs = [torch.rand(4, 4) for _ in range(3)]
-
-        for _ in range(2):
-            opt_fn(*inputs)
+        def fn(x, y):
+            r = y.sum(dim=1)
+            print(r.shape)
+            return x * r
 
         with torch.profiler.profile() as prof:
-            opt_fn(*inputs)
+            fn_c = torch.compile(fn)
 
-        self.assertTrue(any(e.name == "Torch-Compiled Region" for e in prof.events()))
+            fn_c(
+                torch.randn(10),
+                torch.randn(10, 10),
+            )
+
+            fn_c(
+                torch.randn(10),
+                torch.randn(10, 15),
+            )
+
+        annotations = [e.name for e in prof.events() if "Compiled" in e.name]
+        self.assertEqual(
+            annotations,
+            [
+                "Torch-Compiled Region: 0/0",
+                "Torch-Compiled Region: 1/0",
+                "Torch-Compiled Region: 0/1",
+                "Torch-Compiled Region: 1/0",
+            ],
+        )
 
 
 if __name__ == "__main__":

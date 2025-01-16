@@ -1,6 +1,9 @@
+# mypy: allow-untyped-defs
 from typing import Any
+from typing_extensions import deprecated
 
 import torch
+
 
 __all__ = ["autocast"]
 
@@ -8,9 +11,14 @@ __all__ = ["autocast"]
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
-    ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``
+    ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cpu", args...)`` instead.
     """
 
+    @deprecated(
+        "`torch.cpu.amp.autocast(args...)` is deprecated. "
+        "Please use `torch.amp.autocast('cpu', args...)` instead.",
+        category=FutureWarning,
+    )
     def __init__(
         self,
         enabled: bool = True,

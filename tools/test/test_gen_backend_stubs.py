@@ -1,17 +1,14 @@
 # Owner(s): ["module: codegen"]
 
-import os
+from __future__ import annotations
+
 import tempfile
 import unittest
-from typing import Optional
 
 import expecttest
+
 from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
-
 from torchgen.gen_backend_stubs import run
-
-path = os.path.dirname(os.path.realpath(__file__))
-gen_backend_stubs_path = os.path.join(path, "../torchgen/gen_backend_stubs.py")
 
 
 # gen_backend_stubs.py is an integration point that is called directly by external backends.
@@ -28,7 +25,7 @@ class TestGenBackendStubs(expecttest.TestCase):
             run(fp.name, "", True)
 
     def get_errors_from_gen_backend_stubs(
-        self, yaml_str: str, *, kernels_str: Optional[str] = None
+        self, yaml_str: str, *, kernels_str: str | None = None
     ) -> str:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)

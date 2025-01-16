@@ -19,7 +19,7 @@ namespace c10 {
 /// This device guard does NOT have an uninitialized state; it is guaranteed
 /// to reset a device on exit.  If you are in a situation where you *might*
 /// want to setup a guard (i.e., are looking for the moral equivalent
-/// of optional<DeviceGuard>), see OptionalDeviceGuard.
+/// of std::optional<DeviceGuard>), see OptionalDeviceGuard.
 class DeviceGuard {
  public:
   /// No default constructor; see Note [Omitted default constructor from RAII]
@@ -33,6 +33,8 @@ class DeviceGuard {
       Device device,
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
+
+  ~DeviceGuard() = default;
 
   /// Copy is disallowed
   DeviceGuard(const DeviceGuard&) = delete;
@@ -85,8 +87,8 @@ class DeviceGuard {
 /**
  * A OptionalDeviceGuard is an RAII class that sets a device to some value on
  * initialization, and resets the device to its original value on destruction.
- * Morally, a OptionalDeviceGuard is equivalent to optional<DeviceGuard>, but
- * with extra constructors and methods as appropriate.
+ * Morally, a OptionalDeviceGuard is equivalent to std::optional<DeviceGuard>,
+ * but with extra constructors and methods as appropriate.
  *
  * Besides its obvious use (optionally applying a DeviceGuard),
  * OptionalDeviceGuard is often also used for the following idiom:
@@ -104,12 +106,12 @@ class DeviceGuard {
  * when you use the nullary constructor, or pass a nullopt to the constructor.
  * Uninitialized OptionalDeviceGuards do *nothing*; they do not know what the
  * original device was and they do not reset on destruction.  This is why
- * original_device() and current_device() return optional<Device> rather than
- * Device (as they do in DeviceGuard), and also is why we didn't just
+ * original_device() and current_device() return std::optional<Device> rather
+ * than Device (as they do in DeviceGuard), and also is why we didn't just
  * provide OptionalDeviceGuard by default and hide DeviceGuard from users.
  *
  * The semantics of an OptionalDeviceGuard are exactly explained by thinking
- * of it as an optional<DeviceGuard>.  In particular, an initialized
+ * of it as an std::optional<DeviceGuard>.  In particular, an initialized
  * OptionalDeviceGuard doesn't restore device to its value at construction; it
  * restores device to its value *at initialization*.  So if you have the
  * program:
@@ -135,7 +137,7 @@ class OptionalDeviceGuard {
 
   /// Initialize the guard if a Device is passed; otherwise leave the
   /// guard uninitialized.
-  explicit OptionalDeviceGuard(optional<Device> device) : guard_(device) {}
+  explicit OptionalDeviceGuard(std::optional<Device> device) : guard_(device) {}
 
   /// Constructor for testing only.
   explicit OptionalDeviceGuard(
@@ -143,6 +145,7 @@ class OptionalDeviceGuard {
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
 
+  ~OptionalDeviceGuard() = default;
   /// Copy is disallowed
   OptionalDeviceGuard(const OptionalDeviceGuard&) = delete;
   OptionalDeviceGuard& operator=(const OptionalDeviceGuard&) = delete;
@@ -168,13 +171,13 @@ class OptionalDeviceGuard {
   }
 
   /// Returns the device that was set at the time the guard was constructed.
-  optional<Device> original_device() const {
+  std::optional<Device> original_device() const {
     return guard_.original_device();
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via reset_device.
-  optional<Device> current_device() const {
+  std::optional<Device> current_device() const {
     return guard_.current_device();
   }
 

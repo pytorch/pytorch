@@ -1,8 +1,9 @@
+# mypy: ignore-errors
+
 import re
 import sys
 import time
 from functools import partial, wraps
-from typing import Tuple
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -69,7 +70,7 @@ def dist_init(
                 rpc.constants.DEFAULT_SHUTDOWN_TIMEOUT = 60
 
             rpc.init_rpc(
-                name="worker%d" % self.rank,
+                name=f"worker{self.rank:d}",
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
@@ -129,13 +130,12 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
         time.sleep(0.1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
-                    num_pending_futures, num_pending_users
-                )
+                f"Timed out waiting to flush pending futures and users, "
+                f"had {num_pending_futures} pending futures and {num_pending_users} pending users"
             )
 
 
-def get_num_owners_and_forks() -> Tuple[str, str]:
+def get_num_owners_and_forks() -> tuple[str, str]:
     """
     Retrieves number of OwnerRRefs and forks on this node from
     _rref_context_get_debug_info.
@@ -165,13 +165,8 @@ def wait_until_owners_and_forks_on_rank(
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    timeout,
-                    num_owners,
-                    num_forks,
-                    num_owners_on_rank,
-                    num_forks_on_rank,
-                )
+                f"Timed out waiting {timeout} sec for {num_owners} owners and {num_forks} forks on rank,"
+                f" had {num_owners_on_rank} owners and {num_forks_on_rank} forks"
             )
 
 

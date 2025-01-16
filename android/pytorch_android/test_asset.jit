@@ -84,6 +84,15 @@ def conv2d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
         r = r.contiguous()
     return r
 
+def conv3d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
+    r = torch.conv3d(x, w)
+    if (toChannelsLast):
+        # memory_format=torch.channels_last_3d
+        r = r.contiguous(memory_format=2)
+    else:
+        r = r.contiguous()
+    return r
+
 def contiguous(self, x: Tensor) -> Tensor:
     return x.contiguous()
 

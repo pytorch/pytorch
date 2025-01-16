@@ -11,6 +11,7 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/sum.h>
 #endif
+#include <c10/util/irange.h>
 
 namespace at::native {
 namespace mps {
@@ -21,184 +22,17 @@ enum BIN_SELECTION_ALGORITHM {
   BINARY_SEARCH,
 };
 
-static const char* METAL_HISTOGRAM = R"HISTOGRAM_METAL(
-
-#include <metal_stdlib>
-using namespace metal;
-
-enum BIN_SELECTION_ALGORITHM {
-  LINEAR_INTERPOLATION,
-  LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
-  BINARY_SEARCH,
-};
-
-// Re-implementation of std::upper_bound with some modifications.
-template<typename T, typename U>
-U upper_bound(constant T * arr, U first, U len, T val) {
-  while (len > 0) {
-    U half_ = len >> 1;
-    U middle = first + half_;
-
-    if (val < arr[middle]) {
-      len = half_;
-    } else {
-      first = middle + 1;
-      len -= half_ + 1;
-    }
-  }
-  return first;
-}
-
-// The implementation here is mostly taken from the CPU's implementation with some modifications.
-// Please see `aten/src/ATen/native/cpu/HistogramKernel.cpp` for more details.
-template<typename T>
-kernel void histogramdd(constant T  * input_            [[buffer(0)]],
-                  constant T        * weight            [[buffer(1)]],
-                  device   T        * local_out         [[buffer(2)]],
-                  constant uint     * offsets           [[buffer(3)]],
-                  constant size_t   & num_dims          [[buffer(4)]],
-                  constant T        * bin_seq           [[buffer(5)]],
-                  constant int64_t  * num_bin_edges     [[buffer(6)]],
-                  constant T        * leftmost_edge     [[buffer(7)]],
-                  constant T        * rightmost_edge    [[buffer(8)]],
-                  constant int64_t  * local_out_strides [[buffer(9)]],
-                  constant uint8_t  & algorithm         [[buffer(10)]],
-                  constant uint8_t  & has_weight        [[buffer(11)]],
-                  uint tid [[thread_position_in_grid]]) {
-
-  constexpr T eps = 4e-6;
-  bool skip_element = false;
-  int64_t hist_index = 0;
-  int64_t bin_seq_offset = 0;
-
-  for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = input_[offsets[tid * num_dims + dim]];
-
-    // Skips elements which fall outside the specified bins and NaN elements
-    // Adding an eps to the edges to eliminate precision issues that cause elements accidentally skipped,
-    // this is likely due to the minuscule implementation differences between the CPU and MPS's linspace.
-    if (!(element >= (leftmost_edge[dim] - eps) && element <= (rightmost_edge[dim] + eps))) {
-        skip_element = true;
-        break;
-    }
-    int64_t pos = -1;
-
-    if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
-      pos = upper_bound(
-        bin_seq,
-        bin_seq_offset,
-        num_bin_edges[dim],
-        element
-      ) - bin_seq_offset - 1;
-    } else if (
-      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION ||
-      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-      pos = static_cast<int64_t>((element - leftmost_edge[dim])
-                            * (num_bin_edges[dim] - 1)
-                            / (rightmost_edge[dim] - leftmost_edge[dim]));
-      if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-          int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
-          int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
-          pos = upper_bound(
-            bin_seq,
-            bin_seq_offset + pos_min,
-            pos_max - pos_min,
-            element
-          ) - bin_seq_offset - 1;
-      }
-    }
-
-    if (pos == (num_bin_edges[dim] - 1)) {
-      pos -= 1;
-    }
-    hist_index += local_out_strides[dim + 1] * pos;
-    bin_seq_offset += num_bin_edges[dim];
-  }
-  if (!skip_element) {
-    // In the unweighted case, the default weight is 1
-    local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
-  }
-}
-
-
-#define REGISTER_HISTOGRAMDD_OP(DTYPE)                        \
-template                                                      \
-[[host_name("histogramdd_" #DTYPE)]]                          \
-kernel void histogramdd<DTYPE>(                               \
-  constant DTYPE    * input_                  [[buffer(0)]],  \
-  constant DTYPE    * weight                  [[buffer(1)]],  \
-  device   DTYPE    * local_out               [[buffer(2)]],  \
-  constant uint     * offsets                 [[buffer(3)]],  \
-  constant size_t   & num_dims                [[buffer(4)]],  \
-  constant DTYPE    * bin_seq                 [[buffer(5)]],  \
-  constant int64_t  * num_bin_edges           [[buffer(6)]],  \
-  constant DTYPE    * leftmost_edge           [[buffer(7)]],  \
-  constant DTYPE    * rightmost_edge          [[buffer(8)]],  \
-  constant int64_t  * local_out_strides       [[buffer(9)]],  \
-  constant uint8_t  & bin_selection_algorithm [[buffer(10)]], \
-  constant uint8_t  & has_weight              [[buffer(11)]], \
-  uint tid [[thread_position_in_grid]]);
-
-REGISTER_HISTOGRAMDD_OP(float);
-REGISTER_HISTOGRAMDD_OP(half);
-
-kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
-                                device uint           * data_offsets    [[buffer(1)]],
-                                constant uint         * iter_shape      [[buffer(2)]],
-                                constant uint         & num_dimensions  [[buffer(3)]],
-                                uint thread_index [[thread_position_in_grid]]) {
-    data_offsets[thread_index] = 0;
-    uint32_t idx = thread_index;
-    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-        uint32_t reversed_dim = num_dimensions - dim -1;
-        uint32_t remainder = idx % iter_shape[reversed_dim];
-        idx /= iter_shape[reversed_dim];
-
-        data_offsets[thread_index] += remainder * strides[reversed_dim];
-    }
-}
-)HISTOGRAM_METAL";
-
-static id<MTLLibrary> compileHistogramOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> histogramLibrary = nil;
-  if (histogramLibrary) {
-    return histogramLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  histogramLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_HISTOGRAM
-                                                                     encoding:NSASCIIStringEncoding]
-                                          options:options
-                                            error:&error];
-  TORCH_CHECK(histogramLibrary, "Failed to create metal histogram library, error: ", [[error description] UTF8String]);
-  return histogramLibrary;
-}
-
-static id<MTLComputePipelineState> histogramPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> crossLib = compileHistogramOpLibrary(device);
-  id<MTLFunction> crossFunc = [crossLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(crossFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:crossFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/HistogramKernel_metallib.h>
+#endif
 
 template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
-                             const c10::optional<Tensor>& weight) {
+                             const std::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
@@ -257,7 +91,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
-      thread_hist_sizes, hist_output.scalar_type(), c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */
+      thread_hist_sizes, hist_output.scalar_type(), std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */
   );
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
@@ -279,39 +113,29 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
-      id<MTLComputePipelineState> stridedIndicesPSO = histogramPipelineState(device, "kernel_index_offset");
+      id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
-      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      mtl_setArgs(computeEncoder, strides, stridedIndicesBuffer, inputShapeData, nDim);
 
       mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
-      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
-      id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);
+      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input);
+      id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
 
       [computeEncoder setComputePipelineState:histogramPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      if (has_weight) {
-        mtl_setBuffer(computeEncoder, weight.value(), 1);
-      }
-      mtl_setBuffer(computeEncoder, thread_histograms, 2);
-      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
-      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
+      mtl_setArgs(computeEncoder, input, weight, thread_histograms, stridedIndicesBuffer, D);
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
-      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
-      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
-      [computeEncoder setBytes:thread_histograms.strides().data()
-                        length:sizeof(int64_t) * thread_hist_sizes.size()
-                       atIndex:9];
-      [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
-      [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
+      mtl_setArgs<6>(computeEncoder,
+                     num_bin_edges,
+                     leftmost_edge,
+                     rightmost_edge,
+                     thread_histograms.strides(),
+                     bin_selection_algorithm,
+                     has_weight);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
@@ -323,7 +147,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
 template <BIN_SELECTION_ALGORITHM bin_algorithm>
 static void histogramdd_out_mps_template(const Tensor& self,
-                                         const c10::optional<Tensor>& weight,
+                                         const std::optional<Tensor>& weight,
                                          bool density,
                                          Tensor& hist,
                                          const TensorList& bin_edges) {
@@ -336,7 +160,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const Tensor reshaped_input = self.reshape({M, N});
 
   const auto reshaped_weight =
-      weight.has_value() ? c10::optional<Tensor>(weight.value().reshape({M})) : c10::optional<Tensor>();
+      weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
   std::vector<Tensor> bin_edges_contig(bin_edges.size());
   for (const auto dim : c10::irange(bin_edges_contig.size())) {
@@ -371,7 +195,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
 } // namespace mps
 
 static void histogramdd_kernel(const Tensor& self,
-                               const c10::optional<Tensor>& weight,
+                               const std::optional<Tensor>& weight,
                                bool density,
                                Tensor& hist,
                                const TensorList& bin_edges) {
@@ -379,7 +203,7 @@ static void histogramdd_kernel(const Tensor& self,
 }
 
 static void histogramdd_linear_kernel(const Tensor& self,
-                                      const c10::optional<Tensor>& weight,
+                                      const std::optional<Tensor>& weight,
                                       bool density,
                                       Tensor& hist,
                                       const TensorList& bin_edges,
@@ -399,8 +223,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(input, 0);
+  auto [min, max] = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
     leftmost_edges[i] = min[i].item().to<double>();
@@ -408,7 +231,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
   }
 }
 
-REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
-REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel);
-REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel);
+REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel)
+REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel)
+REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel)
 } // namespace at::native

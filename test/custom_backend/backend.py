@@ -1,6 +1,7 @@
 import argparse
 import os.path
 import sys
+
 import torch
 
 
@@ -33,7 +34,9 @@ def to_custom_backend(module):
     Returns:
         The module, lowered so that it can run on TestBackend.
     """
-    lowered_module = torch._C._jit_to_backend("custom_backend", module, {"forward": {"": ""}})
+    lowered_module = torch._C._jit_to_backend(
+        "custom_backend", module, {"forward": {"": ""}}
+    )
     return lowered_module
 
 
@@ -48,9 +51,7 @@ class Model(torch.nn.Module):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Lower a Module to a custom backend"
-    )
+    parser = argparse.ArgumentParser(description="Lower a Module to a custom backend")
     parser.add_argument("--export-module-to", required=True)
     options = parser.parse_args()
 

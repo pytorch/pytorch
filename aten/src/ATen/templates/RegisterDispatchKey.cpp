@@ -16,6 +16,7 @@
 #if defined(CAFFE2_BUILD_MAIN_LIB)        || \
     defined(TORCH_CUDA_BUILD_MAIN_LIB)    || \
     defined(TORCH_HIP_BUILD_MAIN_LIB)     || \
+    defined(TORCH_XPU_BUILD_MAIN_LIB)     || \
     defined(TORCH_CUDA_CU_BUILD_MAIN_LIB) || \
     defined(TORCH_CUDA_CPP_BUILD_MAIN_LIB)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -33,7 +34,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/Tensor.h>
 #include <ATen/native/Resize.h>
 
@@ -49,6 +50,12 @@ $extra_cuda_headers
 $external_backend_headers
 $dispatch_headers
 $ops_headers
+
+namespace at {
+namespace {
+$dispatch_helpers
+} // namespace
+} // namespace at
 
 // See template file RegisterDispatchDefinitions.ini
 $dispatch_definitions

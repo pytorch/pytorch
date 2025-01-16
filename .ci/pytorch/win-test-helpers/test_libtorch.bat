@@ -5,7 +5,7 @@ if errorlevel 1 exit /b 1
 set CWD=%cd%
 
 set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\bin
-set PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt\bin\x64;%TMP_DIR_WIN%\build\torch\lib;%PATH%
+set PATH=%TMP_DIR_WIN%\build\torch\lib;%PATH%
 
 set TORCH_CPP_TEST_MNIST_PATH=%CWD%\test\cpp\api\mnist
 python tools\download_mnist.py --quiet -d %TORCH_CPP_TEST_MNIST_PATH%

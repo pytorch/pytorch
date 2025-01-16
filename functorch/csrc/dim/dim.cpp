@@ -38,6 +38,7 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
@@ -225,17 +226,6 @@ struct DimEntry {
 private:
     int64_t data_;
 };
-
-std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
-    if (entry.is_none()) {
-        ss << "None";
-    } else if (entry.is_positional()) {
-        ss << entry.position();
-    } else {
-        ss << entry.dim();
-    }
-    return ss;
-}
 
 // Dim wrapper methods
 DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
@@ -750,7 +740,7 @@ public:
 
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
-            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
+            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").release();
         }
         return Tensor::alloc(TensorType);
     }
@@ -878,7 +868,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+        return mpy::object::steal(THPVariable_Wrap(tensor));
     }
 
     mpy::obj<Tensor> self = Tensor::create();
@@ -1123,7 +1113,7 @@ int64_t _Tensor_ndim(mpy::handle h) {
 
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
-    c10::optional<PyObject*> mb_obj =
+    std::optional<PyObject*> mb_obj =
         t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
     if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
@@ -1518,14 +1508,14 @@ struct PyInstDecoder {
     // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
     // See https://github.com/pytorch/pytorch/issues/93854
     void next() {
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
@@ -1640,16 +1630,6 @@ static PyObject* _dims(PyObject *self,
     PY_END(nullptr)
 }
 
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-
 struct DotPart {
     Slice<DimEntry> dims;
     size_t total_size = 1;
@@ -1714,7 +1694,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
     DotPart ro_dims;
     DotPart lr_dims;
 
-    auto insert_dim = [&] (mpy::hdl<Dim> d, at::optional<int> lhs_idx, at::optional<int> rhs_idx) {
+    auto insert_dim = [&] (mpy::hdl<Dim> d, std::optional<int> lhs_idx, std::optional<int> rhs_idx) {
         bool reduced = sum.contains(d);
         int64_t lhs_stride = lhs_idx ? lhs_strides[*lhs_idx] : 0;
         int64_t rhs_stride = rhs_idx ? rhs_strides[*rhs_idx] : 0;
@@ -1753,7 +1733,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
             continue;
         }
         auto d = rhs.levels[i];
-        insert_dim(d.dim(), at::nullopt, i);
+        insert_dim(d.dim(), std::nullopt, i);
     }
 
     if (lr_dims.dims.size() != sum.size()) {
@@ -1908,7 +1888,6 @@ static PyObject* order(PyObject *_,
         }
     }
 
-    int ndim = 0;
     int insert_point = -1;
     Slice<DimEntry> new_levels;
     for (auto l : levels) {
@@ -1916,7 +1895,6 @@ static PyObject* order(PyObject *_,
             continue;
         }
         if (l.is_positional()) {
-            ndim++;
             if (insert_point == -1) {
                 insert_point = new_levels.size();
                 new_levels.extend(A, flat_positional_dims);

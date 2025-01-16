@@ -5,6 +5,8 @@ optimizer locally on the workers where the parameters live.  The distributed
 optimizer can use any of the local optimizer :ref:`optimizer-algorithms` to
 apply the gradients on each worker.
 """
+import warnings
+
 import torch
 from torch import optim
 
@@ -13,7 +15,6 @@ from .apply_optimizer_in_backward import (
     _get_in_backward_optimizers,
 )
 from .functional_adadelta import _FunctionalAdadelta
-
 from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam
 from .functional_adamax import _FunctionalAdamax
@@ -32,3 +33,11 @@ if hasattr(torch._C, "_rpc_init"):
 
 from .post_localSGD_optimizer import PostLocalSGDOptimizer
 from .zero_redundancy_optimizer import ZeroRedundancyOptimizer
+
+
+__all__ = [
+    "as_functional_optim",
+    "DistributedOptimizer",
+    "PostLocalSGDOptimizer",
+    "ZeroRedundancyOptimizer",
+]

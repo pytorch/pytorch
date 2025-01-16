@@ -4,14 +4,15 @@ from functools import partial
 from typing import Callable, List, Union
 
 import numpy as np
+from tabulate import tabulate
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
-from tabulate import tabulate
 from torch.nn.attention.bias import CausalBias, CausalVariant
 from torch.nn.parameter import Parameter
-from tqdm import tqdm
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -222,7 +223,7 @@ def print_results(results: List[Experiment]):
         {
             "Type": "Average",
             "Speedup": np.mean(speedups),
-            **{key: None for key in max_config_dict},
+            **dict.fromkeys(max_config_dict),
         },
         {"Type": "Max", "Speedup": speedups[max_speedup_index], **max_config_dict},
         {"Type": "Min", "Speedup": speedups[min_speedup_index], **min_config_dict},

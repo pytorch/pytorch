@@ -5,7 +5,7 @@
 
 // Use of c10::hip namespace here makes hipification easier, because
 // I don't have to also fix namespaces.  Sorry!
-namespace c10 { namespace hip {
+namespace c10::hip {
 
 // Takes a valid HIPAllocator (of any sort) and turns it into
 // an allocator pretending to be a CUDA allocator.  See
@@ -15,7 +15,7 @@ class HIPAllocatorMasqueradingAsCUDA final : public Allocator {
 public:
   explicit HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
     : allocator_(allocator) {}
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     DataPtr r = allocator_->allocate(size);
     r.unsafe_set_device(Device(c10::DeviceType::CUDA, r.device().index()));
     return r;
@@ -28,4 +28,4 @@ public:
   }
 };
 
-}} // namespace c10::hip
+} // namespace c10::hip

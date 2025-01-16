@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Vitals.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <cstdlib>
 
@@ -15,11 +16,7 @@ TEST(Vitals, Basic) {
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {
-#ifdef _WIN32
-    _putenv("TORCH_VITAL=1");
-#else
-    setenv("TORCH_VITAL", "1", 1);
-#endif
+    c10::utils::set_env("TORCH_VITAL", "1");
     TORCH_VITAL_DEFINE(Testing);
     TORCH_VITAL(Testing, Attribute0) << 1;
     TORCH_VITAL(Testing, Attribute1) << "1";
@@ -44,11 +41,7 @@ TEST(Vitals, MultiString) {
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {
-#ifdef _WIN32
-    _putenv("TORCH_VITAL=1");
-#else
-    setenv("TORCH_VITAL", "1", 1);
-#endif
+    c10::utils::set_env("TORCH_VITAL", "1");
     TORCH_VITAL_DEFINE(Testing);
     TORCH_VITAL(Testing, Attribute0) << 1 << " of " << 2;
     TORCH_VITAL(Testing, Attribute1) << 1;
@@ -69,15 +62,7 @@ TEST(Vitals, OnAndOff) {
     std::streambuf* sbuf = std::cout.rdbuf();
     std::cout.rdbuf(buffer.rdbuf());
     {
-#ifdef _WIN32
-      if (i) {
-        _putenv("TORCH_VITAL=1");
-      } else {
-        _putenv("TORCH_VITAL=0");
-      }
-#else
-      setenv("TORCH_VITAL", i ? "1" : "", 1);
-#endif
+      c10::utils::set_env("TORCH_VITAL", i ? "1" : "0");
       TORCH_VITAL_DEFINE(Testing);
       TORCH_VITAL(Testing, Attribute0) << 1;
     }
@@ -100,11 +85,7 @@ TEST(Vitals, APIVitals) {
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {
-#ifdef _WIN32
-    _putenv("TORCH_VITAL=1");
-#else
-    setenv("TORCH_VITAL", "1", 1);
-#endif
+    c10::utils::set_env("TORCH_VITAL", "1");
     APIVitals api_vitals;
     rvalue = api_vitals.setVital("TestingSetVital", "TestAttr", "TestValue");
   }

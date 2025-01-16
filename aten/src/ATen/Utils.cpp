@@ -6,8 +6,6 @@
 
 
 #include <cstdlib>
-#include <stdexcept>
-#include <typeinfo>
 
 namespace at {
 

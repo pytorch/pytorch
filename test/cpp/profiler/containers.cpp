@@ -32,7 +32,7 @@ TEST(ProfilerTest, AppendOnlyList_ref) {
   const int n = 512;
   torch::profiler::impl::AppendOnlyList<std::pair<int, int>, 64> list;
   std::vector<std::pair<int, int>*> refs;
-  for (const auto _ : c10::irange(n)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(n)) {
     refs.push_back(list.emplace_back());
   }
 
@@ -53,7 +53,7 @@ TEST(ProfilerTest, clock_converter) {
   std::vector<
       c10::ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair>
       pairs;
-  for (const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     pairs.push_back(c10::ApproximateClockToUnixTimeConverter::measurePair());
   }
   auto count_to_ns = converter.makeConverter();
@@ -85,6 +85,6 @@ TEST(ProfilerTest, soft_assert) {
   torch::profiler::impl::setSoftAssertRaises(false);
   EXPECT_NO_THROW(SOFT_ASSERT(false));
   // Reset soft assert behavior to default
-  torch::profiler::impl::setSoftAssertRaises(c10::nullopt);
+  torch::profiler::impl::setSoftAssertRaises(std::nullopt);
   EXPECT_NO_THROW(SOFT_ASSERT(false));
 }

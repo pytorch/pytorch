@@ -7,7 +7,8 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<c10::complex<double>> {
 private:
@@ -203,7 +204,7 @@ public:
     auto abs = abs_();
     auto zero = _mm512_setzero_pd();
     auto mask = _mm512_cmp_pd_mask(abs, zero, _CMP_EQ_OQ);
-    auto div = values / abs;
+    auto div = _mm512_div_pd(values, abs);
     return _mm512_mask_blend_pd(mask, div, zero);
   }
   __m512d real_() const {
@@ -249,24 +250,26 @@ public:
     return map(std::log1p);
   }
   Vectorized<c10::complex<double>> asin() const {
-    // asin(x)
-    // = -i*ln(iz + sqrt(1 -z^2))
-    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
-    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-    const __m512d one = _mm512_set1_pd(1);
+    // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+    // // asin(x)
+    // // = -i*ln(iz + sqrt(1 -z^2))
+    // // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    // const __m512d one = _mm512_set1_pd(1);
 
-    auto conj = conj_();
-    auto b_a = _mm512_permute_pd(conj, 0x55);                         //-b        a
-    auto ab = _mm512_mul_pd(conj, b_a);                               //-ab       -ab
-    auto im = _mm512_add_pd(ab, ab);                                  //-2ab      -2ab
+    // auto conj = conj_();
+    // auto b_a = _mm512_permute_pd(conj, 0x55);                         //-b        a
+    // auto ab = _mm512_mul_pd(conj, b_a);                               //-ab       -ab
+    // auto im = _mm512_add_pd(ab, ab);                                  //-2ab      -2ab
 
-    auto val_2 = _mm512_mul_pd(values, values);                       // a*a      b*b
-    auto re = hsub_pd(val_2, _mm512_permute_pd(val_2, 0x55));  // a*a-b*b  b*b-a*a
-    re = _mm512_sub_pd(one, re);
+    // auto val_2 = _mm512_mul_pd(values, values);                       // a*a      b*b
+    // auto re = hsub_pd(val_2, _mm512_permute_pd(val_2, 0x55));  // a*a-b*b  b*b-a*a
+    // re = _mm512_sub_pd(one, re);
 
-    auto root = Vectorized(_mm512_mask_blend_pd(0xAA, re, im)).sqrt();         //sqrt(re + i*im)
-    auto ln = Vectorized(_mm512_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
-    return Vectorized(_mm512_permute_pd(ln.values, 0x55)).conj();         //-i*ln()
+    // auto root = Vectorized(_mm512_mask_blend_pd(0xAA, re, im)).sqrt();         //sqrt(re + i*im)
+    // auto ln = Vectorized(_mm512_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
+    // return Vectorized(_mm512_permute_pd(ln.values, 0x55)).conj();         //-i*ln()
+    return map(std::asin);
   }
   Vectorized<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
@@ -362,16 +365,16 @@ public:
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
-  Vectorized<c10::complex<double>> operator<(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator<(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator<=(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator<=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator>(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator>(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator>=(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator>=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

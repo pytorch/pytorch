@@ -1,9 +1,13 @@
+# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
+
 
 __all__ = ["Gamma"]
 
@@ -26,8 +30,8 @@ class Gamma(ExponentialFamily):
     Args:
         concentration (float or Tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or Tensor): rate = 1 / scale of the distribution
-            (often referred to as beta)
+        rate (float or Tensor): rate parameter of the distribution
+            (often referred to as beta), rate = 1 / scale
     """
     arg_constraints = {
         "concentration": constraints.positive,
@@ -38,15 +42,15 @@ class Gamma(ExponentialFamily):
     _mean_carrier_measure = 0
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.concentration / self.rate
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return ((self.concentration - 1) / self.rate).clamp(min=0)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.concentration / self.rate.pow(2)
 
     def __init__(self, concentration, rate, validate_args=None):
@@ -66,7 +70,7 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
             shape
@@ -96,7 +100,7 @@ class Gamma(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration - 1, -self.rate)
 
     def _log_normalizer(self, x, y):

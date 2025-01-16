@@ -1,5 +1,8 @@
 """Type annotations for various benchmark objects."""
-from typing import Any, Dict, Optional, Tuple, Union
+
+# mypy: ignore-errors
+
+from typing import Dict, Optional, Union
 
 from core.api import AutoLabels, GroupedBenchmark, TimerArgs
 
@@ -63,24 +66,12 @@ TL;DR
 
 # Allow strings in definition for convenience, and None to signify a base
 # case. (No subsequent entry needed. See the "add" example above.)
-Label = Tuple[str, ...]
+Label = tuple[str, ...]
 _Label = Union[Label, Optional[str]]
 
-# MyPy does not currently support recursive types:
-#   https://github.com/python/mypy/issues/731
-#
-# So while the correct type definition would be:
-#   _Value = Union[
-#       # Base case:
-#       Union[TimerArgs, GroupedBenchmark],
-#
-#       # Recursive case:
-#       Dict[Label, "_Value"],
-#   ]
-# we instead have to use Any and rely on runtime asserts when flattening.
 _Value = Union[
     Union[TimerArgs, GroupedBenchmark],
-    Dict[_Label, Any],
+    Dict[_Label, "_Value"],
 ]
 
 Definition = Dict[_Label, _Value]
@@ -91,4 +82,4 @@ Definition = Dict[_Label, _Value]
 FlatIntermediateDefinition = Dict[Label, Union[TimerArgs, GroupedBenchmark]]
 
 # Final parsed schema.
-FlatDefinition = Tuple[Tuple[Label, AutoLabels, TimerArgs], ...]
+FlatDefinition = tuple[tuple[Label, AutoLabels, TimerArgs], ...]

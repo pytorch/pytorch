@@ -1,34 +1,42 @@
 # Owner(s): ["oncall: distributed"]
-
 import sys
 from contextlib import nullcontext
 from enum import auto, Enum
-from typing import Optional
+from typing import List, Optional
 from unittest.mock import patch
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch import distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
+    MLP,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
+device_type = torch.device(get_devtype())
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -48,28 +56,31 @@ class TestCommunication(FSDPTest):
 
     def _init_model(
         self,
+        device,
         nested_model: bool,
         sharding_strategy: ShardingStrategy,
-        device: torch.device,
     ):
-        fsdp_kwargs = {"sharding_strategy": sharding_strategy}
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+            "device_id": device_type.type,
+        }
         if nested_model:
             model = NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_AFTER,
+                DEVICEInitMode.DEVICE_AFTER,
                 fsdp_kwargs,
             )
             fsdp_model: FSDP = FSDP(
                 model,
                 self.process_group,
                 **fsdp_kwargs,
-            ).to(device)
+            )
         else:
             fsdp_model: FSDP = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 fsdp_kwargs,
             )
         return fsdp_model
@@ -197,6 +208,7 @@ class TestCommunication(FSDPTest):
     @parametrize("sharding_strategy", [ShardingStrategy.SHARD_GRAD_OP, None])
     def test_communication(
         self,
+        device,
         nested_model: bool,
         use_no_sync: bool,
         sharding_strategy: Optional[ShardingStrategy],
@@ -204,7 +216,6 @@ class TestCommunication(FSDPTest):
         """
         Tests FSDP's communication cost in terms of calls to collective
         communication primitives (i.e. all-gather and reduce-scatter).
-
         Arguments:
             nested_model (bool): If ``True``, uses ``NestedWrappedModule``,
                 which has nested FSDP instances; if ``False``, uses the default
@@ -219,16 +230,13 @@ class TestCommunication(FSDPTest):
         # Enable execution order checking
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # Initialize the model and inputs
-        device = torch.device("cuda")
-        fsdp_model = self._init_model(nested_model, sharding_strategy, device)
-        batch = fsdp_model.module.get_input(device)
-
+        fsdp_model = self._init_model(device_type, nested_model, sharding_strategy)
+        batch = fsdp_model.module.get_input(device_type)
         # Count the number of FSDP instances that manage parameters since the
         # number of collectives are a function of this number
         num_fsdp = sum(
             (isinstance(m, FSDP) and len(m.params) > 0) for m in fsdp_model.modules()
         )
-
         # If `use_no_sync=True`, we run `num_iters` iterations inside
         # `no_sync()` followed by `num_iters` iterations outside `no_sync()`,
         # and if `use_no_sync=False`, we only run `num_iters` iterations
@@ -283,7 +291,99 @@ class TestCommunication(FSDPTest):
                 self.assertEqual(num_reduce_scatters, ref_num_reduce_scatters)
 
 
-instantiate_parametrized_tests(TestCommunication)
+class TestExplicitUnshard(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(_get_device_module(self.device_type).device_count(), 2)
 
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_orig_params", [False, True])
+    def test_unshard_async(self, device, use_orig_params: bool):
+        class ReduceModule(nn.Module):
+            def __init__(self, dim: int, group: dist.ProcessGroup):
+                super().__init__()
+                self.group = group
+                self.weight = nn.Parameter(torch.randn(dim, dim))
+
+            def forward(self, x: torch.Tensor):
+                y = F.relu(x @ self.weight)
+                # NOTE: This all-reduce is not differentiable and is included
+                # to exercise the overlap.
+                work = dist.all_reduce(y, group=self.group, async_op=True)
+                return y, work
+
+        class MLPs(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.mlp1 = MLP(dim)
+                self.mlp2 = MLP(dim)
+                self.mlp3 = MLP(dim)
+
+            def forward(self, ys: List[torch.Tensor], works: List[dist.Work]):
+                (y1, y2, y3), (work1, work2, work3) = ys, works
+                work1.wait()
+                z1 = self.mlp1(y1)
+                work2.wait()
+                z2 = self.mlp2(y2)
+                work3.wait()
+                z3 = self.mlp3(y3)
+                return z1 + z2 + z3
+
+        class ReduceModel(nn.Module):
+            def __init__(self, dim: int, group: dist.ProcessGroup):
+                super().__init__()
+                self.reduce_module1 = ReduceModule(dim, group)
+                self.reduce_module2 = ReduceModule(dim, group)
+                self.reduce_module3 = ReduceModule(dim, group)
+                self.mlps = MLPs(dim)
+
+            def forward(self, x: torch.Tensor):
+                y1, work1 = self.reduce_module1(x)
+                if isinstance(self.mlps.mlp1, FSDP):
+                    self.mlps.mlp1._unshard(async_op=True)
+                y2, work2 = self.reduce_module2(x)
+                if isinstance(self.mlps.mlp2, FSDP):
+                    self.mlps.mlp2._unshard(async_op=True)
+                y3, work3 = self.reduce_module3(x)
+                if isinstance(self.mlps.mlp3, FSDP):
+                    self.mlps.mlp3._unshard(async_op=True)
+                return self.mlps([y1, y2, y3], [work1, work2, work3])
+
+        group = self.process_group
+        batch_size, dim = 2, 8
+        torch.manual_seed(42)
+        ref_model = DDP(ReduceModel(dim, group).to(device_type), device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        torch.manual_seed(42)
+        model = ReduceModel(dim, group)
+        model.mlps = FSDP(
+            model.mlps,
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            auto_wrap_policy=ModuleWrapPolicy((MLP,)),
+            device_id=device_type.type,
+            use_orig_params=use_orig_params,
+        )
+        model.mlps.check_is_root()
+        mlp_params = set(model.mlps.parameters())
+        mlp_param_names = {n for n, p in model.named_parameters() if p in mlp_params}
+        DDP._set_params_and_buffers_to_ignore_for_model(model, mlp_param_names)
+        model = DDP(model.to(device_type), device_ids=[self.rank])
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((batch_size, dim), device=device_type)
+        for _ in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+                _optim.zero_grad()
+            self.assertEqual(losses[0], losses[1])
+            model.module.mlps._wait_unshard_streams_on_current_stream()
+
+
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestCommunication, globals(), only_for=devices)
+instantiate_device_type_tests(TestExplicitUnshard, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

@@ -1,30 +1,31 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
 try:
     from . import test_export, testing
 except ImportError:
-    import test_export
-    import testing
+    import test_export  # @manual=fbcode//caffe2/test:test_export-library
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
+
 from torch.export import export
+
 
 test_classes = {}
 
 
 def mocked_non_strict_export(*args, **kwargs):
+    # If user already specified strict, don't make it non-strict
     if "strict" in kwargs:
-        del kwargs["strict"]
+        return export(*args, **kwargs)
     return export(*args, **kwargs, strict=False)
 
 
 def make_dynamic_cls(cls):
-    suffix = "_non_strict"
-
     cls_prefix = "NonStrictExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        suffix,
+        test_export.NON_STRICT_SUFFIX,
         mocked_non_strict_export,
         xfail_prop="_expected_failure_non_strict",
     )

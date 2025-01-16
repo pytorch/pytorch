@@ -15,8 +15,8 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -238,7 +238,7 @@ struct TORCH_API Module : public Object {
 
   Module copy() const;
 
-  Module deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
+  Module deepcopy(std::optional<at::Device> device = std::nullopt) const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
@@ -278,8 +278,10 @@ struct TORCH_API Module : public Object {
   // A set of functions to maintain input shapes through torch.jit.save and
   // torch.jit.load. It only works on tensors and lists/dicts of tensors
   // because tracing is only supported by these types.
-  void store_traced_inputs(std::string func_name, std::vector<IValue> inputs) {
-    if (inputs.size() == 0) {
+  void store_traced_inputs(
+      const std::string& func_name,
+      std::vector<IValue> inputs) {
+    if (inputs.empty()) {
       return;
     }
     auto c10_inputs = c10::impl::GenericList(AnyType::get());
@@ -301,7 +303,7 @@ struct TORCH_API Module : public Object {
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo,
+      IValue::HashIdentityIValueMap memo,
       const std::unordered_set<std::string>& ignored_methods,
       const std::unordered_set<std::string>& ignored_attributes) const;
 
@@ -315,8 +317,8 @@ struct TORCH_API Module : public Object {
   }
 
   void to_impl(
-      const c10::optional<at::Device>& device,
-      const c10::optional<at::ScalarType>& dtype,
+      const std::optional<at::Device>& device,
+      const std::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
   // Extra handle for the module to delete when itself is deleted
@@ -333,8 +335,8 @@ struct TORCH_API Module : public Object {
 // details.
 TORCH_API Module freeze(
     const Module& module,
-    const c10::optional<std::vector<std::string>>& preserved_attrs =
-        c10::nullopt,
+    const std::optional<std::vector<std::string>>& preserved_attrs =
+        std::nullopt,
     bool optimize_numerics = true);
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
@@ -541,9 +543,7 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-      for (const value_type& s : *(this)) {
-        (void)s; // Suppress unused variable warning
+      for ([[maybe_unused]] const value_type& _ : *(this)) {
         ++*size_;
       }
     }
@@ -554,7 +554,7 @@ struct slot_list_impl {
       : module_(std::move(module)),
         recurse_(recurse),
         return_module_(return_module),
-        size_(c10::nullopt) {
+        size_(std::nullopt) {
     if (!recurse && !return_module && Policy::all_slots) {
       size_ = module_.num_slots();
     }
@@ -566,7 +566,7 @@ struct slot_list_impl {
   bool return_module_;
   // size of this list, cached on first request
   // when we need to filter the slot list
-  mutable c10::optional<size_t> size_;
+  mutable std::optional<size_t> size_;
   friend struct Module;
 };
 
@@ -593,7 +593,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -606,7 +606,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -620,7 +620,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -633,7 +633,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
+  static constexpr bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.

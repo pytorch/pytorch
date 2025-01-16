@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import unittest.mock
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ import torch._C
 import torch._ops
 import torch.utils._python_dispatch
 import torch.utils._pytree as pytree
+
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]
 
@@ -73,8 +75,8 @@ def check_tensor_metadata_matches(nv, rv, desc):
 
 def check_metadata_matches(n, r, desc):
     assert callable(desc)
-    n_vals, n_spec = pytree.tree_flatten(n)
-    r_vals, r_spec = pytree.tree_flatten(r)
+    n_vals, _n_spec = pytree.tree_flatten(n)
+    r_vals, _r_spec = pytree.tree_flatten(r)
     # TODO: test the specs match; empirically  sometimes we have a tuple
     # on one side and a list on the other
     assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"

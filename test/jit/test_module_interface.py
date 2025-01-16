@@ -1,21 +1,27 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
-from typing import List, Any
-import torch
-import torch.nn as nn
 import os
 import sys
+from typing import Any, List
+
+import torch
+import torch.nn as nn
 from torch import Tensor
 from torch.testing._internal.jit_utils import JitTestCase, make_global
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class OrigModule(nn.Module):
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
@@ -27,12 +33,14 @@ class OrigModule(nn.Module):
     def forward(self, input: Tensor) -> Tensor:
         return input + self.one(input, input) + 1
 
+
 class NewModule(nn.Module):
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         return inp1 * inp2 + 1
 
     def forward(self, input: Tensor) -> Tensor:
         return self.one(input, input + 1)
+
 
 class TestModuleInterface(JitTestCase):
     def test_not_submodule_interface_call(self):
@@ -42,16 +50,18 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestNotModuleInterfaceCall(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
             def forward(self, input: Tensor) -> Tensor:
                 return self.proxy_mod.two(input)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "self.proxy_mod.two"):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "object has no attribute or method", "self.proxy_mod.two"
+        ):
             torch.jit.script(TestNotModuleInterfaceCall())
 
     def test_module_interface(self):
@@ -108,17 +118,37 @@ class TestModuleInterface(JitTestCase):
 
         scripted_foo_mod = torch.jit.script(FooMod())
         scripted_bar_mod = torch.jit.script(BarMod())
-        self.checkScript(use_module_interface,
-                         ([scripted_foo_mod, scripted_bar_mod], torch.rand(3, 4),))
-        self.checkScript(use_class_interface,
-                         ([scripted_foo_mod, scripted_bar_mod], torch.rand(3, 4),))
+        self.checkScript(
+            use_module_interface,
+            (
+                [scripted_foo_mod, scripted_bar_mod],
+                torch.rand(3, 4),
+            ),
+        )
+        self.checkScript(
+            use_class_interface,
+            (
+                [scripted_foo_mod, scripted_bar_mod],
+                torch.rand(3, 4),
+            ),
+        )
 
-        def call_module_interface_on_other_method(mod_interface: OneTwoModule, x: Tensor) -> Tensor:
+        def call_module_interface_on_other_method(
+            mod_interface: OneTwoModule, x: Tensor
+        ) -> Tensor:
             return mod_interface.forward2(x)
 
         # ensure error out when we call the module on the method other than the interface specified.
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "mod_interface.forward2"):
-            self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "object has no attribute or method", "mod_interface.forward2"
+        ):
+            self.checkScript(
+                call_module_interface_on_other_method,
+                (
+                    scripted_bar_mod,
+                    torch.rand(3, 4),
+                ),
+            )
 
     def test_module_doc_string(self):
         @torch.jit.interface
@@ -131,13 +161,13 @@ class TestModuleInterface(JitTestCase):
                 # type: (Tensor) -> Tensor
                 r"""stuff 1"""
                 r"""stuff 2"""
-                pass
+                pass  # noqa: PIE790
                 r"""stuff 3"""
 
         class TestModule(nn.Module):
-            proxy_mod : TestInterface
+            proxy_mod: TestInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
@@ -178,7 +208,9 @@ class TestModuleInterface(JitTestCase):
                 return self.one(self.two(x), x)
 
         # check class object is not a subtype of module interface
-        with self.assertRaisesRegex(RuntimeError, "ScriptModule class can be subtype of module interface"):
+        with self.assertRaisesRegex(
+            RuntimeError, "ScriptModule class can be subtype of module interface"
+        ):
             as_module_interface(Foo())
 
         class WrongMod(nn.Module):
@@ -233,9 +265,11 @@ class TestModuleInterface(JitTestCase):
         as_tensor_to_any(torch.jit.script(TensorToAnyImplB()))
         as_any_to_any(torch.jit.script(AnyToAnyImpl()))
 
-
     def test_module_interface_inheritance(self):
-        with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support inheritance yet. Please directly"
+        ):
+
             @torch.jit.interface
             class InheritMod(nn.ReLU):
                 def three(self, x: Tensor) -> Tensor:
@@ -251,9 +285,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
@@ -269,7 +303,9 @@ class TestModuleInterface(JitTestCase):
         self.assertEqual(scripted_mod(input), input * (input + 1) + 1)
 
         # module swap with non-scripted module should throw error
-        with self.assertRaisesRegex(RuntimeError, "a ScriptModule with non-scripted module"):
+        with self.assertRaisesRegex(
+            RuntimeError, "a ScriptModule with non-scripted module"
+        ):
             scripted_mod.proxy_mod = NewModule()
 
     def test_module_swap_wrong_module(self):
@@ -286,9 +322,9 @@ class TestModuleInterface(JitTestCase):
                 return input + 1
 
         class TestModule(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
@@ -310,9 +346,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
@@ -347,7 +383,7 @@ class TestModuleInterface(JitTestCase):
     def test_module_swap_no_module_interface(self):
         # test module swapping with no module interface
         class TestNoModuleInterface(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 
@@ -358,9 +394,11 @@ class TestModuleInterface(JitTestCase):
         # proxy mod is swapped with the new ScriptModule that share the same JIT type, should succeed.
         scripted_no_module_interface.proxy_mod = torch.jit.script(OrigModule())
         # proxy_mod is neither a module interface or have the same JIT type, should fail
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"Expected a value of type '__torch__.jit.test_module_interface.OrigModule \(.*\)' " +
-                                    r"for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule \(.*\)'"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Expected a value of type '__torch__.jit.test_module_interface.OrigModule \(.*\)' "
+            + r"for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule \(.*\)'",
+        ):
             scripted_no_module_interface.proxy_mod = torch.jit.script(NewModule())
 
     def test_script_module_as_interface_swap(self):
@@ -391,9 +429,9 @@ class TestModuleInterface(JitTestCase):
                 return self.one(input, input + 1)
 
         class TestNNModuleWithScriptModule(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigScriptModule()
 
@@ -411,7 +449,7 @@ class TestModuleInterface(JitTestCase):
     # Freezing is throwing an error for now.
     def test_freeze_module_with_interface(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = 20
 
@@ -419,7 +457,7 @@ class TestModuleInterface(JitTestCase):
                 return self.b
 
         class OrigMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 0
 
@@ -432,9 +470,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(torch.nn.Module):
-            proxy_mod : ModInterface
+            proxy_mod: ModInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()  # folded
@@ -454,7 +492,7 @@ class TestModuleInterface(JitTestCase):
 
     def test_freeze_module_with_setattr_in_interface(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = 20
 
@@ -467,7 +505,7 @@ class TestModuleInterface(JitTestCase):
                 return self.b
 
         class OrigMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 0
 
@@ -480,9 +518,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(torch.nn.Module):
-            proxy_mod : ModInterface
+            proxy_mod: ModInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
@@ -497,7 +535,7 @@ class TestModuleInterface(JitTestCase):
 
     def test_freeze_module_with_inplace_mutation_in_interface(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.tensor([1.5])
 
@@ -510,7 +548,7 @@ class TestModuleInterface(JitTestCase):
                 return self.b
 
         class OrigMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor([0.5])
 
@@ -523,9 +561,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(torch.nn.Module):
-            proxy_mod : ModInterface
+            proxy_mod: ModInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
@@ -543,7 +581,7 @@ class TestModuleInterface(JitTestCase):
 
     def test_freeze_module_with_mutated_interface(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.tensor([1.5])
 
@@ -555,7 +593,7 @@ class TestModuleInterface(JitTestCase):
                 return self.b
 
         class OrigMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor([0.5])
 
@@ -568,9 +606,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(torch.nn.Module):
-            proxy_mod : ModInterface
+            proxy_mod: ModInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
@@ -583,12 +621,14 @@ class TestModuleInterface(JitTestCase):
 
         m = torch.jit.script(TestModule())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type."):
+        with self.assertRaisesRegex(
+            RuntimeError, "Freezing does not support SetAttr on an interface type."
+        ):
             mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
 
     def test_freeze_module_with_interface_and_fork(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.tensor([1.5])
 
@@ -597,7 +637,7 @@ class TestModuleInterface(JitTestCase):
                 return self.b
 
         class OrigMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor([0.5])
 
@@ -610,9 +650,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(torch.nn.Module):
-            proxy_mod : ModInterface
+            proxy_mod: ModInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
@@ -623,7 +663,7 @@ class TestModuleInterface(JitTestCase):
                 return y + z
 
         class MainModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.test = TestModule()
 
@@ -644,9 +684,9 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         class TestModule(nn.Module):
-            proxy_mod : ModuleInterface
+            proxy_mod: ModuleInterface
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.proxy_mod = OrigModule()
 

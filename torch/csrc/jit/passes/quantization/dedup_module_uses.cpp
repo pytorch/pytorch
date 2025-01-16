@@ -5,8 +5,7 @@
 
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 class ModuleUseDeduper {
  public:
@@ -97,9 +96,9 @@ class ModuleUseDeduper {
     // Original name of the child module
     const std::string& original_name = path[path.size() - 1];
     int uid = 0;
-    std::string child_name = original_name + "_" + c10::to_string(uid++);
+    std::string child_name = original_name + "_" + std::to_string(uid++);
     while (parent_of_leaf.hasattr(child_name)) {
-      child_name = original_name + "_" + c10::to_string(uid++);
+      child_name = original_name + "_" + std::to_string(uid++);
     }
     parent_of_leaf.register_module(child_name, child_module.deepcopy());
     return child_name;
@@ -125,5 +124,4 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -9,9 +9,10 @@ import argparse
 import os
 import sys
 
+from scipy.sparse import isspmatrix
+
 import torch
 import torch.utils.benchmark as benchmark_utils
-from scipy.sparse import isspmatrix
 
 from .utils import load_dlmc_dataset
 

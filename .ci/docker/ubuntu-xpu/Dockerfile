@@ -30,6 +30,7 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 ARG ANACONDA_PYTHON_VERSION
 ARG CONDA_CMAKE
 ARG DOCS
+ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
@@ -61,15 +62,20 @@ COPY ci_commit_pins/timm.txt timm.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
+# Install XPU Dependencies
+ARG XPU_VERSION
+COPY ./common/install_xpu.sh install_xpu.sh
+RUN bash ./install_xpu.sh && rm install_xpu.sh
+
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
-# TODO: will add triton xpu commit
-COPY ci_commit_pins/triton.txt triton.txt
+COPY ci_commit_pins/triton-xpu.txt triton-xpu.txt
+COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
+RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
 # (optional) Install database packages like LMDB and LevelDB
 ARG DB
@@ -78,17 +84,12 @@ RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
 RUN rm install_db.sh
 ENV INSTALLED_DB ${DB}
 
-# (optional) Install vision packages like OpenCV and ffmpeg
+# (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# Install XPU Dependencies
-ARG BASEKIT_VERSION
-COPY ./common/install_xpu.sh install_xpu.sh
-RUN bash ./install_xpu.sh && rm install_xpu.sh
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION

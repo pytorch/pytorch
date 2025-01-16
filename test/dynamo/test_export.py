@@ -3,14 +3,16 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
+
 import copy
 import functools
 import inspect
 import io
 import operator
 import unittest
+from collections.abc import Sequence
 from enum import Enum
-from typing import Dict, List, Sequence
+from typing import Dict, List
 from unittest.mock import patch
 
 import torch
@@ -21,7 +23,6 @@ from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
-from torch._export import dynamic_dim
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -35,6 +36,11 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
+@torch._dynamo.assume_constant_result
+def dynamo_assume_constant_result_global_function():
+    return "test"
+
+
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
@@ -44,9 +50,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(0, 4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -69,7 +75,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func()
 
         torch._dynamo.reset()
@@ -80,12 +86,82 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_no_tensor_computation_fail(self):
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Failed to produce a graph",
+        ):
+            inp = [torch.randn(3)]
+            inp2 = 2
+            inps = [inp, inp2]
+
+            def func(x, y):
+                return x
+
+            torch._dynamo.export(func, same_signature=False)(*inps)
+
+    def test_no_tensor_computation(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
+
     def test_export_mismatched_out(self):
         def func(x):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -103,7 +179,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return x.cos()
             return x.sin()
 
-        opt_func = torch._dynamo.optimize("eager")(func)
+        opt_func = torch.compile(func, backend="eager")
         real_result = opt_func(torch.ones(6, 4))
 
         torch._dynamo.reset()
@@ -120,7 +196,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertExpectedInline(
+                    guard.code_list,
+                    """["L['x'].stride()[0] == L['x'].size()[1]", "L['x'].stride()[1] == 1", "L['x'].storage_offset() == 0", "2 <= L['x'].size()[0] and L['x'].size()[0] <= 10", "2 <= L['x'].size()[1]"]""",  # noqa: B950
+                )
+                break
 
         self.assertTrue(hit)
 
@@ -158,7 +238,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return first * second
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -182,7 +262,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return x[0], first * second, x[1], x[2]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -226,7 +306,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -251,7 +331,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return first * second, x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -277,7 +357,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             third = x[2]
             return third, first, second, first * second, first * third
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -296,7 +376,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -315,7 +395,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -336,7 +416,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -358,7 +438,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -380,7 +460,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return z, y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -403,7 +483,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return y[0].item(), y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -426,7 +506,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -450,7 +530,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return a[0].item() + b[0].item() + c[0].item()
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -474,7 +554,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return b[0].item() + c[0].item() + a[0].item() + a[0].item()
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -498,7 +578,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return a, b[0].item() + c[0].item() + a[0].item() + a[0].item(), a
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -526,7 +606,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
             return func2(x)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -550,7 +630,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             x = a + b + c
             return {"a": x}
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -567,9 +647,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(0, 4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -592,7 +672,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func()
 
         torch._dynamo.reset()
@@ -603,12 +683,68 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_no_tensor_computation_with_aten_graph(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([arg0_1], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2_with_aten_graph(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
+
     def test_export_mismatched_out_with_aten_graph(self):
         def func(x):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -634,7 +770,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return first * second
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -658,7 +794,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return x[0], first * second, x[1], x[2]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -675,7 +811,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -702,7 +838,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             second = x[2]
             return first * second, x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -728,7 +864,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             third = x[2]
             return third, first, second, first * second, first * third
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -747,7 +883,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -766,7 +902,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -787,7 +923,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + 1
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -809,7 +945,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -831,7 +967,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return z, y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -854,7 +990,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             y = x + k
             return y[0].item(), y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -877,7 +1013,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -905,7 +1041,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
             return func2(x)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -929,7 +1065,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             x = a + b + c
             return {"a": x}
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -950,7 +1086,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return torch.cos(x).relu() + 1
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -983,17 +1119,17 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.register_buffer("buffer", torch.ones(1, 1))
+                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
                 return torch.cos(x).relu() + self.weight + self.buffer
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -1048,7 +1184,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
             return fw
 
-        opt_func = torch._dynamo.optimize(compiler, nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend=compiler, fullgraph=True, dynamic=True)
         make_fx_result_through_backend = opt_func(inp)
 
         fx_g = make_fx(func)(inp)
@@ -1063,7 +1199,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1089,7 +1225,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1119,7 +1255,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1143,13 +1279,25 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
+    def test_export_with_constant_global_function(self):
+        class MyModule(torch.nn.Module):
+            def forward(self):
+                a = dynamo_assume_constant_result_global_function()
+                b = dynamo_assume_constant_result_global_function()
+                return a + b
+
+        module = MyModule()
+        graph, _ = torch._dynamo.export(module)()
+        result = graph()
+        self.assertEqual(result, "testtest")
+
     def test_export_with_constant_free_function_and_class_method(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1175,7 +1323,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1248,7 +1396,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1272,7 +1420,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1296,7 +1444,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1318,7 +1466,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         module = MyModule()
         real_result = module(torch.tensor([2.0, 2.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2.0, 2.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2.0, 2.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1347,7 +1495,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is negative, so .item() < 0, which means we return y
         self.assertEqual(real_result, torch.tensor([0.5]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1374,7 +1522,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1401,7 +1549,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is negative, so .item() < 0, which means we return y
         self.assertEqual(real_result, torch.tensor([0.5]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1428,7 +1576,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1455,7 +1603,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1476,10 +1624,57 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         module = MyModule()
         module.val = "A"
         resA = module(torch.tensor([2]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         module.val = "B"
         resB = graph(torch.tensor([2]))
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
+
+    def test_export_with_builtin_op_on_assume_constant(self):
+        @torch._dynamo.assume_constant_result
+        def get_y(y) -> torch.Tensor:
+            return y
+
+        class Bob(torch.nn.Module):
+            def __init__(self, p, val) -> None:
+                super().__init__()
+                self.p = p
+                self.y = torch.nn.Parameter(torch.tensor(val))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # This only looks dynamic but it's actually a constant value
+                if get_y(self.y) < self.p:
+                    return torch.cat([x, x])
+                else:
+                    return x
+
+        model = Bob(0.5, 0.3)
+        inp = torch.ones(3, 4)
+        graph, _ = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
+    def test_export_with_constant_in_unspecialized_nn_module(self):
+        class Module(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.y = y
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.y[0].item() == 1
+
+            def forward(self, x):
+                # This line leads to module obj being tracked as UnspecializedNNModuleVariable in dynamo
+                self.device = x.device
+
+                if self.check():
+                    return x + 1
+                else:
+                    return x + 2
+
+        model = Module(torch.tensor([1]))
+        inp = torch.ones(3, 4)
+        graph, _ = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
 
     def test_export_decomp(self):
         def f(x):
@@ -1514,7 +1709,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         with self.assertRaises(AssertionError):
-            graph, _ = torch._dynamo.export(
+            torch._dynamo.export(
                 f,
                 (torch.randn(5)),
                 aten_graph=False,
@@ -1526,7 +1721,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1565,7 +1760,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         class Module(torch.nn.Module):
             # ok
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1597,7 +1792,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1610,7 +1805,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return cond(pred, true_fn, false_fn, [x])
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1623,7 +1818,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return cond(pred, true_fn, false_fn, [x + 1])
 
         class FooBar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1696,7 +1891,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mods = [Module(), Module2()]
         for mod in mods:
             x = torch.randn(2, 2)
-            out_graph, guards = torch._dynamo.export(mod)(x)
+            out_graph, _ = torch._dynamo.export(mod)(x)
             self.assertExpectedInline(
                 out_graph.code.strip(),
                 """\
@@ -1730,17 +1925,14 @@ def forward(self, l_x_):
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                "Expected true_fn_output and false_fn_output to have same metadata but found",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
-            ):
-                # True branch and false branch return tensors of different shape
-                test_x = torch.randn(3, 2)
-                mod(test_x)
+
+            # We specialize into one of the branches since predicate is a python boolean.
+            test_x = torch.randn(3, 2)
+            mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -1788,7 +1980,7 @@ def forward(self, l_x_):
             torch._dynamo.exc.Unsupported,
             "zero-sized tensor",
         ):
-            out_graph, _ = torch._dynamo.export(mod)(xs)
+            torch._dynamo.export(mod)(xs)
 
     def test_export_meta_val(self):
         def f(x, y, z):
@@ -1864,7 +2056,7 @@ def forward(self, l_x_):
             if node.op == "call_function" and node.target == operator.getitem:
                 count += 1
 
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 1)
         self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
 
     def test_dynamic_slicing_invalid(self):
@@ -2128,7 +2320,7 @@ def forward(self, x):
             return wrapper
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -2231,69 +2423,49 @@ def forward(self, x):
             return t.x + t.y
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "graph-captured input #1, of type .*Tensor.*, "
-            "is not among original inputs of types: .*Tensors",
+            UserError,
+            "It looks like one of the inputs with type .*Tensors.* "
+            "is not supported or pytree-flattenable",
         ):
-            torch._dynamo.export(
-                f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
+            torch._dynamo.export(f, aten_graph=False)(
+                Tensors(x=torch.randn(10), y=torch.randn(10))
             )
 
         def f(x, y):
             return Tensors(x=x.sin(), y=y.cos())
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is .*Tensors.*, "
-            "but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*Tensors.* "
+            "is not supported or pytree-flattenable",
         ):
-            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
 
-    def test_none_out(self):
-        def f(x, y):
-            _ = x + y
+    def test_empty(self):
+        def f(x):
+            return x
 
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is None, but only the following types are supported",
-        ):
-            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+        exported = torch._dynamo.export(f)(torch.randn(3, 3))
+        out_graph = exported[0]
+        inp = torch.randn(3, 3)
+        self.assertTrue(torch._dynamo.utils.same(inp, out_graph(inp)))
 
-    def test_primitive_constant_output(self):
-        def foo(x):
-            # return a constant of primitive type
-            y = 5
-            return y * x, y
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.ones(3, 3)
 
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
-        ):
-            torch.export.export(foo, (torch.tensor(3),))
+            def forward(self):
+                return self.a
 
-        def bar(x, y):
-            return y * x, y
-
-        # new behavior
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
-        ):
-            torch.export.export(bar, (torch.tensor(3), 5))
-
-        def qux(x, y):
-            return y * x, y - 1
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 4, but only the following types are supported",
-        ):
-            torch.export.export(qux, (torch.tensor(3), 5))
+        exported = torch._dynamo.export(M())()
+        out_graph = exported[0]
+        self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.features = torch.nn.Sequential(
                     torch.nn.Conv2d(
@@ -2309,19 +2481,56 @@ def forward(self, x):
         random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
         dim_x = torch.export.Dim("dim_x", min=1, max=32)
         exp_program = torch.export.export(
-            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}, strict=True
         )
         output_buffer = io.BytesIO()
         # Tests if we can restore saved nn.Parameters when we load them again
         torch.export.save(exp_program, output_buffer)
         loaded_model = torch.export.load(output_buffer)
         self.assertTrue(
-            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
         )
+
+    def test_export_fast_binary_broadcast_check(self):
+        # This test looks at the case where we erroneously create a guard
+        # when checking the equality of the operands' shape and the output
+        # shape during FakeTensor's binary op fast path.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().cuda()
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(
+            model, (a, b), dynamic_shapes=dynamic_shape_spec, strict=True
+        )
+
+    def test_export_fast_binary_broadcast_check_unbacked(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().cuda()
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar), strict=True)
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(2, 3))
 
@@ -2338,11 +2547,14 @@ def forward(self, x):
         self.assertEqual(dynamo_result, m(inp))
 
     def test_constraint_violation_error_messages(self):
-        def foo(x):
-            if x.shape[0] == x.shape[1] * 2:
-                return x + 1
-            else:
-                return x + 2
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == x.shape[1] * 2:
+                    return x + 1
+                else:
+                    return x + 2
+
+        foo = Foo()
 
         t = torch.zeros([8, 4])
         dim0 = torch.export.Dim("dim0", min=3, max=10)
@@ -2351,16 +2563,20 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
-            "must be specialized.*guards generated.*too complex",
+            "Constraints violated .*!(.*\n)*.*"
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
-            torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
-        def bar(x):
-            if x.shape[0] == 5:
-                return x + 1
-            else:
-                return x + 2
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 5:
+                    return x + 1
+                else:
+                    return x + 2
+
+        bar = Bar()
 
         t = torch.zeros([5])
         dim0 = torch.export.Dim("dim0", min=3, max=8)
@@ -2369,13 +2585,16 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be a constant",
         ):
-            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
-        def qux(x):
-            if x.shape[0] > 5 and x.shape[0] < 10:
-                return x + 1
-            else:
-                return x + 2
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] > 5 and x.shape[0] < 10:
+                    return x + 1
+                else:
+                    return x + 2
+
+        qux = Qux()
 
         t = torch.zeros([7])
         dim0 = torch.export.Dim("dim0", min=3, max=8)
@@ -2384,29 +2603,28 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*satisfy the generated guard",
         ):
-            torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
 
-        def foo(x, y):
-            return y + 1
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return y + 1
+
+        foo = Foo()
 
         x = torch.randn(2)
         y = torch.randn(5, 4)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
-
-        example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
-            ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
 
         example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, dynamic_shapes=dynamic_shapes)
-        ep(torch.randn(3), y)  # no specialization error
+        ep = torch.export.export(
+            foo, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        ep.module()(torch.randn(3), y)  # no specialization error
 
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2419,7 +2637,9 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn)(y)
 
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(y)
 
     def test_export_module_specify_constraints_signature(self):
         y = torch.randn([3, 3, 3])
@@ -2433,10 +2653,10 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(
-            ConstraintViolationError, "def specify_constraints\\(x\\):"
-        ):
-            torch._dynamo.export(mod, constraints=[dynamic_dim(y, 0)])(y)
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = 3"):
+            torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
+                y
+            )
 
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2449,7 +2669,9 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn)(y)
 
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(y)
 
     def test_export_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
@@ -2461,14 +2683,12 @@ def forward(self, x):
             return a.cos()
 
         torch._dynamo.export(my_dyn_fn)(y, y, y)
-        constraints = [dynamic_dim(y, 0)]
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = ({0: dim}, {0: dim}, {0: dim})
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(y, y, y)
-        constraints += [
-            dynamic_dim(y, 1) == dynamic_dim(y, 0),
-            dynamic_dim(y, 2) == dynamic_dim(y, 0),
-        ]
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(y, y, y)
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
+        dynamic_shapes = ({0: dim}, {1: dim}, {2: dim})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
 
     def test_export_no_raise(self):
         y = torch.randn([3, 3, 3])
@@ -2479,7 +2699,9 @@ def forward(self, x):
             return a * b * c
 
         torch._dynamo.export(my_dyn_fn)(y, y, y)
-        torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y, y, y)
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = ({0: dim}, {0: dim}, {0: dim})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
 
     def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
@@ -2492,18 +2714,23 @@ def forward(self, x):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn)(x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        dimx, dimy, dimz = torch.export.dims("dimx", "dimy", "dimz")
+        dynamic_shapes = ({0: dimx}, {0: dimy}, {0: dimz})
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
-        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
+        dimz = dimx
+        dynamic_shapes = ({0: dimx}, {0: dimy}, {0: dimz})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
 
     def test_remove_redundant_dynamic_dim_in_error_message(self):
-        def foo(x, y):
-            if x.shape[0] == y["k"].shape[0]:
-                return x + 1
-            else:
-                return x - 1
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] == y["k"].shape[0]:
+                    return x + 1
+                else:
+                    return x - 1
+
+        foo = Foo()
 
         a = torch.randn(3)
         b = torch.randn(3)
@@ -2513,11 +2740,15 @@ def forward(self, x):
                 foo,
                 (a, {"k": b}),
                 dynamic_shapes={"x": {0: dim0_a}, "y": {"k": {0: dim0_b}}},
+                strict=True,
             )
 
     def test_enforce_equalities(self):
-        def bar(x, y):
-            return torch.matmul(x, y)
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.matmul(x, y)
+
+        bar = Bar()
 
         batch, size = torch.export.dims("batch", "size")
         dynamic_shapes = {"x": (batch, size, size), "y": (batch, size, size)}
@@ -2526,18 +2757,12 @@ def forward(self, x):
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+            ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
-            torch.export.export(
-                bar,
-                (x, y),
-                dynamic_shapes=dynamic_shapes,
-            )
+            torch.export.export(bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True)
         y = torch.randn(10, 3, 3)
         ebar = torch.export.export(
-            bar,
-            (x, y),
-            dynamic_shapes=dynamic_shapes,
+            bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
         )
         self.assertEqual(
             [
@@ -2548,33 +2773,6 @@ def forward(self, x):
             ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
         )
 
-    @config.patch(
-        capture_dynamic_output_shape_ops=True,
-        specialize_int=True,
-        capture_scalar_outputs=True,
-    )
-    def test_export_preserve_constraints_as_metadata_scalar(self):
-        def f(x, y):
-            b = x.item()
-            torch._constrain_as_size(b)
-            return torch.empty((b, y.shape[0]))
-
-        x = torch.tensor([3])
-        y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
-        gm, _ = torch._dynamo.export(
-            f,
-            constraints=constraints,
-            aten_graph=True,
-            tracing_mode="symbolic",
-        )(*example_inputs)
-
-        self.assertEqual(
-            gm.meta["input_shape_constraints"],
-            [c.serializable_spec for c in constraints],
-        )
-
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
@@ -2583,14 +2781,13 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_tensor(self):
         def f(x):
             b = x.nonzero()
-            torch._constrain_as_value(b.shape[0], min=2, max=5)
+            torch._check(b.shape[0] >= 2)
+            torch._check(b.shape[0] <= 5)
             return b
 
         y = torch.tensor([8, 8, 6])
-        constraints = []
-        gm, _ = torch._dynamo.export(
+        torch._dynamo.export(
             f,
-            constraints=constraints,
             aten_graph=True,
             tracing_mode="symbolic",
         )(y)
@@ -2603,16 +2800,16 @@ def forward(self, x):
     def test_exported_graph_serialization(self):
         def f(x, y):
             b = x.item()
-            torch._constrain_as_size(b)
+            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
         example_inputs = [x, y]
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             aten_graph=True,
             tracing_mode="symbolic",
         )(*example_inputs)
@@ -2632,7 +2829,9 @@ def forward(self, x):
 
         torch._dynamo.export(my_dyn_fn)(x)
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(x, 0)])(x)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(x)
 
     def test_symbool(self):
         def f(x):
@@ -2653,23 +2852,16 @@ def forward(self, x):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn)(x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
+        dimx_0, dimx_1, dimx_2 = torch.export.dims("dimx_0", "dimx_1", "dimx_2")
+        dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, None)
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
-        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
-
-    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
-        x = torch.ones(6, 4, 4)
-        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
-            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
+        dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, {0: dimx_0})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
 
     def test_export_dynamic_dim_range_constraint(self):
         x = torch.ones(6, 4, 4)
-        constraints = [
-            4 < dynamic_dim(x, 0),
-            dynamic_dim(x, 0) <= 6,
-        ]
+        dynamic_shapes = ({0: torch.export.Dim("dimx", min=5, max=6)},)
 
         def foo(x):
             if x.shape[0] > 3:  # ok
@@ -2678,7 +2870,7 @@ def forward(self, x):
 
         torch._dynamo.export(
             foo,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             aten_graph=True,
         )(x)
 
@@ -2690,35 +2882,57 @@ def forward(self, x):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(
                 bar,
-                constraints=constraints,
+                dynamic_shapes=dynamic_shapes,
                 aten_graph=True,
             )(x)
 
     def test_trivial_constraint(self):
-        def foo(x):
-            # non-trivial divisibility condition
-            if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
-                return x + 1
-            else:
-                return x - 1
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                # complex divisibility condition
+                if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
+                    return x + 1
+                else:
+                    return x - 1
 
-        def bar(x):
-            # trivially true
-            if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
-                return x + 1
-            else:
-                return x - 1
+        foo = Foo()
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                # trivially true
+                if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        bar = Bar()
+
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                # simple divisibility condition (not trivially true)
+                if (3 * x.shape[0]) % 2 == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        qux = Qux()
 
         x = torch.randn(12)
         dim0 = torch.export.Dim("dim0", max=100)
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "must be specialized.*guards generated.*too complex",
+            r"Constraints violated \(dim0\)",
         ):
-            torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
+            torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes, strict=True)
 
-        torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
+        torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes, strict=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Constraints violated \(dim0\)",
+        ):
+            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes, strict=True)
 
     def test_list_contains(self):
         def func(x):
@@ -2726,7 +2940,7 @@ def forward(self, x):
             return x + x
 
         inps = (torch.randn(1, 5),)
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -2745,7 +2959,7 @@ def forward(self, x):
             return x + x
 
         inps = (torch.randn(1, 5),)
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -2818,7 +3032,7 @@ def forward(self, x):
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -2826,14 +3040,14 @@ def forward(self, x):
                 return self.my_lin(x)
 
         mod, input_tensor = BasicModule(), torch.randn(2, 3)
-        gm, guard = torch._dynamo.export(mod, aten_graph=True)(input_tensor)
+        gm, _ = torch._dynamo.export(mod, aten_graph=True)(input_tensor)
         ref = mod(x=input_tensor)
         res = gm(x=input_tensor)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
     def test_export_pass_arg_by_name_star_args(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -2845,27 +3059,10 @@ def forward(self, x):
             torch.randn(2, 3),
             torch.randn(2, 3),
         )
-        gm, guard = torch._dynamo.export(mod, aten_graph=True)(
-            input_tensor, input_tensor2
-        )
+        gm, _ = torch._dynamo.export(mod, aten_graph=True)(input_tensor, input_tensor2)
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
-
-    def test_export_mark_dynamic_conflict_dynamic_dim(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.mark_dynamic(y, 0)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Constraints violated",
-        ):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
 
     def test_export_dynamic_dim_cleanup(self):
         y = torch.randn([3, 3, 3])
@@ -2873,8 +3070,9 @@ def forward(self, x):
         def my_dyn_fn(x):
             return x.cos()
 
-        constraints = [dynamic_dim(y, 0)]
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(y)
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dim")},))(
+            y
+        )
 
     @config.patch(capture_dynamic_output_shape_ops=True)
     def test_export_dynamic_control_flow_error(self):
@@ -2887,16 +3085,16 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Dynamic control flow is not supported at the moment",
         ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
+            torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
 
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
         def f(x):
-            assert x.shape[0] > 4, "Shape must be more than 4"
+            assert x[0].sum() > 4, "Shape must be more than 4"
             return x.cos() + x.sin()
 
-        gm, guard = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
-            torch.randn(5, 4, 6)
+        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+            torch.ones(5, 4, 6)
         )
 
         def has_aten_op(gm, op):
@@ -2912,7 +3110,7 @@ def forward(self, x):
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
 
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
-            gm(torch.randn(3, 4, 5))
+            gm(torch.zeros(3, 4, 5))
 
     @common_utils.parametrize(
         "type_fn",
@@ -2936,9 +3134,9 @@ def forward(self, x):
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 2))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)
@@ -2997,9 +3195,23 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
+    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
+    def test_sum_param(self):
+        # Setting a new attribute inside forward()
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.randn(3, 2)
+
+            def forward(self, x):
+                self.b = 2
+                return x.sum() + self.a.sum() + self.b
+
+        torch._dynamo.export(Foo())(torch.randn(3, 2))
+
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
@@ -3051,10 +3263,11 @@ def forward(self, x):
         def f(x):
             return cond(x.shape[0] > 10, true_fn, false_fn)
 
+        # Now we allow torch.cond to handle empty args
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             TypeError,
-            r"cond\(\) missing 1 required positional argument: 'operands'",
+            r"false_fn\(\) missing 1 required positional argument: 'x'",
         ):
             f(*example_inputs)
 
@@ -3189,7 +3402,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3209,7 +3422,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            "Expected true_fn_output and false_fn_output to have same metadata but found",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
@@ -3222,7 +3435,7 @@ def forward(self, x):
             return tensor + tensor
 
         text = "".join(chr(a % 90 + 40) for a in range(111))
-        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", dynamic=True)
         for i in [99, 100]:
             input = text[:i]
             opt_func(input)
@@ -3245,20 +3458,19 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     arg0_1 = arg0
-    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 2)
-    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int_1);  slice_2 = None
+    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None
     slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
     sub_1 = sym_size_int - 2
     slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
-    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int_1);  slice_5 = None
+    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int);  slice_5 = None
     slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
-    sub_2 = sym_size_int - 3;  sym_size_int = None
+    sub_2 = sym_size_int - 3
     slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
-    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int_1);  slice_8 = sym_size_int_1 = None
+    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int);  slice_8 = sym_size_int = None
     slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
     return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )
@@ -3312,6 +3524,7 @@ def forward(self, x):
                     pred = fake_x.size(0) == size
                     gm, guards = torch._dynamo.export(f)(pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
+                    # TODO: This is naughty, EXPECTTEST_ACCEPT=1 doesn't work
                     self.assertExpectedInline(actual, exp_graph[i])
                     dynamo_shape_env_guards = [
                         guard
@@ -3339,7 +3552,7 @@ class GraphModule(torch.nn.Module):
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        sin = l_x_.sin();  l_x_ = None
+        sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
@@ -3350,15 +3563,14 @@ class GraphModule(torch.nn.Module):
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        cos = l_x_.cos();  l_x_ = None
+        cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = [
             "cast_symbool_to_symint_guardless(L['pred']) == 1",
         ]
         false_guard_code = [
-            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
-            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
+            "cast_symbool_to_symint_guardless(L['pred']) != 1",
         ]
         test_symbool_guards(
             f,
@@ -3430,7 +3642,7 @@ G['macademia'], accessed at:
         arglebargle = torch.randn(3)
 
         def f(y):
-            x = arglebargle
+            x = arglebargle  # noqa: F841
             return y
 
         torch._dynamo.export(f)(torch.randn(3))
@@ -3441,7 +3653,7 @@ G['macademia'], accessed at:
         fake_mode = fake_tensor.FakeTensorMode()
 
         class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c) -> torch.Tensor:
@@ -3455,15 +3667,12 @@ G['macademia'], accessed at:
         with fake_mode:
             model = DynamicShapeSimpleModel()
             inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-            constraints = [
-                dynamic_dim(inputs[0], 0),
-                dynamic_dim(inputs[2], 0),
-                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
-            ]
+            dim = torch.export.Dim("dim")
+            dynamic_shapes = ({0: dim}, None, {0: dim})
             for aten_graph in [True, False]:
                 gm = torch._dynamo.export(
                     model,
-                    constraints=constraints,
+                    dynamic_shapes=dynamic_shapes,
                     aten_graph=aten_graph,
                 )(*inputs).graph_module
 
@@ -3490,13 +3699,11 @@ G['macademia'], accessed at:
         with fake_mode:
             model = Model()
             inputs = (torch.randn(10, 2, 2),)
-            constraints = [
-                dynamic_dim(inputs[0], 0),
-            ]
+            dynamic_shapes = ({0: torch.export.Dim("dim")},)
             for aten_graph in [True, False]:
-                gm = torch._dynamo.export(
+                torch._dynamo.export(
                     model,
-                    constraints=constraints,
+                    dynamic_shapes=dynamic_shapes,
                     aten_graph=aten_graph,
                 )(*inputs).graph_module
 
@@ -3541,23 +3748,23 @@ G['macademia'], accessed at:
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3577,23 +3784,23 @@ G['macademia'], accessed at:
 
     def test_nested_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3622,23 +3829,23 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond, map
 
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3673,7 +3880,7 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -3753,7 +3960,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     )
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3762,7 +3969,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3790,7 +3997,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3799,7 +4006,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3840,7 +4047,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_nested_list_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3849,7 +4056,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3921,13 +4128,13 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         with self.assertRaises(
             torch._dynamo.exc.Unsupported,
         ):
-            out_graph, _ = torch._dynamo.export(mod, xs)
+            torch._dynamo.export(mod, xs)
 
     def test_param_buffer_safe_from_mutation_simple(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5, 5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5, 5))
 
             def forward(self, x):
                 self.buffer1.add_(1)
@@ -3944,17 +4151,17 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_param_buffer_safe_from_mutation_recurse(self):
         class Child(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.zeros(5))
+                self.buffer2 = torch.nn.Buffer(torch.zeros(5))
 
             def forward(self, x):
                 return x.sum() + self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5))
                 self.child = Child()
 
             def forward(self, x):
@@ -3963,7 +4170,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return x.sum() + self.buffer1.sum() + self.child(x)
 
         gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
-        for name, buffer in gm.named_buffers():
+        for _, buffer in gm.named_buffers():
             self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
 
     def test_predispatch_with_higher_order(self):
@@ -4089,7 +4296,7 @@ def forward(self, arg0_1, arg1_1):
                 return torch.sin(x)
 
         class Module2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = Module1()
 
@@ -4145,8 +4352,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    x = torch.cos(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    x = torch.cos(l_x_);  l_x_ = None
     x_1 = torch.sin(x);  x = None
     x_2 = torch.abs(x_1);  x_1 = None
     return pytree.tree_unflatten([x_2], self._out_spec)""",
@@ -4171,7 +4378,7 @@ def forward(self, x):
 
         gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
         do_export = torch._dynamo.export(gm)
-        torch._dynamo.optimize("eager")(fn)(torch.randn(3, 3))
+        torch.compile(fn, backend="eager")(torch.randn(3, 3))
         gm1, _ = do_export(torch.randn(3, 3))
         gm2, _ = do_export(torch.randn(5, 3))
 
@@ -4180,8 +4387,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
         self.assertExpectedInline(
@@ -4189,8 +4396,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4212,8 +4419,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    l_x__1 = torch.cos(l_x_);  l_x_ = None
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    x = torch.cos(l_x_);  l_x_ = None
+    sin = torch.sin(x);  x = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4239,12 +4446,16 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(l_x__1)",
-            "cos = torch.cos(x_1)",
+            """x = torch.sin(l_x_)""",
+            """cos = torch.cos(l_stack0_)""",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
             self.assertTrue(expected)
+            # Normalize output for dynamic and not
+            for nd in gm.graph.nodes:
+                if "example_value" in nd.meta:
+                    del nd.meta["example_value"]
             self.assertIn(expected[0], gm.print_readable(print_output=False))
             expected.pop(0)
             return gm.forward
@@ -4270,8 +4481,8 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
@@ -4293,14 +4504,139 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
 
         inp = torch.randn(2, 2)
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
+
+        def fn(x):
+            with torch.inference_mode():
+                return x + 1
+
+        gm, _ = torch._dynamo.export(fn)(torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = l_x_ + 1;  l_x_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+        )
+        inp = torch.randn(2, 2, requires_grad=True)
+        out = gm(inp)
+        self.assertEqual(out.requires_grad, False)
+
+    def test_export_masking_with_no_grad(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[b] = y
+            return x
+
+        def fn_no_grad(x, b, y):
+            with torch.no_grad():
+                return fn(x, b, y)
+
+        def fn_inference_mode(x, b, y):
+            with torch.inference_mode():
+                return fn(x, b, y)
+
+        x = torch.randn(4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+
+        gm, _ = torch._dynamo.export(fn_no_grad)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+        gm, _ = torch._dynamo.export(fn_inference_mode)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
+        )
+
+        gm, _ = torch._dynamo.export(fn)(x, b, y)
+
+    def test_dynamo_list_index(self):
+        def fn(x, in_list):
+            return x + in_list.index(2)
+
+        inputs = (torch.ones(2, 2), [1, 2])
+        graph, _ = torch._dynamo.export(fn)(*inputs)
+        out = graph(*inputs)
+        self.assertEqual(out, torch.ones(2, 2) + 1)
+
+    def test_dynamo_enum_in_tuple(self):
+        class IntEnum(int, Enum):
+            X = 0
+
+        def fn(tensor):
+            return tensor[..., IntEnum.X]
+
+        tensor = torch.rand((5, 5))
+        graph, _ = torch._dynamo.export(fn)(tensor)
+        out = graph(tensor)
+        self.assertEqual(out, tensor[:, 0])
+
+    def test_subclass_parameters(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+
+        x = ref_x.detach().clone()
+        graph, _ = torch._dynamo.export(m)(x)
+        out = graph(x)
+        self.assertEqual(ref_out, out)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

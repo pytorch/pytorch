@@ -59,7 +59,7 @@ template <
     typename InstructionShape,
     /// Number of stages used in the pipelined mainloop
     int Stages,
-    /// Operation perfomed by GEMM
+    /// Operation performed by GEMM
     typename Operator,
     typename Enable_ = void>
 struct FindDefaultMma {

@@ -209,6 +209,6 @@ PreprocessGraph::PreprocessGraph(Graph& g) : graph(g.copy()) {
   dropUnused(graph->block());
   // fill in move_flags by scanning blocks;
   insertLastUses(*graph);
-  can_emit_inline = std::move(CanEmitInline(*graph.get()).can_emit_inline_);
+  can_emit_inline = std::move(CanEmitInline(*graph).can_emit_inline_);
 }
 } // namespace torch::jit::interpreter

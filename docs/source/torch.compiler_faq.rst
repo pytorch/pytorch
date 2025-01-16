@@ -37,7 +37,7 @@ backwards ops, due to how AOTAutograd compiled functions interact with
 dispatcher hooks.
 
 The basic strategy for optimizing DDP with Dynamo is outlined in
-`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/distributed.py>`__
+`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/backends/distributed.py>`__
 where the main idea will be to graph break on `DDP bucket
 boundaries <https://pytorch.org/docs/stable/notes/ddp.html#internal-design>`__.
 
@@ -60,7 +60,7 @@ Do I still need to export whole graphs?
 For the vast majority of models you probably don’t and you can use
 ``torch.compile()`` as is but there are a few situations where
 full graphs are necessary and you can can ensure a full graph by simply
-running ``torch.compile(..., nopython=True)``. These situations include:
+running ``torch.compile(..., fullgraph=True)``. These situations include:
 
 * Large scale training runs, such as $250K+ that require pipeline parallelism
   and other advanced sharding strategies.
@@ -126,7 +126,7 @@ Why is compilation slow?
   optimizations, and expresses these assumptions as guards that check
   particular values at runtime. If any of these guards fail, Dynamo will
   recompile that function (or part) up to
-  ``torch._dynamo.config.cache_size_limit`` times. If your program is
+  ``torch._dynamo.config.recompile_limit`` times. If your program is
   hitting the cache limit, you will first need to determine which guard is
   failing and what part of your program is triggering it. The
   `recompilation profiler <#recompilation-profiler>`__ automates the
@@ -136,17 +136,6 @@ Why is compilation slow?
   as long (as many iterations) as you were running when you ran into
   trouble, and the profiler will accumulate statistics over this duration.
 
-.. code-block:: python
-
-   from torch._dynamo.utils import CompileProfiler
-
-   def my_model():
-       ...
-
-   with CompileProfiler() as prof:
-       profiler_model = torch.compile(my_model, backend=prof)
-       profiler_model()
-       print(prof.report())
 
 Why are you recompiling in production?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -186,7 +175,7 @@ The above are general principles for accelerating PyTorch code but
 different backends will each make different tradeoffs on what to
 optimize. For example Inductor first takes care of fusing whatever it
 can and only then generates `Triton <https://openai.com/blog/triton/>`__
-kernels. It can also
+kernels.
 
 Triton in addition offers speedups because of automatic memory
 coalescing, memory management and scheduling within each Streaming
@@ -198,6 +187,8 @@ generated kernels and try to see what’s going on for yourself.
 
 Why am I not seeing speedups?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _torch.compiler_graph_breaks:
 
 Graph Breaks
 ------------
@@ -245,22 +236,29 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
+   explanation = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
    print(explanation)
    """
-   Dynamo produced 3 graphs, with 2 graph break and 6 ops.
-    Break reasons:
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
-      File "t2.py", line 16, in toy_example
-       print("woo")
+   Graph Count: 3
+   Graph Break Count: 2
+   Op Count: 5
+   Break Reasons:
+     Break Reason 1:
+       Reason: builtin: print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+       User Stack:
+         <FrameSummary file foo.py, line 5 in toy_example>
+     Break Reason 2:
+       Reason: generic_jump TensorVariable()
+       User Stack:
+         <FrameSummary file foo.py, line 6 in torch_dynamo_resume_in_toy_example_at_5>
+   Ops per Graph:
+     ...
+   Out Guards:
+     ...
+   """
 
-   2. generic_jump
-      File "t2.py", line 17, in toy_example
-       if b.sum() < 0:
-    """
-
-To throw an error on the first graph break encountered you can use
-disable python fallback by using ``nopython=True``, this should be
+To throw an error on the first graph break encountered you can
+disable python fallbacks by using ``fullgraph=True``, this should be
 familiar if you’ve worked with export based compilers.
 
 .. code-block:: python
@@ -268,7 +266,7 @@ familiar if you’ve worked with export based compilers.
    def toy_example(a, b):
       ...
 
-   torch.compile(toy_example, fullgraph=True, backend=<compiler>)
+   torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 Why didn’t my code recompile when I changed it?
 -----------------------------------------------
@@ -321,7 +319,7 @@ Does ``torch.func`` work with ``torch.compile`` (for `grad` and `vmap` transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Applying a ``torch.func`` transform to a function that uses ``torch.compile``
-does not work:
+does work:
 
 .. code-block:: python
 
@@ -337,30 +335,6 @@ does not work:
     x = torch.randn(2, 3)
     g(x)
 
-This code will not work. There is an `issue <https://github.com/pytorch/pytorch/issues/100320>`__
-that you can track for this.
-
-As a workaround, use ``torch.compile`` outside of the ``torch.func`` function:
-
-.. note::
-    This is an experimental feature and can be used by setting `torch._dynamo.config.capture_func_transforms=True`
-
-.. code-block:: python
-
-    import torch
-
-    torch._dynamo.config.capture_func_transforms=True
-
-    def f(x):
-        return torch.sin(x)
-
-    @torch.compile
-    def g(x):
-        return torch.vmap(f)(x)
-
-    x = torch.randn(2, 3)
-    g(x)
-
 Calling ``torch.func`` transform inside of a function handled with ``torch.compile``
 ------------------------------------------------------------------------------------
 
@@ -371,8 +345,6 @@ Compiling ``torch.func.grad`` with ``torch.compile``
 .. code-block:: python
 
     import torch
-
-    torch._dynamo.config.capture_func_transforms=True
 
     def wrapper_fn(x):
         return torch.func.grad(lambda x: x.sin().sum())(x)
@@ -387,109 +359,12 @@ Compiling ``torch.vmap`` with ``torch.compile``
 
     import torch
 
-    torch._dynamo.config.capture_func_transforms=True
-
     def my_fn(x):
         return torch.vmap(lambda x: x.sum(1))(x)
 
     x = torch.randn(3, 3, 3)
     output = torch.compile(my_fn)(x)
 
-Limitations
------------
-
-There are currently a few cases which are not supported and lead to graph breaks
-(that is, torch.compile falls back to eager-mode PyTorch on these). We are working
-on improving the situation for the next release (PyTorch 2.2)
-
-1. The inputs and outputs of the function being transformed over must be tensors.
-We do not yet support things like tuple of Tensors.
-
-.. code-block:: python
-
-    import torch
-
-    torch._dynamo.config.capture_func_transforms=True
-
-    def fn(x):
-        x1, x2 = x
-        return x1 + x2
-
-    def my_fn(x):
-        return torch.func.vmap(fn)(x)
-
-    x1 = torch.randn(3, 3, 3)
-    x2 = torch.randn(3, 3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)((x1, x2))
-
-2. Keyword arguments are not supported.
-
-.. code-block:: python
-
-    import torch
-
-    torch._dynamo.config.capture_func_transforms=True
-
-    def fn(x, y):
-        return (x + y).sum()
-
-    def my_fn(x, y):
-        return torch.func.grad(fn)(x, y=y)
-
-    x = torch.randn(3, 3)
-    y = torch.randn(3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x, y)
-
-3. Functions with observable side effects. For example, it is OK to mutate a list created in the function,
-but not OK to mutate a list created outside of the function.
-
-.. code-block:: python
-
-    import torch
-
-    torch._dynamo.config.capture_func_transforms=True
-
-    some_list = []
-
-    def f(x, y):
-        some_list.append(1)
-        return x + y
-
-    def my_fn(x, y):
-        return torch.func.vmap(f)(x, y)
-
-    x = torch.ones(2, 3)
-    y = torch.randn(2, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x, y)
-
-4. ``torch.vmap`` over a function that calls one or more operators in the following list.
-
-.. note::
-    'stride', 'requires_grad', 'storage_offset', 'layout', 'data', 'is_coalesced', 'is_complex',
-    'is_conj', 'is_contiguous', 'is_cpu', 'is_cuda', 'is_distributed', 'is_floating_point',
-    'is_inference', 'is_ipu', 'is_leaf', 'is_meta', 'is_mkldnn', 'is_mps', 'is_neg', 'is_nested',
-    'is_nonzero', 'is_ort', 'is_pinned', 'is_quantized', 'is_same_size', 'is_set_to', 'is_shared',
-    'is_signed', 'is_sparse', 'is_sparse_csr', 'is_vulkan', 'is_xla', 'is_xpu'
-
-.. code-block:: python
-
-    import torch
-
-    torch._dynamo.config.capture_func_transforms=True
-
-    def bad_fn(x):
-        x.stride()
-        return x
-
-    def my_fn(x):
-        return torch.func.vmap(bad_fn)(x)
-
-    x = torch.randn(3, 3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x)
 
 Compiling functions besides the ones which are supported (escape hatch)
 -----------------------------------------------------------------------
@@ -668,7 +543,7 @@ Using this decorator, we can also differentiate through NumPy code!
    @torch.compile(fullgraph=True)
    @torch.compiler.wrap_numpy
    def numpy_fn(X, Y):
-       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+       return np.mean(np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1)))
 
    X = torch.randn(1024, 64, device="cuda", requires_grad=True)
    Y = torch.randn(1024, 64, device="cuda")
@@ -716,7 +591,7 @@ How do I debug NumPy code under ``torch.compile``?
 
 Debugging JIT compiled code is challenging, given the complexity of modern
 compilers and the daunting errors that they raise.
-`The tutorial on how to diagnose runtime errors within torch.compile <https://pytorch.org/docs/main/torch.compiler_troubleshooting.html#diagnosing-runtime-errors>`__
+:ref:`The torch.compile troubleshooting doc <torch.compiler_troubleshooting>`
 contains a few tips and tricks on how to tackle this task.
 
 If the above is not enough to pinpoint the origin of the issue, there are still
@@ -741,7 +616,7 @@ an issue.
 
 If the program does work when importing ``torch._numpy as np``, chances are
 that the bug is in TorchDynamo. If this is the case, please feel open an issue
-with a `minimal reproducer <https://pytorch.org/docs/2.1/torch.compiler_troubleshooting.html>`__.
+with a :ref:`minimal reproducer <torch.compiler_troubleshooting>`.
 
 I ``torch.compile`` some NumPy code and I did not see any speed-up.
 -------------------------------------------------------------------

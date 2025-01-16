@@ -1,17 +1,17 @@
-#include <sstream>
-
 #include <c10/util/irange.h>
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/profiler/stubs/base.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
+
+namespace torch::profiler::impl {
 namespace {
 
 struct ITTMethods : public ProfilerStubs {
-  void record(int* device, ProfilerVoidEventStub* event, int64_t* cpu_ns)
-      const override {}
+  void record(
+      c10::DeviceIndex* device,
+      ProfilerVoidEventStub* event,
+      int64_t* cpu_ns) const override {}
 
   float elapsed(
       const ProfilerVoidEventStub* event,
@@ -49,6 +49,5 @@ struct RegisterITTMethods {
 RegisterITTMethods reg;
 
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
+C10_DIAGNOSTIC_POP()

@@ -20,6 +20,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   VirtualGuardImpl& operator=(const VirtualGuardImpl&) = default;
   VirtualGuardImpl(VirtualGuardImpl&&) noexcept = default;
   VirtualGuardImpl& operator=(VirtualGuardImpl&&) noexcept = default;
+  ~VirtualGuardImpl() override = default;
 
   DeviceType type() const override {
     return impl_->type();
@@ -36,8 +37,11 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     impl_->uncheckedSetDevice(d);
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return impl_->getStream(d);
+  }
+  Stream getNewStream(Device d, int priority = 0) const override {
+    return impl_->getNewStream(d, priority);
   }
   Stream getDefaultStream(Device d) const override {
     return impl_->getDefaultStream(d);
@@ -46,7 +50,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
       const override {
     return impl_->getStreamFromGlobalPool(d, isHighPriority);
   }
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
   DeviceIndex deviceCount() const noexcept override {
@@ -82,6 +86,19 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     impl_->recordDataPtrOnStream(data_ptr, stream);
+  }
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    return impl_->elapsedTime(event1, event2, device_index);
+  }
+
+  void synchronizeEvent(void* event) const override {
+    return impl_->synchronizeEvent(event);
+  }
+
+  void synchronizeDevice(const DeviceIndex device_index) const override {
+    return impl_->synchronizeDevice(device_index);
   }
 
  private:

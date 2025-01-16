@@ -44,6 +44,10 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
+  VK_CHECK_COND(
+      buffer.has_memory(),
+      "Buffer must be bound to memory for it to be usable");
+
   DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
@@ -59,6 +63,9 @@ DescriptorSet& DescriptorSet::bind(
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanImage& image) {
+  VK_CHECK_COND(
+      image.has_memory(), "Image must be bound to memory for it to be usable");
+
   VkImageLayout binding_layout = image.layout();
   if (shader_layout_signature_[idx] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
     binding_layout = VK_IMAGE_LAYOUT_GENERAL;
@@ -160,7 +167,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
 }
 
 void DescriptorSetPile::allocate_new_batch() {
-  // No-ops if there are still descriptor sets availble
+  // No-ops if there are still descriptor sets available
   if (in_use_ < descriptors_.size() &&
       descriptors_[in_use_] != VK_NULL_HANDLE) {
     return;
@@ -195,6 +202,25 @@ DescriptorPool::DescriptorPool(
       config_(config),
       mutex_{},
       piles_{} {
+  if (config.descriptorPoolMaxSets > 0) {
+    init(config);
+  }
+}
+
+DescriptorPool::~DescriptorPool() {
+  if (VK_NULL_HANDLE == pool_) {
+    return;
+  }
+  vkDestroyDescriptorPool(device_, pool_, nullptr);
+}
+
+void DescriptorPool::init(const DescriptorPoolConfig& config) {
+  VK_CHECK_COND(
+      pool_ == VK_NULL_HANDLE,
+      "Trying to init a DescriptorPool that has already been created!");
+
+  config_ = config;
+
   std::vector<VkDescriptorPoolSize> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -226,16 +252,12 @@ DescriptorPool::DescriptorPool(
   VK_CHECK(vkCreateDescriptorPool(device_, &create_info, nullptr, &pool_));
 }
 
-DescriptorPool::~DescriptorPool() {
-  if (VK_NULL_HANDLE == pool_) {
-    return;
-  }
-  vkDestroyDescriptorPool(device_, pool_, nullptr);
-}
-
 DescriptorSet DescriptorPool::get_descriptor_set(
     VkDescriptorSetLayout set_layout,
     const ShaderLayout::Signature& signature) {
+  VK_CHECK_COND(
+      pool_ != VK_NULL_HANDLE, "DescriptorPool has not yet been initialized!");
+
   auto it = piles_.find(set_layout);
   if (piles_.cend() == it) {
     it = piles_
@@ -253,8 +275,10 @@ DescriptorSet DescriptorPool::get_descriptor_set(
 }
 
 void DescriptorPool::flush() {
-  VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
-  piles_.clear();
+  if (pool_ != VK_NULL_HANDLE) {
+    VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
+    piles_.clear();
+  }
 }
 
 } // namespace api

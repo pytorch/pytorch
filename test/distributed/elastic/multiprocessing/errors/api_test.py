@@ -29,6 +29,13 @@ def raise_exception_fn():
 
 
 @record
+def raise_system_exit_exception_fn(exit_code: int = 1):
+    exp = SystemExit()
+    exp.code = exit_code
+    raise exp
+
+
+@record
 def good_fn():
     print("hello world")
 
@@ -174,6 +181,21 @@ class ApiTest(unittest.TestCase):
             self.assertIsNotNone(err["message"]["message"])
             self.assertIsNotNone(err["message"]["extraInfo"]["py_callstack"])
             self.assertIsNotNone(err["message"]["extraInfo"]["timestamp"])
+
+    def test_record_system_exit(self):
+        with mock.patch.dict(os.environ, {}):
+            raise_system_exit_exception_fn(exit_code=0)
+
+        # no error file should have been generated
+        self.assertFalse(os.path.isfile(self.test_error_file))
+
+    def test_record_system_exit_erronr(self):
+        with mock.patch.dict(os.environ, {}):
+            with self.assertRaises(SystemExit):
+                raise_system_exit_exception_fn()
+
+        # no error file should have been generated
+        self.assertFalse(os.path.isfile(self.test_error_file))
 
     def test_record_no_error_file(self):
         with mock.patch.dict(os.environ, {}):

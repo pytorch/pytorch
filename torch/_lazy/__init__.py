@@ -1,4 +1,4 @@
-import threading
+# mypy: allow-untyped-defs
 
 import torch._C._lazy
 from torch.utils._pytree import tree_flatten, tree_unflatten

@@ -4,13 +4,14 @@ import math
 import os
 from collections import Counter, defaultdict
 from functools import partial
-from typing import Any, Dict, Generator, Iterable, Tuple
+from typing import Any, Dict, Generator, Iterable
 
 import torch
 from torch.testing import make_tensor
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def serialize_sparse_tensor(e):
 
 
 def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def deserialize_tensor(size, dtype, stride=None):
@@ -262,7 +263,7 @@ class OperatorInputsLoader:
 
     def get_inputs_for_operator(
         self, operator, dtype=None, device="cuda"
-    ) -> Generator[Tuple[Iterable[Any], Dict[str, Any]], None, None]:
+    ) -> Generator[tuple[Iterable[Any], Dict[str, Any]], None, None]:
         assert (
             str(operator) in self.operator_db
         ), f"Could not find {operator}, must provide overload"

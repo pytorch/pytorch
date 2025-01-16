@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 from enum import Enum
-from typing import Dict, List, Set
+from pathlib import Path
 
 
 # <project folder>
 HOME_DIR = os.environ["HOME"]
-TOOLS_FOLDER = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), os.path.pardir, os.path.pardir
-)
+TOOLS_FOLDER = str(Path(__file__).resolve().parents[2])
 
 
 # <profile folder>
@@ -41,8 +41,8 @@ class Test:
         self.test_type = test_type
 
 
-TestList = List[Test]
-TestStatusType = Dict[str, Set[str]]
+TestList = list[Test]
+TestStatusType = dict[str, set[str]]
 
 
 # option

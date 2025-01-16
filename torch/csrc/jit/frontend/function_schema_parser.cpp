@@ -1,14 +1,13 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/Reduction.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/Optional.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+#include <optional>
 
-#include <functional>
 #include <memory>
 #include <vector>
 
@@ -23,14 +22,14 @@ namespace torch::jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
+  explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
-            c10::string_view(str),
-            c10::nullopt,
+            std::string_view(str),
+            std::nullopt,
             0,
             nullptr,
             Source::DONT_COPY)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+        type_parser(L, /*parse_complete_tensor_types*/ false, allow_typevars) {}
 
   std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -49,8 +48,9 @@ struct SchemaParser {
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
       if (is_vararg)
-        throw ErrorReport(L.cur())
-            << "... must be the last element of the argument list";
+        throw(
+            ErrorReport(L.cur())
+            << "... must be the last element of the argument list");
       if (L.nextIf('*')) {
         kwarg_only = true;
       } else if (L.nextIf(TK_DOTS)) {
@@ -65,8 +65,9 @@ struct SchemaParser {
     if (is_vararg) {
       for (const auto& arg : arguments) {
         if (arg.default_value().has_value()) {
-          throw ErrorReport(L.cur())
-              << "schemas with vararg (...) can't have default value args";
+          throw(
+              ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args");
         }
       }
     }
@@ -78,8 +79,9 @@ struct SchemaParser {
     } else if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         if (is_varret) {
-          throw ErrorReport(L.cur())
-              << "... must be the last element of the return list";
+          throw(
+              ErrorReport(L.cur())
+              << "... must be the last element of the return list");
         }
         if (L.nextIf(TK_DOTS)) {
           is_varret = true;
@@ -149,20 +151,20 @@ struct SchemaParser {
     auto fake_type = std::move(std::get<0>(p));
     auto real_type = std::move(std::get<1>(p));
     auto alias_info = std::move(std::get<2>(p));
-    c10::optional<int32_t> N;
-    c10::optional<IValue> default_value;
-    c10::optional<std::string> alias_set;
+    std::optional<int32_t> N;
+    std::optional<IValue> default_value;
+    std::optional<std::string> alias_set;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
       fake_type = ListType::create(std::move(fake_type));
       real_type = ListType::create(std::move(real_type));
-      N = c10::stoll(L.expect(TK_NUMBER).text());
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          container = c10::optional<at::AliasInfo>(at::AliasInfo());
+          container = std::optional<at::AliasInfo>(at::AliasInfo());
           container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
@@ -186,7 +188,8 @@ struct SchemaParser {
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
         // NB: this means we have to unswizzle default too
-        default_value = parseDefaultValue(*fake_type, fake_type->kind(), N);
+        default_value =
+            parseDefaultValue(*fake_type, fake_type->kind(), *real_type, N);
       }
     }
     return Argument(
@@ -198,11 +201,29 @@ struct SchemaParser {
         !is_return && kwarg_only,
         std::move(alias_info));
   }
-  IValue parseSingleConstant(const c10::Type& type, TypeKind kind) {
+
+  bool isPossiblyOptionalScalarType(const c10::Type& type) {
+    if (type.kind() == at::ScalarTypeType::Kind) {
+      return true;
+    }
+    if (type.kind() == at::OptionalType::Kind) {
+      for (const auto& inner : type.containedTypes()) {
+        if (isPossiblyOptionalScalarType(*inner))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  IValue parseSingleConstant(
+      const c10::Type& type,
+      TypeKind kind,
+      const c10::Type& real_type) {
     if (kind == c10::TypeKind::DynamicType) {
       return parseSingleConstant(
-          type, type.expectRef<c10::DynamicType>().dynamicKind());
+          type, type.expectRef<c10::DynamicType>().dynamicKind(), real_type);
     }
+    const auto& str2dtype = c10::getStringToDtypeMap();
     switch (L.cur().kind) {
       case TK_TRUE:
         L.next();
@@ -220,6 +241,9 @@ struct SchemaParser {
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
+        // NB: float/complex/long are here for BC purposes. Other dtypes
+        // are handled via str2dtype.
+        // Please don't add more cases to this if-else block.
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
         } else if ("complex" == text) {
@@ -232,8 +256,12 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Reduction::Mean);
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
+        } else if (
+            isPossiblyOptionalScalarType(real_type) &&
+            str2dtype.count(text) > 0) {
+          return static_cast<int64_t>(str2dtype.at(text));
         } else {
-          throw ErrorReport(L.cur().range) << "invalid numeric default value";
+          throw(ErrorReport(L.cur().range) << "invalid numeric default value");
         }
       }
       default:
@@ -244,14 +272,14 @@ struct SchemaParser {
           n = L.expect(TK_NUMBER).text();
 
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
-          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          auto imag = std::stod(n.substr(0, n.size() - 1));
           return c10::complex<double>(0, imag);
         } else if (
             kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
-          return c10::stod(n);
+          return std::stod(n);
         } else {
-          int64_t v = c10::stoll(n);
+          int64_t v = std::stoll(n);
           return v;
         }
     }
@@ -274,16 +302,20 @@ struct SchemaParser {
         return convertToList(
             type, type.expectRef<c10::DynamicType>().dynamicKind(), range, vs);
       default:
-        throw ErrorReport(range)
-            << "lists are only supported for float, int and complex types";
+        throw(
+            ErrorReport(range)
+            << "lists are only supported for float, int and complex types");
     }
   }
-  IValue parseConstantList(const c10::Type& type, TypeKind kind) {
+  IValue parseConstantList(
+      const c10::Type& type,
+      TypeKind kind,
+      const c10::Type& real_type) {
     auto tok = L.expect('[');
     std::vector<IValue> vs;
     if (L.cur().kind != ']') {
       do {
-        vs.push_back(parseSingleConstant(type, kind));
+        vs.push_back(parseSingleConstant(type, kind, real_type));
       } while (L.nextIf(','));
     }
     L.expect(']');
@@ -297,7 +329,8 @@ struct SchemaParser {
   IValue parseDefaultValue(
       const c10::Type& arg_type,
       TypeKind kind,
-      c10::optional<int32_t> arg_N) {
+      const c10::Type& real_type,
+      std::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (kind) {
       case TypeKind::TensorType:
@@ -312,7 +345,7 @@ struct SchemaParser {
       case TypeKind::BoolType:
       case TypeKind::FloatType:
       case TypeKind::ComplexType:
-        return parseSingleConstant(arg_type, kind);
+        return parseSingleConstant(arg_type, kind, real_type);
         break;
       case TypeKind::DeviceObjType: {
         auto device_text =
@@ -322,23 +355,27 @@ struct SchemaParser {
       }
       case TypeKind::ListType: {
         auto elem_type = arg_type.containedType(0);
+        auto real_elem_type = real_type.containedType(0);
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {
-          IValue v = parseSingleConstant(*elem_type, elem_type->kind());
+          IValue v = parseSingleConstant(
+              *elem_type, elem_type->kind(), *real_elem_type);
           std::vector<IValue> repeated(*arg_N, v);
           return convertToList(*elem_type, elem_type->kind(), range, repeated);
         } else {
-          return parseConstantList(*elem_type, elem_type->kind());
+          return parseConstantList(
+              *elem_type, elem_type->kind(), *real_elem_type);
         }
       } break;
       case TypeKind::DynamicType:
         return parseDefaultValue(
             arg_type,
             arg_type.expectRef<c10::DynamicType>().dynamicKind(),
+            real_type,
             arg_N);
       default:
-        throw ErrorReport(range) << "unexpected type, file a bug report";
+        throw(ErrorReport(range) << "unexpected type, file a bug report");
     }
     return IValue(); // silence warnings
   }
@@ -365,12 +402,19 @@ struct SchemaParser {
 } // namespace
 
 std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
-    const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
+    const std::string& schemaOrName,
+    bool allow_typevars) {
+  // We're ignoring aten and prim for BC reasons
+  if (schemaOrName.rfind("aten::", 0) == 0 ||
+      schemaOrName.rfind("prim::", 0) == 0) {
+    allow_typevars = true;
+  }
+  return SchemaParser(schemaOrName, allow_typevars)
+      .parseExactlyOneDeclaration();
 }
 
-FunctionSchema parseSchema(const std::string& schema) {
-  auto parsed = parseSchemaOrName(schema);
+FunctionSchema parseSchema(const std::string& schema, bool allow_typevars) {
+  auto parsed = parseSchemaOrName(schema, allow_typevars);
   TORCH_CHECK(
       std::holds_alternative<FunctionSchema>(parsed),
       "Tried to parse a function schema but only the operator name was given");

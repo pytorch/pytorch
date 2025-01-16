@@ -8,7 +8,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <vector>
 
 namespace at {
@@ -44,7 +44,7 @@ template<class T, class Iterator> class ListIterator;
 template<class T, class Iterator> class ListElementReference;
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) noexcept;
 
 template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
@@ -58,18 +58,18 @@ struct ListElementConstReferenceTraits {
   using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 };
 
-// There is no to() overload for c10::optional<std::string>.
+// There is no to() overload for std::optional<std::string>.
 template<>
-struct ListElementConstReferenceTraits<c10::optional<std::string>> {
-  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+struct ListElementConstReferenceTraits<std::optional<std::string>> {
+  using const_reference = std::optional<std::reference_wrapper<const std::string>>;
 };
 
 template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator std::conditional_t<
-      std::is_reference<typename c10::detail::
-                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      std::is_reference_v<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>,
       const T&,
       T>() const;
 
@@ -84,10 +84,11 @@ public:
     return *iterator_;
   }
 
-  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
+  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs) noexcept;
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
+  ~ListElementReference() = default;
 
 private:
   ListElementReference(Iterator iter)
@@ -234,6 +235,7 @@ const IValue* ptr_to_first_element(const List<IValue>& list);
  * breaking backwards compatibility for the kernel API.
  */
 template<class T>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class List final {
 private:
   // This is an intrusive_ptr because List is a pointer type.
@@ -273,6 +275,7 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
+  ~List() = default;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
@@ -285,7 +288,7 @@ public:
    * Returns the element at specified location pos, with bounds checking.
    * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
    */
-  value_type get(size_type pos) const;
+  internal_const_reference_type get(size_type pos) const;
 
   /**
    * Moves out the element at the specified location pos and returns it, with bounds checking.
@@ -477,8 +480,6 @@ namespace impl {
 // public API. Kernels should use Lists with concrete types instead
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
-
-const IValue* ptr_to_first_element(const GenericList& list);
 
 }
 }

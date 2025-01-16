@@ -1,13 +1,14 @@
+# mypy: ignore-errors
 import atexit
 import re
 import shutil
 import textwrap
-from typing import List, Optional, Tuple
-
-from torch.utils.benchmark.utils.common import _make_temp_dir
+from typing import List, Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
+
+from torch.utils.benchmark.utils.common import _make_temp_dir
 
 
 _TEMPDIR: Optional[str] = None
@@ -58,7 +59,7 @@ def flatten(schema: Definition) -> FlatIntermediateDefinition:
     return result
 
 
-def parse_stmts(stmts: str) -> Tuple[str, str]:
+def parse_stmts(stmts: str) -> tuple[str, str]:
     """Helper function for side-by-side Python and C++ stmts.
 
     For more complex statements, it can be useful to see Python and C++ code
@@ -73,7 +74,7 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
     assert len(lines) >= 3, f"Invalid string:\n{stmts}"
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
-    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"
+    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"  # noqa: F841
     separation_pattern = r"^[-]{40} | [-]{40}$"
     code_pattern = r"^(.{40}) \|($| (.*)$)"
 

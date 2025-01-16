@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Optional
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.attr_value_pb2 import AttrValue

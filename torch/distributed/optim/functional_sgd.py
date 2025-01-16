@@ -1,11 +1,16 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+from torch.distributed.optim._deprecation_warning import (
+    _scripted_functional_optimizer_deprecation_warning,
+)
+
 
 __all__: List[str] = []
+
 
 # Define a TorchScript compatible Functional SGD Optimizer
 # where we use these optimizer in a functional way.
@@ -28,8 +33,10 @@ class _FunctionalSGD:
         nesterov: bool = False,
         maximize: bool = False,
         foreach: bool = False,
+        fused: bool = False,
         _allow_empty_param_list: bool = False,
     ):
+        _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
             "momentum": momentum,
@@ -39,6 +46,7 @@ class _FunctionalSGD:
         self.nesterov = nesterov
         self.maximize = maximize
         self.foreach = foreach
+        self.fused = fused
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -88,6 +96,9 @@ class _FunctionalSGD:
                 maximize=self.maximize,
                 has_sparse_grad=has_sparse_grad,
                 foreach=self.foreach,
+                fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )
         # update momentum_buffer in state
         state = self.state[param]
@@ -142,6 +153,9 @@ class _FunctionalSGD:
                 maximize=self.maximize,
                 has_sparse_grad=has_sparse_grad,
                 foreach=self.foreach,
+                fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )
 
         # update momentum_buffers in state

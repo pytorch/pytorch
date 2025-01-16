@@ -11,6 +11,8 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+import inspect
+
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
@@ -24,8 +26,8 @@ from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
-
 import torch
+
 
 try:
     import torchvision  # noqa: F401
@@ -37,6 +39,7 @@ except ImportError:
 RELEASE = os.environ.get("RELEASE", False)
 
 import pytorch_sphinx_theme
+
 
 # -- General configuration ------------------------------------------------
 
@@ -61,6 +64,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_panels",
     "myst_parser",
+    "sphinx.ext.linkcode",
 ]
 
 # build the templated autosummary files
@@ -88,12 +92,11 @@ templates_path = ["_templates"]
 
 # TODO: document these and remove them from here.
 
+html_domain_indices = False
+
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.autograd
-    "register_py_tensor_class_for_device",
-    "variable",
     # torch.cuda
     "check_error",
     "cudart",
@@ -153,7 +156,6 @@ coverage_ignore_functions = [
     "DistributedDataParallelCPU",
     # torch.utils
     "set_module",
-    # torch.utils.model_dump
     "burn_in_info",
     "get_info_and_burn_skeleton",
     "get_inline_skeleton",
@@ -303,6 +305,7 @@ coverage_ignore_functions = [
     "node_arg_is_weight",
     "return_arg_list",
     # torch.ao.quantization.pt2e.graph_utils
+    "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
     "update_equivalent_types_dict",
@@ -312,7 +315,6 @@ coverage_ignore_functions = [
     "reference_representation_rewrite",
     # torch.ao.quantization.pt2e.utils
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
     "get_default_qat_qconfig",
@@ -390,20 +392,6 @@ coverage_ignore_functions = [
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
-    # torch.autograd.forward_ad
-    "enter_dual_level",
-    "exit_dual_level",
-    # torch.autograd.function
-    "once_differentiable",
-    "traceable",
-    # torch.autograd.gradcheck
-    "get_analytical_jacobian",
-    "get_numerical_jacobian",
-    "get_numerical_jacobian_wrt_specific_input",
-    # torch.autograd.graph
-    "increment_version",
-    # torch.autograd.profiler
-    "parse_nvprof_trace",
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
@@ -424,6 +412,7 @@ coverage_ignore_functions = [
     "change_current_allocator",
     "empty_cache",
     "get_allocator_backend",
+    "get_per_process_memory_fraction",
     "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_cached",
@@ -597,6 +586,7 @@ coverage_ignore_functions = [
     "barrier",
     "get_all",
     "synchronize",
+    "store_timeout",
     # torch.distributed.fsdp.wrap
     "always_wrap_policy",
     "enable_wrap",
@@ -623,45 +613,6 @@ coverage_ignore_functions = [
     # torch.distributed.optim.utils
     "as_functional_optim",
     "register_functional_optim",
-    # torch.distributed.pipeline.sync.checkpoint
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "is_checkpointing",
-    "is_recomputing",
-    "restore_rng_states",
-    "save_rng_states",
-    # torch.distributed.pipeline.sync.dependency
-    "fork",
-    "join",
-    # torch.distributed.pipeline.sync.microbatch
-    "check",
-    "gather",
-    "scatter",
-    # torch.distributed.pipeline.sync.phony
-    "get_phony",
-    # torch.distributed.pipeline.sync.skip.layout
-    "inspect_skip_layout",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "current_skip_tracker",
-    "use_skip_tracker",
-    # torch.distributed.pipeline.sync.stream
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream",
-    # torch.distributed.pipeline.sync.utils
-    "partition_model",
-    # torch.distributed.pipeline.sync.worker
-    "create_workers",
-    "spawn_workers",
-    "worker",
     # torch.distributed.rendezvous
     "register_rendezvous_handler",
     "rendezvous",
@@ -685,6 +636,8 @@ coverage_ignore_functions = [
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
     "input_reshard",
+    # torch.distributed.tensor.parallel.loss
+    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.distributions.utils
@@ -896,15 +849,13 @@ coverage_ignore_functions = [
     "extract_val",
     "fake_signature",
     "fetch_sym_proxy",
-    "fetch_tensor_proxy",
+    "fetch_object_proxy",
     "get_innermost_proxy_mode",
     "get_isolated_graphmodule",
     "get_proxy_slot",
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "make_fx",
-    "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
     "set_meta",
@@ -939,11 +890,7 @@ coverage_ignore_functions = [
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
-    "constrain_range",
-    "constrain_unify",
     "create_contiguous",
-    "definitely_false",
-    "definitely_true",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
@@ -959,23 +906,15 @@ coverage_ignore_functions = [
     "guard_scalar",
     "has_hint",
     "has_symbolic_sizes_strides",
-    "has_free_symbols",
-    "hint_int",
     "is_channels_last_contiguous_2d",
     "is_channels_last_contiguous_3d",
     "is_channels_last_strides_2d",
     "is_channels_last_strides_3d",
-    "is_concrete_bool",
-    "is_concrete_int",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
-    "is_singleton",
+    "is_nested_int",
     "is_symbol_binding_fx_node",
     "is_symbolic",
-    "parallel_and",
-    "parallel_or",
-    "sym_eq",
-    "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
@@ -1198,6 +1137,7 @@ coverage_ignore_functions = [
     "fd_id",
     "init_reductions",
     "rebuild_cuda_tensor",
+    "rebuild_meta_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",
     "rebuild_sparse_coo_tensor",
@@ -1328,7 +1268,6 @@ coverage_ignore_functions = [
     "args_have_same_dtype",
     "check_training_mode",
     "dequantize_helper",
-    "is_caffe2_aten_fallback",
     "is_complex_value",
     "quantize_helper",
     "quantized_args",
@@ -2231,6 +2170,9 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
+    # torch.cuda.memory
+    "MemPool",
+    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2518,6 +2460,8 @@ coverage_ignore_classes = [
     "SharedQuantizationSpec",
     # torch.ao.quantization.quantizer.x86_inductor_quantizer
     "X86InductorQuantizer",
+    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
+    "XPUInductorQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer
     "XNNPACKQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
@@ -2529,43 +2473,9 @@ coverage_ignore_classes = [
     "QuantWrapper",
     # torch.ao.quantization.utils
     "MatchAllNode",
-    # torch.autograd.forward_ad
-    "UnpackedDualTensor",
-    # torch.autograd.function
-    "BackwardCFunction",
-    "Function",
-    "FunctionCtx",
-    "FunctionMeta",
-    "InplaceFunction",
-    "NestedIOFunction",
-    # torch.autograd.grad_mode
-    "inference_mode",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    # torch.autograd.gradcheck
-    "GradcheckError",
-    # torch.autograd.profiler
-    "EnforceUnique",
-    "KinetoStepTracker",
-    "profile",
-    "record_function",
-    # torch.autograd.profiler_legacy
-    "profile",
-    # torch.autograd.profiler_util
-    "EventList",
-    "FormattedTimesMixin",
-    "FunctionEvent",
-    "FunctionEventAvg",
-    "Interval",
-    "Kernel",
-    "MemRecordsAcc",
-    "StringTable",
-    # torch.autograd.variable
-    "Variable",
-    "VariableMeta",
     # torch.backends.cudnn.rnn
     "Unserializable",
-    # torch.cuda.amp.grad_scaler
+    # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
     # torch.cuda.graphs
@@ -2709,52 +2619,6 @@ coverage_ignore_classes = [
     "PostLocalSGDOptimizer",
     # torch.distributed.optim.zero_redundancy_optimizer
     "ZeroRedundancyOptimizer",
-    # torch.distributed.pipeline.sync.batchnorm
-    "DeferredBatchNorm",
-    # torch.distributed.pipeline.sync.checkpoint
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.copy
-    "Context",
-    "Copy",
-    "Wait",
-    # torch.distributed.pipeline.sync.dependency
-    "Fork",
-    "Join",
-    # torch.distributed.pipeline.sync.microbatch
-    "Batch",
-    "NoChunk",
-    # torch.distributed.pipeline.sync.pipe
-    "BalanceError",
-    "Pipe",
-    "PipeSequential",
-    "WithDevice",
-    # torch.distributed.pipeline.sync.pipeline
-    "Pipeline",
-    # torch.distributed.pipeline.sync.skip.layout
-    "SkipLayout",
-    # torch.distributed.pipeline.sync.skip.namespace
-    "Namespace",
-    # torch.distributed.pipeline.sync.skip.portal
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange",
-    # torch.distributed.pipeline.sync.skip.skippable
-    "Skippable",
-    # torch.distributed.pipeline.sync.skip.tracker
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    # torch.distributed.pipeline.sync.stream
-    "CPUStreamType",
-    # torch.distributed.pipeline.sync.worker
-    "Task",
     # torch.distributed.rpc.api
     "AllGatherStates",
     "RRef",
@@ -2855,22 +2719,17 @@ coverage_ignore_classes = [
     # torch.fx.experimental.symbolic_shapes
     "Constraint",
     "ConstraintViolationError",
-    "DimConstraints",
-    "DimDynamic",
     "DynamicDimConstraintPrinter",
-    "EqualityConstraint",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
+    "SymExprPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
-    "ShapeEnv",
     "ShapeGuardPrinter",
-    "StrictMinMaxConstraint",
+    "ShapeGuardPythonPrinter",
     "SymDispatchMode",
     "SymbolicContext",
-    "StatelessSymbolicContext",
-    "StatefulSymbolicContext",
-    "SubclassSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
@@ -3503,7 +3362,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2023, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 
@@ -3527,6 +3386,45 @@ if RELEASE:
     version = ".".join(torch_version.split(".")[:2])
     html_title = " ".join((project, version, "documentation"))
     release = version
+
+
+# Use the linkcode extension to override [SOURCE] links to point
+# to the repo. Use the torch_version variable defined above to
+# determine link
+def linkcode_resolve(domain, info):
+    if domain != "py":
+        return None
+    if not info["module"]:
+        return None
+
+    try:
+        module = __import__(info["module"], fromlist=[""])
+        obj = module
+        for part in info["fullname"].split("."):
+            obj = getattr(obj, part)
+        # Get the source file and line number
+        obj = inspect.unwrap(obj)
+        fn = inspect.getsourcefile(obj)
+        source, lineno = inspect.getsourcelines(obj)
+    except Exception:
+        return None
+
+    # Determine the tag based on the torch_version
+    if RELEASE:
+        version_parts = torch_version.split(
+            "."
+        )  # For release versions, format as "vX.Y.Z" for correct path in repo
+        patch_version = (
+            version_parts[2].split("+")[0].split("a")[0]
+        )  # assuming a0 always comes after release version in versions.txt
+        version_path = f"v{version_parts[0]}.{version_parts[1]}.{patch_version}"
+    else:
+        version_path = torch.version.git_version
+    fn = os.path.relpath(fn, start=os.path.dirname(torch.__file__))
+    return (
+        f"https://github.com/pytorch/pytorch/blob/{version_path}/torch/{fn}#L{lineno}"
+    )
+
 
 # The language for content autogenerated by Sphinx. Refer to documentation
 # for a list of supported languages.
@@ -3621,11 +3519,19 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_css_files = [
-    "css/jit.css",
-]
+html_css_files = ["css/jit.css", "css/custom.css"]
 
 from sphinx.ext.coverage import CoverageBuilder
+
+
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
 
 
 def coverage_post_process(app, exception):
@@ -3667,7 +3573,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []
@@ -3865,10 +3771,10 @@ import sphinx.ext.doctest
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
-
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.util.docfields import TypedField
+
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ""

@@ -8,8 +8,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API LazyGraphExecutor {
  public:
@@ -422,5 +421,4 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<BackendDataPtr> tensors_data);
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

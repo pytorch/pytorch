@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -11,7 +12,6 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::BlockInfo;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
@@ -68,10 +68,11 @@ std::vector<IValue> ivalue_symbolize(
     for (const auto& e : t) {
       l.push_back(all_frames.at(e));
     }
-    py_unique_frames.push_back(std::move(l));
+    py_unique_frames.emplace_back(std::move(l));
   }
 
   std::vector<IValue> result;
+  result.reserve(to_symbolize.size());
   for (const auto& sc : to_symbolize) {
     result.push_back(py_unique_frames.at(cached_frames.at(sc)));
   }
@@ -96,6 +97,26 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
+void _initRecordAnnotations() {
+  static c10::once_flag ra_init;
+  c10::call_once(ra_init, [&] {
+    // Save user annotations to CCA memory snapshot tool
+    at::addThreadLocalCallback(
+        at::RecordFunctionCallback(
+            [](const at::RecordFunction& fn)
+                -> std::unique_ptr<at::ObserverContext> {
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "START"}});
+              return nullptr;
+            },
+            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "END"}});
+            })
+            .scopes({at::RecordScope::USER_SCOPE}));
+  });
+}
+
 } // namespace
 
 void _record_memory_history(
@@ -105,7 +126,8 @@ void _record_memory_history(
     bool trace_alloc_record_context,
     bool record_cpp_context) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && record_cpp_context) {
+  if (enabled && record_cpp_context &&
+      (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
@@ -116,7 +138,8 @@ void _record_memory_history(
   } else if (record_context) {
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when);
 }
@@ -130,9 +153,9 @@ static void checkOptionIn(
 }
 
 void _record_memory_history(
-    c10::optional<std::string> enabled,
-    c10::optional<std::string> context,
-    std::string stacks,
+    std::optional<std::string> enabled,
+    std::optional<std::string> context,
+    const std::string& stacks,
     size_t max_entries) {
   if (enabled) {
     checkOptionIn(
@@ -150,7 +173,7 @@ void _record_memory_history(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && stacks == "all") {
+  if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
@@ -166,7 +189,8 @@ void _record_memory_history(
       when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
     }
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when);
 }
@@ -215,11 +239,15 @@ std::string _memory_snapshot_pickled() {
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
     segmentDict.insert(device_s, segmentInfo.device);
-    segmentDict.insert(address_s, segmentInfo.address);
-    segmentDict.insert(total_size_s, segmentInfo.total_size);
-    segmentDict.insert(allocated_size_s, segmentInfo.allocated_size);
-    segmentDict.insert(active_size_s, segmentInfo.active_size);
-    segmentDict.insert(requested_size_s, segmentInfo.requested_size);
+    segmentDict.insert(address_s, static_cast<int64_t>(segmentInfo.address));
+    segmentDict.insert(
+        total_size_s, static_cast<int64_t>(segmentInfo.total_size));
+    segmentDict.insert(
+        allocated_size_s, static_cast<int64_t>(segmentInfo.allocated_size));
+    segmentDict.insert(
+        active_size_s, static_cast<int64_t>(segmentInfo.active_size));
+    segmentDict.insert(
+        requested_size_s, static_cast<int64_t>(segmentInfo.requested_size));
     segmentDict.insert(stream_s, int64_t(segmentInfo.stream));
     segmentDict.insert(
         segment_type_s, (segmentInfo.is_large ? large_s : small_s));
@@ -234,9 +262,10 @@ std::string _memory_snapshot_pickled() {
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
-      blockDict.insert(address_s, address);
-      blockDict.insert(size_s, blockInfo.size);
-      blockDict.insert(requested_size_s, blockInfo.requested_size);
+      blockDict.insert(address_s, static_cast<int64_t>(address));
+      blockDict.insert(size_s, static_cast<int64_t>(blockInfo.size));
+      blockDict.insert(
+          requested_size_s, static_cast<int64_t>(blockInfo.requested_size));
       blockDict.insert(
           state_s,
           (blockInfo.allocated
@@ -303,7 +332,8 @@ std::string _memory_snapshot_pickled() {
       auto trace_entry = new_dict();
       trace_entry.insert(action_s, action_to_str(te.action_));
       trace_entry.insert(
-          TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
+          TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
+          static_cast<int64_t>(te.addr_));
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       if (te.context_) {
@@ -317,9 +347,60 @@ std::string _memory_snapshot_pickled() {
     traces.push_back(trace);
   }
 
+  auto external_annotations = new_list();
+  for (const auto& ae : snapshot.external_annotations) {
+    auto annotation_entry = new_dict();
+    for (const auto& md : ae.metadata_) {
+      annotation_entry.insert((IValue)md.first, md.second);
+    }
+    annotation_entry.insert(device_s, ae.device_);
+    annotation_entry.insert(time_us_s, ae.time_.t_);
+    external_annotations.push_back(annotation_entry);
+  }
+
+  auto allocator_settings = new_dict();
+  IValue last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
+  IValue max_split_size_s = "max_split_size";
+  IValue garbage_collection_threshold_s = "garbage_collection_threshold";
+  IValue expandable_segments_s = "expandable_segments";
+  IValue pinned_num_register_threads_s = "pinned_num_register_threads";
+  IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
+  IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
+  IValue roundup_power2_divisions_s = "roundup_power2_divisions";
+
+  allocator_settings.insert(
+      last_allocator_settings_s,
+      snapshot.config_metadata.last_allocator_settings);
+  allocator_settings.insert(
+      max_split_size_s, int64_t(snapshot.config_metadata.max_split_size));
+  allocator_settings.insert(
+      garbage_collection_threshold_s,
+      snapshot.config_metadata.garbage_collection_threshold);
+  allocator_settings.insert(
+      expandable_segments_s, snapshot.config_metadata.expandable_segments);
+  allocator_settings.insert(
+      pinned_num_register_threads_s,
+      int64_t(snapshot.config_metadata.pinned_num_register_threads));
+  allocator_settings.insert(
+      release_lock_on_malloc_s,
+      snapshot.config_metadata.release_lock_on_malloc);
+  allocator_settings.insert(
+      pinned_use_host_register_s,
+      snapshot.config_metadata.pinned_use_host_register);
+  unsigned int roundup_key = 1;
+  auto roundup_settings = new_dict();
+  for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
+    IValue roundup_key_s = std::to_string(roundup_key);
+    roundup_settings.insert(roundup_key_s, int64_t(v));
+    roundup_key *= 2;
+  }
+  allocator_settings.insert(roundup_power2_divisions_s, roundup_settings);
+
   auto result = new_dict();
   result.insert("segments", segments);
   result.insert("device_traces", traces);
+  result.insert("allocator_settings", allocator_settings);
+  result.insert("external_annotations", external_annotations);
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {

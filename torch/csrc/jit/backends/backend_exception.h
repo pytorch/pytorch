@@ -1,6 +1,8 @@
 #pragma once
 #include <c10/util/Exception.h>
 
+#include <utility>
+
 namespace c10 {
 class TORCH_API BackendRuntimeException : public c10::Error {
  public:
@@ -9,7 +11,7 @@ class TORCH_API BackendRuntimeException : public c10::Error {
       SourceLocation loc,
       std::string msg,
       int64_t debug_handle)
-      : c10::Error(loc, msg) {
+      : c10::Error(loc, std::move(msg)) {
     debug_handles.push_back(debug_handle);
   }
   // If rethrowing, can push another debug_handle

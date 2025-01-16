@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -9,13 +10,15 @@ import os
 import signal
 import time
 from queue import Empty
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
-__all__ = ['LocalTimerClient', 'MultiprocessingRequestQueue', 'LocalTimerServer']
 
-log = logging.getLogger(__name__)
+__all__ = ["LocalTimerClient", "MultiprocessingRequestQueue", "LocalTimerServer"]
+
+logger = logging.getLogger(__name__)
+
 
 class LocalTimerClient(TimerClient):
     """
@@ -85,7 +88,7 @@ class LocalTimerServer(TimerServer):
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
     ):
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
-        self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
+        self._timers: Dict[tuple[Any, str], TimerRequest] = {}
 
     def register_timers(self, timer_requests: List[TimerRequest]) -> None:
         for request in timer_requests:
@@ -100,7 +103,7 @@ class LocalTimerServer(TimerServer):
                 self._timers[(pid, scope_id)] = request
 
     def clear_timers(self, worker_ids: Set[int]) -> None:
-        for (pid, scope_id) in list(self._timers.keys()):
+        for pid, scope_id in list(self._timers.keys()):
             if pid in worker_ids:
                 self._timers.pop((pid, scope_id))
 
@@ -118,8 +121,8 @@ class LocalTimerServer(TimerServer):
             os.kill(worker_id, signal.SIGKILL)
             return True
         except ProcessLookupError:
-            log.info("Process with pid=%s does not exist. Skipping", worker_id)
+            logger.info("Process with pid=%s does not exist. Skipping", worker_id)
             return True
         except Exception:
-            log.exception("Error terminating pid=%s", worker_id)
+            logger.exception("Error terminating pid=%s", worker_id)
         return False

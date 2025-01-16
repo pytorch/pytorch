@@ -1,10 +1,10 @@
 from functools import partial
-from typing import no_type_check, Optional, Tuple
+from typing import no_type_check, Optional
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
 @no_type_check
@@ -21,7 +21,7 @@ def sync_grad_hook(grad, *, device_handle=None, compute_stream=None):
 
 def _flatten_tensor(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, Optional[DTensorSpec]]:
+) -> tuple[torch.Tensor, Optional[DTensorSpec]]:
     if isinstance(tensor, DTensor):
         tensor._local_tensor.requires_grad_()
         return tensor._local_tensor, tensor._spec

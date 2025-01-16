@@ -2,15 +2,15 @@
 import operator
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch._dynamo.testing import same
+from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -86,11 +86,12 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         self.assertEqual(r1.device, r2.device)
         self.assertEqual(r1.device, r3.device)
 
+    @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        opt_s = torch._dynamo.optimize("ts")(s)
+        opt_s = torch.compile(s, backend="ts")
         r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
@@ -109,7 +110,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
 
         toy_example(i1, i2)
         try:
-            opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
+            opt_toy_example = torch.compile(toy_example, backend=incorrect_compile_fn)
             opt_toy_example(i1, i2)
         except RuntimeError:
             pass
@@ -131,7 +132,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)
-        opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
+        opt_toy_example = torch.compile(toy_example, backend=incorrect_compile_fn)
         r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
 

@@ -1,10 +1,12 @@
+# mypy: allow-untyped-defs
 """Defines utilities for interacting with scaled_dot_product_attention"""
 import math
-from typing import List, Optional
+from typing import Optional, Union
 
 import torch
 
-__all__: List[str] = []
+
+__all__: list[str] = []
 
 
 def _input_requires_grad(*tensors: torch.Tensor) -> bool:
@@ -27,6 +29,14 @@ def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
     if scale is not None:
         return scale
     return 1.0 / math.sqrt(head_dim_size)
+
+
+_SUPPORTED_HEAD_DIMS = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+
+
+def _supported_head_dim(n: Union[int, torch.SymInt]) -> bool:
+    """Returns true if the head dim is supported by FlexAttention"""
+    return n in _SUPPORTED_HEAD_DIMS
 
 
 def _validate_sdpa_input(

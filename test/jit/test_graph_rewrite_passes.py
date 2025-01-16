@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: jit"]
 
-from torch.testing._internal.jit_utils import JitTestCase
 import torch
 import torch._C
 from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestGraphRewritePasses(JitTestCase):

@@ -4,12 +4,13 @@ import functools
 import unittest
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
@@ -76,7 +77,7 @@ class TestMoveConstructorsToCuda(TestCase):
             return x[c1 + c2], c2 - 4 * 2
 
         inp = torch.rand([4]).cuda()
-        out, code = run_and_get_code(foo, inp)
+        _, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
         @torch.compile()
@@ -85,7 +86,7 @@ class TestMoveConstructorsToCuda(TestCase):
             c1 = torch.ones([4], dtype=torch.long)
             return x[c1 + c2], c2 - 4 * 2
 
-        out, code = run_and_get_code(foo, inp)
+        _, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
     @requires_multigpu()

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import logging
@@ -16,7 +17,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -24,9 +25,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import _gather_state_dict
-from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -52,7 +51,12 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor, Replicate
 from torch.utils._pytree import tree_map_only
+
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +70,7 @@ class FSDPParamInfo:
     param_requires_grad: List[bool]
 
 
-def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
+def sorted_items(dictionary: Dict[str, Any]) -> Iterator[tuple[str, Any]]:
     keys = sorted(dictionary.keys())
     for k in keys:
         yield k, dictionary[k]
@@ -100,7 +104,7 @@ class _ConsolidatedOptimState:
 
 class _PosDimTensorInfo(NamedTuple):
     """
-    Meatadata for positive-dimension tensors used internally for
+    Metadata for positive-dimension tensors used internally for
     :meth:`scatter_full_optim_state_dict`.
 
     Attributes:
@@ -121,7 +125,7 @@ class _OptimStateKey(NamedTuple):
     IDs to make it independent of each rank's own optimizer construction.
     """
 
-    unflat_param_names: Tuple[str, ...]
+    unflat_param_names: tuple[str, ...]
     is_fsdp_managed: bool
 
 
@@ -337,14 +341,14 @@ def _broadcast_processed_state(
     group: Optional[dist.ProcessGroup],
 ) -> Dict[str, Any]:
     objects: List[Any] = [None]
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
             lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         return optim_state
     else:
         return objects[0]
@@ -353,7 +357,7 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
         tensor = state.to(fsdp_state.compute_device)
@@ -531,9 +535,7 @@ def _flatten_optim_state_dict(
                     else:
                         # Move the tensor in the original osd back to CPU to make the
                         # original osd unaffected.
-                        unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
-                            state_name
-                        ].cpu()
+                        unflat_osd_state[fqn][state_name] = param_state.cpu()
 
     # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
@@ -627,7 +629,7 @@ def _flatten_optim_state(
     assert state_names is not None
 
     # Flatten the state
-    flat_state: Dict[str, Any] = {}
+    flat_state: Dict[str, Optional[torch.Tensor]] = {}
     for state_name in state_names:
         state_values = [
             unflat_param_state[state_name] if unflat_param_state is not None else None
@@ -655,7 +657,7 @@ def _flatten_optim_state(
         if are_pos_dim_tensors:
             flat_tensor = _flatten_tensor_optim_state(
                 state_name,
-                state_values,
+                state_values,  # type: ignore[arg-type]
                 unflat_param_names,
                 unflat_param_shapes,
                 handle,
@@ -677,7 +679,7 @@ def _flatten_optim_state(
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
                 state_name,
-                state_values,
+                state_values,  # type: ignore[arg-type]
                 unflat_param_names,
             )
         else:
@@ -906,7 +908,7 @@ def _rekey_sharded_optim_state_dict(
     assert len(param_to_param_key) <= len(param_to_fqns)
 
     unflat_param_names_to_flat_param_key: Dict[
-        Tuple[str, ...], Union[int, str]
+        tuple[str, ...], Union[int, str]
     ] = {}  # for "state"
     unflat_param_name_to_flat_param_key: Dict[
         str, Union[int, str]
@@ -1193,7 +1195,7 @@ def _map_param_key_to_optim_keys(
     param_to_fqns: Dict[nn.Parameter, List[str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
     merge_keys: bool = False,
-) -> Tuple[List[_OptimStateKey], Dict[_OptimStateKey, Union[int, str]]]:
+) -> tuple[List[_OptimStateKey], Dict[_OptimStateKey, Union[int, str]]]:
     """
     Construct the local mapping between the ``_OptimStateKey`` and parameter keys
     and all the ``_OptimStateKey`` across ranks. If ``merge_keys`` is False, rank0
@@ -1290,7 +1292,7 @@ def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
     try:
         key = next(iter(state.keys()))
     except Exception as e:
-        raise Exception(optim_state_dict) from e
+        raise Exception(optim_state_dict) from e  # noqa: TRY002
     return isinstance(key, str)
 
 
@@ -1344,7 +1346,7 @@ def _convert_all_state_info(
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
-) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
+) -> tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
@@ -1419,7 +1421,7 @@ def _convert_all_state_info(
                 )
                 gathered_state[name] = scalar_tensor_value
 
-    return dtype, state_buffers
+    return dtype, state_buffers  # type: ignore[possibly-undefined]
 
 
 def _unflatten_orig_param_states(
@@ -1452,7 +1454,7 @@ def _unflatten_orig_param_states(
             # gather the tensor on its TP dimension before chunking them into DTensor again.
             if placement != Replicate():
                 placement_dim = placement.dim  # type: ignore[attr-defined]
-                value_local = value.redistribute(placements=(Replicate(),))
+                value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
                 reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)
@@ -1507,10 +1509,10 @@ def _allgather_orig_param_states(
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
     fsdp_state = fsdp_param_info.state
-    if fsdp_state.rank == 0:
-        logger.warning(
-            "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
-            torch.cuda.memory_summary(),
+    if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
+        logger.info(
+            "Memory Summary before calling to _allgather_orig_param_states %s",
+            fsdp_state._device_handle.memory_summary(),
         )
 
     output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
@@ -1541,7 +1543,7 @@ def _allgather_orig_param_states(
     )
     gathered_tensor = empty_func(flat_param._padded_unsharded_size)
     # Synchronize can be slow but this will be easier for us to debug.
-    torch.cuda.synchronize()
+    fsdp_state._device_handle.synchronize()
     for state_name, buffers in state_buffers.items():
         local_buffers: List[torch.Tensor] = []
         begin = fsdp_state.rank * flat_param._sharded_size.numel()
@@ -1629,13 +1631,13 @@ def _allgather_orig_param_states(
             "FlatParameter's metadata or the reconstruction logic in optimizer "
             "state dict."
         )
-        torch.cuda.synchronize()
+        fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
             dist.all_gather_into_tensor(
                 gathered_tensor, local_shard, group=fsdp_state.process_group
             )
             # Synchronize can be slow but this will be easier for us to debug.
-            torch.cuda.synchronize()
+            fsdp_state._device_handle.synchronize()
 
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
@@ -2081,11 +2083,6 @@ def _set_optim_use_dtensor(
                 "Found state_dict_type LOCAL_STATE_DICT.",
                 "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
                 "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
-            )
-        elif state_dict_type == StateDictType.FULL_STATE_DICT:
-            logger.warning(
-                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
-                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
             )
         else:
             state_dict_settings.optim_state_dict_config._use_dtensor = True

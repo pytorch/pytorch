@@ -1,9 +1,12 @@
+# mypy: ignore-errors
+
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     OpInfo,
     ReductionOpInfo,
     UnaryUfuncInfo,
 )
+
 
 # NOTE [Python References]
 # Python References emulate existing PyTorch operations, but can ultimately

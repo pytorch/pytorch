@@ -10,34 +10,42 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
-auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
+static variable_list CopyBackwards_apply_functional(
+    variable_list&& grads,
+    std::array<bool, 2> needs_input_grad,
+    const c10::TensorOptions& src_options) {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
-  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
+  auto& grad = std::move(grads)[0];
   variable_list grad_inputs(2);
-  if (grad->defined()) {
-    if (task_should_compute_output(0)) {
-      grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (grad.defined()) {
+    if (needs_input_grad[0]) {
+      grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    if (task_should_compute_output(1)) {
+    if (needs_input_grad[1]) {
       // Handle R->C copies without raising a warning
       const auto src_type = src_options.dtype().toScalarType();
-      if (!c10::isComplexType(src_type) && grad->is_complex()) {
-        grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grads[0]));
+      if (!c10::isComplexType(src_type) && grad.is_complex()) {
+        grad = at::real(grad);
       }
 
       at::DeviceGuard device_guard(src_options.device());
-      grad_inputs[1] = grad->to(src_options);
+      grad_inputs[1] = grad.to(src_options);
     }
   }
   return grad_inputs;
+}
+
+auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
+  return CopyBackwards_apply_functional(
+      std::move(grads),
+      {task_should_compute_output(0), task_should_compute_output(1)},
+      src_options);
 }
 
 void CopyBackwards::compiled_args(CompiledNodeArgs& args) {
@@ -55,10 +63,9 @@ variable_list CopyBackwards::apply_with_saved(
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    std::function<at::Tensor(const at::Tensor&)> view_fn_,
+    std::unique_ptr<ViewFunc> view_fn_,
     std::shared_ptr<Node> fn_)
-    : Node(),
-      base(base_var),
+    : base(base_var),
       view(std::move(view_)),
       view_fn(std::move(view_fn_)),
       fn(std::move(fn_)) {
@@ -79,7 +86,7 @@ inline variable_list CopySlices::apply_impl(
     variable_list&& inputs,
     const T& call_fn) {
   check_input_variables("CopySlices", inputs, 1, -1, true);
-  auto& grad = inputs[0];
+  auto& grad = std::move(inputs)[0];
   if (!grad.defined()) {
     return variable_list(num_outputs());
   }
@@ -98,7 +105,7 @@ inline variable_list CopySlices::apply_impl(
 
   at::Tensor grad_slice;
   if (view_fn) {
-    grad_slice = view_fn(result);
+    grad_slice = (*view_fn)(result);
   } else {
     auto offset = view.sym_storage_offset() - base.sym_storage_offset();
     grad_slice =
@@ -213,5 +220,4 @@ auto CopySlices::apply(variable_list&& inputs1) -> variable_list {
   });
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

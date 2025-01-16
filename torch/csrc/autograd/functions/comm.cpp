@@ -9,17 +9,15 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <cstddef>
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    c10::optional<std::vector<int64_t>> chunk_sizes,
+    std::optional<std::vector<int64_t>> chunk_sizes,
     int64_t dim,
-    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
+    std::optional<std::vector<std::optional<at::cuda::CUDAStream>>> streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(std::move(chunk_sizes)),
@@ -105,19 +103,19 @@ variable_list Gather::apply(variable_list&& inputs) {
         std::move(source_devices),
         std::move(input_sizes),
         dim_,
-        /*streams=*/c10::nullopt,
+        /*streams=*/std::nullopt,
         /*unsqueeze_scalars=*/unsqueeze_scalars);
     grad_fn->set_next_edges(collect_next_edges(inputs));
   }
 
   std::vector<at::Tensor> tensors;
-  tensors.reserve(inputs.size());
-  for (auto& variable : inputs) {
-    if (unsqueeze_scalars) {
+  if (unsqueeze_scalars) {
+    tensors.reserve(inputs.size());
+    for (auto& variable : inputs) {
       tensors.push_back(variable.view(1));
-    } else {
-      tensors.push_back(std::move(variable));
     }
+  } else {
+    tensors = std::move(inputs);
   }
 
   // Disable the autograd during the actual computation
@@ -137,5 +135,4 @@ variable_list Gather::apply(variable_list&& inputs) {
   return {variable};
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

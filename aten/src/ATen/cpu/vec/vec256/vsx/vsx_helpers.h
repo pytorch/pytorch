@@ -391,6 +391,7 @@ const vbool32 imag_mask = vbool32{0x0, 0xFFFFFFFF, 0x0, 0xFFFFFFFF};
 const vbool32 isign_mask = vbool32{0x0, 0x80000000, 0x0, 0x80000000};
 const vbool32 rsign_mask = vbool32{0x80000000, 0x0, 0x80000000, 0x0};
 
+const vbool64 vd_sign_mask  = vbool64{0x8000000000000000, 0x8000000000000000};
 const vbool64 vd_imag_mask  = vbool64{0x0, 0xFFFFFFFFFFFFFFFF};
 const vbool64 vd_real_mask  = vbool64{0xFFFFFFFFFFFFFFFF, 0x0};
 const vbool64 vd_isign_mask = vbool64{0x0, 0x8000000000000000};

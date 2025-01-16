@@ -7,8 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace at {
-namespace jit {
+namespace at::jit {
 
 // A template environment is a mapping from template variable names, e.g.,
 // identifier (corresponding to $identifier) to their expansions.
@@ -20,6 +19,10 @@ namespace jit {
 struct TemplateEnv {
   TemplateEnv() = default;
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
+  TemplateEnv(TemplateEnv&&) = delete;
+  TemplateEnv& operator=(const TemplateEnv& parent) = delete;
+  TemplateEnv& operator=(TemplateEnv&& parent) = delete;
+  ~TemplateEnv() = default;
 
   using string_list = std::vector<std::string>;
 
@@ -32,7 +35,7 @@ struct TemplateEnv {
   // Add a number 'v' to the map at key 'k'
   template <typename T>
   void d(const std::string& k, const T& v) {
-    strings_[k] = c10::to_string(v);
+    strings_[k] = std::to_string(v);
     lists_.erase(k);
   }
 
@@ -110,10 +113,8 @@ struct CodeTemplate {
       char c = template_text[pos];
       if (c == '$') {
         std::stringstream kss;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool comma_before;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool comma_after;
+        bool comma_before = false;
+        bool comma_after = false;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
         std::string k = kss.str();
         bool is_string = env.keyIsString(k);
@@ -207,7 +208,7 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for (C10_UNUSED const auto i : c10::irange(indent)) {
+    for ([[maybe_unused]] const auto i : c10::irange(indent)) {
       out << " ";
     }
   }
@@ -241,5 +242,4 @@ static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
-} // namespace jit
-} // namespace at
+} // namespace at::jit

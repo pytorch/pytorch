@@ -1,16 +1,13 @@
 #pragma once
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
 #include <functional>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Wraps a function in a `Module`.
 ///
@@ -65,7 +62,7 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
   template <
       typename SomeFunction,
       typename... Args,
-      typename = torch::enable_if_t<(sizeof...(Args) > 0)>>
+      typename = std::enable_if_t<(sizeof...(Args) > 0)>>
   explicit FunctionalImpl(SomeFunction original_function, Args&&... args)
       // NOLINTNEXTLINE(modernize-avoid-bind)
       : function_(std::bind(
@@ -101,5 +98,4 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
 /// module storage semantics.
 TORCH_MODULE(Functional);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

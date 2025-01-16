@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# mypy: allow-untyped-defs
 import collections
 import io
 import sys
@@ -20,17 +21,18 @@ from typing import (
 
 import torch
 import torch.distributed.rpc as rpc
-from torch import Tensor, device, dtype, nn
-from torch.distributed.nn.jit import instantiator
+from torch import device, dtype, nn, Tensor
 from torch.distributed import _remote_device
+from torch.distributed.nn.jit import instantiator
 from torch.distributed.rpc.internal import _internal_rpc_pickler
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
+
 __all__ = ["RemoteModule"]
 
-_grad_t = Union[Tuple[Tensor, ...], Tensor]
+_grad_t = Union[tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -108,9 +110,9 @@ def _create_module_with_interface(
 
 
 def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
-    ret: List[rpc.RRef[Parameter]] = []
-    for param in module_rref.local_value().parameters(recurse):
-        ret.append(rpc.RRef(param))
+    ret: List[rpc.RRef[Parameter]] = [
+        rpc.RRef(param) for param in module_rref.local_value().parameters(recurse)
+    ]
     return ret
 
 
@@ -119,7 +121,6 @@ def _raise_not_supported(name: str) -> None:
 
 
 class _RemoteModule(nn.Module):
-
     def __new__(cls, *args, **kwargs):
         # Use __new__ for logging purposes.
         torch._C._log_api_usage_once("torch.distributed.nn.api.remote_module")
@@ -155,7 +156,7 @@ class _RemoteModule(nn.Module):
         created outside of remote modules, rather than as submodules of any remote module (by calling ``add_module``).
         Hybrid Example:
                 >>> class HybridModel(nn.Module):
-                >>>     def __init__(self):
+                >>>     def __init__(self) -> None:
                 >>>         nn.Module.__init__(self)
                 >>>         self.remote_embedding = RemoteModule(...)
                 >>>         self.local_linear = nn.Linear(...)
@@ -368,8 +369,11 @@ class _RemoteModule(nn.Module):
     def register_forward_pre_hook(  # type: ignore[return]
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...]], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+            Callable[[T, tuple[Any, ...]], Optional[Any]],
+            Callable[
+                [T, tuple[Any, ...], Dict[str, Any]],
+                Optional[tuple[Any, Dict[str, Any]]],
+            ],
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -379,8 +383,8 @@ class _RemoteModule(nn.Module):
     def register_forward_hook(  # type: ignore[return, override]
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -404,28 +408,22 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Parameter]]:
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ) -> Iterator[tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ) -> Iterator[tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
     def children(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.children.__name__)
 
-    def named_children(self) -> Iterator[Tuple[str, Module]]:  # type: ignore[return]
+    def named_children(self) -> Iterator[tuple[str, Module]]:  # type: ignore[return]
         _raise_not_supported(self.named_children.__name__)
 
     def modules(self) -> Iterator[Module]:  # type: ignore[return]
@@ -463,7 +461,11 @@ class _RemoteModule(nn.Module):
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
         remote_device = _remote_device(remote_device_str)
-        self.on = remote_device.worker_name() if remote_device.worker_name() is not None else remote_device.rank()
+        self.on = (
+            remote_device.worker_name()
+            if remote_device.worker_name() is not None
+            else remote_device.rank()
+        )
         self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,

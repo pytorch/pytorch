@@ -1,17 +1,20 @@
+# mypy: allow-untyped-defs
 import logging
 import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, Iterator, List, Set, Tuple
+from typing import Dict, Iterator, List, Set
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp._flat_param as flat_param_file
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _get_module_fsdp_state,
     clean_tensor_name,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +56,16 @@ class SimpleProfiler:
 
     @classmethod
     def dump_and_reset(cls, msg: str) -> None:
-        logger.warning("%s %s", msg, str(cls.results))
+        # This cannot be combined with DETAIL distributed log
+        # as the profiling will be very incorrect.
+        if dist.get_rank() == 0 and dist.get_debug_level() == dist.DebugLevel.INFO:
+            logger.info("%s %s", msg, cls.results)
         cls.reset()
 
 
 def _get_sharded_module_tree_with_module_name_to_fqns(
     model: torch.nn.Module,
-) -> Tuple[str, Dict[str, List[str]]]:
+) -> tuple[str, Dict[str, List[str]]]:
     """
     It is used for composable fully_shard() code path, it returns
       1. sharded module tree info: each line reprents a submodule name that contats the

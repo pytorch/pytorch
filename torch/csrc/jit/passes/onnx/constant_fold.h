@@ -2,11 +2,10 @@
 
 #include <memory>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <optional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 const int ONNX_OPSET_9 = 9;
 const int ONNX_OPSET_10 = 10;
@@ -19,7 +18,7 @@ namespace onnx_constant_fold {
 
 at::Tensor IntToTensor(int64_t value);
 
-c10::optional<at::Tensor> runTorchBackendForOnnx(
+std::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version);
@@ -30,6 +29,4 @@ void ConstantFoldONNX(
     std::map<std::string, IValue>& paramDict,
     int opset_version);
 
-} // namespace jit
-
-} // namespace torch
+} // namespace torch::jit

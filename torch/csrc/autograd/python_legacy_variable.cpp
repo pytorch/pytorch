@@ -10,8 +10,7 @@
 
 using namespace at;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 static PyObject* THPVariable_pynew(
     PyTypeObject* type,
@@ -54,10 +53,9 @@ static PyObject* THPVariable_pynew(
       throw python_error();
   }
 
-  if (is_volatile && requires_grad) {
-    throw ValueError(
-        "Variable can't be volatile and require_grad at the same time!");
-  }
+  TORCH_CHECK_VALUE(
+      !is_volatile || !requires_grad,
+      "Variable can't be volatile and require_grad at the same time!");
   if (grad_fn && !THPFunction_Check(grad_fn)) {
     throw TypeError(
         "_grad_fn has to be a Function object or None, but got %s",
@@ -106,14 +104,13 @@ static PyObject* THPVariable_pynew(
     }
   }
 
-  return THPVariable_Wrap(std::move(var));
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 
 PyTypeObject THPLegacyVariableType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._LegacyVariableBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._LegacyVariableBase", /* tp_name */
     0, /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -164,5 +161,4 @@ void init_legacy_variable(PyObject* module) {
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

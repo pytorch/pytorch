@@ -33,6 +33,9 @@ for detailed steps on how to use this API.
     forward_ad.dual_level
     forward_ad.make_dual
     forward_ad.unpack_dual
+    forward_ad.enter_dual_level
+    forward_ad.exit_dual_level
+    forward_ad.UnpackedDualTensor
 
 .. _functional-api:
 
@@ -196,6 +199,8 @@ Tensor autograd functions
     Function.jvp
     Function.vmap
 
+.. _context_method_mixins:
+
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When creating a new :class:`Function`, the following methods are available to `ctx`.
@@ -208,6 +213,27 @@ When creating a new :class:`Function`, the following methods are available to `c
     function.FunctionCtx.mark_non_differentiable
     function.FunctionCtx.save_for_backward
     function.FunctionCtx.set_materialize_grads
+
+Custom Function utilities
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Decorator for backward method.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    function.once_differentiable
+
+Base custom :class:`Function` used to build PyTorch utilities
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    function.BackwardCFunction
+    function.InplaceFunction
+    function.NestedIOFunction
+
 
 .. _grad-check:
 
@@ -224,6 +250,7 @@ Numerical gradient checking
 
     gradcheck
     gradgradcheck
+    GradcheckError
 
 .. Just to reset the base path for the rest of this file
 .. currentmodule:: torch.autograd
@@ -249,6 +276,14 @@ and vtune profiler based using
     profiler.profile.key_averages
     profiler.profile.self_cpu_time_total
     profiler.profile.total_average
+    profiler.parse_nvprof_trace
+    profiler.EnforceUnique
+    profiler.KinetoStepTracker
+    profiler.record_function
+    profiler_util.Interval
+    profiler_util.Kernel
+    profiler_util.MemRecordsAcc
+    profiler_util.StringTable
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
 .. autoclass:: torch.autograd.profiler.emit_itt
@@ -260,12 +295,19 @@ and vtune profiler based using
 
     profiler.load_nvprof
 
-Anomaly detection
+Debugging and anomaly detection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    grad_mode.set_multithreading_enabled
+
 
 
 Autograd graph
@@ -286,6 +328,7 @@ enabled and at least one of the inputs required gradients), or ``None`` otherwis
     graph.Node.next_functions
     graph.Node.register_hook
     graph.Node.register_prehook
+    graph.increment_version
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass.

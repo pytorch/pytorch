@@ -32,7 +32,7 @@ def strip_profiling_nodes(nodes):
 
 def warmup_forward(f, *args):
     profiling_count = 2
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -70,7 +70,7 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu_unicode_temp_dir(self):
-        with TemporaryDirectoryName(suffix='中文') as dname:
+        with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname:
             shell_env = os.environ.copy()
             shell_env['TMP'] = dname
             cmd = [sys.executable, os.path.basename(__file__), type(self).__name__ + '.test_abs_cpu']
@@ -94,7 +94,7 @@ class TestFuser(JitTestCase):
         sin = torch.zeros(0, device="cuda")
         cos = torch.zeros(0, device="cuda")
         inputs = [sin, cos]
-        ge = self.checkScript(decode, inputs)
+        self.checkScript(decode, inputs)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_arg_configurations_smoke_cuda(self):
@@ -587,7 +587,7 @@ class TestFuser(JitTestCase):
             return p * (x * x + x)
 
         scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
-        out = scripted(x, p)
+        scripted(x, p)
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
@@ -821,7 +821,7 @@ class TestFuser(JitTestCase):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.d = torch.device('cuda')
 

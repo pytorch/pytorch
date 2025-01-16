@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
@@ -10,6 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+
 
 __all__ = ["Geometric"]
 
@@ -82,23 +85,23 @@ class Geometric(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return 1.0 / self.probs - 1.0
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.probs)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (1.0 / self.probs - 1.0) / self.probs
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     def sample(self, sample_shape=torch.Size()):

@@ -1,6 +1,9 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import math
 from functools import wraps
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._prims as prims
@@ -21,10 +24,12 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _make_inplace
 
+
 __all__ = [
     "alpha_dropout",
     "celu",
     "celu_",
+    "channel_shuffle",
     "dropout",
     "elu",
     "elu_",
@@ -62,6 +67,9 @@ __all__ = [
     "threshold_",
     "triplet_margin_loss",
 ]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
@@ -125,22 +133,27 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def _inplace_wrapper(fn):
+def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
 
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
-    def _fn(a, *args, inplace=False, **kwargs):
-        if inplace:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        a = args[0]
+        if "inplace" not in kwargs:
+            kwargs["inplace"] = False
+        if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
-            return fn(a, *args, inplace=False, out=a, **kwargs)
+            kwargs["inplace"] = False
+            kwargs["out"] = a
+            return fn(*args, **kwargs)
         else:
-            return fn(a, *args, inplace=False, **kwargs)
+            return fn(*args, **kwargs)
 
     return _fn
 
@@ -259,6 +272,44 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return torch.where(torch.le(a, 0), 0, a)
+
+
+@register_decomposition(aten.channel_shuffle)
+@out_wrapper()
+def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
+    """
+    Reference implementation of :func:`torch.nn.functional.channel_shuffle`.
+    """
+    from torch._meta_registrations import device_hint
+
+    torch._check(
+        input.dim() > 2,
+        lambda: f"channel_shuffle expects input with > 2 dims, but got input with sizes {list(input.size())}",
+    )
+    c = input.shape[1]
+    torch._check(
+        groups > 0,
+        lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
+    )
+    torch._check(
+        (c % groups) == 0,
+        lambda: f"Number of channels must be divisible by groups. Got {c} channels and {groups} groups.",
+    )
+    n = input.shape[0]
+    cg = c // groups
+    dhw = input.shape[2:]
+
+    if input.numel() == 0 or (
+        device_hint(input) == "cuda" and (groups == 1 or groups == c)
+    ):
+        return input.view(input.shape)
+
+    return (
+        input.reshape(n, groups, cg, *dhw)
+        .transpose(1, 2)
+        .reshape(input.shape)
+        .contiguous()
+    )
 
 
 def group_norm(
@@ -470,7 +521,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     )
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
-    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, 0)
+    # We multiply by 0 for dealing with nans
+    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, a * 0)
 
 
 # Losses
@@ -600,7 +652,7 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    # loss_without_reduction = max(0, -target * (input1 - input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
@@ -898,6 +950,9 @@ def triplet_margin_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
+
     # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
     # since it's a pure Python implementation.  Use this helper instead.
     return _triplet_margin_with_distance_loss(
@@ -986,6 +1041,10 @@ def hardtanh(
             raise RuntimeError(
                 "Cannot do hardtanh on an unsigned type with negative limits"
             )
+
+    if min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
 
 
@@ -1094,7 +1153,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
         weight = weight[0] if weight.ndim == 1 else weight
     else:
         weight = prims.broadcast_in_dim(
-            weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
+            weight, a.shape, () if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
     return torch.where(a > 0, a, a * weight)
@@ -1164,6 +1223,62 @@ def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
         t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
     i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
     return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])
+
+
+@register_decomposition(aten.pixel_shuffle)
+@out_wrapper()
+def pixel_shuffle(self: Tensor, upscale_factor: int):
+    torch._check(
+        self.dim() >= 3,
+        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+    )
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] // upscale_factor**2
+    HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
+    n = len(batch)
+    B_dims = range(n)
+    C_dim, r1_dim, r2_dim, H_dim, W_dim = range(n, n + 5)
+    return (
+        self.view(
+            *batch,
+            C_out,
+            upscale_factor,
+            upscale_factor,
+            self.shape[-2],
+            self.shape[-1],
+        )
+        .permute(*B_dims, C_dim, H_dim, r1_dim, W_dim, r2_dim)
+        .reshape(*batch, C_out, *HW_out)
+        .clone(memory_format=utils.suggest_memory_format(self))
+    )
+
+
+@register_decomposition(aten.pixel_unshuffle)
+@out_wrapper()
+def pixel_unshuffle(self: Tensor, downscale_factor: int):
+    torch._check(
+        self.dim() >= 3,
+        lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+    )
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] * downscale_factor**2
+    HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)
+    n = len(batch)
+    B_dims = range(n)
+    C_dim, H_dim, r1_dim, W_dim, r2_dim = range(n, n + 5)
+    return (
+        self.view(
+            *batch,
+            self.shape[-3],
+            HW_out[0],
+            downscale_factor,
+            HW_out[1],
+            downscale_factor,
+        )
+        .permute(*B_dims, C_dim, r1_dim, r2_dim, H_dim, W_dim)
+        .reshape(*batch, C_out, *HW_out)
+        .clone(memory_format=utils.suggest_memory_format(self))
+    )
 
 
 # Needed as aten.{celu_,elu_...} exist (even if they don't have the in-place kwarg)

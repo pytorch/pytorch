@@ -9,10 +9,10 @@
 
 #include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 #include <c10/util/hash.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <optional>
 
 // TODO: replace with pytorch/rfcs#43 when it is ready.
 #define SOFT_ASSERT(cond, ...)                         \
@@ -27,18 +27,16 @@
       if (torch::profiler::impl::softAssertRaises()) { \
         TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
       } else {                                         \
-        TORCH_WARN(__VA_ARGS__);                       \
+        TORCH_WARN_ONCE(__VA_ARGS__);                  \
       }                                                \
       return false;                                    \
     }                                                  \
     return true;                                       \
   }()
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 TORCH_API bool softAssertRaises();
-TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
+TORCH_API void setSoftAssertRaises(std::optional<bool> value);
 TORCH_API void logSoftAssert(
     const char* func,
     const char* file,
@@ -78,6 +76,30 @@ struct TORCH_API FileLineFunc {
   std::string funcname;
 };
 
+struct TORCH_API SaveNcclMetaConfig {
+  bool truncate;
+  bool introspectMetadata;
+  bool introspectInputs;
+  bool introspectOutputs;
+
+  // Default constructor with default values
+  SaveNcclMetaConfig()
+      : truncate(true),
+        introspectMetadata(true),
+        introspectInputs(false),
+        introspectOutputs(false) {}
+
+  SaveNcclMetaConfig(
+      bool truncate,
+      bool introspectMetadata,
+      bool introspectInputs,
+      bool introspectOutputs)
+      : truncate(truncate),
+        introspectMetadata(introspectMetadata),
+        introspectInputs(introspectInputs),
+        introspectOutputs(introspectOutputs) {}
+};
+
 TORCH_API std::vector<FileLineFunc> prepareCallstack(
     const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(
@@ -94,14 +116,20 @@ TORCH_API std::string shapesToStr(
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
+TORCH_API std::string ivalueToStr(const c10::IValue& val, bool isString);
 TORCH_API std::string ivalueListToStr(const std::vector<c10::IValue>& list);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
-std::unordered_map<std::string, std::string> TORCH_API
-saveNcclMeta(const at::RecordFunction& fn);
-
+std::unordered_map<std::string, std::string> TORCH_API saveNcclMeta(
+    const at::RecordFunction& fn,
+    const SaveNcclMetaConfig& config = SaveNcclMetaConfig());
+int getTensorStartHint(const at::Tensor& t);
+bool checkFunctionOutputsForLogging(const at::RecordFunction& fn);
+bool checkFunctionInputsForLogging(const at::RecordFunction& fn);
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
+    const c10::IValue& val);
 uint64_t TORCH_API computeFlops(
     const std::string& op_name,
     const std::unordered_map<std::string, c10::IValue>& extra_args);
@@ -112,7 +140,7 @@ template <typename T>
 class TORCH_API GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
-    static GlobalStateManager singleton_;
+    /* library-local */ static GlobalStateManager singleton_;
     return singleton_;
   }
 
@@ -157,6 +185,24 @@ struct HashCombine {
   }
 };
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+#ifdef USE_DISTRIBUTED
+constexpr auto kCommsName = "Collective name";
+constexpr auto kDtype = "dtype";
+constexpr auto kInMsgNelems = "In msg nelems";
+constexpr auto kOutMsgNelems = "Out msg nelems";
+constexpr auto kInSplit = "In split size";
+constexpr auto kOutSplit = "Out split size";
+constexpr auto kGlobalRankStart = "Global rank start";
+constexpr auto kGlobalRankStride = "Global rank stride";
+constexpr auto kGroupSize = "Group size";
+constexpr auto kProcessGroupName = "Process Group Name";
+constexpr auto kProcessGroupDesc = "Process Group Description";
+constexpr auto kGroupRanks = "Process Group Ranks";
+constexpr auto kRank = "Rank";
+constexpr auto kP2pSrc = "Src Rank";
+constexpr auto kP2pDst = "Dst Rank";
+constexpr auto kInTensorsStart = "Input Tensors start";
+constexpr auto kOutTensorsStart = "Output Tensors start";
+#endif // USE_DISTRIBUTED
+
+} // namespace torch::profiler::impl

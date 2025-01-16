@@ -1,17 +1,16 @@
 #include <ATen/ThreadLocalState.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 #include <c10/util/Logging.h>
 
 namespace c10d {
-SequenceNum::SequenceNum() : num_(c10::nullopt) {}
+SequenceNum::SequenceNum() = default;
 
 SequenceNum::SequenceNum(const uint64_t num) : num_(num) {}
 
 SequenceNum::SequenceNum(const SequenceNum& other) {
   if (!other.isSet()) {
-    num_ = c10::nullopt;
+    num_ = std::nullopt;
   } else {
     num_ = other.get();
   }
@@ -19,12 +18,13 @@ SequenceNum::SequenceNum(const SequenceNum& other) {
 
 uint64_t SequenceNum::get() const {
   std::lock_guard<std::mutex> lock(lock_);
-  return *num_;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return num_.value();
 }
 
 void SequenceNum::increment() {
   std::lock_guard<std::mutex> lock(lock_);
-  TORCH_CHECK(num_ != c10::nullopt);
+  TORCH_CHECK(num_.has_value());
   num_ = ++(*num_);
 }
 
@@ -33,7 +33,7 @@ void SequenceNum::increment() {
 uint64_t SequenceNum::getAndIncrement() {
   uint64_t curVal = 0;
   std::lock_guard<std::mutex> lock(lock_);
-  TORCH_CHECK(num_ != c10::nullopt);
+  TORCH_CHECK(num_.has_value());
   curVal = *num_;
   num_ = ++(*num_);
   return curVal;
@@ -46,13 +46,13 @@ void SequenceNum::set(const uint64_t num) {
 
 bool SequenceNum::isSet() const {
   std::lock_guard<std::mutex> lock(lock_);
-  return num_ != c10::nullopt;
+  return num_.has_value();
 }
 
 SequenceNum& SequenceNum::operator=(const SequenceNum& other) {
   std::lock_guard<std::mutex> lock(lock_);
   if (!other.isSet()) {
-    num_ = c10::nullopt;
+    num_ = std::nullopt;
   } else {
     num_ = other.get();
   }

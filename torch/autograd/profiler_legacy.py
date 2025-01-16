@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import itertools
-from warnings import warn
+import warnings
+from typing_extensions import deprecated
 
 import torch
 import torch.cuda
-
 from torch.autograd import (
     _disable_profiler_legacy,
     _enable_profiler_legacy,
@@ -20,9 +21,15 @@ from torch.autograd.profiler_util import (
     MEMORY_EVENT_NAME,
 )
 
+
 __all__ = ["profile"]
 
 
+@deprecated(
+    "`torch.autograd.profiler_legacy.profile` is deprecated and will be removed in a future release. "
+    "Please use `torch.profiler` instead.",
+    category=None,  # TODO: change to `FutureWarning`
+)
 class profile:
     """DEPRECATED: use torch.profiler instead."""
 
@@ -51,7 +58,10 @@ class profile:
         self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
-            warn("CUDA is not available, disabling CUDA profiling")
+            warnings.warn(
+                "CUDA is not available, disabling CUDA profiling",
+                stacklevel=2,
+            )
             self.use_cuda = False
 
         if self.use_cuda:
@@ -93,7 +103,7 @@ class profile:
         parsed_results = _parse_legacy_records(records)
         self.function_events = EventList(
             parsed_results,
-            use_cuda=self.use_cuda,
+            use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
@@ -178,10 +188,8 @@ def _parse_legacy_records(thread_records):
         """Return a tuple for correlating start and end records in `_parse_legacy_records`."""
         return (record.handle(), record.node_id())
 
-    next_id = 0
     start_record = None
     functions = []
-    record_stack = []
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain.from_iterable(thread_records):
@@ -250,8 +258,9 @@ def _parse_legacy_records(thread_records):
                         entry for entry in start.stack() if _filter_stack_entry(entry)
                     ],
                     scope=start.scope(),
+                    use_device="cuda" if start.has_cuda() else None,
                     cpu_memory_usage=cpu_memory_usage,
-                    cuda_memory_usage=cuda_memory_usage,
+                    device_memory_usage=cuda_memory_usage,
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
@@ -287,7 +296,7 @@ def _parse_legacy_records(thread_records):
                         end_us=0,
                         stack=[],
                         cpu_memory_usage=record.cpu_memory_usage(),
-                        cuda_memory_usage=record.cuda_memory_usage(),
+                        device_memory_usage=record.cuda_memory_usage(),
                         is_legacy=True,
                     )
                     functions.append(fe)

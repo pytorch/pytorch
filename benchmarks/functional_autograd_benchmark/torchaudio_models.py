@@ -3,11 +3,12 @@
 
 import math
 from collections import OrderedDict
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
+
 
 __all__ = ["Wav2Letter"]
 
@@ -219,7 +220,7 @@ class BatchRNN(nn.Module):
 
 
 class Lookahead(nn.Module):
-    # Wang et al 2016 - Lookahead Convolution Layer for Unidirectional Recurrent Neural Networks
+    # Wang et al., 2016 - Lookahead Convolution Layer for Unidirectional Recurrent Neural Networks
     # input shape - sequence, batch, feature - TxNxH
     # output shape - same as input
     def __init__(self, n_features, context):
@@ -313,7 +314,7 @@ class DeepSpeech(nn.Module):
                 rnn_type=rnn_type,
                 bidirectional=bidirectional,
             )
-            rnns.append(("%d" % (x + 1), rnn))
+            rnns.append((f"{x + 1:d}", rnn))
         self.rnns = nn.Sequential(OrderedDict(rnns))
         self.lookahead = (
             nn.Sequential(
@@ -511,7 +512,7 @@ class MultiheadAttentionContainer(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
             query, key, value (Tensor): map a query and a set of key-value pairs to an output.
@@ -588,7 +589,7 @@ class ScaledDotProduct(torch.nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         bias_k: Optional[torch.Tensor] = None,
         bias_v: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Uses a scaled dot product with the projected key-value pair to update
         the projected query.
         Args:
@@ -685,7 +686,7 @@ class InProjContainer(torch.nn.Module):
 
     def forward(
         self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""Projects the input sequences using in-proj layers.
         Args:
             query, key, value (Tensors): sequence to be projected

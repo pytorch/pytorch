@@ -6,11 +6,14 @@ import timeit
 from collections import namedtuple
 
 import benchmark_utils
+
 import numpy as np
+
 import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+
 
 """Performance microbenchmarks.
 
@@ -49,7 +52,7 @@ def _create_test(
     """Create tests with the benchmark backend.
     Args:
         bench_op_obj: an object which instantiated from a subclass of
-            Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+            TorchBenchmarkBase which includes tensor
             creation and operator execution.
         orig_test_attrs: a dictionary includes test configs.
         tags: a attribute in test config to filter inputs
@@ -74,7 +77,7 @@ def _build_test(
     """Generate PyTorch/Caffe2 tests of operators with different inputs.
     Args:
         configs: a dictionary that has the input shapes
-        bench_op: a subclass of Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+        bench_op: a subclass of TorchBenchmarkBase which includes tensor
             creation and operator execution
         OperatorTestCase: a named tuple to save the metadata of an test
         run_backward: a bool parameter indicating backward path
@@ -108,10 +111,9 @@ def _build_test(
 
         if tags is None:
             raise ValueError("Missing tags in configs")
-        input_config = str(test_attrs)[1:-1].replace("'", "")
+
         op = bench_op()
         assert op is not None, "Can't create test"
-        tensor_error_info = None
         # op_name_function is a dictionary which has op_name and op_function.
         # an example of op_name_function is:
         # {'op_name' : 'abs', 'op_function' : torch.abs}
@@ -232,9 +234,7 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            if test_case.framework == "PyTorch":
-                print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
-
+            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -248,6 +248,58 @@ class BenchmarkRunner:
                 print()
             else:
                 print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
+
+    def _perf_result_to_dict(self, reported_run_time_us, test_case):
+        """This function is the parallel of _print_perf_result, which instead of
+        writing information to terminal, returns a dictionary.
+        """
+        if self.args.report_aibench:
+            return {}
+        out = {
+            "test_name": test_case.test_config.test_name,
+            "input_config": test_case.test_config.input_config,
+            "mode": "JIT" if self.use_jit else "Eager",
+            "run": "Backward" if test_case.test_config.run_backward else "Forward",
+            "latency": round(reported_run_time_us[0], 3),
+            "latency unit": "us",
+        }
+
+        # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
+        # input: 'M: 1, N: 1, K: 1, device: cpu'
+        # output: {'M':'1', 'N':'1', 'K':'1', 'device': 'cpu'}
+        # splitting the string on unnested commas
+        def split(s):
+            open_to_close = {"{": "}", "(": ")", "[": "]"}
+            break_idxs = [-1]
+            curr_brackets = []
+            for i, c in enumerate(s):
+                if c in open_to_close.keys():
+                    curr_brackets.append(c)
+                elif c in open_to_close.values():
+                    assert (
+                        curr_brackets and open_to_close[curr_brackets[-1]] == c
+                    ), "ERROR: not able to parse the string!"
+                    curr_brackets.pop()
+                elif c == "," and (not curr_brackets):
+                    break_idxs.append(i)
+            break_idxs.append(len(s))
+            out = []
+            for i in range(len(break_idxs) - 1):
+                start, end = break_idxs[i], break_idxs[i + 1]
+                out.append(s[start + 1 : end])
+            return out
+
+        key_vals = split(
+            test_case.test_config.input_config
+        )  # 'M: [(32, 16), (64, 32)], ZPB: 2' -> ['M: [(32, 16), (64, 32)]', 'ZPB: 2']
+        key_vals = [
+            (key.strip(), value.strip())
+            for key, value in map(lambda str: str.split(":"), key_vals)  # noqa: C417
+        ]  # ['M: (32, 16)', 'ZPB: 2'] -> [('M', '(32, 16)'), ('ZPB', '2')]
+        for key, value in key_vals:
+            out[key] = value
+
+        return out
 
     def _predict_num_iter_needed(self, i):
         return i * self.multiplier
@@ -282,8 +334,7 @@ class BenchmarkRunner:
         and the execution time is reported
         """
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
-        if test_case.framework == "PyTorch":
-            test_case._output_mean()
+        test_case._output_mean()
         backward_time = timeit.timeit(
             functools.partial(test_case.run_backward, iters, print_per_iter), number=1
         )
@@ -340,24 +391,17 @@ class BenchmarkRunner:
         return cmd_flag is None or test_flag == cmd_flag
 
     def _check_operator_first_char(self, test_flag, cmd_flag):
-        if cmd_flag is None or test_flag[:1].lower() in cmd_flag:
-            return True
-        return False
+        return cmd_flag is None or test_flag[:1].lower() in cmd_flag
 
     def _check_keep_list(self, test_flag, cmd_flag_list):
-        if cmd_flag_list is None or any(
+        return cmd_flag_list is None or any(
             test_flag == cmd_flag for cmd_flag in cmd_flag_list
-        ):
-            return True
-        return False
+        )
 
     def _keep_test(self, test_case):
         # TODO: consider regex matching for test filtering.
         # Currently, this is a sub-string matching.
         op_test_config = test_case.test_config
-
-        if self.args.framework:
-            frameworks = benchmark_utils.process_arg_list(self.args.framework)
 
         operators = (
             benchmark_utils.process_arg_list(self.args.operators)
@@ -366,10 +410,9 @@ class BenchmarkRunner:
         )
 
         # Filter framework, operator, test_name, tag, forward_only
-        if (
+        return (
             self._check_keep(op_test_config.test_name, self.args.test_name)
             and self._check_keep_list(test_case.op_bench.module_name(), operators)
-            and self._check_keep_list(test_case.framework, frameworks)
             and self._check_operator_first_char(
                 test_case.op_bench.module_name(), self.operator_range
             )
@@ -386,10 +429,7 @@ class BenchmarkRunner:
                 or "device" not in test_case.test_config.input_config
                 or self.args.device in op_test_config.test_name
             )
-        ):
-            return True
-
-        return False
+        )
 
     def _print_test_case_info(self, test_case):
         # Print out the test name and skip the real execution
@@ -409,6 +449,9 @@ class BenchmarkRunner:
 
     def run(self):
         self._print_header()
+
+        if self.args.output_json:
+            perf_list = []
 
         for test_metainfo in BENCHMARK_TESTER:
             for test in _build_test(*test_metainfo):
@@ -450,3 +493,11 @@ class BenchmarkRunner:
                 ]
 
                 self._print_perf_result(reported_time, test_case)
+                if self.args.output_json:
+                    perf_list.append(
+                        self._perf_result_to_dict(reported_time, test_case)
+                    )
+
+        if self.args.output_json:
+            with open(self.args.output_json, "w") as f:
+                json.dump(perf_list, f)

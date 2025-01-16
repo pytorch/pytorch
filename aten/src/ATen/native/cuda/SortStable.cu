@@ -3,7 +3,6 @@
 #include <ATen/native/cuda/SortStable.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/core/Array.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -232,18 +231,6 @@ void launch_stable_sort_kernel(
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
   int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
-
-#if (defined(USE_ROCM) && ROCM_VERSION < 40500)
-  constexpr bool is_rocm_bf16_sort_unsupported = true;
-#else
-  constexpr bool is_rocm_bf16_sort_unsupported = false;
-#endif
-
-  if constexpr (is_rocm_bf16_sort_unsupported) {
-    if (self.scalar_type() == kBFloat16) {
-      TORCH_CHECK(false, "BFloat16 is not supported on ROCm < 4.5");
-    }
-  }
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&] {
