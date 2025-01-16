@@ -1852,7 +1852,7 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            std::make_optional((PyObject*)self)) {
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py

@@ -154,7 +154,7 @@ class Freezer:
         for i in range(0, len(m.bytecode), 16):
             outfp.write("\n\t")
             for c in bytes(m.bytecode[i : i + 16]):
-                outfp.write("%d," % c)
+                outfp.write(f"{c:d},")
         outfp.write("\n};\n")
 
     def compile_path(self, path: Path, top_package_path: Path):
