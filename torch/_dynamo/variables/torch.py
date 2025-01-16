@@ -431,7 +431,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 assert len(args) == 1
                 assert isinstance(args[0], variables.TensorVariable)
                 fake_tensor = args[0].proxy.node.meta["example_value"]
-                return DispatchKeySetVariable.create(self.value(fake_tensor))
+                dks = self.value(fake_tensor)
+                # Remove Python and PythonTLSSnapshot from the dispatch key set since they are from FakeTensor propogation.
+                dks = (
+                    dks
+                    - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+                    - torch._C.DispatchKeySet(torch._C.DispatchKey.PythonTLSSnapshot)
+                )
+                return DispatchKeySetVariable.create(dks)
             else:
                 assert not args
                 return DispatchKeySetVariable.create(self.value())

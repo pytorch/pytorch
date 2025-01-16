@@ -3,13 +3,21 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
-    def test_dispatch_key(self):
+    def test_dispatch_key1(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            x = x + 1
+            return torch._C._dispatch_keys(x)
+
+        x = torch.randn(2, 3)
+        self.assertTrue(fn(x).raw_repr() == torch._C._dispatch_keys(x + 1).raw_repr())
+
+    def test_dispatch_key2(self):
         eager = EagerAndRecordGraphs()
 
         @torch.compile(backend=eager, fullgraph=True)
@@ -23,8 +31,7 @@ class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
                 return torch.sin(x - 1)
 
         x = torch.randn(2, 3)
-        with enable_python_dispatcher():
-            self.assertEqual(fn(x), torch.sin(x + 1))
+        self.assertEqual(fn(x), torch.sin(x - 1))
 
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
@@ -36,8 +43,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 3]"):
         l_x_ = L_x_
 
-        add: "f32[2, 3]" = l_x_ + 1;  l_x_ = None
-        sin: "f32[2, 3]" = torch.sin(add);  add = None
+        sub: "f32[2, 3]" = l_x_ - 1;  l_x_ = None
+        sin: "f32[2, 3]" = torch.sin(sub);  sub = None
         return (sin,)
 """,  # NOQA: B950
         )
