@@ -548,8 +548,11 @@ def _aggregate_origins(
 
 
 def get_fused_kernel_name(
-    node_schedule: Sequence[BaseSchedulerNode], descriptive_names: str
+    node_schedule: Sequence[BaseSchedulerNode], descriptive_names: str | bool
 ) -> str:
+    if not descriptive_names:
+        return ""
+
     all_origins = _aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
