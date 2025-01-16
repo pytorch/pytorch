@@ -35,7 +35,7 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
       streams.emplace_back();
     } else {
       // NOLINTNEXTLINE(bugprone-throw-keyword-missing)
-      std::runtime_error(
+      throw std::runtime_error(
           "Unknown data type found in stream list. Need torch.cuda.Stream or None");
     }
   }
