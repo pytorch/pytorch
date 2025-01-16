@@ -35,6 +35,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 
 
 class MPSBasicTests(TestCase):
+    is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
 
