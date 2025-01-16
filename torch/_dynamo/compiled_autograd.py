@@ -679,7 +679,6 @@ class AutogradCompilerInstance:
                     del node.meta[field]
 
         self.rename_aot_dispatcher_nodes()
-        self.remove_unnecessary_validate_outputs()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
         self.reorder_accumulate_grad_nodes()
@@ -851,42 +850,6 @@ class AutogradCompilerInstance:
         ):
             return True
         return False
-
-    def remove_unnecessary_validate_outputs(self):
-        """
-        Remove validate_outputs nodes that follow a CompiledBackward node.
-        These nodes would other prevent reordering of the accumulate_grad nodes.
-
-        Note that this will not cause correctness issues, because
-        1) AOTAutograd already coerces gradients to have the same metadata as the inputs.
-        2) the AOTAutograd graph already has the necessary aten::sum_to nodes in it (so
-        it doesn't need to rely on validate_outputs to handle that).
-
-        However, we are dropping some (edge case) safety checks compared to eager:
-        a backward that would have errored out in eager may not error out in compiled autograd
-        (for example, if the user provided an incorrect number of gradients).
-        """
-        assert hasattr(ops, "validate_outputs")
-        to_remove = []
-        for node in self.fx_tracer.graph.find_nodes(
-            op="call_function",
-            target=ops.validate_outputs,
-        ):
-            grad_nodes = node.args[0]
-            if all(
-                grad_node.name.startswith("aot")
-                for grad_node in grad_nodes
-                if grad_node is not None
-            ):
-                for user in node.users:
-                    assert user.target == operator.getitem
-                    idx = user.args[1]
-                    assert isinstance(idx, int)
-                    user.replace_all_uses_with(grad_nodes[idx])
-                    to_remove.append(user)
-                to_remove.append(node)
-        for node in to_remove:
-            self.fx_tracer.graph.erase_node(node)
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -1151,6 +1114,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 self.aot_graph_cls_name = node_name
                 maybe_aot_id = forward_cls._aot_id
                 self.aot_graph_infos[nodecall_index] = {
