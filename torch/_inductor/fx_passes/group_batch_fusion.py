@@ -3,17 +3,7 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from typing import (
-    Any,
-    DefaultDict,
-    Deque,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-)
+from typing import Any, DefaultDict, Deque, Dict, Iterable, Iterator, List, Optional
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
@@ -195,7 +185,7 @@ class PostGradBatchLinearFusion(BatchFusion):
 
     def match(
         self, node: torch.fx.Node
-    ) -> Optional[Tuple[str, int, int, int, bool, str]]:
+    ) -> Optional[tuple[str, int, int, int, bool, str]]:
         if CallFunctionVarArgs(aten.mm).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -331,7 +321,7 @@ class GroupLinearFusion(GroupFusion):
             )
         )
 
-    def match(self, node: torch.fx.Node) -> Optional[Tuple[str, bool]]:
+    def match(self, node: torch.fx.Node) -> Optional[tuple[str, bool]]:
         if CallFunctionVarArgs(aten.mm.default).match(
             node
         ) and self._mm_node_can_be_fused(node):
@@ -499,7 +489,7 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> Optional[Tuple[str, bool, Any]]:
+    def match(self, node: torch.fx.Node) -> Optional[tuple[str, bool, Any]]:
         if CallFunctionVarArgs(torch.nn.functional.linear).match(
             node
         ) and is_linear_node_can_be_fused(node):
@@ -1300,7 +1290,7 @@ def get_fusion_candidates(
     Search fusion candidates for a specific rule using BFS starting from the root node.
     We only search the subgraph within graph_search_options["max_fuse_search_depth"].
     """
-    q: Deque[Tuple[int, torch.fx.Node]] = collections.deque()
+    q: Deque[tuple[int, torch.fx.Node]] = collections.deque()
 
     candidate_dict: DefaultDict[Any, List[torch.fx.Node]] = collections.defaultdict(
         list
