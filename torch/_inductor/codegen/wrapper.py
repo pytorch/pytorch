@@ -640,6 +640,7 @@ class CommBufferFreeLine(CommBufferLine):
 
 
 BufferName = str
+Line = Union[MemoryPlanningLine, LineContext]
 
 
 class PythonWrapperCodegen(CodeGen):
@@ -663,7 +664,7 @@ class PythonWrapperCodegen(CodeGen):
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
-        self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
+        self.lines: List[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
