@@ -608,6 +608,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
         std::string("apply_with_saved not implemented: ") + name());
   }
 
+  // If this node is the AOTBackward node produced by torch.compile.
+  // Compiled Autograd special-cases on this information.
+  virtual bool is_aot_backward() const {
+    return false;
+  }
+
  protected:
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
