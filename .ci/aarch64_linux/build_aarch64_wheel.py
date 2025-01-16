@@ -329,7 +329,7 @@ def build_ArmComputeLibrary(host: RemoteHost, git_clone_flags: str = "") -> None
         ]
     )
     host.run_cmd(
-        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v24.09 {git_clone_flags}"
+        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v24.12 {git_clone_flags}"
     )
 
     host.run_cmd(f"cd ComputeLibrary && scons Werror=1 -j8 {acl_build_flags}")
