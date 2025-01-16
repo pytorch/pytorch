@@ -880,16 +880,32 @@ static CacheNode* _compiled_autograd_impl(
             false);
       });
 
-      PackedArgs args;
-      args.pack(input_metadata);
-      ivalue_list input_metadata_state = std::move(args).vec();
-      outputs = call_function(
-          py_compiler,
-          "validate_outputs",
-          "validate_outputs",
-          outputs,
-          input_metadata_state,
-          input_metadata_state[0]);
+      // Don't emit validate_outputs nodes that follow a CompiledBackward node.
+      // These nodes would otherwise prevent reordering of accumulate_grad
+      // nodes.
+      //
+      // Note that this will not cause correctness issues, because
+      // 1) AOTAutograd already coerces gradients to have the same metadata as
+      // the inputs. 2) the AOTAutograd graph already has the necessary
+      // aten::sum_to nodes in it (so it doesn't need to rely on
+      // validate_outputs to handle that).
+      //
+      // However, we may be dropping some (edge case) safety checks compared to
+      // eager: a backward that would have errored out in eager may not error
+      // out in compiled autograd (for example, if the user provided an
+      // incorrect number of gradients).
+      if (!call.node->is_aot_backward()) {
+        PackedArgs args;
+        args.pack(input_metadata);
+        ivalue_list input_metadata_state = std::move(args).vec();
+        outputs = call_function(
+            py_compiler,
+            "validate_outputs",
+            "validate_outputs",
+            outputs,
+            input_metadata_state,
+            input_metadata_state[0]);
+      }
 
       saved.after(call.node->next_edges());
       saved.debug_asserts();
