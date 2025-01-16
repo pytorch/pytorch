@@ -6546,9 +6546,17 @@ class CommonTemplate:
 
         device_interface = get_interface_for_device(self.device)
         for dtype in all_types():
-            ctx = contextlib.nullcontext() if device_interface.is_dtype_supported(dtype) else self.assertRaises(TypeError)
+            ctx = (
+                contextlib.nullcontext()
+                if device_interface.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
             with ctx:
-                self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),), check_lowp=False)
+                self.common(
+                    fn, 
+                    (make_tensor(8, dtype=dtype, device=self.device),),
+                    check_lowp=False
+                )
 
     def test_full_boolean(self):
         def fn(n):
