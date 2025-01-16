@@ -3502,6 +3502,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
         n_max = int(0.75 * 2 ** 32)
