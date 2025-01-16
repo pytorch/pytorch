@@ -71,13 +71,13 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/gemm/collective/collective_builder.hpp>
 #include <cutlass/gemm/device/gemm_universal.h>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
+#include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
 #include <cutlass/epilogue/collective/collective_builder.hpp>
 #include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
 
 #include <cute/atom/mma_atom.hpp>
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
-#include <cutlass/gemm/kernel/default_gemm_universal_with_visitor.h>
 #include <cutlass/util/packed_stride.hpp>
 
 
