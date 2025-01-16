@@ -10,6 +10,7 @@
 #pragma once
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
@@ -35,7 +36,57 @@ class Callable {
     }
 };
 
-template <typename ParamsT, typename TimerT>
+namespace {
+
+/** http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
+
+class Stats {
+  public:
+    Stats() {
+      _n = 0UL;
+      _mean = 0.0;
+      _M2 = 0.0;
+      _sum = 0.0;
+      _min = 0.0;
+      _max = 0.0;
+    }
+
+    void sample_value(const double x) {
+      double delta = 0;
+      _sum = _sum + x;
+      if (0UL == _n) {
+          _min = x;
+          _max = x;
+      }
+      else {
+          _min = _min < x ? _min : x;
+          _max = _max > x ? _max : x;
+      }
+      _n = _n + 1UL;
+      delta = x - _mean;
+      _mean = _mean + delta/_n;
+      _M2 = _M2 + delta * (x - _mean);
+    }
+
+    double variance() const {
+      return _M2/(_n-1);
+    }
+
+    double stddev() const {
+      return std::sqrt(variance());
+    }
+
+    unsigned long _n;
+    double _mean;
+    double _M2;
+    double _sum;
+    double _min;
+    double _max;
+};
+
+} // anonymous namespace
+
+template <typename ParamsT>
 class TunableOp {
   public:
     virtual ~TunableOp() = default;
@@ -100,10 +151,10 @@ class TunableOp {
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+    static double ProfileSimple(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
-      TimerT timer{};
+      StreamTimer timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
@@ -115,6 +166,25 @@ class TunableOp {
       return timer.Duration() / num_iter;
     }
 
+    static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->IsICacheFlushEnabled();
+      std::vector<StreamTimerNoSync> timer(num_iter);
+      for (size_t i = 0; i < num_iter; i++) {
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
+        timer[i].Start();
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+        timer[i].End();
+      }
+      Stats s;
+      for (size_t i = 0; i < num_iter; i++) {
+        s.sample_value(timer[i].Duration());
+      }
+      return s;
+    }
+
   protected:
     virtual ResultEntry FindFastest(const ParamsT* params) {
       TuningContext* ctx = getTuningContext();
@@ -122,6 +192,7 @@ class TunableOp {
       auto params_sig = params->Signature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
+      auto min_worst_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
 
@@ -185,9 +256,9 @@ class TunableOp {
 
         // collect a small profile
         constexpr const int approx_num_iter = 3;
-        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter, offset);
+        auto approx_duration = ProfileSimple(candidate, reusable_params, approx_num_iter, offset);
         // bail if too slow
-        if (approx_duration > 2 * min_duration_ms) {
+        if (approx_duration > 3 * min_duration_ms) {
           TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
@@ -238,10 +309,15 @@ class TunableOp {
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
-        auto duration_ms = Profile(candidate, reusable_params, tuning_iter, offset);
-        if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG3("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
-          min_duration_ms = duration_ms;
+        auto s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
+        if (s._mean < min_duration_ms && s._max < min_worst_ms) {
+          TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+                " min ", s._min,
+                " max ", s._max,
+                " mean ", s._mean,
+                " std ", s.stddev());
+          min_duration_ms = s._mean;
+          min_worst_ms = s._max;
           id_name = op_names_[i];
         }
       }

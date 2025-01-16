@@ -40,4 +40,27 @@ float StreamTimer::Duration() {
   return time;
 }
 
+StreamTimerNoSync::StreamTimerNoSync() {
+  AT_CUDA_CHECK(cudaEventCreate(&start_));
+  AT_CUDA_CHECK(cudaEventCreate(&end_));
+}
+
+StreamTimerNoSync::~StreamTimerNoSync() = default;
+
+void StreamTimerNoSync::Start() {
+  AT_CUDA_CHECK(cudaEventRecord(start_, at::cuda::getCurrentCUDAStream()));
+}
+
+void StreamTimerNoSync::End() {
+  AT_CUDA_CHECK(cudaEventRecord(end_, at::cuda::getCurrentCUDAStream()));
+}
+
+float StreamTimerNoSync::Duration() {
+  auto time = std::numeric_limits<float>::quiet_NaN();
+  AT_CUDA_CHECK(cudaEventSynchronize(end_));
+  // time is in ms with a resolution of 1 us
+  AT_CUDA_CHECK(cudaEventElapsedTime(&time, start_, end_));
+  return time;
+}
+
 } // namespace at::cuda::tunable
