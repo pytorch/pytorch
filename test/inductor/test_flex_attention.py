@@ -838,7 +838,7 @@ class TestFlexAttention(InductorTestCase):
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
-        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
 
         q2 = torch.randn(
@@ -871,7 +871,7 @@ class TestFlexAttention(InductorTestCase):
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
-        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
 
         q3 = torch.randn(
@@ -1332,7 +1332,9 @@ class TestFlexAttention(InductorTestCase):
             val_max = [x * (y - 1) for x, y in zip(strides, shape)]
             assert sum(val_max) + offset < B * H * S * D * 2
             assert strides[-1] == 1
-            return torch.as_strided(val, shape, strides, offset).requires_grad_(True)
+            return torch.as_strided(val, shape, strides, offset).requires_grad_(
+                not test_inference_only
+            )
 
         q = coerce_to_strides(q1, q_shape, q_s)
         k = coerce_to_strides(k1, k_shape, k_s)
@@ -1940,7 +1942,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024, device=self.device)
         (
             k_cache1,
             v_cache1,
@@ -2253,6 +2255,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(
             attention,
+            torch.float16,
             B,
             H * 4,  # Hq = 4*Hkv.
             S // 8,
@@ -3294,6 +3297,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
 
     @supported_platform
+    @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
     def test_invalid_block_size(self):
         # Create tensors on different devices
         q, k, v = (torch.randn(1, 8, 128, 64, device=self.device) for _ in range(3))
@@ -3505,6 +3509,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
+    @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
     def test_symbol_closure_in_score_mod(self):
         class SimpleAttention(torch.nn.Module):
             def __init__(self, dim=512, n_head=8):
