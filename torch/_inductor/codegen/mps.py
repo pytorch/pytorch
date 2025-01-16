@@ -398,9 +398,10 @@ class MetalScheduling(SIMDScheduling):
     def __init__(self, scheduler: Scheduler) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
-        wrapper.header.splice(
-            "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-        )
+        if wrapper is not None:
+            wrapper.header.splice(
+                "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+            )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
