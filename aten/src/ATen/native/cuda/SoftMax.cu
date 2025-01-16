@@ -700,9 +700,9 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   }
 }
 
-template <typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue, int32_t reg_cnt>
+template <typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue, typename index_t, int32_t reg_cnt>
 __global__ void
-cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, int classes)
+cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t classes)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
@@ -931,10 +931,10 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 
             int32_t potential_reg_cnt = potential_register_count(dim_size, block.x);
             if(potential_reg_cnt < 10){
-              TORCH_CHECK(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
+              TORCH_INTERNAL_ASSERT(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
               switch (potential_reg_cnt) {
               #define SOFTMAX_REG_N(N) case N: \
-                                        cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, N> \
+                                        cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, N> \
                                                               <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size); \
                                         break
 
