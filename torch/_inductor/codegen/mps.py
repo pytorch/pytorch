@@ -297,7 +297,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        line = f"{var}[{index}] = static_cast<{dtype_str}>({value});"
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
         self.body.writeline(DeferredLine(name, line))
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
