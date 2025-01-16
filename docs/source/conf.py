@@ -1973,6 +1973,7 @@ coverage_ignore_functions = [
     "mm_flop",
     "normalize_tuple",
     "register_flop_formula",
+    "scaled_mm_flop",
     "sdpa_backward_flop",
     "sdpa_backward_flop_count",
     "sdpa_flop",
@@ -3362,7 +3363,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2024, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

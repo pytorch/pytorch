@@ -1711,13 +1711,25 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
         # Runtime tangent size and stride are the same as expected, no need to coerce
         return x
 
-    if not torch._prims_common.is_non_overlapping_and_dense(x):
-        x = x.contiguous()
+    try:
+        # Empty_strided creates a raw Tensor.
+        # We are guranteed that only raw Tensors has expected size and stride.
+        # Subclasses have only expected memory_format.
+        restrided = torch.empty_strided(
+            size=expected_size,
+            stride=expected_stride,
+            dtype=x.dtype,
+            device=x.device,
+            layout=x.layout,
+            requires_grad=x.requires_grad,
+        )
+        restrided.copy_(x)
+        return restrided
+    except Exception:
+        import traceback
 
-    if x.shape == expected_size and x.stride() == expected_stride:
-        return x
-
-    return x.as_strided(size=expected_size, stride=expected_stride)
+        traceback.print_exc()
+        breakpoint()
 
 
 # This is wrapped in a class just for namespacing purposes

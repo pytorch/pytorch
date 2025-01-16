@@ -357,12 +357,14 @@ def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
         split_idxs = tuple(itertools.accumulate(chunk_sizes))
 
     flat_args_chunks = tuple(
-        t.tensor_split(split_idxs, dim=in_dim)
-        if in_dim is not None
-        else [
-            t,
-        ]
-        * len(split_idxs)
+        (
+            t.tensor_split(split_idxs, dim=in_dim)
+            if in_dim is not None
+            else [
+                t,
+            ]
+            * len(split_idxs)
+        )
         for t, in_dim in zip(flat_args, flat_in_dims)
     )
 
@@ -523,9 +525,11 @@ def unwrap_batched(args, level):
     if len(flat_args) == 0:
         return args, ()
     result = [
-        torch._C._functorch._unwrap_batched(arg, level)
-        if isinstance(arg, torch.Tensor)
-        else (arg, None)
+        (
+            torch._C._functorch._unwrap_batched(arg, level)
+            if isinstance(arg, torch.Tensor)
+            else (arg, None)
+        )
         for arg in flat_args
     ]
     output, bdims = zip(*result)

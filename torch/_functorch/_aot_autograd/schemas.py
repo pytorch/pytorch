@@ -177,20 +177,29 @@ class MemoryFormatMeta:
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
-        is_static_shape = True
-        for s in itertools.chain(t.shape, t.stride()):
-            if not isinstance(s, int):
-                is_static_shape = False
-                break
+        # We only memorize expected memory format for
+        # 1. Traceable wrapper subclasses
+        # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
+        # 2. Dynamic shape tensors
+        # Support for symbolic shapes is not implemented yet.
+        use_memory_format: bool = is_traceable_wrapper_subclass(t)
+        if not use_memory_format:
+            is_static_shape = True
+            for s in itertools.chain(t.shape, t.stride()):
+                if not isinstance(s, int):
+                    is_static_shape = False
+                    break
 
-        if is_static_shape:
+            use_memory_format = not is_static_shape
+
+        if use_memory_format:
             return MemoryFormatMeta(
-                size=t.size(),
-                stride=t.stride(),
+                memory_format=torch._prims_common.suggest_memory_format(t),
             )
 
         return MemoryFormatMeta(
-            memory_format=torch._prims_common.suggest_memory_format(t),
+            size=t.size(),
+            stride=t.stride(),
         )
 
 

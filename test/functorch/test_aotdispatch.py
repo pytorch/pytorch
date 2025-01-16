@@ -6113,7 +6113,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
                 def forward(self, x, y):
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return r, y + 1
 
             m = M()
@@ -6156,7 +6156,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
                 def forward(self, x):
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return r
 
             m = M()
@@ -6444,8 +6444,8 @@ metadata incorrectly.
         self, dynamic_shapes, test_subclasses, device
     ):
         B = 2
-        T = 8
-        E = 16
+        T = 4
+        E = 6
 
         def fn(x):
             x = x + 1
@@ -6463,17 +6463,47 @@ metadata incorrectly.
 
         _inp = _inp_dense if not test_subclasses else _inp_sc
 
-        fn(_inp())
-
-        inp = _inp()
-
         comp_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        y = comp_fn(inp)
-        y.backward(torch.ones_like(y))
 
-        # Classic sum().backward() that produces tangent with memory overlap using .expand()
-        y2 = comp_fn(_inp())
-        y2.sum().backward()
+        def _tg3(y):
+            t = torch.randn(
+                2 * y.shape, dtype=y.dtype, layout=y.layout, device=y.device
+            )
+            return t.as_strided(y.shape, tuple(s * 2 for s in y.stride()))
+
+        TEST_CASES = [
+            (_inp, lambda y: torch.ones(y.shape, dtype=y.dtype, device=y.device)),
+            # Memory overlap, dense tangent
+            (
+                _inp,
+                lambda y: torch.tensor([1], dtype=y.dtype, device=y.device).as_strided(
+                    y.shape, (0,) * y.ndim
+                ),
+            ),
+            # No memory overlap, not-dense tangent
+            (_inp, _tg3),
+        ]
+
+        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+            ref_x = inp_fn()
+            x = ref_x.detach().clone().requires_grad_()
+
+            ref_y = fn(ref_x)
+
+            y = comp_fn(x)
+            self.assertEqual(ref_y, y)
+
+            ref_tg = (
+                tg_fn(ref_y)
+                if not test_subclasses
+                else TwoTensor(tg_fn(ref_y), tg_fn(ref_y))
+            )
+            tg = ref_tg.clone()
+
+            ref_y.backward(ref_tg)
+            y.backward(tg)
+
+            self.assertEqual(ref_x.grad, x.grad)
 
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
@@ -6606,9 +6636,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_upsample_bilinear2d_aa"
-    ),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
