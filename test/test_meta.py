@@ -13,6 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_s
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
+from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
@@ -1793,6 +1794,16 @@ class TestMeta(TestCase):
             raise RuntimeError("cpu didn't fail, but meta did.") from meta_err
         elif cpu_err is not None and meta_err is None:
             raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
+
+    def test_nonzero(self):
+        t = torch.randn(2, 3, 4, device='meta')
+        with exp_config.patch(meta_nonzero_assume_all_nonzero=True):
+            nz = t.nonzero()
+        self.assertEqual(nz.dtype, torch.int64)
+        self.assertEqual(nz.device.type, 'meta')
+        self.assertEqual(nz.shape, torch.Size([24, 3]))
+        self.assertEqual(nz.stride(), torch.Size([1, 24]))
+
 
 
 instantiate_device_type_tests(TestMeta, globals())
