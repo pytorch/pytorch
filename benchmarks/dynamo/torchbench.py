@@ -408,9 +408,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in self._require_larger_multiplier_for_smaller_tensor
 
-    def xpu_higher_tolerance(self, current_device, name):
+    def xpu_higher_tolerance(self, current_device):
         return (
-            current_device == "xpu" and name in self._tolerance["higher_fp16_bf16_xpu"]
+            self._tolerance["higher_fp16_bf16_xpu"] if current_device == "xpu" else []
         )
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -418,8 +418,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
-            if name in self._tolerance["higher_fp16"] or self.xpu_higher_tolerance(
-                current_device, name
+            if name in self._tolerance["higher_fp16"] | self.xpu_higher_tolerance(
+                current_device
             ):
                 return 1e-2, cosine
             elif name in self._tolerance["even_higher"]:
@@ -427,8 +427,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return 1e-3, cosine
 
         if self.args.bfloat16:
-            if name in self._tolerance["higher_bf16"] or self.xpu_higher_tolerance(
-                current_device, name
+            if name in self._tolerance["higher_bf16"] | self.xpu_higher_tolerance(
+                current_device
             ):
                 return 1e-2, cosine
 
