@@ -100,18 +100,23 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
+function formatSize(num, binary = true) {
   const orig = num;
   // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
-  const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
+  const units = binary
+    ? ['', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB']
+    : ['', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB'];
+  const base = binary ? 1024 : 1000;
   for (const unit of units) {
-    if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+    if (Math.abs(num) < base) {
+      return `${num.toFixed(1)}${unit} (${orig} bytes)`;
     }
-    num /= 1024.0;
+    num /= base;
   }
-  return `${num.toFixed(1)}YiB`;
+  unit = binary ? 'YiB' : 'YB';
+  return `${num.toFixed(1)}${unit} (${orig} bytes)`;
 }
+
 function formatAddr(event) {
   const prefix = event.action.startsWith('segment') ? 's' : 'b';
   return `${prefix}${event.addr.toString(16)}_${event.version}`;
@@ -121,23 +126,25 @@ function formatEvent(event) {
     event.stream === null ? '' : `\n              (stream ${event.stream})`;
   switch (event.action) {
     case 'oom':
-      return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(
+      return `OOM (requested ${formatSize(event.size, false)}, CUDA has ${formatSize(
         event.device_free,
+        false,
       )} memory free)${stream}`;
     case 'snapshot':
       return 'snapshot';
     default:
       return `${event.action.padEnd(14)} ${formatAddr(event).padEnd(
         18,
-      )} ${formatSize(event.size)}${stream}`;
+      )} ${formatSize(event.size, false)}${stream}`;
   }
 }
 
 function eventStack(e, allocated, reserved) {
   let event = formatEvent(e);
   if (reserved !== undefined) {
-    event = `(${formatSize(allocated)} allocated / ${formatSize(
+    event = `(${formatSize(allocated, false)} allocated / ${formatSize(
       reserved,
+      false,
     )} reserved)\n${event}`;
   }
   return event + '\n' + format_frames(e.frames);
@@ -429,8 +436,9 @@ function MemoryView(outer, stack_info, snapshot, device) {
           return (
             `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(
               t.size,
+              false,
             )} allocated, ` +
-            `${formatSize(free)} free${internal} (stream ${
+            `${formatSize(free, false)} free${internal} (stream ${
               t.stream
             })\n${format_frames(t.frames)}`
           );
@@ -495,7 +503,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
-            `${formatSize(t.requested_size)} allocation${requested} (stream ${
+            `${formatSize(t.requested_size, false)} allocation${requested} (stream ${
               t.segment.stream
             })\n` +
             format_frames(t.frames)
@@ -527,6 +535,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           return (
             `Free space lost due to rounding ${formatSize(
               t.size - t.requested_size,
+              false,
             )}` +
             ` (stream ${t.segment.stream})\n` +
             format_frames(t.frames)
@@ -976,9 +985,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     context_for_id: id => {
       const elem = elements[id];
       let text = `Addr: ${formatAddr(elem)}`;
-      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Size: ${formatSize(elem.size, false)} allocation`;
       text = `${text}, Total memory used after allocation: ${formatSize(
         elem.max_allocated_mem,
+        false,
       )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
