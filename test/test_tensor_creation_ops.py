@@ -2768,12 +2768,9 @@ class TestTensorCreation(TestCase):
         # need more than one device_type to test this
         assert self.device_type == 'cuda'
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-
-            self.assertEqual(tensor.new_tensor(tensor.cpu()).device, torch_device)
-            self.assertEqual(tensor.cpu().new_tensor(tensor).device, cpu_device)
-            self.assertEqual(tensor.new_tensor(tensor, device=cpu_device).device, cpu_device)
+        self.assertEqual(tensor.new_tensor(tensor.cpu()).device, torch_device)
+        self.assertEqual(tensor.cpu().new_tensor(tensor).device, cpu_device)
+        self.assertEqual(tensor.new_tensor(tensor, device=cpu_device).device, cpu_device)
 
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
