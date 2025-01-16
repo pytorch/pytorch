@@ -1061,6 +1061,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
 
+    def generate_maybe_resolve_tensor_flags(self, tensor):
+        self.writeline()
+
     def generate_c_shim_fallback_kernel(self, fallback_kernel, args):
         output_args = []
         output_raii_handles = []
@@ -2296,27 +2299,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
 
         val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
         if isinstance(type_, torch.TensorType) and val_is_scalar:
-
-            def get_scalar_func_name(v):
-                if isinstance(v, (bool, torch.SymBool)):
-                    return "aoti_torch_scalar_to_tensor_bool"
-                if isinstance(v, complex):
-                    return "aoti_torch_scalar_to_tensor_complex128"
-                if isinstance(v, (float, torch.SymFloat)):
-                    return "aoti_torch_scalar_to_tensor_float64"
-                if isinstance(v, (int, torch.SymInt)):
-                    return "aoti_torch_scalar_to_tensor_int64"
-
-            var_name = f"var_{next(self.arg_var_id)}"
-            func_name = get_scalar_func_name(val)
             val_str = self.val_to_arg_str_for_prim_type(val, None)
-
-            self.writeline(f"AtenTensorHandle {var_name}_handle;")
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({func_name}({val_str}, &{var_name}_handle));"
-            )
-            self.writeline(f"RAIIAtenTensorHandle {var_name}({var_name}_handle);")
-            return var_name
+            return self.codegen_scalar_to_tensor(val_str)
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
