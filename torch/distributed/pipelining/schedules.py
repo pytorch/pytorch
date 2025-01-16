@@ -224,14 +224,11 @@ def _format_pipeline_order(
     return formatted_table
 
 
-loss_T = Optional[Union[_Loss, Callable[..., torch.Tensor]]]
-
-
 class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
-        loss_fn: loss_T = None,
+        loss_fn: Optional[Callable[..., torch.Tensor]] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
