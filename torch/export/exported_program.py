@@ -641,14 +641,47 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
 
-    output_specs = [
-        OutputSpec(
-            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
-            update_arg(spec.arg, new_outputs[i]),
-            old_new_placeholder_map.get(spec.target, spec.target),
+    output_specs = []
+
+    # handle buffer & input mutations; these appear before loss output & gradients
+    # (1) ep.graph_signature.input_specs tells us types of inputs
+    # (2) graph_signature.user_inputs tells us node input names in order
+    # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
+    # map (3) -> (2) for input order, -> (1) for input type
+    user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
+    assert mutation_names == [node.name for node in new_outputs[: len(mutation_names)]]
+    for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
+        i = user_inputs_index[input_name]
+        input_spec = ep.graph_signature.input_specs[i]
+        assert input_spec.kind in (InputKind.USER_INPUT, InputKind.BUFFER)
+        output_kind = (
+            OutputKind.BUFFER_MUTATION
+            if input_spec.kind == InputKind.BUFFER
+            else OutputKind.USER_INPUT_MUTATION
         )
-        for i, spec in enumerate(ep.graph_signature.output_specs)
-    ]
+        target = (
+            input_spec.target
+            if input_spec.kind == InputKind.BUFFER
+            else input_spec.arg.name
+        )
+        output_specs.append(
+            OutputSpec(
+                kind=output_kind,
+                arg=TensorArgument(name=output_name),
+                target=target,
+            )
+        )
+
+    # handle actual user outputs
+    for i, spec in enumerate(ep.graph_signature.output_specs):
+        output_specs.append(
+            OutputSpec(
+                OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
+                update_arg(spec.arg, new_outputs[len(mutation_names) + i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
+        )
 
     if joint_loss_index is not None:
         assert graph_signature.backward_signature is not None
