@@ -59,6 +59,7 @@ class MPSBasicTests(TestCase):
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
+    test_pow2 = CommonTemplate.test_pow2
     test_remainder = CommonTemplate.test_remainder
     test_remove_no_ops = CommonTemplate.test_remove_no_ops
     test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
