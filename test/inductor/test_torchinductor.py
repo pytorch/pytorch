@@ -11778,6 +11778,8 @@ class CommonTemplate:
             torch.bfloat16,
         ]
         for cpu_dtype in test_dtypes:
+            if not self.is_dtype_supported(cpu_dtype):
+                continue
             x = torch.rand([20], device=GPU_TYPE)
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
             self.common(
