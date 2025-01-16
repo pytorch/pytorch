@@ -120,9 +120,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         for i, patterns in enumerate(pass_patterns):
+            torch._inductor.fx_passes.post_grad.cache.clear()
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
+            torch._inductor.fx_passes.post_grad.cache.clear()
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions
             if pass_name in POST_GRAD_FUSIONS:
@@ -968,6 +970,8 @@ def should_prefer_unfused_addmm(match):
     return all(is_pointwise_use(use) for use in output.users)
 
 
+cache = {}
+
 @register_graph_pattern(
     CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
     pass_dict=pass_patterns[2],
@@ -977,7 +981,16 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    match.replace_by_example(repl, [inp, mat1, mat2])
+    key = (
+        mat1.meta["tensor_meta"].shape,
+        mat2.meta["tensor_meta"].shape,
+        inp.meta["tensor_meta"].shape,
+    )
+    if key in cache:
+        match.replace_with_graph(cache[key], [inp, mat1, mat2])
+    else:
+        gm = match.replace_by_example(repl, [inp, mat1, mat2])
+        cache[key] = gm
 
 
 def is_valid_addmm_fusion(match):

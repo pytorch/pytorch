@@ -292,6 +292,7 @@ class Match:
                 replacement,
                 args,
             )
+            return replacement
 
 
 class FailedMatch(RuntimeError):
