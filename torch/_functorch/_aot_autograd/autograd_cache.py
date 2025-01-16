@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import CompileEventLogger, counters
 from torch._functorch import config
 from torch._inductor.codecache import (
@@ -135,7 +136,14 @@ def check_node_safe(node: Node):
 
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
-        return f"{target.__module__}.{target.__name__}" in SAFE_TORCH_FUNCTIONS
+        function_name = f"{target.__module__}.{target.__name__}"
+        # Functions in torch_non_c_binding_in_graph_functions
+        # are guaranteed to be cache safe.
+        # See NOTE: [Cacheability of in-graph torch functions]
+        return (
+            function_name in torch_non_c_binding_in_graph_functions
+            or function_name in SAFE_TORCH_FUNCTIONS
+        )
 
     def is_torch_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
