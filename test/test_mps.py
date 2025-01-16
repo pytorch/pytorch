@@ -7502,6 +7502,13 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
+    # From https://github.com/pytorch/pytorch/issues/144824
+    def test_index_select_bounds(self):
+        with self.assertRaisesRegex(IndexError, "index out of range in self"):
+            embed = nn.Embedding(10, 2).to('mps')
+            t = torch.tensor(10).to('mps')
+            embed(t)
+
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
