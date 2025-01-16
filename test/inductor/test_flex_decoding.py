@@ -52,6 +52,7 @@ if TEST_ON_CUDA:
 else:
     test_device = "cpu"
     torch_config_string = torch.__config__.show()
+    SKIP_UT_ON_CPU = True
     LONG_COMPILATION_ON_CPU = False
     if "CLANG" in torch_config_string.upper():
         # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
@@ -253,11 +254,13 @@ class TestFlexDecoding(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
+        self.test_inference_only = False
         if self.device == "cpu":
             if LONG_COMPILATION_ON_CPU:
                 self.skipTest(
                     "skip UT for CPU due to long compilation time found in CI"
                 )
+            self.test_inference_only = True
 
     def _check_equal(
         self,
@@ -324,29 +327,26 @@ class TestFlexDecoding(InductorTestCase):
             score_mod is not None or block_mask is not None
         ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
-        if self.device == "cpu":
-            test_inference_only = True
-            if dtype is torch.float16:
-                dtype = torch.float32
-        else:
-            test_inference_only = False
+        if self.device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
+
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D),
             dtype=dtype,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
         k = torch.randn(
             (KV_B, KV_H, KV_S, Q_D),
             dtype=dtype,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
         v = torch.randn(
             (KV_B, KV_H, KV_S, V_D),
             dtype=dtype,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -355,7 +355,7 @@ class TestFlexDecoding(InductorTestCase):
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
         compiled_sdpa = torch.compile(sdpa_partial)
-        if not test_inference_only:
+        if not self.test_inference_only:
             golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
             ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
             compiled_out, compiled_lse = compiled_sdpa(q, k, v, return_lse=True)
@@ -512,12 +512,9 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
-        if self.device == "cpu":
-            test_inference_only = True
-            if dtype is torch.float16:
-                dtype = torch.float32
-        else:
-            test_inference_only = False
+        if self.device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
+
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S, device=self.device)
 
@@ -533,7 +530,7 @@ class TestFlexDecoding(InductorTestCase):
         compiled_sdpa = torch.compile(flex_attention)
 
         # compute
-        if not test_inference_only:
+        if not self.test_inference_only:
             compiled_out, compiled_lse = compiled_sdpa(
                 q,
                 k_cache,
@@ -571,12 +568,8 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
     ):
         assert Q_H % KV_H == 0
-        if self.device == "cpu":
-            test_inference_only = True
-            if dtype is torch.float16:
-                dtype = torch.float32
-        else:
-            test_inference_only = False
+        if self.device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
         q = torch.randn(
             (Q_B, Q_H, Q_S, QK_D),
             dtype=dtype,
@@ -618,7 +611,7 @@ class TestFlexDecoding(InductorTestCase):
             ref_out,
             compiled_out,
         )
-        if not test_inference_only:
+        if not self.test_inference_only:
             self._check_out(
                 gold_lse,
                 ref_lse,
@@ -691,7 +684,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @expectedFailure
-    @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_bw_decoding_fails(self, dtype):
         make_kv = functools.partial(
@@ -1403,27 +1396,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
         # Ensure fully masked out rows won't cause NaNs.
-        if self.device == "cpu":
-            test_inference_only = True
-        else:
-            test_inference_only = False
         query = torch.randn(
             (B, Hq, S, D),
             dtype=torch.float32,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
         key = torch.randn(
             (B, Hkv, S, D),
             dtype=torch.float32,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
         value = torch.randn(
             (B, Hkv, S, D),
             dtype=torch.float32,
             device=self.device,
-            requires_grad=not test_inference_only,
+            requires_grad=not self.test_inference_only,
         )
 
         M = S // 2
@@ -1434,7 +1423,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
 
         flex = torch.compile(flex_attention, dynamic=False)
-        if not test_inference_only:
+        if not self.test_inference_only:
             out, lse = flex(
                 query,
                 key,
@@ -1539,7 +1528,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
@@ -1593,7 +1582,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_logsumexp_only_return(self):
         make_q = functools.partial(
             torch.randn,
