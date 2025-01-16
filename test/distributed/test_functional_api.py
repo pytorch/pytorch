@@ -575,7 +575,6 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
         self.world_size = 4
-        print("world_size=", self.world_size)
 
         exit_if_lt_x_accelerators(self.world_size, device)
         mesh_dim_names = ["dp", "tp"]
