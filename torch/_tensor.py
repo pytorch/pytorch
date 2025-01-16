@@ -1655,7 +1655,7 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, stream=None):
+    def __dlpack__(self, stream=None, max_version=None):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1672,6 +1672,11 @@ class Tensor(torch._C.TensorBase):
             both streams.  If None or -1 is passed then no synchronization is performed.
             If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
             synchronization.
+
+            max_version (tuple[int, int] or None): An optional Python tuple with
+            2 integers, representing the maximum version the caller supports. If
+            None is passed, then PyTorch will fallback to DLPack 0.X, where versions
+            are not supported.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
@@ -1722,7 +1727,14 @@ class Tensor(torch._C.TensorBase):
                 raise RuntimeError(
                     "Can't export to dlpack an XLA tensor that is not on CUDA."
                 )
+
+            # Does not support DLPack 1.0, yet.
             return xla_dlpack.to_dlpack(self)
+
+        if max_version is None or max_version[0] < 1:
+            # Fallback to the old, unversioned variant.
+            return torch.to_dlpack_unversioned(self)
+
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
@@ -1737,9 +1749,9 @@ class Tensor(torch._C.TensorBase):
         if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
         elif torch_device_type == "cpu" and self.is_pinned():
-            device_type = DLDeviceType.kDLCPUPinned
+            device_type = DLDeviceType.kDLCUDAHost
         elif torch_device_type == "cuda":
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
@@ -1755,7 +1767,7 @@ class Tensor(torch._C.TensorBase):
             ):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
 
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

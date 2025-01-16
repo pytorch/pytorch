@@ -2234,7 +2234,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     matrix_rank,
     solve,
 )
-from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch.utils.dlpack import from_dlpack, to_dlpack, to_dlpack_unversioned
 
 
 class _TorchCompileInductorWrapper:
