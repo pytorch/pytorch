@@ -471,6 +471,12 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._stage_initialized = False
         self.scale_grads = scale_grads
 
+        if n_microbatches < self._num_stages:
+            raise ValueError(
+                f"Number of microbatches ({n_microbatches}) must be greater than \
+or equal to the number of stages ({self._num_stages})."
+            )
+
     def _initialize_stage(self, args, kwargs):
         self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
         if self._has_backward:
