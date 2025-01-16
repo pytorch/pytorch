@@ -42,10 +42,8 @@ def get_filenames(self, subname):
     test_file = os.path.realpath(sys.modules[module_id].__file__)
     base_name = os.path.join(os.path.dirname(test_file), "../serialized", munged_id)
 
-    subname_output = ""
     if subname:
         base_name += "_" + subname
-        subname_output = f" ({subname})"
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
@@ -145,7 +143,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             scripted_module_file,
             traced_module_file,
             expected_file,
@@ -196,7 +194,7 @@ class TestSerialization(TestCase):
             input_file,
             state_dict_file,
             _,
-            traced_module_file,
+            _,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -220,7 +218,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             _scripted_module_file,
             _traced_module_file,
             expected_file,
