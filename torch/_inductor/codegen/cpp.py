@@ -3704,14 +3704,13 @@ class CppKernelProxy(CppKernel):
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def get_input_dtype(node: torch.fx.Node):
-                """Get input dtype for nodes that may consumes lowp fp dt; True for ops that can accept any dt of input"""
+                """Get input dtype for nodes that may consumes lowp fp dt"""
                 if node.target == "store":
                     return V.graph.get_dtype(node.args[1])
                 elif node.target == "to_dtype_bitcast":
                     return node.args[-1]
                 elif node.target == "to_dtype":
-                    src_dtype = node.kwargs.get("src_dtype", None)
-                    return True if src_dtype is None else src_dtype
+                    return node.kwargs.get("src_dtype", None)
                 else:
                     return None
 
@@ -3735,10 +3734,13 @@ class CppKernelProxy(CppKernel):
 
             def is_lowp_fp_sink(node: torch.fx.Node, dt: torch.dtype):
                 """If the node can accepts the lowp fp dt as input without casting to high precision"""
-                node_dtype = get_input_dtype(node)
-                if node_dtype is not None:
-                    return node_dtype is True or node_dtype == dt
-                return False
+                input_dtype = get_input_dtype(node)
+                if input_dtype is not None:
+                    return input_dtype == dt
+                elif node.target == "to_dtype":
+                    return True
+                else:
+                    return False
 
             sub_graph_nodes = list(sub_graph.nodes)
             to_lowp_fp_legalized_nodes = []
@@ -3858,7 +3860,9 @@ class CppKernelProxy(CppKernel):
                     # precision values for the rest of the computation.
                     if dtype in DTYPE_LOWP_FP:
                         # No need to promote to float if all users are ops that accepts lowp fp input
-                        if not (all(is_lowp_fp_sink(user, dtype) for user in _node.users)):
+                        if not (
+                            all(is_lowp_fp_sink(user, dtype) for user in _node.users)
+                        ):
                             ops = _node.args[0]
                             with sub_graph.inserting_after(_node):
                                 to_type_node = sub_graph.call_method(
