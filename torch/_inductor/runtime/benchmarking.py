@@ -13,6 +13,7 @@ from torch._inductor.config import use_experimental_benchmarker
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
+use_experimental_benchmarker = use_experimental_benchmarker and not torch.xpu._is_compiled
 
 
 MILLISECONDS_PER_SECOND = 1000
@@ -396,7 +397,7 @@ class InductorBenchmarker(TritonBenchmarker):
             queue_t_per_iter,
             start_event.elapsed_time(end_event) / num_iters,
         )
-    
+
     @cached_property
     def queue_t_per_cache_flush(self: Self) -> float:
         return self.queue_t_and_gpu_t_per_cache_clear[0]
