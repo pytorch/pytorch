@@ -42,6 +42,8 @@ class MPSBasicTests(TestCase):
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
+    test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
+    test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
     test_div1 = CommonTemplate.test_div1
     test_div3 = CommonTemplate.test_div3
     test_cat_empty = CommonTemplate.test_cat_empty
@@ -49,6 +51,7 @@ class MPSBasicTests(TestCase):
     test_floordiv = CommonTemplate.test_floordiv
     test_fmod = CommonTemplate.test_fmod
     test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
+    test_index_dynamic_shapes = CommonTemplate.test_index_dynamic_shapes
     test_inf = CommonTemplate.test_inf
     test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
@@ -57,12 +60,15 @@ class MPSBasicTests(TestCase):
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_nan_to_num = CommonTemplate.test_nan_to_num
     test_remainder = CommonTemplate.test_remainder
+    test_remove_no_ops = CommonTemplate.test_remove_no_ops
+    test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
     test_rsqrt = CommonTemplate.test_rsqrt
     test_signbit = CommonTemplate.test_signbit
     test_silu = CommonTemplate.test_silu
     test_slice_scatter4 = CommonTemplate.test_slice_scatter4
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
+    test_view_on_aliased = CommonTemplate.test_view_on_aliased
     test_views3 = CommonTemplate.test_views3
     test_views6 = CommonTemplate.test_views6
     test_views7 = CommonTemplate.test_views7
