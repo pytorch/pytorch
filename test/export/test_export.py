@@ -297,6 +297,18 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_export_slice_unbacked_dim1(self):
+        class MySlice(torch.nn.Module):
+            def forward(self, x, seq_len):
+                l = seq_len.item()
+                torch._check_is_size(l, max=x.size(1))
+                x = x.narrow(1, 0, l)
+                return x
+
+        x = torch.randn(10, 7)
+        seq_len = torch.tensor(5)
+        torch.export.export(MySlice(), args=(x, seq_len))
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
