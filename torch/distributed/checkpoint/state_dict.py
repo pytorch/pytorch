@@ -16,7 +16,6 @@ from typing import (
     no_type_check,
     Optional,
     Set,
-    Tuple,
     Union,
 )
 
@@ -80,7 +79,7 @@ _STATE = "state"
 FQNS_T = Set[str]
 PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
 ValueType = Union[
-    PrimitiveType, List[PrimitiveType], Tuple[PrimitiveType], Dict[str, "ValueType"]
+    PrimitiveType, List[PrimitiveType], tuple[PrimitiveType], Dict[str, "ValueType"]
 ]
 DictValueType = Dict[str, ValueType]
 ListDictValueType = List[DictValueType]
@@ -263,7 +262,7 @@ def _iterate_valid_model_state(model):
 
 def _verify_options(
     model: nn.Module,
-    optims: Tuple[torch.optim.Optimizer, ...],
+    optims: tuple[torch.optim.Optimizer, ...],
     optim_only: bool,
     *,
     submodules: Optional[Set[nn.Module]] = None,
@@ -559,23 +558,30 @@ def _load_model_state_dict(
 
     assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
-        device = None
+        devices = set()
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
-                if device is None:
-                    device = value.device
-                else:
-                    assert device == value.device
-        assert device is not None
-        if device == torch.device("meta"):
-            device = dist.distributed_c10d._get_pg_default_device()
+                devices.add(value.device)
+        # In lora state_dict, there could be multiple devices, with meta device inside.
+        # Take the other device in the broadcast/distribtue, and set assign to True
+        if torch.device("meta") in devices:
+            devices.remove(torch.device("meta"))
             assign = True
+        if len(devices) == 0:
+            devices.add(dist.distributed_c10d._get_pg_default_device())
+        elif len(devices) > 1:
+            raise ValueError("Multiple devices found")
+
         if info.broadcast_from_rank0:
             _broadcast_state_dict(
-                state_dict, local_state_dict, device=device, strict=info.strict
+                state_dict,
+                local_state_dict,
+                device=devices.pop(),
+                strict=info.strict,
+                cpu_offload=info.cpu_offload,
             )
         elif info.full_state_dict:
-            _distribute_state_dict(state_dict, local_state_dict, device=device)
+            _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -742,7 +748,7 @@ def _unflatten_optim_state_dict(
 @torch.no_grad()
 def _get_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     info: _StateDictInfo,
 ) -> OptimizerStateType:
     if not info.handle_optim:
@@ -878,7 +884,7 @@ def _split_optim_state_dict(
 @torch.no_grad()
 def _load_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     state_dict: OptimizerStateType,
     info: _StateDictInfo,
 ) -> None:
@@ -1057,7 +1063,7 @@ def get_state_dict(
     *,
     submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
-) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
+) -> tuple[Dict[str, ValueType], OptimizerStateType]:
     """
     Return the model state_dict and optimizers state_dict.
 
@@ -1372,7 +1378,7 @@ def _patch_model_state_dict(
 def _patch_optimizer_state_dict(
     model: nn.Module,
     *,
-    optimizers: Tuple[torch.optim.Optimizer, ...],
+    optimizers: tuple[torch.optim.Optimizer, ...],
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optimizers``.
