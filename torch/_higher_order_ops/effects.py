@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
@@ -261,12 +260,12 @@ def handle_effects(
 
     ctx = PythonFunctionalizeAPI()
 
-    unwrapped_token = ctx.unwrap_tensors([token])[0]  # type: ignore[arg-type]
-    unwrapped_args = ctx.unwrap_tensors(args)  # type: ignore[arg-type]
+    unwrapped_token = ctx.unwrap_tensors([token])[0]
+    unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         (new_token, *unwrapped_outs) = with_effects(
-            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs  # type: ignore[arg-type]
+            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
     schema = _get_schema(op, unwrapped_args)
@@ -285,4 +284,4 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_outs)

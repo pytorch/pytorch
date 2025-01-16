@@ -53,13 +53,13 @@ class DebugPrinterManager:
     def __init__(
         self,
         debug_printer_level,
+        use_array_ref: bool,
         args_to_print_or_save: Optional[List[str]] = None,
         kernel_name: str = "",
         kernel=None,
-        arg_signatures: Optional[List[type]] = None,
-        kernel_type=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
+        self.use_array_ref = use_array_ref
         if args_to_print_or_save is None:
             args_to_print_or_save = []
         self.args_to_print_or_save = args_to_print_or_save
@@ -150,19 +150,20 @@ class DebugPrinterManager:
         # get the list of args_to_print_or_save
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
-            args_to_print_or_save_extern = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_extern.append(arg)
+            args_to_print_or_save_extern = [
+                arg for arg in args_to_print_or_save if arg.startswith(("buf", "arg"))
+            ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
-            args_to_print_or_save_cpp = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_cpp.append(
-                        f"convert_arrayref_tensor_to_tensor({arg})"
-                    )
-            self.args_to_print_or_save = args_to_print_or_save_cpp
+            self.args_to_print_or_save = [
+                (
+                    f"copy_arrayref_tensor_to_tensor({arg})"
+                    if self.use_array_ref
+                    else arg
+                )
+                for arg in args_to_print_or_save
+                if arg.startswith(("buf", "arg"))
+            ]
         else:
             self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name

@@ -1,7 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Sized
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -43,18 +42,17 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
     select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
-    default_strategy = []
-    for strategy in select_strategy.strategies:
-        # we create new DTensorSpecs even for default strategy to assure that
-        # the tensor metas are distinct between the arguments and outputs
-        default_strategy.append(
-            PlacementStrategy(
-                output_specs=DTensorSpec(
-                    mesh=strategy.output_spec.mesh,
-                    placements=strategy.output_spec.placements,
-                )
+    # we create new DTensorSpecs even for default strategy to assure that
+    # the tensor metas are distinct between the arguments and outputs
+    default_strategy = [
+        PlacementStrategy(
+            output_specs=DTensorSpec(
+                mesh=strategy.output_spec.mesh,
+                placements=strategy.output_spec.placements,
             )
         )
+        for strategy in select_strategy.strategies
+    ]
     return OpStrategy(default_strategy)
 
 
@@ -65,6 +63,7 @@ register_op_strategy(
         aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
+        aten.view.dtype,
         aten.zero_.default,
     ]
 )(default_strategy)
@@ -290,7 +289,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
 def unshard_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """Disallow the given tensor dimension to be sharded."""
     return tuple(
         p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
@@ -300,7 +299,7 @@ def unshard_tensor_dim(
 
 def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """Force the given tensor dimension to be replicated."""
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
@@ -594,7 +593,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             args_schema=(
                 schema_suggestion.args_schema[0],
                 dim,
-                schema_suggestion.args_schema[1][dim],
+                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
             ),
             kwargs_schema=op_schema.kwargs_schema,
         )
@@ -622,7 +621,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(values_spec, DTensorSpec)
     assert isinstance(multi_indices_spec, list)
     multi_indices_spec = cast(List[Optional[DTensorSpec]], multi_indices_spec)
-    valid_indices_spec: List[Tuple[int, DTensorSpec]] = [
+    valid_indices_spec: List[tuple[int, DTensorSpec]] = [
         (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
     ]
 
@@ -770,7 +769,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
             ),
         )
 
-    def size_split(N, i):
+    def size_split(N, i) -> List:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
         assert i > 0
@@ -781,6 +780,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         if isinstance(split_size_or_sections, int)
         else split_size_or_sections
     )
+    assert isinstance(output_size_list, Sized)
     output_spec_list = [
         DTensorSpec(
             mesh=input_spec.mesh,

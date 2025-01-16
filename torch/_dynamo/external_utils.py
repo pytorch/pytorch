@@ -2,7 +2,8 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,21 +14,37 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
-    """
-    return torch.compiler.is_compiling()
+if TYPE_CHECKING:
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
+
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        # NOTE: With `@torch.compile(backend="eager")`, torch._dynamo.is_compiling() will get traced
+        # and return true. torch.compiler.is_compiling() is skipped and will return false.
+        return torch.compiler.is_compiling()
 
 
-def wrap_inline(fn: Callable[..., Any]) -> Callable[..., Any]:
+def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Create an extra frame around fn that is not in skipfiles.
     """
 
     @functools.wraps(fn)
-    def inner(*args: Any, **kwargs: Any) -> Any:
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
     return inner
@@ -47,7 +64,7 @@ def call_hook(
     return result
 
 
-def wrap_numpy(f: Callable[..., Any]) -> Callable[..., Any]:
+def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
     """
@@ -55,7 +72,7 @@ def wrap_numpy(f: Callable[..., Any]) -> Callable[..., Any]:
         return f
 
     @functools.wraps(f)
-    def wrap(*args: Any, **kwargs: Any) -> Any:
+    def wrap(*args: _P.args, **kwargs: _P.kwargs) -> pytree.PyTree:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )

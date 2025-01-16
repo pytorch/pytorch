@@ -278,8 +278,6 @@ class TestPublicBindings(TestCase):
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
             try:
-                # TODO: fix "torch/utils/model_dump/__main__.py"
-                # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
                 importlib.import_module(modname)
@@ -460,7 +458,7 @@ class TestPublicBindings(TestCase):
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         """

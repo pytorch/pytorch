@@ -209,6 +209,7 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=True,
             )
 
+    @inductor_config.patch({"enable_linear_binary_folding": True})
     def test_linear_binary_folding(self):
         @torch.no_grad()
         def test_linear_fusion(

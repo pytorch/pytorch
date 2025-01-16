@@ -61,7 +61,7 @@ RUN git config --global --add safe.directory "*"
 # NOTE: Need a better way to get this library as Ubuntu's package can be removed by the vender, or changed
 ###############################################################################
 RUN cd ~/ \
-  && curl -L -o ~/libgfortran-10-dev.deb http://ports.ubuntu.com/ubuntu-ports/pool/universe/g/gcc-10/libgfortran-10-dev_10.5.0-1ubuntu1_arm64.deb \
+  && curl -L -o ~/libgfortran-10-dev.deb http://ports.ubuntu.com/ubuntu-ports/pool/universe/g/gcc-10/libgfortran-10-dev_10.5.0-4ubuntu2_arm64.deb \
   && ar x ~/libgfortran-10-dev.deb \
   && tar --use-compress-program=unzstd -xvf data.tar.zst -C ~/ \
   && cp -f ~/usr/lib/gcc/aarch64-linux-gnu/10/libgfortran.a /opt/rh/devtoolset-10/root/usr/lib/gcc/aarch64-redhat-linux/10/

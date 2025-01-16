@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+# ruff: noqa: F841
 
 import os
 import sys
