@@ -110,7 +110,8 @@ class TestSerialization(TestCase):
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
-        input_tensor = torch.load(input_file)
+        # can't use weights_only when _use_new_zipfile_serialization=False
+        input_tensor = torch.load(input_file, weights_only=new_zipfile_serialization)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
