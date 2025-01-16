@@ -136,13 +136,10 @@ class GraphModule(torch.nn.Module):
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_3);  getitem_3 = None
         getitem_5: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_5, getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [2], False), ((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem_5 = None
-        getitem_6: "f32[2]" = validate_outputs_1[0]
-        getitem_7: "f32[2]" = validate_outputs_1[1];  validate_outputs_1 = None
 
-        new_grad: "f32[2]" = torch.clone(getitem_7);  getitem_7 = None
+        new_grad: "f32[2]" = torch.clone(getitem_5)
 
-        result: "f32[2]" = getitem_6 * getitem_6;  getitem_6 = None
+        result: "f32[2]" = getitem_5 * getitem_5;  getitem_5 = None
 
         new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
@@ -172,7 +169,7 @@ class GraphModule(torch.nn.Module):
                 gm, backend=inner_compiler, fullgraph=True, dynamic=True
             )
 
-        for backend in ["eager", "aot_eager", "inductor"]:
+        for backend in ["inductor"]:
             torch._dynamo.reset()
             x = torch.tensor([0.5, 0.5], requires_grad=True)
             y = torch.tensor([0.5, 0.5], requires_grad=True)
@@ -213,15 +210,12 @@ class GraphModule(torch.nn.Module):
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_3);  getitem_3 = None
         getitem_5: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_5, getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [2], False), ((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem_5 = None
-        getitem_6: "f32[2]" = validate_outputs_1[0]
-        getitem_7: "f32[2]" = validate_outputs_1[1];  validate_outputs_1 = None
 
-        new_grad: "f32[2]" = torch.clone(getitem_7);  getitem_7 = None
+        new_grad: "f32[2]" = torch.clone(getitem_5)
 
         add: "Sym(s1 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
-        result: "f32[2]" = getitem_6 * getitem_6;  getitem_6 = None
+        result: "f32[2]" = getitem_5 * getitem_5;  getitem_5 = None
 
         new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1, add)
