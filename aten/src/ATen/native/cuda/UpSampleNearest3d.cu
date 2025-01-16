@@ -55,7 +55,7 @@ __global__ void upsample_nearest3d_out_frame(
     float height_scale,
     float width_scale) {
 
-  int64_t dst_idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  int64_t dst_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
@@ -100,7 +100,7 @@ __global__ void upsample_nearest3d_backward_out_frame(
     float height_scale,
     float width_scale) {
 
-  int64_t dst_idx = ((int64_t)blockIdx.x) * blockDim.x + threadIdx.x;
+  int64_t dst_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
