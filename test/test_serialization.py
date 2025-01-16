@@ -596,7 +596,8 @@ class SerializationMixin:
 
         error_msg = r'Attempting to deserialize object on a CUDA device'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            _ = torch.load(buf)
+            # weights_only=False as serialized is in legacy format
+            _ = torch.load(buf, weights_only=False)
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_api_requirements(self):
