@@ -927,7 +927,7 @@ class TestFlexAttention(InductorTestCase):
                 v1,
             )
         else:
-            self._check_equal(golden_out1, ref_out1, compiled_out1)
+            self._check_out(golden_out1, ref_out1, compiled_out1)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # Second compilation with new dimensions
@@ -952,7 +952,7 @@ class TestFlexAttention(InductorTestCase):
                 v2,
             )
         else:
-            self._check_equal(golden_out2, ref_out2, compiled_out2)
+            self._check_out(golden_out2, ref_out2, compiled_out2)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # Third compilation with new dimensions
@@ -977,7 +977,7 @@ class TestFlexAttention(InductorTestCase):
                 v3,
             )
         else:
-            self._check_equal(golden_out3, ref_out3, compiled_out3)
+            self._check_out(golden_out3, ref_out3, compiled_out3)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
     def run_automatic_dynamic_test(
