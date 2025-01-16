@@ -62,12 +62,6 @@ on:
       github-token:
         required: true
         description: Github Token
-      conda-pytorchbot-token:
-        required: true
-        description: Conda PyTorchBot token
-      conda-pytorchbot-token-test:
-        required: true
-        description: Conda PyTorchBot token
 
 jobs:
   upload:
@@ -89,7 +83,6 @@ jobs:
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
-      ANACONDA_USER: pytorch
       BINARY_ENV_FILE: /tmp/env
       GITHUB_TOKEN: ${{ secrets.github-token }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -146,15 +139,7 @@ jobs:
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
-          # When running these on pull_request events these should be blank
-          CONDA_PYTORCHBOT_TOKEN: ${{ secrets.conda-pytorchbot-token }}
-          CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.conda-pytorchbot-token-test }}
           BUILD_NAME: ${{ inputs.build_name }}
         run: |
             set -ex
-            if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
-              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
-            else
-              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
-            fi
             bash .circleci/scripts/binary_upload.sh

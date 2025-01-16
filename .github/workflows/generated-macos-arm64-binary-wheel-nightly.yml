@@ -19,9 +19,7 @@ on:
   workflow_dispatch:
 
 env:
-  # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: macos-arm64-binary-wheel
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -147,8 +145,6 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -265,8 +261,6 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -383,8 +377,6 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -501,8 +493,6 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -619,6 +609,4 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
