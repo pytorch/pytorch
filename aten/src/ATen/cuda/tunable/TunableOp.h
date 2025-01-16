@@ -193,6 +193,7 @@ class TunableOp {
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       auto min_worst_ms = std::numeric_limits<double>::infinity();
+      auto min_stddev_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
 
@@ -310,14 +311,16 @@ class TunableOp {
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
         auto s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
-        if (s._mean < min_duration_ms && s._max < min_worst_ms) {
+        auto s_stddev = s.stddev();
+        if (s._mean < min_duration_ms && s._max < min_worst_ms && s_stddev < min_stddev_ms) {
           TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
                 " min ", s._min,
                 " max ", s._max,
                 " mean ", s._mean,
-                " std ", s.stddev());
+                " std ", s_stddev);
           min_duration_ms = s._mean;
           min_worst_ms = s._max;
+          min_stddev_ms = s_stddev;
           id_name = op_names_[i];
         }
       }
