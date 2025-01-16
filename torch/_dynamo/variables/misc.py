@@ -847,7 +847,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         return out
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         if self.proxy is None:
             unimplemented("proxy not set")
         return self.proxy
@@ -984,7 +984,7 @@ class GetAttrVariable(VariableTracker):
     def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr):
         return getattr(base_proxy, attr)
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
     def as_python_constant(self):
@@ -1311,7 +1311,7 @@ class NumpyVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         if config.trace_numpy and isinstance(self.value, type):
             # This handles numpy dtype attributes such as np.float32
             # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
@@ -1555,7 +1555,7 @@ class NumpyTypeInfoVariable(ConstantLikeVariable):
 class NumpyDTypeVariable(ConstantLikeVariable):
     _error_prefix = "np.dtype[...]"
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
         np.dtype() objects are serialized as strings, torch._numpy wrappers will normalize to the torch dtype.

@@ -646,7 +646,7 @@ class BuiltinVariable(VariableTracker):
     def as_python_constant(self):
         return self.fn
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         DTYPE = {
             bool: torch.bool,
             int: torch.int64,

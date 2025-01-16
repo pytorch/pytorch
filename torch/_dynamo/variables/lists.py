@@ -80,7 +80,7 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
@@ -285,7 +285,7 @@ class RangeVariable(BaseListVariable):
         else:
             return self.apply_index(index)
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.python_type()(*self._as_proxy())
 
     def unpack_var_sequence(self, tx=None):
@@ -655,7 +655,7 @@ class SizeVariable(TupleVariable):
     def python_type(self):
         return torch.Size
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         if self.proxy is not None:
             return self.proxy
 
@@ -816,7 +816,7 @@ class NamedTupleVariable(TupleVariable):
         # NamedTupleType(*iterable)
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         assert self.python_type() is not SizeVariable
         if self.is_structseq():
             # StructSequenceType(iterable)
@@ -927,7 +927,7 @@ class SliceVariable(BaseListVariable):
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return slice(*self._as_proxy())
 
     def python_type(self):
@@ -1088,7 +1088,7 @@ class RestrictedListSubclassVariable(ListVariable):
     def python_type(self):
         return self.user_cls
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):

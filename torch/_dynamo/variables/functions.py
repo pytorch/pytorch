@@ -17,10 +17,10 @@ from typing import (
     TYPE_CHECKING,
     TypeVar,
 )
-from typing_extensions import Never
 from unittest.mock import patch
 
 import torch
+from typing_extensions import Never
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
@@ -182,6 +182,63 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return self.fn
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
+
+    # def as_proxy(self, tx=None):
+    #     assert tx is not None
+    #     fn_tracer = torch._dynamo.output_graph.SubgraphTracer(
+    #         tx.output,
+    #         parent=tx.output.current_tracer,
+    #         source_target="user_defined_fn_arg",
+    #     )
+
+    #     # def _fn():
+    #     #     assert False, "Not supported yet"
+
+    #     from torch._dynamo.variables.higher_order_ops import speculate_subgraph
+    #     from torch._functorch.utils import user_fn_call_stub
+
+    #     fn_val = user_fn_call_stub
+
+    #     (fn_out, fn_treespec), fn_graph, fn_freevars = speculate_subgraph(
+    #         tx,
+    #         UserFunctionVariable(fn_val),
+    #         tuple(),
+    #         {},
+    #         "user_defined_fn_arg",
+    #         # source_target=_fn,
+    #         restore_side_effects=False,
+    #         tracer=fn_tracer,
+    #     )
+    #     print(
+    #         f"XXX fn_out:{fn_out} fn_treespec:{fn_treespec} fn_graph:{fn_graph} fn_freevars:{fn_freevars}"
+    #     )
+    #     fn_out_proxy = fn_out.as_proxy()
+    #     print(f"XXX fn_out_proxy:{fn_out_proxy}")
+    #     subgraph_example_value = (
+    #         fn_out_proxy
+    #         if fn_out_proxy is None
+    #         else fn_out_proxy.node.meta["example_value"]
+    #     )
+    #     print(f"XXX subgraph_example_value:{subgraph_example_value}")
+    #     subgraph_attr_name = tx.output.install_subgraph(
+    #         "user_defined_fn_body",
+    #         torch.fx.GraphModule(dict(tx.output.nn_modules), fn_graph),
+    #     )
+    #     print(f"XXX subgraph_attr_name:{subgraph_attr_name}")
+    #     node = tx.output.create_proxy(
+    #         "get_attr",
+    #         subgraph_attr_name,
+    #         (),
+    #         {},
+    #     )
+
+    #     from .builder import wrap_fx_proxy
+
+    #     return wrap_fx_proxy(
+    #         tx=tx,
+    #         proxy=node,
+    #         example_value=fn_val,
+    #     )
 
     def self_args(self):
         return []

@@ -38,3 +38,7 @@ def unwrap_dead_wrappers(args):
 
 
 argnums_t = Union[int, Tuple[int, ...]]
+
+
+def user_fn_call_stub():
+    return torch.tensor([])  # pass  # assert False, "Not supported yet"

@@ -35,7 +35,7 @@ class ComptimeVar:
     def __init__(self, v) -> None:
         self.__variable = v
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         """
         Returns an fx.Proxy (or tuple/list of fx.Proxy) representing
         this variable in the FX graph we are assembling to pass

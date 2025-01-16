@@ -14,12 +14,12 @@ import types
 import warnings
 import weakref
 from typing import Dict, Generic, List, TYPE_CHECKING
-from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
+from typing_extensions import is_typeddict
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -109,7 +109,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.value
 
     def __repr__(self) -> str:
@@ -597,7 +597,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     self.value,
-                    *proxy_args_kwargs(args, kwargs),
+                    *proxy_args_kwargs(args, kwargs, tx=tx),
                 ),
             )
 
@@ -1267,7 +1267,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             fields = {}
         self.fields = fields
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         from dataclasses import fields
 
         args = []

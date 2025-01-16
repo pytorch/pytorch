@@ -68,7 +68,7 @@ its type to `common_constant_types`.
         else:
             self.value = value
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.value
 
     def __repr__(self) -> str:
@@ -208,7 +208,7 @@ class EnumVariable(VariableTracker):
                     return cls(member, **options)
         unimplemented("Enum variable is constructed with non constant values")
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value

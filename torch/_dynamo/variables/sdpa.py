@@ -45,7 +45,7 @@ class SDPAParamsVariable(VariableTracker):
         codegen.foreach(self.param_vars)
         codegen.extend_output(create_call_function(len(self.param_vars), False))
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:

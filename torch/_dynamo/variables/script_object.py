@@ -41,7 +41,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         self.proxy.node.meta["example_value"] = value
         self.source = source
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     @_raise_hard_error_if_graph_break(

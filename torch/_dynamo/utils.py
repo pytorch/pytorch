@@ -60,7 +60,6 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -89,6 +88,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
+from typing_extensions import Literal, TypeIs
 
 
 try:
@@ -583,15 +583,13 @@ def dynamo_timed(
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
-    ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> Tuple[List[str], List[object]]:
-    ...
+) -> Tuple[List[str], List[object]]: ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -791,20 +789,17 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
-    ...
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]: ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeIs[T]:
-    ...
+) -> TypeIs[T]: ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool:
-    ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
 def istype(obj, allowed_types):
@@ -969,10 +964,10 @@ def make_cell(val=None):
     return f.__closure__[0]
 
 
-def proxy_args_kwargs(args, kwargs):
+def proxy_args_kwargs(args, kwargs, tx: Optional["InstructionTranslator"] = None):
     try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
-        proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        proxy_args = tuple(arg.as_proxy(tx=tx) for arg in args)
+        proxy_kwargs = {key: arg.as_proxy(tx=tx) for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
         from .exc import unimplemented
@@ -1193,15 +1188,15 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
-        else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
-        else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        non_compliant_ops=(
+            list(c.non_compliant_ops) if c.non_compliant_ops is not None else None
+        ),
+        compliant_custom_ops=(
+            list(c.compliant_custom_ops) if c.compliant_custom_ops is not None else None
+        ),
+        restart_reasons=(
+            list(c.restart_reasons) if c.restart_reasons is not None else None
+        ),
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -2789,9 +2784,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
+            (
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+            )
             for arg in args
         )
 

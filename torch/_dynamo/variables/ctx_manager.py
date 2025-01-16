@@ -1128,7 +1128,7 @@ class StreamVariable(VariableTracker):
         else:
             unimplemented(self.device + " stream method " + name + " unsupported")
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def reconstruct(self, codegen):
@@ -1180,7 +1180,7 @@ class EventVariable(VariableTracker):
         else:
             unimplemented(f"event method {name} unsupported")
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def reconstruct(self, codegen):

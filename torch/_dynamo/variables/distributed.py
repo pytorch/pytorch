@@ -375,7 +375,7 @@ class BackwardHookVariable(VariableTracker):
         self.user_hooks = user_hooks
         self.user_pre_hooks = user_pre_hooks
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def call_method(

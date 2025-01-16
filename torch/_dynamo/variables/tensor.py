@@ -176,7 +176,7 @@ class TensorVariable(VariableTracker):
         # TODO: strip off fake tensor from repr here
         return repr(self.proxy.node.meta["example_value"])
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def python_type(self):
@@ -1185,7 +1185,7 @@ class SymNodeVariable(VariableTracker):
         else:
             return type(self.sym_num)
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.proxy
 
     def as_tensor(self, tx, dtype):

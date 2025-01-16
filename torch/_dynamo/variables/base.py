@@ -339,7 +339,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         raise NotImplementedError(str(self))
 
     def maybe_fx_node(self):

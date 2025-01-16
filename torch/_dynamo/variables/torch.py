@@ -195,7 +195,7 @@ class BaseTorchVariable(VariableTracker):
             codegen.setup_globally_cached(unique_var_name, self.value)
         )
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return self.value
 
     def as_python_constant(self):

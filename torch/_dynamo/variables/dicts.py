@@ -158,7 +158,7 @@ class ConstDictVariable(VariableTracker):
         self.original_items = items.copy()
         self.user_cls = user_cls
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
     def debug_repr(self):
@@ -476,7 +476,7 @@ class SetVariable(ConstDictVariable):
         # Variable to fill in he keys of the dictinary
         return ConstantVariable.create(None)
 
-    def as_proxy(self):
+    def as_proxy(self, tx=None):
         return {k.vt.as_proxy() for k in self.set_items}
 
     def python_type(self):

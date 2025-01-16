@@ -3294,6 +3294,7 @@ MOD_INLINELIST = [
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
+    "torch._functorch.utils",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.invoke_subgraph",
