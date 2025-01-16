@@ -113,12 +113,12 @@ partition create_sdpa_graph_partition(
   matmul_qk.set_attr<bool>(op::attr::transpose_b, true);
 
   logical_tensor scaled_qk_out{lt_id++, dtype};
-  op scale_div{
+  op scale_mul{
       op_id++,
-      op::kind::Divide,
+      op::kind::Multiply,
       {matmul_qk_out, params.scale},
       {scaled_qk_out},
-      "scale_div"};
+      "scale_mul"};
 
   std::optional<op> mask_add;
   std::optional<logical_tensor> masked_qk_out;
@@ -151,7 +151,7 @@ partition create_sdpa_graph_partition(
   constexpr auto ekind = dnnl::engine::kind::gpu;
   dnnl::graph::graph g(ekind);
   g.add_op(matmul_qk);
-  g.add_op(scale_div);
+  g.add_op(scale_mul);
   if (mask_add.has_value()) {
     g.add_op(mask_add.value());
   }
@@ -186,7 +186,7 @@ void gpu_float_sdpa(
       {c10::kXPU, c10::xpu::current_device()});
   auto strm = GpuStreamManager::Instance().get_stream();
 
-  Tensor softmax_scale1 = at::full({}, 1 / softmax_scale, query.options());
+  Tensor softmax_scale1 = at::full({}, softmax_scale, query.options());
 
   const data_type logical_tensor_dtype =
       query.scalar_type() == c10::ScalarType::Float      ? data_type::f32
