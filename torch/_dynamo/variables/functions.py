@@ -1277,6 +1277,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         return configs
 
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+        if not result.is_python_constant():
+            self.raise_unsupported(
+                "@triton.heuristics must return constant values because configs can only contain constant values."
+            )
+
+        return result.guard_as_python_constant()
+
     # We need to override call_getitem here so that we can add the source in the case
     # where we call the triton kernel with a grid
     def call_getitem(
@@ -1290,7 +1298,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
             self.raise_unsupported(
                 "Triton kernels should be called with only a single grid"
             )
-
         return type(variable)(
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
