@@ -85,8 +85,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
-    GeneratorFunctionVariable,
-    GeneratorObjectVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -932,8 +932,8 @@ class InstructionTranslatorBase(
         """
         Redirect the call to the generator "call_function"
         """
-        if not isinstance(fn, GeneratorFunctionVariable):
-            fn = GeneratorFunctionVariable(fn)
+        if not isinstance(fn, LocalGeneratorFunctionVariable):
+            fn = LocalGeneratorFunctionVariable(fn)
         return fn.call_function(self, args, kwargs)
 
     def inline_user_function_return(self, fn, args, kwargs):
@@ -3086,7 +3086,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if (
             len(self.stack)
             and (tos := self.stack[-1])
-            and isinstance(tos, GeneratorObjectVariable)
+            and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
                 tos.force_unpack_var_sequence(self),
@@ -3198,8 +3198,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             (
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
-                GeneratorFunctionVariable,
-                GeneratorObjectVariable,
+                LocalGeneratorFunctionVariable,
+                LocalGeneratorObjectVariable,
             ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
@@ -3267,7 +3267,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         else:
             # need the line below to make MyPy happy
-            assert not isinstance(func, GeneratorObjectVariable)
+            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -3531,7 +3531,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, (ListIteratorVariable, GeneratorObjectVariable)) or (
+        if isinstance(tos, (ListIteratorVariable, LocalGeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
