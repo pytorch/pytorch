@@ -4,7 +4,6 @@ import csv
 import functools
 import json
 import os
-import re
 import timeit
 from collections import namedtuple
 
