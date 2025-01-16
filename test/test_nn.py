@@ -4969,54 +4969,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         run_test(input, grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_batchnorm_nhwc_miopen(self):
-        def run_test(input, grad_output):
-            c = input.size(1)
-            mod = nn.BatchNorm2d(c).cuda().float()
-            mod.weight.data.uniform_()
-            mod.bias.data.uniform_()
-            ref_input = input.detach().clone(memory_format=torch.preserve_format).requires_grad_(True)
-            ref_grad = grad.detach().clone(memory_format=torch.preserve_format)
-            ref_mod = nn.BatchNorm2d(c).cuda().float()
-            ref_mod.load_state_dict(mod.state_dict())
-            out = mod(input)
-            out.backward(grad_output)
-            with torch.backends.cudnn.flags(enabled=False): # force to use native nhwc batchnorm
-                ref_out = ref_mod(ref_input)
-                ref_out.backward(ref_grad)
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous(memory_format=torch.channels_last))
-            self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
-            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
-
-        # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-        PYTORCH_MIOPEN_SUGGEST_NHWC = "PYTORCH_MIOPEN_SUGGEST_NHWC"
-        prev_val = os.getenv(PYTORCH_MIOPEN_SUGGEST_NHWC)
-        try:
-            os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = "1"
-            input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-            input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-
-            grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
-            grad = grad.contiguous(memory_format=torch.channels_last)
-            run_test(input, grad)
-            # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
-            # not channels_last
-            input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-            input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-            grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
-            grad = grad.permute(0, 2, 1, 3)
-            run_test(input, grad)
-        finally:
-            if prev_val is None:
-                del os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC]
-            else:
-                os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = prev_val
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_cudnn_half(self):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
@@ -5136,6 +5088,96 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out1 = model(inp1)
             out2 = model(inp2)
             self.assertEqual(out1, out2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @parametrize_test("mixed", [False, True])
+    @parametrize_test("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_batchnorm_nhwc_eval(self, mixed, dtype):
+        if mixed and dtype == torch.float:
+            self.skipTest("mixed precision is useless for float32")
+        if TEST_WITH_ROCM and not mixed and dtype in (torch.half, torch.bfloat16):
+            self.skipTest("pure mode not supported for bf16/fp16 on ROCm")
+        if TEST_WITH_ROCM:
+            self.skipTest("MIOpen SolverNotFound for FP32/Fp16/BF16 NHWC batchnorm SWDEV-509640")
+
+        (N, C, H, W) = 2, 64, 50, 50
+        model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        model = model.eval().cuda()
+        if not mixed:
+            model = model.to(dtype)
+        inp1 = torch.randn(N, C, H, W, device=torch.device('cuda'), dtype=dtype)
+        inp2 = inp1.contiguous(memory_format=torch.channels_last)
+        out1 = model(inp1)
+        out2 = model(inp2)
+        self.assertEqual(out1, out2)
+
+    @parametrize_test("layout", ["NCHW", "NHWC"])
+    @parametrize_test("mixed", [False, True])
+    @parametrize_test("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_batchnorm(self, layout, mixed, dtype):
+        def _batchnorm2d_helper(dtype, memory_format, mixed: bool):
+            def _run_test(input, grad_output, mixed: bool):
+                c = input.size(1)
+                mod = nn.BatchNorm2d(c).cuda()
+                ref_mod = nn.BatchNorm2d(c).cuda()
+                if not mixed:
+                    mod = mod.to(dtype=input.dtype)
+                    ref_mod = ref_mod.to(dtype=input.dtype)
+
+                mod.weight.data.uniform_()
+                mod.bias.data.uniform_()
+
+                ref_input = input.detach().clone(memory_format=torch.preserve_format).requires_grad_(True)
+                ref_grad = grad.detach().clone(memory_format=torch.preserve_format)
+                ref_mod.load_state_dict(mod.state_dict())
+
+                out = mod(input)
+                out.backward(grad_output)
+                with torch.backends.cudnn.flags(enabled=False):  # force to use native nhwc batchnorm
+                    ref_out = ref_mod(ref_input)
+                    ref_out.backward(ref_grad)
+                self.assertTrue(out.is_contiguous(memory_format=memory_format))
+                self.assertTrue(ref_out.is_contiguous(memory_format=memory_format))
+                self.assertEqual(out, ref_out)
+                self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+                self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
+                self.assertEqual(mod.running_mean, ref_mod.running_mean)
+                self.assertEqual(mod.running_var, ref_mod.running_var)
+                self.assertEqual(input.grad, ref_input.grad)
+
+            size = (4, 8, 2, 2)
+            input = torch.randint(1, 10, size=size, dtype=dtype, device="cuda")
+            input = input.contiguous(memory_format=memory_format).detach().requires_grad_()
+            grad = torch.randint(1, 10, size=size, dtype=dtype, device="cuda")
+            grad = grad.contiguous(memory_format=memory_format)
+            _run_test(input, grad, mixed)
+            # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
+            # not channels_last
+            input = torch.randint(1, 10, (2, 8, 8, 1), dtype=dtype, device="cuda")
+            input = input.contiguous(memory_format=memory_format).detach().requires_grad_()
+            grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=dtype, device="cuda")
+            grad = grad.permute(0, 2, 1, 3)
+            _run_test(input, grad, mixed)
+
+        if mixed and dtype == torch.float:
+            self.skipTest("mixed precision is useless for float32")
+        if TEST_WITH_ROCM and not mixed and dtype in (torch.half, torch.bfloat16):
+            self.skipTest("pure mode not supported for bf16/fp16 on ROCm")
+        if TEST_WITH_ROCM and layout == "NCHW" and dtype == torch.bfloat16 and mixed:
+            self.skipTest("MIOpen tolerance issue for NCHW BF16 mixed batchnorm SWDEV-507600")
+
+        memory_format = torch.contiguous_format if layout == "NCHW" else torch.channels_last
+        # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+        PYTORCH_MIOPEN_SUGGEST_NHWC = "PYTORCH_MIOPEN_SUGGEST_NHWC"
+        prev_val = os.getenv(PYTORCH_MIOPEN_SUGGEST_NHWC)
+        try:
+            os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = "1"
+            _batchnorm2d_helper(dtype, memory_format=memory_format, mixed=mixed)
+        finally:
+            if prev_val is None:
+                del os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC]
+            else:
+                os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = prev_val
 
     def test_batchnorm_load_state_dict(self):
         bn = torch.nn.BatchNorm2d(3)
@@ -8308,64 +8350,6 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
-    def batchnorm2d_miopen(self, dtype, memory_format):
-        def run_test(input, grad_output):
-            c = input.size(1)
-            mod = nn.BatchNorm2d(c).cuda().to(dtype=input.dtype)
-            mod.weight.data.uniform_()
-            mod.bias.data.uniform_()
-            ref_input = input.detach().clone(memory_format=torch.preserve_format).requires_grad_(True)
-            ref_grad = grad.detach().clone(memory_format=torch.preserve_format)
-            ref_mod = nn.BatchNorm2d(c).cuda().to(dtype=input.dtype)
-            ref_mod.load_state_dict(mod.state_dict())
-            out = mod(input)
-            out.backward(grad_output)
-            with torch.backends.cudnn.flags(enabled=False): # force to use native nhwc batchnorm
-                ref_out = ref_mod(ref_input)
-                ref_out.backward(ref_grad)
-            self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertTrue(ref_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
-            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
-            self.assertEqual(mod.running_mean, ref_mod.running_mean)
-            self.assertEqual(mod.running_var, ref_mod.running_var)
-            self.assertEqual(input.grad, ref_input.grad)
-
-        size = (4, 8, 2, 2)
-        input = torch.randint(1, 10, size=size, dtype=dtype, device="cuda")
-        input = input.contiguous(memory_format=memory_format).detach().requires_grad_()
-        grad = torch.randint(1, 10, size=size, dtype=dtype, device="cuda")
-        grad = grad.contiguous(memory_format=memory_format)
-        run_test(input, grad)
-        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
-        # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=dtype, device="cuda")
-        input = input.contiguous(memory_format=memory_format).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=dtype, device="cuda")
-        grad = grad.permute(0, 2, 1, 3)
-        run_test(input, grad)
-
-
-    @onlyCUDA
-    @dtypes(torch.float)
-    def test_batchnorm_nhwc_miopen(self, dtype):
-        # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-        PYTORCH_MIOPEN_SUGGEST_NHWC = "PYTORCH_MIOPEN_SUGGEST_NHWC"
-        prev_val = os.getenv(PYTORCH_MIOPEN_SUGGEST_NHWC)
-        try:
-            os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = "1"
-            self.batchnorm2d_miopen(dtype, torch.channels_last)
-        finally:
-            if prev_val is None:
-                del os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC]
-            else:
-                os.environ[PYTORCH_MIOPEN_SUGGEST_NHWC] = prev_val
-
-    @onlyCUDA
-    @dtypes(torch.float)
-    def test_batchnorm_nchw_miopen(self, dtype):
-        self.batchnorm2d_miopen(dtype, torch.contiguous_format)
 
     @onlyCUDA
     @dtypes(torch.float, torch.half)
