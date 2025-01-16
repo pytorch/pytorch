@@ -64,9 +64,12 @@ class MPSBasicTests(TestCase):
     test_remove_no_ops = CommonTemplate.test_remove_no_ops
     test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
     test_rsqrt = CommonTemplate.test_rsqrt
+    test_scalar_output = CommonTemplate.test_scalar_output
+    test_setitem_with_int_parameter = CommonTemplate.test_setitem_with_int_parameter
     test_signbit = CommonTemplate.test_signbit
     test_silu = CommonTemplate.test_silu
     test_slice_scatter4 = CommonTemplate.test_slice_scatter4
+    test_sort = CommonTemplate.test_sort
     test_tanh = CommonTemplate.test_tanh
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_view_on_aliased = CommonTemplate.test_view_on_aliased
