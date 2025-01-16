@@ -83,14 +83,6 @@ def create_block_mask_test(score_mod, query, key):
     return block_mask
 
 
-test_dtypes = (
-    [torch.float16, torch.bfloat16, torch.float32]
-    if PLATFORM_SUPPORTS_BF16
-    else [torch.float16, torch.float32]
-)
-
-test_dtypes_fast = [torch.float16]
-
 test_page_sizes = [64, 128, 256]
 
 
@@ -1487,7 +1479,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         score_mod = _generate_windowed(1000)
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
+        block_mask = create_block_mask(mask_mod, 1, 1, 8, S, device=self.device)
         attention = functools.partial(
             flex_attention, block_mask=block_mask, score_mod=score_mod
         )
