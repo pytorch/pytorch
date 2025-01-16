@@ -941,12 +941,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return final_tmp_name
 
     def val_to_arg_str(self, val, type_=None) -> str:
-        if isinstance(type_, torch.OptionalType) and isinstance(
-            element_type := type_.getElementType(), torch.TensorType
+        if (
+            val is not None
+            and isinstance(type_, torch.OptionalType)
+            and isinstance(type_.getElementType(), torch.TensorType)
         ):
             # type_ is Optional[Tensor]
             # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-            base_handle = self.val_to_arg_str(val, element_type)
+            base_handle = self.val_to_arg_str(val, torch.TensorType)
             if config.aot_inductor.use_minimal_arrayref_interface:
                 if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
                     base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
