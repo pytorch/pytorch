@@ -3227,21 +3227,19 @@ class CompiledAutograd0(torch.nn.Module):
         aot0_add_3 = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
 
         make_subclass = torch__dynamo_compiled_autograd_make_subclass(aot0_add_2, aot0_add_3);  aot0_add_2 = aot0_add_3 = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([make_subclass], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], True)]);  make_subclass = None
-        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
 
-        getitem_14 = hooks[1];  hooks = None
-        call_backward = torch__dynamo_external_utils_call_backward(getitem_14, (), getitem_13);  getitem_14 = getitem_13 = None
-        getitem_17 = call_backward[0]
-        getitem_18 = call_backward[1];  call_backward = None
-        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_17, getitem_18], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_17 = getitem_18 = None
-        getitem_20 = validate_outputs_3[0]
+        getitem_13 = hooks[1];  hooks = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_13, (), make_subclass);  getitem_13 = make_subclass = None
+        getitem_16 = call_backward[0]
+        getitem_17 = call_backward[1];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16, getitem_17], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_16 = getitem_17 = None
+        getitem_19 = validate_outputs_2[0]
 
-        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_20);  getitem_4 = getitem_20 = accumulate_grad__1 = None
+        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_19);  getitem_4 = getitem_19 = accumulate_grad__1 = None
 
-        getitem_21 = validate_outputs_3[1];  validate_outputs_3 = None
+        getitem_20 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_21);  getitem_3 = getitem_21 = accumulate_grad_ = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_20);  getitem_3 = getitem_20 = accumulate_grad_ = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
