@@ -282,10 +282,10 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 #ifdef FBCODE_CAFFE2
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
-      std::is_same_v<T, int64_t> ||
-      std::is_same_v<T, double> ||
-      std::is_same_v<T, float> ||
-      std::is_same_v<T, at::BFloat16>) && range >= 1ULL << 32)
+      std::is_same_v<scalar_t, int64_t> ||
+      std::is_same_v<scalar_t, double> ||
+      std::is_same_v<scalar_t, float> ||
+      std::is_same_v<scalar_t, at::BFloat16>) && range >= 1ULL << 32)
     {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {

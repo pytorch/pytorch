@@ -556,7 +556,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/',
+    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',
