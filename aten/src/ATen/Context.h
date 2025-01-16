@@ -337,6 +337,8 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
+  bool allowFP16AccumulationCuBLAS() const;
+  void setAllowFP16AccumulationCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -418,6 +420,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
+  bool allow_fp16_accumulation_cublas = false;
   bool enabled_mkldnn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
@@ -484,22 +487,8 @@ inline DeprecatedTypeProperties& MPS(ScalarType s) {
       Backend::MPS, s);
 }
 
-// Note [at::hasXXX() vs. at::globalContext().hasXXX()]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//
-// The purpose of `at::hasXXX()` is to check if device XXX is available at
-// runtime. In contrast, `at::globalContext().hasXXX()` determines whether
-// support for device XXX was included in the PyTorch build (enabled at compile
-// time) or if a device XXX extension has already been registered with PyTorch.
-//
-// `at::globalContext().hasXXX()` is often used in functions like
-// `getAccelerator()` instead of `at::hasXXX()` to avoid initializing the
-// runtime for device XXX (which can poison child processes while detecting the
-// current accelerator).
-
 inline bool hasCUDA() {
-  return globalContext().hasCUDA() &&
-      (detail::getCUDAHooks().deviceCount() > 0);
+  return globalContext().hasCUDA();
 }
 
 inline bool hasMTIA() {
@@ -527,7 +516,7 @@ inline bool hasMAIA() {
 }
 
 inline bool hasXPU() {
-  return globalContext().hasXPU() && (detail::getXPUHooks().deviceCount() > 0);
+  return globalContext().hasXPU();
 }
 
 inline bool hasHPU() {
