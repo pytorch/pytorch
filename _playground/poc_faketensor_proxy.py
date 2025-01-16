@@ -71,8 +71,8 @@ class SpecialTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        # Real
-        real_tensor_args, real_tensor_kwargs = pytree.tree_map_only(
+        # Compute real
+        real_args, real_kwargs = pytree.tree_map_only(
             SpecialTensor, lambda x: x.real_tensor, (args, kwargs)
         )
 
@@ -85,26 +85,25 @@ class SpecialTensor(torch.Tensor):
             )
             return pytree.tree_unflatten(args, spec)
 
-        real_tensor_args = eval_args(real_tensor_args, shape_env.var_to_val)
-        real_out = func(*real_tensor_args, **real_tensor_kwargs)
+        real_args = eval_args(real_args, shape_env.var_to_val)
+        real_out = func(*real_args, **real_kwargs)
         real_out_flat, spec = pytree.tree_flatten(real_out)
 
-        # Fake
-        fake_tensor_args, fake_tensor_kwargs = pytree.tree_map_only(
+        # Compute fake
+        fake_args, fake_kwargs = pytree.tree_map_only(
             SpecialTensor, lambda x: x.fake_tensor, (args, kwargs)
         )
-        fake_out = func(*fake_tensor_args, **fake_tensor_kwargs)
+        fake_out = func(*fake_args, **fake_kwargs)
         fake_out_flat, spec = pytree.tree_flatten(fake_out)
 
-        # out_flat = [SpecialTensor(r, f) for r, f in zip(real_out_flat, fake_out_flat)]
-        out_flat_new = []
-        for r, f in zip(real_out_flat, fake_out_flat):
+        # Combine outputs into a new SpecialTensor
+        def fn(r, f):
             if isinstance(r, torch.Tensor) and isinstance(f, FakeTensor):
-                out_flat_new.append(SpecialTensor(r, f))
+                return SpecialTensor(r, f)
             else:
-                out_flat_new.append(r)
-        out_flat = out_flat_new
+                return r
 
+        out_flat = pytree.tree_map(fn, real_out_flat, fake_out_flat)
         out = pytree.tree_unflatten(out_flat, spec)
 
         return return_and_correct_aliasing(func, args, kwargs, out)
