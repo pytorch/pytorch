@@ -12361,6 +12361,10 @@ def copy_tests(
 
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
+    # Special case convenience routine
+    if hasattr(my_cls, "is_dtype_supported"):
+        other_cls.is_dtype_supported = my_cls.is_dtype_supported
+
 
 if HAS_CPU:
 
