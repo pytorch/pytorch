@@ -105,27 +105,34 @@ using Cast = cutlass::epilogue::fusion::Sm90Compute<
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
-template <bool PingPong, bool FastAccum>
+template <bool LargeTile, bool FastAccum>
 struct Schedule;
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/false> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/false> {
   using type = cutlass::gemm::KernelTmaWarpSpecialized;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/false> {
-  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/false> {
+  // For a 128x128x128 tile with fastAccum = false, using
+  // pingpong schedule will lead to spilling, and WarpSpecialized w/o pingpong
+  // is slow
+  using type = cutlass::gemm::KernelTmaWarpSpecializedCooperative;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecializedCooperative;
 };
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 int ceildiv(int a, int b) {
@@ -140,7 +147,6 @@ int round_up_to_nearest_multiple(int a, int b) {
 template <
     typename TileShape,
     typename ClusterShape,
-    typename PingPong,
     typename Transposed,
     typename FastAccum,
     typename DtypeA,
@@ -226,6 +232,8 @@ void f8f8bf16_rowwise_impl(
           Bias,
           AccumScale>>;
 
+  constexpr bool large_tile = std::is_same_v<TileShape, cute::Shape<cute::_128, cute::_128, cute::_128>>;
+
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
           ArchTag,
@@ -241,7 +249,7 @@ void f8f8bf16_rowwise_impl(
           DtypeOutput,
           LayoutOutput,
           AlignmentOutput,
-          cutlass::epilogue::TmaWarpSpecialized,
+          typename Schedule<large_tile, FastAccum::value>::epilogue_type,
           EpilogueEVT>::CollectiveOp;
 
   using CollectiveMainloop =
@@ -259,7 +267,7 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          typename Schedule<PingPong::value, FastAccum::value>::type>::
+          typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
@@ -370,13 +378,11 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }
