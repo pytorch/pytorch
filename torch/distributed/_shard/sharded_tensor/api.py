@@ -8,12 +8,13 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Callable, cast, Dict, List, Optional, Sequence, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch._utils import _get_device_module
 from torch.distributed import distributed_c10d, rpc
 from torch.distributed._shard._utils import DEPRECATE_MSG
 from torch.distributed._shard.sharding_spec._internals import (
@@ -370,8 +371,18 @@ class ShardedTensor(ShardedTensorBase):
         Return the preferred device to be used when creating tensors for collectives.
         This method takes into account the associated process group
         """
-        if dist.get_backend(self._process_group) == dist.Backend.NCCL:
+        backend = dist.get_backend(self._process_group)
+        if backend == dist.Backend.NCCL:
             return torch.device(torch.cuda.current_device())
+        elif backend == dist.Backend.GLOO:
+            return torch.device("cpu")
+        else:
+            backend_config = dist.BackendConfig(backend)
+            for device, backend_str in backend_config.get_device_backend_map().items():
+                if backend_str == backend and device != "cpu":
+                    return torch.device(
+                        device, _get_device_module(device).current_device()
+                    )
         return torch.device("cpu")
 
     def gather(  # type: ignore[override]
@@ -419,7 +430,7 @@ class ShardedTensor(ShardedTensorBase):
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = {}
+        shard_placement: Dict[ShardMetadata, tuple[int, int]] = {}
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()

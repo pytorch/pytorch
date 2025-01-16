@@ -67,14 +67,14 @@ class MetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
-    def set(self, metric: str, value: Any) -> None:
+    def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
         """
         Set a metric to a given value. Raises if the metric has been assigned previously
         in the current context.
         """
         if self._level == 0:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
-        if metric in self._metrics:
+        if metric in self._metrics and not overwrite:
             raise RuntimeError(
                 f"Metric '{metric}' has already been set in the current context"
             )
