@@ -416,7 +416,7 @@ enable_trace_contextlib = True
 
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
-enable_faithful_generator_behavior = True
+enable_faithful_generator_behavior = False
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
