@@ -18,7 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
+from ..utils import _align, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -126,23 +126,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
 
+    def get_device_include(self):
+        if V.graph.aot_mode:
+            return f"#include <torch/csrc/inductor/aoti_include/{self.device}.h>"
+        return f"#include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>"
+
     def write_header(self):
         if V.graph.is_const_graph:
             # We do not write header for constant graph, it will be written by main module.
             return
 
-        if V.graph.aot_mode:
-            self.header.splice(
-                """
-                #include <torch/csrc/inductor/aoti_runtime/interface.h>
-                #include <torch/csrc/inductor/aoti_runtime/model.h>
-                """
-            )
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
-        else:
+        if not V.graph.aot_mode:
             self.header.splice(
                 """
                 import torch
@@ -150,61 +144,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                #include <optional>
-                #include <Python.h>
-
-                #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
-                namespace py = pybind11;
-
-                class RAIIPyObject {
-                public:
-                    RAIIPyObject() : obj_(nullptr) {}
-                    RAIIPyObject(PyObject* obj) : obj_(obj) {}
-                    ~RAIIPyObject() {
-                        Py_XDECREF(obj_);
-                    }
-                    RAIIPyObject& operator=(const RAIIPyObject& other) {
-                        if (this != &other) {
-                            Py_XDECREF(obj_);
-                            obj_ = other.obj_;
-                            Py_XINCREF(obj_);
-                        }
-                        return *this;
-                    }
-                    operator PyObject*() {
-                        return obj_;
-                    }
-                    PyObject* get() {
-                        return obj_;
-                    }
-                private:
-                    PyObject* obj_;
-                };
-
-                #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
-                #include <torch/csrc/inductor/aoti_runtime/utils.h>
-                using namespace torch::aot_inductor;
                 """
             )
 
-        self.header.splice(
-            f"""
-            #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
-            #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
-            #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-            #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
+        self.header.splice(self.get_device_include())
 
-            #include <c10/util/generic_math.h>
-            typedef at::Half half;
-            typedef at::BFloat16 bfloat16;
+        if V.graph.aot_mode:
+            with open(
+                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
+            ) as f:
+                self.header.splice(f.read())
 
-            // Round up to the nearest multiple of {ALIGN_BYTES}
-            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
-              return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
-            }}
-            """
-        )
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
@@ -1517,8 +1467,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return final_tmp_name
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
+        """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
+        handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
     def codegen_multi_output(self, name, value):

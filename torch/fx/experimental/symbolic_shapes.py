@@ -3376,7 +3376,7 @@ class ShapeEnv:
     def allow_complex_guards_as_runtime_asserts(self) -> bool:
         return self.settings.allow_complex_guards_as_runtime_asserts
 
-    def jsonify_metadata(self) -> str:
+    def _jsonify_metadata(self) -> str:
         return json.dumps(
             {
                 "var_to_val": {str(k): str(v) for k, v in self.var_to_val.items()},
