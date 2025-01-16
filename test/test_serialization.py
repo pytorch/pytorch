@@ -876,14 +876,14 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
-    @parametrize('weights_only', (True, False))
+    @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
         def test(f_new, f_old):
             torch.save(x, f_new, _use_new_zipfile_serialization=True)
             f_new.seek(0)
-            x_new_load = torch.load(f_new)
+            x_new_load = torch.load(f_new, weights_only=weights_only)
             self.assertEqual(x, x_new_load)
 
             torch.save(x, f_old, _use_new_zipfile_serialization=False)
