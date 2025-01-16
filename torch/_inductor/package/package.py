@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, IO, List, Optional, Union
 
 import torch
 import torch._inductor
@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
+from torch.types import FileLike
 
 from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
@@ -23,8 +24,8 @@ log = logging.getLogger(__name__)
 
 
 class PT2ArchiveWriter:
-    def __init__(self, archive_path: Union[str, io.BytesIO]) -> None:
-        self.archive_path: Union[str, io.BytesIO] = archive_path
+    def __init__(self, archive_path: FileLike) -> None:
+        self.archive_path: FileLike = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
     def __enter__(self) -> "PT2ArchiveWriter":
@@ -158,9 +159,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 
 def package_aoti(
-    archive_file: Union[str, io.BytesIO],
+    archive_file: FileLike,
     aoti_files: Union[List[str], Dict[str, List[str]]],
-) -> Union[str, io.BytesIO]:
+) -> FileLike:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
 
@@ -179,8 +180,9 @@ def package_aoti(
         "files. You can get this list of files through calling "
         "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
     )
-    assert isinstance(archive_file, io.BytesIO) or (
-        isinstance(archive_file, str) and archive_file.endswith(".pt2")
+    assert isinstance(archive_file, (io.IOBase, IO)) or (
+        isinstance(archive_file, (str, os.PathLike))
+        and os.fspath(archive_file).endswith(".pt2")
     ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
 
     # Save using the PT2 packaging format
@@ -222,7 +224,7 @@ def package_aoti(
                     file,
                 )
 
-    if isinstance(archive_file, io.BytesIO):
+    if isinstance(archive_file, io.IOBase):
         archive_file.seek(0)
     return archive_file
 
@@ -269,12 +271,12 @@ class AOTICompiledModel:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
 
 
-def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
-    assert isinstance(path, io.BytesIO) or (
-        isinstance(path, str) and path.endswith(".pt2")
+def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+    assert isinstance(path, (io.IOBase, IO)) or (
+        isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")
     ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
 
-    if isinstance(path, io.BytesIO):
+    if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             # TODO(angelayi): We shouldn't need to do this -- miniz should
             # handle reading the buffer. This is just a temporary workaround

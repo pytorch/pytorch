@@ -247,7 +247,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
 
 def _write_item(
-    stream: io.IOBase,
+    stream: IO[bytes],
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
@@ -260,7 +260,7 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, cast(IO[bytes], stream))
+        torch.save(data, stream)
     length = stream.tell() - offset
 
     return WriteResult(
