@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-from typing import cast, Dict, Optional, Tuple
+from typing import cast, Dict, Optional
 
 import torch
 import torch._prims_common as utils
@@ -77,7 +77,7 @@ def loss_parallel():
 
 # Currently only needs to support one dimensional DeviceMesh; in general return
 # the mesh_dim with placements[mesh_dim].is_shard(dim)
-def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> int:
+def _find_all_reduce_mesh_dim(placements: tuple[Placement, ...], dim: int) -> int:
     if not len(placements) == 1:
         raise ValueError(
             "Currently loss_parallel() only supports input on one-dimensional DeviceMesh."
@@ -90,7 +90,7 @@ def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> in
 
 
 def _cast_to_dtensor(
-    tensor, placements: Tuple[Placement, ...], mesh: DeviceMesh
+    tensor, placements: tuple[Placement, ...], mesh: DeviceMesh
 ) -> DTensor:
     if isinstance(tensor, DTensor):
         if tensor.placements == placements:
@@ -107,7 +107,7 @@ def _cast_to_dtensor(
 
 def _propagate_tensor_meta(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
@@ -153,7 +153,7 @@ def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
 
 def _log_softmax_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
@@ -184,7 +184,7 @@ def _log_softmax_handler(
 # _log_softmax_backward_handler does not actually do any computation.
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
@@ -205,7 +205,7 @@ def _nll_loss_forward(
     channel_dim: int,
     mesh: DeviceMesh,
     mesh_dim: int,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     n_dims = x.dim()
     channel_dim = 1
     if n_dims < 2:
@@ -269,7 +269,7 @@ def _nll_loss_forward(
 
 def _nll_loss_forward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
@@ -413,7 +413,7 @@ def _nll_loss_and_log_softmax_backward(
 
 def _nll_loss_backward_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
