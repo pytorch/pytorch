@@ -1417,6 +1417,33 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             out.backward(retain_graph=True)
         out.backward()
 
+    def test_autograd_function_tangent_mutation(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1.copy_(grad2)
+
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn(4, requires_grad=True)
+        x_ref = x.clone().detach().requires_grad_()
+
+        out_ref = f(x_ref)
+        out = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(x_ref, x)
+
+        (out[0] + out[1]).sum().backward()
+        (out_ref[0] + out_ref[1]).sum().backward()
+
+        self.assertEqual(x_ref.grad, x.grad)
+
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer_with_retain_or_create_graph4(self):
         # Gives non-empty bw_donated_idxs
