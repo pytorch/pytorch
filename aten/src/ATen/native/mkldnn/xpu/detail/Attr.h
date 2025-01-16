@@ -423,9 +423,13 @@ static inline void construct_attr_by_post_op(
         unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
   } else if (binary_post_op == "sum") {
     if (unary_post_op == "none") {
-      attr = attr.append_post_sum(1, input1_scale, input1_zero_point);
+      if(input1_zero_point!=0)
+        attr = attr.append_post_eltwise(/*scale*/1, /*alpha*/1, -input1_zero_point * input1_scale, attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/0);
     } else if (unary_post_op == "relu") {
-      attr = attr.append_post_sum(1, input1_scale, input1_zero_point);
+      if(input1_zero_point!=0)
+        attr = attr.append_post_eltwise(/*scale*/1, /*alpha*/1, -input1_zero_point*input1_scale, attr.kind_with_linear);
+      attr = attr.append_post_sum(1, input1_scale, /*input1_zero_point*/0);
       attr = attr.append_post_eltwise(
           /* eltwise_scale */ 1.f,
           /* alpha */ 0.f,
@@ -433,7 +437,7 @@ static inline void construct_attr_by_post_op(
           attr.kind_with_relu);
     }
   } else if (binary_post_op == "add") {
-    TORCH_CHECK(accum.has_value())
+    TORCH_CHECK(accum.has_value());
     attr = attr.append_post_binary(attr.kind_with_binary_add, accum.value());
     if (unary_post_op == "relu") {
       attr = attr.append_post_eltwise(1.f, 0.f, 0.f, attr.kind_with_relu);
