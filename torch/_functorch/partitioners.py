@@ -501,7 +501,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr":
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -1447,23 +1447,14 @@ def estimate_runtime(node):
             shape = list(x.meta["val"].shape)
 
             def realize_symbol(d):
-                if isinstance(d, torch.SymInt) and d.node.hint is None:
-                    return d.node.expr.xreplace(
-                        dict.fromkeys(d.node.expr.free_symbols, 4096)
-                    )
-                return hint_int(d)
+                return hint_int(d, fallback=4096)
 
             shape = [realize_symbol(s) for s in shape]
             return x.meta["val"].new_empty_strided(
                 shape, stride=x.meta["tensor_meta"].stride
             )
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            d = x.meta["val"]
-            if d.node.hint is None:
-                return d.node.expr.xreplace(
-                    dict.fromkeys(d.node.expr.free_symbols, 4096)
-                )
-            return hint_int(d)
+            return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
