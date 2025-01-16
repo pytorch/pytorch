@@ -1387,7 +1387,7 @@ class OutputGraph:
                     "name": "shape_env",
                     "encoding": "json",
                 },
-                payload_fn=lambda: old_fake_mode.shape_env.jsonify_metadata(),
+                payload_fn=lambda: old_fake_mode.shape_env._jsonify_metadata(),
             )
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
