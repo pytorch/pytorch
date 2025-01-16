@@ -360,11 +360,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
     decompose_custom_triton_ops,
 ):
+    from torch._export.utils import _fakify_params_buffers
     from torch._functorch.aot_autograd import aot_export_module
     from torch.export._trace import (
         _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
-        _fakify_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -402,20 +402,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
-        retracing_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                if isinstance(node.meta["val"], CustomObjArgument):
-                    real_script_obj = None
-                    if node.meta["val"].fake_val is None:
-                        real_script_obj = ep.constants[node.meta["val"].name]
-                    else:
-                        real_script_obj = node.meta["val"].fake_val.real_obj
-                    retracing_args.append(real_script_obj)
-                else:
-                    retracing_args.append(node.meta["val"])
 
-        retracing_args_unwrapped = pytree.tree_unflatten(retracing_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
@@ -448,13 +435,34 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # TODO (tmanlaibaatar) Ideally run_decomp should just call _non_strict_export
         # but due to special handling of constants as non-persistent buffers make it little
         # diffucult. But we should unify this code path together. T206837815
-        from torch._export.non_strict_utils import _fakify_script_objects
+        from torch._export.non_strict_utils import (
+            _enable_graph_inputs_of_type_nn_module,
+            _fakify_script_objects,
+        )
+
+        retracing_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                if isinstance(node.meta["val"], CustomObjArgument):
+                    real_script_obj = None
+                    if node.meta["val"].fake_val is None:
+                        real_script_obj = ep.constants[node.meta["val"].name]
+                    else:
+                        real_script_obj = node.meta["val"].fake_val.real_obj
+                    retracing_args.append(real_script_obj)
+                else:
+                    retracing_args.append(node.meta["val"])
 
         with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
+        ), _enable_graph_inputs_of_type_nn_module(
+            ep.example_inputs
         ):
+            retracing_args_unwrapped = pytree.tree_unflatten(
+                retracing_args, mod._in_spec
+            )
             # this requires empty kwargs, but not in pytree.flattened format
             with _fakify_script_objects(
                 mod,
