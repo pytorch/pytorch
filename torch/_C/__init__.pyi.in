@@ -67,6 +67,7 @@ from . import (
     _export,
     _cpu,
     _dynamo,
+    _functionalization,
     _functorch,
     _lazy,
     _lazy_ts_backend,
