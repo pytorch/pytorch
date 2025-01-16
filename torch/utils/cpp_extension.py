@@ -4,7 +4,6 @@ import glob
 import importlib
 import importlib.abc
 import os
-import platform
 import re
 import shlex
 import shutil
