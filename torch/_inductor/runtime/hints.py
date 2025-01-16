@@ -43,7 +43,10 @@ def _is_triton_available() -> bool:
 
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
 if _is_triton_available():
-    try:
+    import triton.backends.compiler
+    import triton.compiler.compiler
+
+    if hasattr(triton.backends.compiler, "AttrsDescriptor"):
         from triton.backends.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -64,7 +67,7 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    except ImportError:
+    else:
         from triton.compiler.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -142,6 +145,9 @@ class DeviceProperties(typing.NamedTuple):
         except AttributeError:
             if device_type == "xpu":
                 multi_processor_count = props.gpu_subslice_count
+            elif device_type == "mps":
+                # TODO: Fetch the actual value from ioreg
+                multi_processor_count = 8
             else:
                 raise
         return cls(

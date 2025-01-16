@@ -721,7 +721,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
+            use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
@@ -759,6 +760,7 @@ class PythonWrapperCodegen(CodeGen):
                 import os
                 import tempfile
                 from math import inf, nan
+                from cmath import nanj
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
@@ -2192,9 +2194,12 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         self.allocated.add(name)
-        if isinstance(
-            buffer.get_defining_op(),
-            (ir.ExternKernelAlloc, ir.MultiOutput),
+        if (
+            isinstance(
+                buffer.get_defining_op(),
+                (ir.ExternKernelAlloc, ir.MultiOutput),
+            )
+            and not buffer.should_allocate()
         ):
             return
 
