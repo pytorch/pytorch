@@ -600,6 +600,10 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               output.size(dim),
               ".");
 
+  auto dim_size = self.size(dim);
+  auto within_range = index.max().less(dim_size).item().toBool();
+  TORCH_CHECK_INDEX(within_range, "index out of range in self");
+
   for (const auto i : irange(self.dim())) {
     if (i == dim)
       continue;
