@@ -110,6 +110,8 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -220,6 +222,8 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
