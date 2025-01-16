@@ -110,12 +110,14 @@ class TestSerialization(TestCase):
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
-        input_tensor = torch.load(input_file)
+        # weights_only=False as file was saved in .tar format
+        input_tensor = torch.load(input_file, weights_only=False)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
-        expected = torch.load(expected_file)
+        # weights_only=False as file was saved in .tar format
+        expected = torch.load(expected_file, weights_only=False)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
