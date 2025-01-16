@@ -6334,6 +6334,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = f(t, [1, 2])
         self.assertEqual(t * 2, res)
 
+    def test_compile_copy__int_overload(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            return x.copy_(1)
+
+        t = torch.zeros(2)
+        res = f(t)
+        self.assertEqual(torch.ones_like(t), res)
+
     def test_symnode_is_not_op(self):
         @torch.compile(backend="eager", fullgraph=True, dynamic=True)
         def f(x, xs):
