@@ -589,6 +589,15 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale.realize()
+
+            if x_zp is None:
+                # If x_zp is None, x is int8 quantized per-tensor and its scale is not reshaped,
+                # then the codegened code would segfault if we don't create a tensor for x_zp.
+                # It's safe to do so since x is a symmetrically quantized int8 tensor.
+                # Moreover, oneDNN qlinear API doesn't accept None value for zp
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
                 x_zp = V.graph.add_tensor_constant(
@@ -597,33 +606,20 @@ def register_onednn_fusion_ops():
             else:
                 x_zp.realize()
 
-            if isinstance(
-                ir.InputsKernel.unwrap_storage_for_input(x_zp),
-                ir.ComputedBuffer,
-            ) and (x_zp.get_numel() == 0 and x.get_dtype() == torch.int8):
-                # If x_zp is empty, x is int8 quantized per-tensor and its scale is not reshaped,
-                # then the codegened code would segfault if we don't create a tensor for x_zp.
-                # It's safe to do so since x is a symmetrically quantized int8 tensor.
-                x_zp = V.graph.add_tensor_constant(
-                    torch.tensor(0, dtype=torch.int32), name="x_zp"
-                )
-
             assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
             # Refer to https://github.com/pytorch/pytorch/blob
             # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
-            w_scale.realize()
-            w_zp.realize()
-            if isinstance(
-                ir.InputsKernel.unwrap_storage_for_input(w_zp),
-                ir.ComputedBuffer,
-            ) and (w_zp.get_numel() == 0):
-                # If w_zp is empty, then it's a dummy tensor created to denote the
+            if w_zp is None:
+                # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
+                # Moreover, oneDNN qlinear API doesn't accept None value for zp
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
+            w_scale.realize()
+            w_zp.realize()
             if w_zp.get_dtype() != torch.int32 and isinstance(
                 ir.InputsKernel.unwrap_storage_for_input(w_zp),
                 ir.ConstantBuffer,
@@ -828,6 +824,7 @@ def register_onednn_fusion_ops():
             input_gen_fns = {
                 3: lambda x: V.graph.constants[x.get_name()],  # packed weight
                 4: lambda x: V.graph.constants[x.get_name()],  # weight scale
+                5: lambda x: V.graph.constants[x.get_name()],  # weight zp
                 6: lambda x: V.graph.constants[x.get_name()],  # bias
             }
 
