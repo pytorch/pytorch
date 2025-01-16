@@ -1681,6 +1681,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return output.as_int
         elif output.type == "as_float":
             return output.as_float
+        elif output.type == "as_bool":
+            return output.as_bool
         elif output.type == "as_none":
             return None
         else:
@@ -3086,7 +3088,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_float type: {f}")
-            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+            elif arg.type in ("as_none", "as_bool", "as_int", "as_float", "as_string"):
                 return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
