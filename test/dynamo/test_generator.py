@@ -347,6 +347,9 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("container", [list, tuple, dict, OrderedDict])
     def test_dict_tuple_list_generator(self, container):
+        if container in (dict, OrderedDict):
+            self.skipTest('Needs __iter__')
+
         def whoo(t):
             yield 1, t + 1
             yield 2, t + 2
