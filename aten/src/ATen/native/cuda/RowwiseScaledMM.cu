@@ -373,6 +373,8 @@ void f8f8bf16_rowwise_impl_sm89(
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
     at::Tensor out) {
+  TORCH_CHECK(false, "Verifying that SM89 kernel is called");
+
   int M = XQ.size(0);
   int N = WQ.size(1);
   int K = XQ.size(1);
