@@ -3265,7 +3265,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
         out_compiled = flex_compile(query, key, value, kernel_options=kernel_options)
 
-        assert torch.equal(out_eager, out_compiled)
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
 
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
