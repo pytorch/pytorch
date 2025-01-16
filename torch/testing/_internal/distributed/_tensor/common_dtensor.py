@@ -202,9 +202,9 @@ class Transformer(nn.Module):
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
         self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
         self.dropout = nn.Dropout(args.dropout_p)
-        self.layers = nn.ModuleDict()
-        for i in range(args.n_layers):
-            self.layers[str(i)] = TransformerBlock(args)
+        self.layers = nn.ModuleList()
+        for _ in range(args.n_layers):
+            self.layers.append(TransformerBlock(args))
         self.norm = nn.LayerNorm(args.dim)
         self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
         if args.weight_tying:
