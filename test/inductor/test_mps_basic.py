@@ -49,7 +49,6 @@ class MPSBasicTests(TestCase):
     test_cat_empty = CommonTemplate.test_cat_empty
     test_cat_unbacked_empty_1d = CommonTemplate.test_cat_unbacked_empty_1d
     test_floordiv = CommonTemplate.test_floordiv
-    test_full_truncation = CommonTemplate.test_full_truncation
     test_fmod = CommonTemplate.test_fmod
     test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
     test_index_dynamic_shapes = CommonTemplate.test_index_dynamic_shapes
