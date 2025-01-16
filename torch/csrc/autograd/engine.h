@@ -47,7 +47,7 @@ TORCH_API void validate_outputs(
     const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
-TORCH_API std::vector<c10::optional<InputMetadata>> collect_input_metadata(
+TORCH_API std::vector<std::optional<InputMetadata>> collect_input_metadata(
     const edge_list& edges);
 
 struct NodeTask {

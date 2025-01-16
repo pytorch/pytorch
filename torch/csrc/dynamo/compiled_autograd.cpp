@@ -19,7 +19,7 @@ void resetPyCompilerInterface() {
   kPyCompilerInterface.reset();
 }
 
-std::vector<c10::optional<InputMetadata>> get_input_metadata(
+std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges) {
   return torch::autograd::collect_input_metadata(edges);
 }
