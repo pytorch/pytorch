@@ -1390,7 +1390,7 @@ TORCH_API void resetPyCompilerInterface();
 // symbol resolution issues. Instead requiring downstream users to include
 // engine.h to access collect_input_metadata, we provide it here (with a
 // different name to avoid ambigous symbols...)
-TORCH_API std::vector<c10::optional<InputMetadata>> get_input_metadata(
+TORCH_API std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges);
 
 } // namespace torch::dynamo::autograd
