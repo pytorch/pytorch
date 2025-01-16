@@ -328,7 +328,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class GeneratorObjectVariable(VariableTracker):
+class LocalGeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
         code: types.CodeType,
@@ -464,7 +464,9 @@ class GeneratorObjectVariable(VariableTracker):
         super().call_method(tx, name, args, kwargs)
 
 
-class ContextlibContextManagerGeneratorObjectVariable(GeneratorObjectVariable):
+class ContextlibContextManagerLocalGeneratorObjectVariable(
+    LocalGeneratorObjectVariable
+):
     """
     .. note::
 
@@ -475,7 +477,7 @@ class ContextlibContextManagerGeneratorObjectVariable(GeneratorObjectVariable):
     """
 
 
-class GeneratorFunctionVariable(BaseUserFunctionVariable):
+class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
     .. note::
@@ -484,7 +486,11 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
     """
 
     def __init__(
-        self, vt: VariableTracker, *, generator_cls=GeneratorObjectVariable, **kwargs
+        self,
+        vt: VariableTracker,
+        *,
+        generator_cls=LocalGeneratorObjectVariable,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.vt = vt
@@ -526,7 +532,9 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         )
 
 
-class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVariable):
+class FunctionDecoratedByContextlibContextManagerVariable(
+    LocalGeneratorFunctionVariable
+):
     """
     .. note::
 
@@ -535,7 +543,9 @@ class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVaria
 
     def __init__(self, vt, **kwargs):
         super().__init__(
-            vt, generator_cls=ContextlibContextManagerGeneratorObjectVariable, **kwargs
+            vt,
+            generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
+            **kwargs,
         )
 
     def _build_inline_tracer(self, tx, args, kwargs):

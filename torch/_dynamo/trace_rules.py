@@ -46,8 +46,8 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
-    GeneratorFunctionVariable,
-    GeneratorObjectVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -3524,8 +3524,8 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            GeneratorFunctionVariable,
-            GeneratorObjectVariable,
+            LocalGeneratorFunctionVariable,
+            LocalGeneratorObjectVariable,
         ),
     ):
         try:
@@ -3547,7 +3547,11 @@ def check_verbose(obj, is_inlined_call=False):
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if issubclass(
         rule,
-        (UserFunctionVariable, GeneratorFunctionVariable, PolyfilledFunctionVariable),
+        (
+            UserFunctionVariable,
+            LocalGeneratorFunctionVariable,
+            PolyfilledFunctionVariable,
+        ),
     ):
         return SkipResult(
             False,
