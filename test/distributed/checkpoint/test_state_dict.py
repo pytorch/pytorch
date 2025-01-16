@@ -881,6 +881,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # from view to clone. This test would fail if with view due to higher memory cost.
         memory_allocated = torch.cuda.memory_allocated(0) / 1024 / 1024
         memory_reserved = torch.cuda.memory_reserved(0) / 1024 / 1024
+        print("XXXXXXX")
+        print(memory_allocated)
+        print("XXXXXXX")
         self.assertTrue(memory_allocated <= 384)
         self.assertTrue(memory_reserved <= 768)
 
