@@ -2751,19 +2751,25 @@ class Scheduler:
         # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
         # accomplishes this.
         if is_multi_template and any(
-            n.get_template_node() is not None and isinstance(n, SchedulerNode)
-            for n in (node1, node2)
+            n.get_template_node() is not None for n in (node1, node2)
         ):
             epilogue_fusion = node1.get_template_node() is not None
-
-            multi_node = node1.node if epilogue_fusion else node2.node
+            multi_node = (
+                node1.get_template_node()
+                if epilogue_fusion
+                else node2.get_template_node()
+            )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
             choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
 
             # Eagerly compile and benchmark non-template nodes
             _, ms1 = multi_node.get_min_choice()
-            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+            ms2, path2 = (
+                self.benchmark_fused_nodes(node_list_2)
+                if epilogue_fusion
+                else self.benchmark_fused_nodes(node_list_1)
+            )
 
             # Start compiling choices in parallel
             future_choices: List[tuple[Any, Optional[TritonFuture], ModuleType]] = []
@@ -2803,6 +2809,7 @@ class Scheduler:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
+                new_timings = {}
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
                     if future is not None:
@@ -2811,6 +2818,7 @@ class Scheduler:
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, device
                         )
+                        new_timings[choice] = ms_fused
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
@@ -2819,6 +2827,7 @@ class Scheduler:
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
                     multi_node.finalize_as_triton_caller(ms_fused_choice)
+                    multi_node._choice_timings = new_timings
                     return True
                 else:
                     return False
