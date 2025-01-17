@@ -321,7 +321,7 @@ class TestAttention(TestCase):
     def test_attention_all(self):
         model = TransformerModel()
 
-        inputs = self.gen_rand_inputs(model, 15, 991)
+        inputs = self.gen_rand_inputs(model, 15, 1023)
         inputs_p = self.pad_inputs(inputs, 16)
 
         self.run_unpadded_padded(model.f_attention, inputs, inputs_p)
@@ -330,7 +330,7 @@ class TestAttention(TestCase):
         model = TransformerModel()
 
         with torch.no_grad():
-            inputs = self.gen_rand_inputs(model, 15, 991)
+            inputs = self.gen_rand_inputs(model, 15, 1023)
             inputs_p = self.pad_inputs(inputs, 16)
 
             self.run_unpadded_padded_bench(
