@@ -15,6 +15,10 @@ class UtilizationStats:
 @dataclass
 class UtilizationMetadata:
     level: Optional[str] = None
+    workflow_id: Optional[str] = None
+    job_id: Optional[str] = None
+    workflow_name: Optional[str] = None
+    job_name: Optional[str] = None
     usage_collect_interval: Optional[float] = None
     data_model_version: Optional[float] = None
     gpu_count: Optional[int] = None
@@ -46,11 +50,5 @@ class UtilizationRecord:
     error: Optional[str] = None
     log_duration: Optional[str] = None
 
-# data model for db upload
-
-
-
-# helper function
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
-
