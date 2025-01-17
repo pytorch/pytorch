@@ -5,7 +5,7 @@ import itertools
 import operator
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -118,7 +118,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        origins: List[List[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -785,7 +785,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[List[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:
@@ -820,6 +820,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 self.aot_graph_cls_name = node_name
                 maybe_aot_id = forward_cls._aot_id
                 self.aot_graph_infos[nodecall_index] = {
