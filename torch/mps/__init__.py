@@ -154,7 +154,7 @@ def _compile_shader(source: str):
     """
     from pathlib import Path
 
-    from torch.utils.cpp_embed_headers import _embed_headers
+    from torch.utils._cpp_embed_headers import _embed_headers
 
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
