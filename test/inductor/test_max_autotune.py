@@ -1302,8 +1302,8 @@ class TestPrologueFusion(TestCase):
         def multi_use(x, y):
             return (x @ x.T) * (y @ y.T)
 
-        x = torch.rand([128, 16], device="cuda")
-        y = torch.rand([128, 32], device="cuda")
+        x = torch.rand([128, 16], device=GPU_TYPE)
+        y = torch.rand([128, 32], device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
@@ -1313,7 +1313,7 @@ class TestPrologueFusion(TestCase):
         def resolve_pending(x):
             return (x @ x).relu()
 
-        x = torch.rand([128, 128], device="cuda")
+        x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
         FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
@@ -1322,7 +1322,7 @@ class TestPrologueFusion(TestCase):
             y = x.to(torch.float)
             return (y @ y).relu()
 
-        x = torch.rand([128, 128], dtype=torch.float16, device="cuda")
+        x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
         FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
