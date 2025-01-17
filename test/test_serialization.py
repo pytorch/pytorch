@@ -227,9 +227,6 @@ class SerializationMixin:
     def test_serialization(self):
         self._test_serialization(False)
 
-    def test_serialization_safe(self):
-        self._test_serialization(True)
-
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
         b = self._test_serialization_data()
@@ -365,9 +362,6 @@ class SerializationMixin:
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
-
-    def test_serialization_sparse_safe(self):
-        self._test_serialization(True)
 
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
@@ -514,9 +508,6 @@ class SerializationMixin:
     def test_serialization_backwards_compat(self):
         self._test_serialization_backwards_compat(False)
 
-    def test_serialization_backwards_compat_safe(self):
-        self._test_serialization_backwards_compat(True)
-
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
@@ -561,7 +552,8 @@ class SerializationMixin:
         def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
-                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                    # weigts_only=False as the downloaded file path uses the old serialization format
+                    tensor = torch.load(fileobject_lambda(), map_location=map_location, weights_only=False)
 
                     self.assertEqual(tensor.device, intended_device)
                     self.assertEqual(tensor.dtype, dtype)
@@ -604,7 +596,8 @@ class SerializationMixin:
 
         error_msg = r'Attempting to deserialize object on a CUDA device'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            _ = torch.load(buf)
+            # weights_only=False as serialized is in legacy format
+            _ = torch.load(buf, weights_only=False)
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_api_requirements(self):
@@ -724,7 +717,8 @@ class SerializationMixin:
                       b'\x00\x00\x00\x00')
 
         buf = io.BytesIO(serialized)
-        (s1, s2) = torch.load(buf)
+        # serialized was saved with PyTorch 0.3.1
+        (s1, s2) = torch.load(buf, weights_only=False)
         self.assertEqual(s1[0], 0)
         self.assertEqual(s2[0], 0)
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
@@ -841,6 +835,24 @@ class serialization_method:
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
+
+# used to set weights_only=False in _use_new_zipfile_serialization=False tests
+class load_method:
+    def __init__(self, weights_only):
+        self.weights_only = weights_only
+        self.torch_load = torch.load
+
+    def __enter__(self, *args, **kwargs):
+        def wrapper(*args, **kwargs):
+            kwargs['weights_only'] = self.weights_only
+            return self.torch_load(*args, **kwargs)
+
+        torch.load = wrapper
+
+    def __exit__(self, *args, **kwargs):
+        torch.load = self.torch_load
+
+
 Point = namedtuple('Point', ['x', 'y'])
 
 class ClassThatUsesBuildInstruction:
@@ -877,13 +889,24 @@ class TestBothSerialization(TestCase):
 
             torch.save(x, f_old, _use_new_zipfile_serialization=False)
             f_old.seek(0)
-            x_old_load = torch.load(f_old, weights_only=weights_only)
+            x_old_load = torch.load(f_old, weights_only=False)
             self.assertEqual(x_old_load, x_new_load)
 
         with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
+
+    def test_old_serialization_fails_with_weights_only(self):
+        a = torch.randn(5, 5)
+        with BytesIOContext() as f:
+            torch.save(a, f, _use_new_zipfile_serialization=False)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot use ``weights_only=True`` with files saved in the .tar format used before version 1.6."
+            ):
+                torch.load(f, weights_only=True)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -960,8 +983,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
-    @parametrize('weights_only', (True, False))
-    def test_serialization_offset_filelike(self, weights_only):
+    def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
         b = torch.randn(1024, 1024, 512, dtype=torch.float32)
         i, j = 41, 43
@@ -973,16 +995,16 @@ class TestOldSerialization(TestCase, SerializationMixin):
             self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
-            a_loaded = torch.load(f, weights_only=weights_only)
+            a_loaded = torch.load(f)
             j_loaded = pickle.load(f)
-            b_loaded = torch.load(f, weights_only=weights_only)
+            b_loaded = torch.load(f)
         self.assertTrue(torch.equal(a, a_loaded))
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
     def run(self, *args, **kwargs):
-        with serialization_method(use_zip=False):
+        with serialization_method(use_zip=False), load_method(weights_only=False):
             return super().run(*args, **kwargs)
 
 
