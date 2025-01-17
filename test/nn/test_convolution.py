@@ -3246,8 +3246,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             .half()
         )
         output = model(input_tensor)
-        output_cpu = model(input_tensor.float().cpu())
         _model_cpu = model.cpu().float()
+        output_cpu = model(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
