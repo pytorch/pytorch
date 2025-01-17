@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
@@ -179,12 +179,12 @@ def save_model_with_external_data(
                 except (RuntimeError, ValueError) as e:
                     if "mmap can only be used with files saved with" in str(
                         e
-                    ) or isinstance(el, io.BytesIO):
+                    ) or isinstance(el, (io.IOBase, IO)):
                         log.warning(
                             "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
                             "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
                         )
-                        if isinstance(el, io.BytesIO):
+                        if isinstance(el, (io.IOBase, IO)):
                             el.seek(0)  # torch.load from `try:` has read the file.
                         state_dict = torch.load(el, map_location="cpu")
                     else:
