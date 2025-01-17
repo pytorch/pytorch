@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import importlib
 import inspect
 import io
 import itertools
@@ -2462,3 +2463,30 @@ def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
                     origin.name for origin in node.node.origins
                 ]
+
+
+class TritonAttrsDescriptorVersion(enum.Enum):
+    V0_NO_TRITON = 0
+    V1_COMPILER = 1  # triton.compiler.compiler.AttrsDescriptor
+    V2_BACKENDS = 2  # triton.backends.compiler.AttrsDescriptor
+    V3_BACKENDS_TUPLE = (
+        3  # triton.backends.compiler.AttrsDescriptor, but with tuple support
+    )
+    V4_DICT = 4  # a raw dict
+
+
+@functools.lru_cache(None)
+def get_triton_attrs_descriptor_version():
+    if importlib.util.find_spec("triton") is None:
+        return TritonAttrsDescriptorVersion.V0_NO_TRITON
+
+    import triton.backends.compiler
+    import triton.compiler.compiler
+
+    if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # TODO: differentiate V2 and V3
+        return TritonAttrsDescriptorVersion.V2_BACKENDS
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        return TritonAttrsDescriptorVersion.V1_COMPILER
+    else:
+        return TritonAttrsDescriptorVersion.V4_DICT

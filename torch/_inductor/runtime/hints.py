@@ -47,6 +47,7 @@ if _is_triton_available():
     import triton.compiler.compiler
 
     if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # Triton 3.2.0 - the second implementation
         from triton.backends.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -67,7 +68,8 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    else:
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        # Triton 3.0.0 - the original implementation
         from triton.compiler.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -82,6 +84,20 @@ if _is_triton_available():
 
             # Instantiate AttrsDescriptor with the prepared arguments
             return AttrsDescriptor(**kwargs)
+
+    else:
+        # Triton in 2025:
+        # note: there's also a range of triton commits not currently supported
+        # from ~Dec 9, 2024 to Jan 1 2025, in which AttrsDescriptors are still
+        # used, but the contents are different.
+
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            return {
+                tuple((x,) for x in divisible_by_16): [["tt.divisibility", 16]],
+            }
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available

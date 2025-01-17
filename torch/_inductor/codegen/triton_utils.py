@@ -9,7 +9,14 @@ from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
+from .common import (
+    ConstexprArg,
+    KernelArgType,
+    SizeArg,
+    TensorArg,
+    TMADescriptorArg,
+    WorkspaceArg,
+)
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -152,7 +159,7 @@ def config_of(
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True
-        if isinstance(x, TMADescriptorArg):
+        if isinstance(x, (TMADescriptorArg, ConstexprArg)):
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 

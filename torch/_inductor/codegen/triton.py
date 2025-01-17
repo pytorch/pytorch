@@ -60,6 +60,7 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
+    get_triton_attrs_descriptor_version,
     is_welford_reduction,
     Placeholder,
     prefix_is_reduction,
@@ -67,6 +68,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     triton_type,
+    TritonAttrsDescriptorVersion,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
@@ -74,6 +76,7 @@ from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
+    ConstexprArg,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -3407,17 +3410,6 @@ class TritonKernel(SIMDKernel):
             #     tree.numel
             # )
             # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
-        triton_meta["configs"] = [config_of(signature)]
-
-        # Triton compiler includes equal_to_1 args into constants even
-        # when they are not constexpr. otherwise there may be a segfault
-        # during launching the Inductor-compiled Triton kernel.
-        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
-
-        self.triton_meta = triton_meta
 
         for tree in self.range_trees:
             if tree.is_reduction and self.persistent_reduction:
@@ -3425,10 +3417,43 @@ class TritonKernel(SIMDKernel):
                 continue
             if tree.tensor_dim is None:
                 continue
-            argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
+
+            var_name = f"{tree.prefix.upper()}BLOCK"
+            if (
+                get_triton_attrs_descriptor_version()
+                == TritonAttrsDescriptorVersion.V4_DICT
+            ):
+                constexprarg = ConstexprArg(var_name)
+                signature.append(constexprarg)
+                triton_meta_signature[var_name] = "constexpr"
+            argdefs.append(f"{var_name} : tl.constexpr")
 
         if self.cooperative_reduction:
+            if (
+                get_triton_attrs_descriptor_version()
+                == TritonAttrsDescriptorVersion.V4_DICT
+            ):
+                constexprarg = ConstexprArg("RSPLIT")
+                signature.append(constexprarg)
+                triton_meta_signature["RSPLIT"] = "constexpr"
+
             argdefs.append("RSPLIT : tl.constexpr")
+
+        triton_meta["configs"] = [config_of(signature)]
+
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        if (
+            get_triton_attrs_descriptor_version()
+            != TritonAttrsDescriptorVersion.V4_DICT
+        ):
+            for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
+                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+
+        self.triton_meta = triton_meta
 
         self.codegen_body()
 
