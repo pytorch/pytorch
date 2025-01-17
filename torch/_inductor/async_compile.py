@@ -5,7 +5,6 @@ import atexit
 import functools
 import logging
 import os
-import re
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -96,9 +95,6 @@ log = logging.getLogger(__name__)
 
 # Used to keep track of all process pools invoked so far.
 _pool_set = OrderedSet[SubprocPool]()
-
-# TODO - pass in at runtime
-cache_interference_pattern = re.compile(r"'optimize_mem': (?:True|False), ")
 
 
 def shutdown_compile_workers() -> None:
@@ -206,10 +202,8 @@ class AsyncCompile:
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
             future_cache = get_future_cache()
-            # TODO: pass in at runtime, fix
-            source_code_key = cache_interference_pattern.sub("", source_code)
 
-            if future := future_cache.get(source_code_key, None):
+            if future := future_cache.get(source_code, None):
                 counters["inductor"]["async_compile_cache_hit"] += 1
                 return future
 
@@ -222,7 +216,7 @@ class AsyncCompile:
                     extra_env,
                 ),
             )
-            future_cache[source_code_key] = future
+            future_cache[source_code] = future
             return future
 
         else:
