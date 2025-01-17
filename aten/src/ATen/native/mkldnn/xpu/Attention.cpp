@@ -213,14 +213,24 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   auto logsumexp = at::empty({}, opts.dtype(at::kFloat));
 
   std::optional<at::Tensor> attn_mask_fallback;
+  bool is_implict_causal = is_causal;
   if (attn_bias.has_value()) {
     attn_mask_fallback = attn_bias;
+    TORCH_INTERNAL_ASSERT(
+        !is_causal,
+        "scaled_dot_product_fused_attention_overrideable_xpu: "
+        "attn_bias cannot present with is_causal");
   } else {
-    if (is_causal) {
-      auto attn_mask_fallback =
-          at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool))
+    // Currenetly implict mask only supports square fp16 cases
+    const bool support_implict_causal =
+        query.dtype() == at::kHalf && seq_len_q == seq_len_kv;
+    if (is_causal && !support_implict_causal) {
+      auto bool_tril =
+          at::ones_symint(
+              {query.sym_size(-2), key.sym_size(-2)}, opts.dtype(at::kBool))
               .tril();
-      attn_mask_fallback = convert_boolean_attn_mask(attn_mask_fallback, opts);
+      attn_mask_fallback = convert_boolean_attn_mask(bool_tril, opts);
+      is_implict_causal = false;
     } else {
       attn_mask_fallback = std::nullopt;
     }
@@ -237,7 +247,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       key,
       value,
       attn_mask_fallback,
-      false, // is_causal fallback with attn_mask for now
+      is_implict_causal,
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim)),
       output);
 
