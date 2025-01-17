@@ -12,7 +12,9 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 from utils import *
 
 
-def slice_nd(input, start_idxs, end_idxs):
+def slice_nd(
+    input: torch.Tensor, start_idxs: List[int], end_idxs: List[int]
+) -> torch.Tensor:
     log("Slicing tensor with shape %s to %s" % (input.shape, end_idxs))
 
     # Slice a tensor along multiple dimensions
@@ -44,7 +46,9 @@ def slice_nd(input, start_idxs, end_idxs):
     return input
 
 
-def extract_tensors_from_padded(args, kwargs):
+def extract_tensors_from_padded(
+    args: Tuple, kwargs: Dict
+) -> Tuple[List[torch.Tensor], Dict]:
     if kwargs is None:
         kwargs = {}
     tensor_args, tensor_kwargs = pytree.tree_map_only(
@@ -111,8 +115,8 @@ class ViewOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        def find_mapping(input_shape, output_shape):
+    def infer_shape(self, args, kwargs) -> List[torch.Size]:
+        def find_mapping(input_shape: torch.Size, output_shape: List[int]):
             mapping = []
             input_index = 0
 
@@ -133,7 +137,9 @@ class ViewOp(SliceRunRepadOp):
 
             return mapping
 
-        def apply_mapping(input_shape, mapping):
+        def apply_mapping(
+            input_shape: torch.Size, mapping: List[List[int]]
+        ) -> List[int]:
             output_shape = []
 
             for current_mapping in mapping:
@@ -179,7 +185,7 @@ class ViewOp(SliceRunRepadOp):
         tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
         inp, shape = tensor_args
 
-        def infer_minus_1_shape(input_shape, output_shape):
+        def infer_minus_1_shape(input_shape: torch.Size, output_shape: List[int]):
             input_shape_prod = math.prod(input_shape)
             output_shape_prod = math.prod(output_shape) * -1
 
@@ -683,7 +689,7 @@ def get_multipliers(args):
     return {n: 1 for n in range(10)}
 
 
-def strip_common_suffix(list1, list2):
+def strip_common_suffix(list1: List[int], list2: List[int]) -> List[int]:
     list1, list2 = list(list1), list(list2)
 
     def f(list1, list2):
