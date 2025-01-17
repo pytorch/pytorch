@@ -546,8 +546,10 @@ void bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   BGEMM_CHECK_ARGVALUES(at::Half);
   float falpha = alpha;
   float fbeta = beta;
+#ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
+#endif
   void * alpha_ptr = &falpha;
   void * beta_ptr = &fbeta;
   auto compute_type = CUDA_R_32F;
@@ -895,8 +897,10 @@ void gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   float falpha = alpha;
   float fbeta = beta;
+#ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
+#endif
   void * alpha_ptr = &falpha;
   void * beta_ptr = &fbeta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
