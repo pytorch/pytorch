@@ -146,7 +146,6 @@
 #include <c10/util/quint8.h>
 #include <c10/util/safe_numerics.h>
 #include <c10/util/string_utils.h>
-#include <c10/util/string_view.h>
 #include <c10/util/typeid.h>
 
 #include <ATen/StorageUtils.h>
@@ -161,5 +160,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/symbol.h>
+
+#include <string_view>
 
 #pragma pop_macro("TORCH_ASSERT_NO_OPERATORS")

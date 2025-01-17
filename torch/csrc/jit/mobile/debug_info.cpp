@@ -7,7 +7,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-#include <c10/util/string_view.h>
+#include <string_view>
 
 namespace torch::jit {
 

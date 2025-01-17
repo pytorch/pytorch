@@ -25,10 +25,10 @@
  * will fail (and the operator will be included in the binary anyway).
  */
 
-#include <c10/util/string_view.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/macros/Macros.h>
 
+#include <string_view>
 
 #if defined(ENABLE_RECORD_KERNEL_FUNCTION_DTYPE)
 #include <ATen/record_function.h>
