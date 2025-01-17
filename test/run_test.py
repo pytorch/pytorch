@@ -1804,7 +1804,7 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
         ]
-        if MACOS_VERSION >= 15.0:
+        if MACOS_VERSION >= 14.0:
             selected_tests += [
                 "test_ops",
             ]
