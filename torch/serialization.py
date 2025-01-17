@@ -1737,28 +1737,25 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
-        if pickle_module is _weights_only_unpickler:
-            try:
-                with closing(
-                    tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
-                ):
+        try:
+            with closing(
+                tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
+            ):
+                if pickle_module is _weights_only_unpickler:
                     raise RuntimeError(
                         "Cannot use ``weights_only=True`` with files saved in the "
                         "legacy .tar format. " + UNSAFE_MESSAGE
                     )
-            except tarfile.TarError:
-                f.seek(0)
-        else:
-            try:
-                return legacy_load(f)
-            except tarfile.TarError:
-                if _is_zipfile(f):
-                    # .zip is used for torch.jit.save and will throw an un-pickling error here
-                    raise RuntimeError(
-                        f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
-                    ) from None
-                # if not a tarfile, reset file offset and proceed
-                f.seek(0)
+            f.seek(0)
+            return legacy_load(f)
+        except tarfile.TarError:
+            if _is_zipfile(f):
+                # .zip is used for torch.jit.save and will throw an un-pickling error here
+                raise RuntimeError(
+                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
+                ) from None
+            # if not a tarfile, reset file offset and proceed
+            f.seek(0)
 
     if not hasattr(f, "readinto") and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
