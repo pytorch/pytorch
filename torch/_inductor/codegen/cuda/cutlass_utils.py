@@ -108,6 +108,8 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
+    exclude_kernels = ""
+    instantiation_level = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
