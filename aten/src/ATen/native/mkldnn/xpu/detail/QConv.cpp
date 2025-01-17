@@ -137,7 +137,7 @@ at::Tensor quantized_convolution(
   bool dst_need_zp = (output_zero_point != 0);
 
   // create usr_md for tensors, and md for conv primitive
-  auto [src_md, weight_md, bias, output_md] =
+  auto [src_md, weight_md, bias_md, output_md] =
       qconv_get_md(act, weight, bias, output, groups);
 
   // get tensor md
