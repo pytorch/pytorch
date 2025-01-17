@@ -18,6 +18,7 @@ struct SDPALogicalParams {
     query,
     key,
     scale,
+    neg_inf,
     attn_mask,
     value,
     output,
@@ -27,6 +28,7 @@ struct SDPALogicalParams {
   logical_tensor query;
   logical_tensor key;
   logical_tensor scale;
+  std::optional<logical_tensor> neg_inf;
   std::optional<logical_tensor> attn_mask;
   logical_tensor value;
   logical_tensor output;
@@ -37,8 +39,9 @@ struct SDPALogicalParams {
       const at::Tensor& value_,
       const std::optional<at::Tensor>& attn_mask_,
       const at::Tensor& output_,
-      data_type dtype) {
-    dims scale_shape = {1};
+      data_type dtype,
+      bool is_causal) {
+    const dims scalar_shape = {1};
     std::vector<logical_tensor> inputLogicalTensors;
     query = {
         static_cast<size_t>(TensorID::query),
@@ -53,9 +56,17 @@ struct SDPALogicalParams {
     scale = {
         static_cast<size_t>(TensorID::scale),
         dtype,
-        scale_shape,
+        scalar_shape,
         logical_tensor::layout_type::strided,
         logical_tensor::property_type::constant};
+    if (is_causal) {
+      neg_inf = {
+          static_cast<size_t>(TensorID::neg_inf),
+          dtype,
+          scalar_shape,
+          logical_tensor::layout_type::strided,
+          logical_tensor::property_type::constant};
+    }
     if (attn_mask_.has_value()) {
       attn_mask = {
           static_cast<size_t>(TensorID::attn_mask),
@@ -77,6 +88,8 @@ struct SDPALogicalParams {
   std::vector<logical_tensor> get_input() const {
     if (attn_mask.has_value()) {
       return {query, key, scale, attn_mask.value(), value};
+    } else if (neg_inf.has_value()) {
+      return {query, key, scale, neg_inf.value(), value};
     } else {
       return {query, key, scale, value};
     }
@@ -120,9 +133,23 @@ partition create_sdpa_graph_partition(
       {scaled_qk_out},
       "scale_mul"};
 
-  std::optional<op> mask_add;
   std::optional<logical_tensor> masked_qk_out;
+
+  // For optional additive mask
+  std::optional<op> mask_add;
+
+  // For optional implicite causal mask
+  std::optional<op> mask_gen_idx_row;
+  std::optional<logical_tensor> mask_row_idx;
+  std::optional<op> mask_gen_idx_col;
+  std::optional<logical_tensor> mask_col_idx;
+  std::optional<op> mask_gt;
+  std::optional<logical_tensor> mask_gt_out;
+  std::optional<op> mask_select;
+
   if (params.attn_mask.has_value()) {
+    TORCH_INTERNAL_ASSERT(
+        !is_causal, "Additive mask cannot use with is_causal.");
     masked_qk_out = {lt_id++, dtype};
     mask_add = {
         op_id++,
@@ -131,7 +158,39 @@ partition create_sdpa_graph_partition(
         {masked_qk_out.value()},
         "mask_add"};
   } else if (is_causal) {
-    TORCH_INTERNAL_ASSERT(false, "Causal mask must use fallback mask for now.");
+    mask_row_idx = {lt_id++, data_type::s32};
+    mask_gen_idx_row = {
+        op_id++,
+        op::kind::GenIndex,
+        {scaled_qk_out},
+        {mask_row_idx.value()},
+        "mask_gen_idx_row"};
+    mask_gen_idx_row->set_attr<int64_t>(op::attr::axis, 2);
+
+    mask_col_idx = {lt_id++, data_type::s32};
+    mask_gen_idx_col = {
+        op_id++,
+        op::kind::GenIndex,
+        {scaled_qk_out},
+        {mask_col_idx.value()},
+        "mask_gen_idx_col"};
+    mask_gen_idx_col->set_attr<int64_t>(op::attr::axis, 3);
+
+    mask_gt_out = {lt_id++, data_type::boolean};
+    mask_gt = {
+        op_id++,
+        op::kind::GreaterEqual,
+        {mask_row_idx.value(), mask_col_idx.value()},
+        {mask_gt_out.value()},
+        "mask_gt"};
+
+    masked_qk_out = {lt_id++, dtype};
+    mask_select = {
+        op_id++,
+        op::kind::Select,
+        {mask_gt_out.value(), scaled_qk_out, params.neg_inf.value()},
+        {masked_qk_out.value()},
+        "mask_select"};
   }
 
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
@@ -155,6 +214,13 @@ partition create_sdpa_graph_partition(
   if (mask_add.has_value()) {
     g.add_op(mask_add.value());
   }
+  if (is_causal) {
+    g.add_op(mask_gen_idx_row.value());
+    g.add_op(mask_gen_idx_col.value());
+    g.add_op(mask_gt.value());
+    g.add_op(mask_select.value());
+  }
+
   g.add_op(softmax);
   g.add_op(matmul_v);
   g.finalize();
@@ -188,6 +254,10 @@ void gpu_float_sdpa(
 
   Tensor softmax_scale1 = at::full({}, softmax_scale, query.options());
 
+  std::optional<at::Tensor> neg_inf;
+  if (is_causal) {
+    neg_inf = at::full({}, -INFINITY, query.options());
+  }
   const data_type logical_tensor_dtype =
       query.scalar_type() == c10::ScalarType::Float      ? data_type::f32
       : query.scalar_type() == c10::ScalarType::Half     ? data_type::f16
@@ -217,35 +287,10 @@ void gpu_float_sdpa(
   int pos = 8;
   // attn_mask
   patternID.set(pos++, attn_mask.has_value());
-
-  // first check cache
-  // The key has a pattern ID, as well as the shapes of input tenors
-  std::vector<int64_t> map_key;
-  map_key.reserve(1024);
-  // We use this because different thread-pools may be used
-  map_key.push_back(omp_get_max_threads());
-  map_key.push_back(static_cast<int64_t>(patternID.to_ullong()));
-  map_key.insert(map_key.end(), query.sizes().begin(), query.sizes().end());
-  map_key.insert(map_key.end(), query.strides().begin(), query.strides().end());
-  map_key.insert(map_key.end(), key.sizes().begin(), key.sizes().end());
-  map_key.insert(map_key.end(), key.strides().begin(), key.strides().end());
-  map_key.insert(map_key.end(), value.sizes().begin(), value.sizes().end());
-  map_key.insert(map_key.end(), value.strides().begin(), value.strides().end());
-  map_key.insert(
-      map_key.end(),
-      softmax_scale1.sizes().begin(),
-      softmax_scale1.sizes().end());
-  if (attn_mask.has_value()) {
-    map_key.insert(
-        map_key.end(), attn_mask->sizes().begin(), attn_mask->sizes().end());
-    map_key.insert(
-        map_key.end(),
-        attn_mask->strides().begin(),
-        attn_mask->strides().end());
-  }
+  patternID.set(pos++, is_causal);
 
   const SDPALogicalParams logical_params(
-      query, key, value, attn_mask, output, logical_tensor_dtype);
+      query, key, value, attn_mask, output, logical_tensor_dtype, is_causal);
   auto partition_ = cache.find_partition(patternID);
   if (!partition_.has_value()) {
     // partition cache no hit
@@ -275,6 +320,9 @@ void gpu_float_sdpa(
   inputs.emplace_back(l_inputs[i++], eng, query.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, key.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, softmax_scale1.data_ptr());
+  if (neg_inf.has_value()) {
+    inputs.emplace_back(l_inputs[i++], eng, neg_inf->data_ptr());
+  }
   if (attn_mask.has_value()) {
     inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
   }
