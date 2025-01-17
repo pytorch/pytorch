@@ -13,6 +13,10 @@ As this file is imported from within torch/__init__.py we do not want it to depe
 to avoid having to load SymPy at import time, as doing so is *very* slow.
 """
 
+
+
+
+import json
 import builtins
 import itertools
 import logging
@@ -1645,7 +1649,28 @@ def _make_user_magic(method, user_type):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
+
+    def uninteresting_files() -> Set[str]:
+        import inspect
+        import torch
+
+        mods = [
+            torch._dynamo.eval_frame,
+            torch._dynamo.utils,
+            torch.fx.experimental.sym_node,
+            torch,
+        ]
+        import torch._dynamo.guards
+
+        return (
+            {inspect.getfile(m) for m in mods}
+            | torch._dynamo.guards.uninteresting_files()
+            | {"<string>"}
+        )
+
+
     def binary_magic_impl(self, other):
+
         if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
         sym_node_log.debug("MAGIC %s %s %s", method, self, other)
@@ -1660,6 +1685,44 @@ def _make_user_magic(method, user_type):
         if other_node is NotImplemented:
             return NotImplemented
         ret = wrap_node(getattr(self.node, method_attr)(other_node))
+        import inspect
+        import traceback
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        # import fbvscode; fbvscode.set_trace()
+
+        if (len(TracingContext.extract_stack()) > 0):
+            floc: Optional[Union[str, traceback.FrameSummary]] = None
+            user_stack = TracingContext.extract_stack()
+            user_top_stack = format_frame(user_stack[0], line=True)
+            user_bottom_stack = format_frame(user_stack[-1], line=True)
+            frame = inspect.currentframe()
+            try:
+                while frame is not None:
+                    if frame.f_code.co_filename not in uninteresting_files():
+                        floc = traceback.FrameSummary(
+                            frame.f_code.co_filename,
+                            frame.f_lineno,
+                            frame.f_code.co_name,
+                        )
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame
+            # cpp_stack = CapturedTraceback.extract(cpp=True)
+            # print([method, (self, other), "=", ret], user_bottom_stack, user_top_stack, floc)
+            out: Dict[str, Any] = {
+                "method": method,
+                "arguments": [str(self), str(other)],
+                "result": str(ret),
+                "user_bottom_stack": str(user_bottom_stack),
+                "user_top_stack": str(user_top_stack),
+                "floc": str(floc),
+            }
+
+            with open("/tmp/prov.txt", "a") as f:
+                f.write(json.dumps(out) + "\n")
         return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
@@ -1676,6 +1739,44 @@ def _make_user_magic(method, user_type):
         if other_node is NotImplemented:
             return NotImplemented
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        import inspect
+        import traceback
+        from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+        from torch._logging import dtrace_structured, LazyString, structured, trace_structured
+        from torch.utils._traceback import CapturedTraceback, format_frame
+        # import fbvscode; fbvscode.set_trace()
+
+        if (len(TracingContext.extract_stack()) > 0):
+            floc: Optional[Union[str, traceback.FrameSummary]] = None
+            user_stack = TracingContext.extract_stack()
+            user_top_stack = format_frame(user_stack[0], line=True)
+            user_bottom_stack = format_frame(user_stack[-1], line=True)
+            frame = inspect.currentframe()
+            try:
+                while frame is not None:
+                    if frame.f_code.co_filename not in uninteresting_files():
+                        floc = traceback.FrameSummary(
+                            frame.f_code.co_filename,
+                            frame.f_lineno,
+                            frame.f_code.co_name,
+                        )
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame
+            # cpp_stack = CapturedTraceback.extract(cpp=True)
+            # print([method, (self, other), "=", ret], user_bottom_stack, user_top_stack, floc)
+            out: Dict[str, Any] = {
+                "method": method,
+                "arguments": [str(self), str(other)],
+                "result": str(ret),
+                "user_bottom_stack": str(user_bottom_stack),
+                "user_top_stack": str(user_top_stack),
+                "floc": str(floc),
+            }
+
+            with open("/tmp/prov.txt", "a") as f:
+                f.write(json.dumps(out) + "\n")
         return get_constant(ret) if is_constant(ret) else ret
 
     if method in unary_magic_methods:
