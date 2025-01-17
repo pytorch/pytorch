@@ -433,6 +433,10 @@ track_nodes_for_deduplication = False
 # Should be disabled in dynamo-wrapped tests since some tests check that no warnings are issued.
 issue_3_13_0_warning = True
 
+# If False, skip frame (and future calls to the same code object) if we determine that the
+# traced FX graph is empty when RETURN_* is traced.
+allow_empty_graphs = False
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False

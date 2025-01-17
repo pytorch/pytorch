@@ -383,6 +383,10 @@ class MpsInterface(DeviceInterface):
         def get_device_properties(device: _device_t = None):
             return {}
 
+        @staticmethod
+        def current_device():
+            return 0
+
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False

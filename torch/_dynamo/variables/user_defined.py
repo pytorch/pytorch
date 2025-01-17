@@ -217,7 +217,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
-            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
@@ -322,12 +321,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
-        elif name == "__new__" and self.value is collections.OrderedDict:
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            return variables.ConstDictVariable(
-                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
-            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -339,6 +332,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
+        from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -358,10 +352,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.construct_dict),
-                [self, *args],
-                kwargs,
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
             )
         elif (
             self.value is collections.defaultdict
@@ -1425,14 +1417,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         if method in self._dict_methods:
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
-
-    def unpack_var_sequence(self, tx):
-        if type(self.value).__iter__ in (
-            dict.__iter__,
-            collections.OrderedDict.__iter__,
-        ):
-            return self._dict_vt.unpack_var_sequence(tx)
-        raise NotImplementedError
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

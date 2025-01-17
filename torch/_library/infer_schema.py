@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import inspect
 import typing
 from typing import List, Optional, Sequence, Union  # noqa: F401
@@ -54,6 +55,7 @@ def infer_schema(
     sig = inspect.signature(prototype_function)
 
     def error_fn(what):
+        breakpoint()
         raise ValueError(
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
@@ -172,6 +174,8 @@ def derived_types(
         return [
             typing.Sequence[typ],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]
+            collections.abc.Sequence[typ],
+            list[typ],
         ]
 
     if list_base:

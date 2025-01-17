@@ -1428,6 +1428,16 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
+    def DISPATCH_KEY_SET_MATCH(self, guard: Guard):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch._C.DispatchKeySet)
+        code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
+
+        self.get_guard_manager(guard).add_dispatch_key_set_guard(
+            val, get_verbose_code_parts(code_parts, guard)
+        )
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 

@@ -6441,6 +6441,32 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
 
+    @torch._dynamo.config.patch(allow_empty_graphs=True)
+    @parametrize("fullgraph", [True, False])
+    def test_empty_graph_nested_calls(self, fullgraph):
+        def k(x):
+            return x
+
+        def g(x):
+            return k(x)
+
+        def f(x):
+            return g(x)
+
+        # TODO clear this on all tests
+        torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos.clear()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph, dynamic=False)
+        opt_f(torch.randn(3))
+        # we should not be compiling g or h as top-level functions
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 1)
+        # no recompilation
+        opt_f(torch.randn(3))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 1)
+        # recompilation
+        opt_f(torch.randn(4))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 2)
+
     def test_torchname(self):
         def fn(obj):
             return torch.typename(obj)
