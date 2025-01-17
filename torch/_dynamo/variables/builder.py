@@ -1555,7 +1555,9 @@ class VariableBuilder:
             is_static_input = True
 
         make_graph_attribute = is_static_input and (
-            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+            not config.inline_inbuilt_nn_modules
+            or is_parameter_freezing()
+            or torch._dynamo.config.prepare_freezing
         )
 
         if (
@@ -2969,6 +2971,10 @@ class SourcelessBuilder:
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
+        elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
+            return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
+                value
+            )
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )

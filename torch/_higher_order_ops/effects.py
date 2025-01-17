@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
