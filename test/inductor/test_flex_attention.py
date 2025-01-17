@@ -3653,6 +3653,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @supported_platform
     @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
     def test_cpu_error_message_return_lse(self):
         make_tensor = functools.partial(
@@ -3670,6 +3671,7 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
+    @supported_platform
     @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
     def test_validate_cpu_dtype_error_message(self):
         make_tensor = functools.partial(
