@@ -9,7 +9,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.fuzzer import ConfigFuzzer, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 def create_simple_test_model_cpu():
