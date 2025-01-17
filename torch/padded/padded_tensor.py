@@ -265,7 +265,7 @@ class PolarOp(RegularOp):
         return [input_shape]
 
 
-class TransposeOp(SliceRunRepadOp):
+class TransposeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 

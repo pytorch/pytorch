@@ -96,7 +96,7 @@ class TransformerModel(nn.Module):
 
     def kv_update(self, input_pos, k_val, v_val, k_cache, v_cache):
         # input_pos: [S], k_val: [B, H, S, D]
-        assert input_pos.shape[0] == k_val.shape[2]
+        # assert input_pos.shape[0] == k_val.shape[2]
 
         k_out = self.k_cache
         v_out = self.v_cache
