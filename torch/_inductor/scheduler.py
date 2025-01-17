@@ -2707,15 +2707,18 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-        ) -> Tuple[TritonFuture, ModuleType]:
+        ) -> Tuple[Optional[TritonFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
             mod = PyCodeCache.load(src_code)
-            return (
-                async_compile.triton(kernel_name="triton_", source_code=src_code),
-                mod,
-            )
+            if not async_compile.use_process_pool():
+                fut = None
+            else:
+                fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
+                assert isinstance(fut, TritonFuture)
+
+            return (fut, mod)
 
         # After the succesful fusion with Template, we finalize its config.
         # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
@@ -2736,9 +2739,7 @@ class Scheduler:
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
             # Start compiling choices in parallel
-            future_choices: List[
-                Tuple[Any, torch._inductor.codecache.TritonFuture, ModuleType]
-            ] = []
+            future_choices: List[Tuple[Any, Optional[TritonFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -2777,7 +2778,8 @@ class Scheduler:
 
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
-                    future.result()
+                    if future is not None:
+                        future.result()
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, device
@@ -2805,9 +2807,13 @@ class Scheduler:
             def benchmark_when_ready() -> bool:
                 try:
                     # Wait for all compilations to complete
-                    future_and_mod_l1[0].result()
-                    future_and_mod_l2[0].result()
-                    future_and_mod_l1_fused[0].result()
+                    for fut in (
+                        future_and_mod_l1[0],
+                        future_and_mod_l2[0],
+                        future_and_mod_l1_fused[0],
+                    ):
+                        if fut is not None:
+                            fut.result()
 
                     ms1, path1 = self.benchmark_codegened_module(
                         future_and_mod_l1[1], device
@@ -2953,7 +2959,9 @@ class Scheduler:
 
             seen_pair_speedup_fn.add(is_speedup_fn)
 
-            if is_speedup_fn() and not self.will_fusion_create_cycle(node1, node2):
+            if is_speedup_fn() and not self.will_fusion_create_cycle(
+                node_key1, node_key2
+            ):
                 fuse_two_nodes(node_key1, node_key2)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)

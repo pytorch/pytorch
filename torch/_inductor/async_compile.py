@@ -127,7 +127,7 @@ def get_compile_threads() -> int:
 
 
 @clear_on_fresh_inductor_cache
-@functools.lru_cache
+@functools.lru_cache(None)
 def get_future_cache():
     return {}
 
