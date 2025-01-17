@@ -2282,7 +2282,7 @@ class GuardManager {
   bool check_accessors_nopybind(T* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
-    if constexpr (std::is_same<T, PyObject>::value) {
+    if constexpr (std::is_same_v<T, PyObject>) {
       if (_is_dict) {
         // Check if the dict tag matches. If it does, propagate to the child
         // accessors. This will pass to the child manager via
