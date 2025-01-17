@@ -288,6 +288,7 @@ class TestFxGraphCache(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
     def test_cache_hot_load(self, device, dtype, dynamic):
         """
         Verify that we can populate and hot load functions from the cache.
@@ -364,6 +365,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
     def test_cache_hot_load_pgo(self):
         """
