@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     scoped_load_inline,
     skipIfWindows,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -3233,14 +3232,17 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    @unittest.skipIf(TEST_WITH_ROCM, "flexattention has some ROCm incompatibilities")
     def test_flex_attention(self):
+        def _squared(score, b, h, m, n):
+            """Joint graph needed for correctness"""
+            return score * score
+
         def fn():
             @torch.compile(backend="aot_eager")
             def fwd_bwd(x: torch.Tensor):
-                flex_attention(x, x, x).sum().backward()
+                flex_attention(x, x, x, score_mod=_squared).sum().backward()
 
-            for a, b in zip([12, 24, 48], [64, 128, 256]):
+            for a, b in zip([12, 24, 12], [64, 128, 64]):
                 v = torch.zeros(
                     1,
                     1,
@@ -3253,9 +3255,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fwd_bwd(v)
                 yield v.grad
 
-        # TODO: Dynamo graph breaks on torch.ops.higher_order.flex_attention_backward
         self.check_output_and_recompiles(
-            fn, count=3, compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
     @unittest.expectedFailure

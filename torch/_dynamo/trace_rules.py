@@ -305,6 +305,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
     # everything else
+    "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
@@ -2242,6 +2243,14 @@ if sys.version_info >= (3, 11):
 
 
 # In graph functions (including constant folding) that are not C bindings
+# NOTE: [Cacheability of in-graph torch functions]
+# Functions in this list have the property that graphs containing them are safe to cache/serialize.
+# serialize given only the information in the graph. I.e, either:
+# - Your function does not access or close over global state, or
+# - Your function closes over global state, but this state is guarded by dynamo, either
+#   through constant folding or other mechanisms
+# If your function needs a custom special handler (via @register on TorchInGraphFunctionVariable),
+# or captures global state, please add it to manual_torch_name_rule_map instead
 torch_non_c_binding_in_graph_functions = dict.fromkeys(
     [
         "torch.__future__.get_overwrite_module_params_on_conversion",
