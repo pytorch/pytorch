@@ -25,11 +25,6 @@ install_ubuntu() {
   chmod 755 /opt/cache/bin/sccache-0.2.14a
 }
 
-install_binary() {
-  echo "Downloading sccache binary from S3 repo"
-  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
-}
-
 mkdir -p /opt/cache/bin
 mkdir -p /opt/cache/lib
 sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
@@ -42,10 +37,7 @@ chmod a+x /opt/cache/bin/sccache
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
-  if [ $1 == "gcc" ]; then
-    # Do not call sccache recursively when dumping preprocessor argument
-    # For some reason it's very important for the first cached nvcc invocation
-    cat >"/opt/cache/bin/$1" <<EOF
+  cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
@@ -54,17 +46,6 @@ else
   exec $(which $1) "\$@"
 fi
 EOF
-  else
-    cat >"/opt/cache/bin/$1" <<EOF
-#!/bin/sh
-
-if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache $(which $1) "\$@"
-else
-  exec $(which $1) "\$@"
-fi
-EOF
-  fi
   chmod a+x "/opt/cache/bin/$1"
 }
 
