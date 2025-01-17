@@ -8,44 +8,89 @@ namespace at::functionalization {
 
 // See Note [Functionalization Pass In Core]
 
+enum class InverseReturnMode {
+  /// Specifies that functional inverses should always return a view.
+  AlwaysView,
+  /// Specifies that functional inverses should always return a non-view / copy.
+  NeverView,
+  /// Specifies that functional inverses should return a view unless a (copying)
+  /// scatter
+  /// inverse exists, in which case that will be used instead.
+  /// This avoids as_strided() calls that can be difficult for subclasses to
+  /// handle.
+  ViewOrScatterInverse,
+};
+
+#define FUNCTIONALIZATION_VIEWMETA_NAME(TYPE) \
+  static const char* name() {                 \
+    return #TYPE;                             \
+  }
+
+#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
+  using SerializableTuple = std::tuple<__VA_ARGS__>;
+
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
 // For example, if I call `b = a.view1(...)`
-// the functionalization pass will generate and store a ViewMeta on b that looks
-// like:
+// the functionalization pass will generate and store a ViewMeta specialization
+// for `view1` operation on b that looks like:
 //
-// ViewMeta(
-//   [<captures>](const Tensor& base, int64_t mutated_view_idx) {
-//     return base.view1(...);
-//   },
-//   [<captures>](const at::Tensor& base, const at::Tensor& mutated_view,
-//   int64_t mutated_view_idx) -> at::Tensor {
-//     return at::functionalization::impl::view1_inverse(base, mutated_view,
-//     ...);
+// struct TORCH_API view1_ViewMeta : public ViewMeta {
+//   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
+//   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
+//       bool /* reapply_views */,
+//       const std::vector<int64_t>&);
+//
+//   view1_ViewMeta(const SerializableTuple& tpl)
+//       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
+//
+//   view1_ViewMeta(bool reapply_views, const std::vector<int64_t>& size)
+//       : ViewMeta(/*has_symbolic_inputs=*/false),
+//         reapply_views(reapply_views),
+//         size(size) {}
+//
+//   Tensor forward(const Tensor& base) override {
+//       return base.view1(...);
 //   }
 //
-// The forward_fn lambda describes how to replay view1 on a tensor.
+//   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override {
+//       return at::functionalization::impl::view1_inverse(base, mutated_view,
+//       ...);
+//   }
 //
-// The reverse_fn lambda describes how, given a tensor that is already a view,
+//   SerializableTuple to_serializable_tuple() {
+//     return std::make_tuple(reapply_views, size);
+//   }
+//
+//   bool reapply_views;
+//   std::vector<int64_t> size;
+// };
+//
+// The forward function describes how to replay view1 on a tensor.
+//
+// The reverse function describes how, given a tensor that is already a view,
 // how to get the corresponding base tensor. See Note [Functionalization Pass:
 // View Inverses] for details.
+//
+// `SerializedTuple` is a typedef that defines an `std::tuple<...>` type
+// representing the `ViewMeta` instance state. Methods that take in/return such
+// a type are used for supporting pickle serialization.
 struct ViewMeta {
   ViewMeta(
-      std::function<Tensor(const Tensor&, int64_t)> forward,
-      std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
       bool has_symbolic_inputs,
       bool is_multi_output = false,
       bool is_as_strided = false,
       int64_t out_idx = 0)
-      : forward_fn(std::move(forward)),
-        reverse_fn(std::move(reverse)),
-        out_index(out_idx),
+      : out_index(out_idx),
         is_multi_output(is_multi_output),
         is_as_strided(is_as_strided),
         has_symbolic_inputs(has_symbolic_inputs) {}
 
-  std::function<Tensor(const Tensor&, int64_t)> forward_fn;
-  std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
+  virtual ~ViewMeta() {}
+
+  virtual Tensor forward(const Tensor& base) = 0;
+  virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;
+
   // See Note [out_idx in ViewMeta]
   int64_t out_index;
 
@@ -57,10 +102,17 @@ struct ViewMeta {
   // Tells us if this view operation has any symbolic inputs
   bool has_symbolic_inputs;
 
-  // Returns a copy of the current ViewMeta, if out_idx matches the current
-  // out_index. Otherwise, returns a new ViewMeta with the same forward/reverse
+  // Returns a new ViewMeta with the same forward/reverse
   // functions, but a new out index.
-  ViewMeta to_out_idx(int64_t out_idx);
+  //
+  // This method should be implemented by those `ViewMeta` that have more than
+  // one output.
+  virtual std::shared_ptr<ViewMeta> to_out_index(int64_t out_index) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "ViewMeta::to_out_index not implemented. ",
+        "Likely because there's only one output.");
+  }
 };
 
 // FunctionalStorageImpl is a subclass of StorageImpl used by the
@@ -93,14 +145,14 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const at::Tensor new_val;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const std::vector<ViewMeta> view_metas;
+    const std::vector<std::shared_ptr<ViewMeta>> view_metas;
   };
 
   explicit FunctionalStorageImpl(const Tensor& value);
 
   void add_update(
       const Tensor& updated_val,
-      const std::vector<ViewMeta>& view_metas);
+      const std::vector<std::shared_ptr<ViewMeta>>& view_metas);
   bool apply_updates();
   const Tensor& base() {
     return base_;
