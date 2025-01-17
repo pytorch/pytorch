@@ -692,6 +692,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(y, t.sin())
 
     @unittest.expectedFailure
+    @unittest.skipIf(sys.version_info < (3, 11))
     def test_close_subgen(self):
         z = 0
 
