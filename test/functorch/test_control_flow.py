@@ -4088,9 +4088,9 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
     while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
-    value = while_loop[2]
-    value_1 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, value, value_1)""",  # noqa: B950
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
             )
 
     def _wrap_with_functionalize(self, fn, func_type):
