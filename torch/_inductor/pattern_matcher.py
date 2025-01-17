@@ -64,7 +64,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -139,13 +138,30 @@ class Multiple:
 MULTIPLE = Multiple()
 
 
-def _transfer_meta(new_meta: Dict[str, Any], old_meta: Dict[str, Any]) -> None:
+def _transfer_meta(
+    new_meta: Dict[str, Any], old_node: torch.fx.Node, pass_name: str = ""
+) -> None:
+    from torch.fx.traceback import NodeSource, NodeSourceAction
+
     # transfer metadata after pattern matching occurs.
     # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
     # to remain accurate after pattern matching has occurred.
-    new_meta.update(
-        (k, v) for k, v in old_meta.items() if k in torch.fx.proxy._COPY_META_FIELDS
-    )
+    if config.trace.enabled:
+        # We handle "from_node" field of the node meta specially to record that the new node comes from the old_node.
+        new_from_node = new_meta.get("from_node", []).copy()
+        new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
+        new_meta.update(
+            (k, v)
+            for k, v in old_node.meta.items()
+            if k in torch.fx.proxy._COPY_META_FIELDS
+        )
+        new_meta["from_node"] = new_from_node
+    else:
+        new_meta.update(
+            (k, v)
+            for k, v in old_node.meta.items()
+            if k in torch.fx.proxy._COPY_META_FIELDS
+        )
 
 
 class Match:
@@ -264,7 +280,11 @@ class Match:
             )
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
-                    _transfer_meta(new_meta=n.meta, old_meta=self.nodes[0].meta)
+                    _transfer_meta(
+                        new_meta=n.meta,
+                        old_node=self.nodes[0],
+                        pass_name="replace_by_example",
+                    )
 
             ReplacementPatternEntry.replace_with_graph(
                 self,
@@ -543,7 +563,7 @@ class _TargetExpr(PatternExpr):
         )
 
 
-_SimpleSpec = Tuple[Any, ...]
+_SimpleSpec = tuple[Any, ...]
 
 
 class _TargetArgsExpr(_TargetExpr):
@@ -573,7 +593,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def simple_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         values = (*args, *kwargs.values())
         spec = (len(args), *kwargs.keys())
         return values, spec
@@ -581,7 +601,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
 
         def convert_type(x: Any) -> Any:
@@ -986,7 +1006,7 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+    def __getitem__(self, k: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         ...
 
 
@@ -1070,7 +1090,11 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
-                    _transfer_meta(new_meta=result.meta, old_meta=node.meta)
+                    _transfer_meta(
+                        new_meta=result.meta,
+                        old_node=node,
+                        pass_name="Interpreter_Replacer",
+                    )
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
@@ -1402,7 +1426,8 @@ def register_replacement(
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
                             new_meta=n.meta,
-                            old_meta=match.nodes[0].meta,
+                            old_node=match.nodes[0],
+                            pass_name="replacement",
                         )
                 return True
             return False
@@ -1542,7 +1567,7 @@ SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patt
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
 _known_precompiled_patterns: List[
-    Tuple[
+    tuple[
         Any,
         Iterable[Any],
         Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
@@ -1615,7 +1640,7 @@ def gen_pattern_and_search_gm(
     trace_fn: TraceFn,
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
-) -> Tuple[PatternExpr, torch.fx.GraphModule]:
+) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     if scalar_workaround is None:
@@ -1779,7 +1804,7 @@ class PatternMatcherPass:
     ) -> None:
         super().__init__()
         self.patterns: DefaultDict[
-            Tuple[str, torch.fx.node.Target], List[PatternEntry]
+            tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
 
@@ -1789,7 +1814,7 @@ class PatternMatcherPass:
         # searches are actually different.
         self.seen_patterns: Dict[str, List[Optional[str]]] = defaultdict(list)
 
-    def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+    def __getitem__(self, item: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
@@ -1989,7 +2014,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
     def record_joint_graph(
         joint_graph: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
-    ) -> Tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         nonlocal gm
         assert not gm
         gm = clone_graph(joint_graph)
@@ -2111,6 +2136,10 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
             return new_node
 
     return CopyGraph(input_graph).transform()
+
+
+# TODO: remove in follow up diff, used internally
+_seen_patterns = OrderedSet[str]()
 
 
 def get_arg_value(

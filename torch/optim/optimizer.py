@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Base optimizer."""
 import functools
@@ -17,6 +16,7 @@ from typing import (
     List,
     Optional,
     overload,
+    Sequence,
     Set,
     Tuple,
     TypeVar,
@@ -35,6 +35,9 @@ from torch.utils._foreach_utils import (
 )
 from torch.utils.hooks import RemovableHandle
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
@@ -56,16 +59,6 @@ __all__ = [
 _global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
-
-
-class _RequiredParameter:
-    """Singleton class representing a required parameter for an Optimizer."""
-
-    def __repr__(self) -> str:
-        return "<required parameter>"
-
-
-required = _RequiredParameter()
 
 
 def _use_grad_for_differentiable(func):
@@ -113,7 +106,9 @@ def _stack_if_compiling(x):
         return x
 
 
-def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+def _disable_dynamo_if_unsupported(
+    single_tensor_fn: Optional[Callable[..., object]] = None
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
     # global environment at the site at which the
@@ -121,7 +116,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
     if single_tensor_fn:
         globals()[single_tensor_fn.__name__] = single_tensor_fn
 
-    def wrapper(func):
+    def wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         import inspect
 
         disabled_func = torch._disable_dynamo(func)
@@ -138,15 +133,18 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args, **kwargs):
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                and (arg := args[state_steps_ind])
+                and isinstance(arg, Sequence)
+                and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    and kwargs["state_steps"]
-                    and kwargs["state_steps"][0].is_cuda
+                    and (kwarg := kwargs["state_steps"])
+                    and isinstance(kwarg, Sequence)
+                    and kwarg[0].is_cuda
                 )
             ):
                 return disabled_func(*args, **kwargs)
@@ -316,7 +314,6 @@ ParamsT: TypeAlias = Union[
     Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
 ]
 
-_P = ParamSpec("_P")
 R = TypeVar("R")
 T = TypeVar("T")
 
@@ -1064,12 +1061,7 @@ class Optimizer:
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():
-            if default is required and name not in param_group:
-                raise ValueError(
-                    f"parameter group didn't specify a value of required optimization parameter {name}"
-                )
-            else:
-                param_group.setdefault(name, default)
+            param_group.setdefault(name, default)
 
         params = param_group["params"]
         if len(params) != len(set(params)):
