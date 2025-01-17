@@ -41,10 +41,10 @@ class Allocator:
 
 class HostAllocator(Allocator):
     def is_pinned_ptr(self, ptr):
-        for ptr_, (size, _) in self.allocated.items():
-            if ptr_ <= ptr and ptr < ptr_ + size:
-                return True
-        return False
+        return any(
+            ptr_ <= ptr and ptr < ptr_ + size
+            for ptr_, (size, _) in self.allocated.items()
+        )
 
 
 class DeviceAllocator(Allocator):
