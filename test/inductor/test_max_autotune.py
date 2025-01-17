@@ -1292,7 +1292,7 @@ class TestPrologueFusion(TestCase):
             "mixed_mm_choice": "default",
         }
     )
-    def test_pending_fusions(self):
+    def test_pending_fusions_multiple(self):
         def multi_use(x, y):
             return (x @ x.T) * (y @ y.T)
 
@@ -1312,6 +1312,15 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def call").check_count(".run(", 1, exactly=True).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "Triton",
+            "benchmark_epilogue_fusion": True,
+            "use_mixed_mm": False,
+            "mixed_mm_choice": "default",
+        }
+    )
+    def test_pending_fusion_pro_and_epi(self):
         def test_multiple_fusions(x):
             y = x.to(torch.float)
             return (y @ y).relu()

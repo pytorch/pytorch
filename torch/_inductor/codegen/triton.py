@@ -3957,7 +3957,6 @@ class TritonScheduling(SIMDScheduling):
             def store_cache():
                 path = cache_file_path()
                 with open(path, "w") as fd:
-                    breakpoint()
                     fd.write(str(ms))  # type: ignore[has-type]
 
             def load_cache():

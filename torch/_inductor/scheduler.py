@@ -2952,6 +2952,9 @@ class Scheduler:
                 pending_fusions.pop(node_key1, None)
                 pending_fusions.pop(node_key2, None)
 
+                assert self.get_fused_node(node_key1) is node_key1
+                assert self.get_fused_node(node_key2) is node_key2
+
                 if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
                     continue
 
@@ -2985,6 +2988,9 @@ class Scheduler:
                 continue
 
             seen_pair_speedup_fn.add(is_speedup_fn)
+
+            assert self.get_fused_node(node_key1) is node_key1
+            assert self.get_fused_node(node_key2) is node_key2
 
             if is_speedup_fn() and not self.will_fusion_create_cycle(
                 node_key1, node_key2
