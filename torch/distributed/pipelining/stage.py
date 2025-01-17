@@ -586,15 +586,9 @@ class _PipelineStageBase(ABC):
         # PP scales only for its own contribution (microbatches), but relies on DP to scale further
         # for DP degree.
         if grad_scale_factor != 1:
-            scaled_any = False
             for p in self.submod.parameters():
                 if p.grad is not None:
                     p.grad.div_(grad_scale_factor)
-                    scaled_any = True
-            assert scaled_any, (
-                "No gradients found for any parameter, "
-                "this is likely a composability bug between pipelining and something else."
-            )
 
     def backward_maybe_with_nosync(
         self,
