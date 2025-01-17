@@ -1612,6 +1612,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         with closing(
             tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
         ) as tar, mkdtemp() as tmpdir:
+            if pickle_module is _weights_only_unpickler:
+                raise RuntimeError(
+                    "Cannot use ``weights_only=True`` with files saved in the "
+                    "legacy .tar format. " + UNSAFE_MESSAGE
+                )
             tar.extract("storages", path=tmpdir)
             with open(os.path.join(tmpdir, "storages"), "rb", 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
@@ -1738,13 +1743,6 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
-            with closing(tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)):
-                if pickle_module is _weights_only_unpickler:
-                    raise RuntimeError(
-                        "Cannot use ``weights_only=True`` with files saved in the "
-                        "legacy .tar format. " + UNSAFE_MESSAGE
-                    )
-            f.seek(0)
             return legacy_load(f)
         except tarfile.TarError:
             if _is_zipfile(f):
