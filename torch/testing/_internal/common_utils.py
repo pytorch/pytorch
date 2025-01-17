@@ -307,7 +307,7 @@ NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backen
 DEVICE_LIST_SUPPORT_PROFILING_TEST = ('cpu', 'cuda', 'xpu')
 ALLOW_XPU_PROFILING_TEST = True
 
-check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra', 'thor']
 IS_JETSON = any(name in platform.platform() for name in check_names)
 
 def gcIfJetson(fn):
@@ -354,11 +354,13 @@ def get_tracked_input() -> Optional[TrackedInput]:
         return None
     return getattr(test_fn, "tracked_input", None)
 
-def clear_tracked_input():
+def clear_tracked_input() -> None:
     test_fn = extract_test_fn()
     if test_fn is None:
         return
-    return getattr(test_fn, "tracked_input", None)
+    if not hasattr(test_fn, "tracked_input"):
+        return
+    test_fn.tracked_input = None  # type: ignore[attr-defined]
 
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.

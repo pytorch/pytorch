@@ -2456,8 +2456,8 @@ Tensor index_select_sparse_cpu(
       // src is a source of indices to binary search in sorted
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) =
-          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz](
-              void) -> std::tuple<Tensor, Tensor, Tensor> {
+          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz]()
+          -> std::tuple<Tensor, Tensor, Tensor> {
         // sort dim_indices to binary search into it
         if (search_in_dim_indices) {
           // dim_indices is already sorted if self is coalesced and dim == 0

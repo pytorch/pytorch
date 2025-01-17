@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
 
 import torch
 
@@ -320,6 +320,10 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return True
+
+    @staticmethod
     def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
@@ -366,6 +370,10 @@ class MpsInterface(DeviceInterface):
         return 0
 
     @staticmethod
+    def get_compute_capability(device: _device_t = None) -> str:
+        return ""
+
+    @staticmethod
     def synchronize(device: _device_t = None):
         torch.mps.synchronize()
 
@@ -373,6 +381,10 @@ class MpsInterface(DeviceInterface):
         @staticmethod
         def get_device_properties(device: _device_t = None):
             return {}
+
+        @staticmethod
+        def current_device():
+            return 0
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
@@ -397,7 +409,7 @@ def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInt
     raise NotImplementedError(f"No interface for device {device}")
 
 
-def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterface]]]:
+def get_registered_device_interfaces() -> Iterable[tuple[str, Type[DeviceInterface]]]:
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
