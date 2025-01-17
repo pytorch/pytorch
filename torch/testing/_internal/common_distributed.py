@@ -1449,7 +1449,7 @@ class MultiProcContinousTest(TestCase):
     # Rendezvous file
     rdvz_file: Optional[str] = None
     # timeout configured per class
-    timeout: timedelta=timedelta(seconds=120)
+    timeout: timedelta = timedelta(seconds=120)
 
 
     @classmethod
