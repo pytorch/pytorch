@@ -286,17 +286,6 @@ class TransposeOp(RegularOp):
         return [torch.Size(input_shape)]
 
 
-class ExpandOp(SliceRunRepadOp):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
-        shape = args[1]
-
-        return [torch.Size(shape)]
-
-
 class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -556,7 +545,6 @@ class OpDatabase:
             "unsqueeze": UnsqueezeOp(),
             "polar": PolarOp(),
             "transpose": TransposeOp(),
-            "expand": ExpandOp(),
             "clone": ElementwiseUnaryOp(),
             # Elementwise operations
             "where": ElementwiseUnaryOp(),
