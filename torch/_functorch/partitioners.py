@@ -1091,10 +1091,12 @@ def solve_min_cut(
                 if node_info.is_required_fw(user):
                     if node_info.get_fw_order(user) > max_range:
                         continue
-                    heapq.heappush(
-                        sorted_nodes,
-                        (node_info.get_fw_order(user), user, is_fusible(node, user)),
-                    )
+                    val = (node_info.get_fw_order(user), user, is_fusible(node, user))
+                    if val not in sorted_nodes:
+                        heapq.heappush(
+                            sorted_nodes,
+                            val,
+                        )
         return max_range
 
     if min_cut_options.ban_if_used_far_apart:
