@@ -34,6 +34,7 @@ def _get_request_headers() -> dict[str, str]:
         "Authorization": "token " + os.environ["GITHUB_TOKEN"],
     }
 
+
 def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
     response = requests.get(
