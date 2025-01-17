@@ -85,6 +85,13 @@ STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedSto
 
 IS_WINDOWS = sys.platform == "win32"
 
+UNSAFE_MESSAGE = (
+    "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+    "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+    "but it can result in arbitrary code execution. Do it only if you got the file from a "
+    "trusted source."
+)
+
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
@@ -1341,12 +1348,6 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
-    UNSAFE_MESSAGE = (
-        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
-        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
-        "but it can result in arbitrary code execution. Do it only if you got the file from a "
-        "trusted source."
-    )
     DOCS_MESSAGE = (
         "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
         "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
@@ -1736,16 +1737,28 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
-        try:
-            return legacy_load(f)
-        except tarfile.TarError:
-            if _is_zipfile(f):
-                # .zip is used for torch.jit.save and will throw an un-pickling error here
-                raise RuntimeError(
-                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
-                ) from None
-            # if not a tarfile, reset file offset and proceed
-            f.seek(0)
+        if pickle_module is _weights_only_unpickler:
+            try:
+                with closing(
+                    tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
+                ):
+                    raise RuntimeError(
+                        "Cannot use ``weights_only=True`` with files saved in the "
+                        "legacy .tar format. " + UNSAFE_MESSAGE
+                    )
+            except tarfile.TarError:
+                f.seek(0)
+        else:
+            try:
+                return legacy_load(f)
+            except tarfile.TarError:
+                if _is_zipfile(f):
+                    # .zip is used for torch.jit.save and will throw an un-pickling error here
+                    raise RuntimeError(
+                        f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
+                    ) from None
+                # if not a tarfile, reset file offset and proceed
+                f.seek(0)
 
     if not hasattr(f, "readinto") and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
