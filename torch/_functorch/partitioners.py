@@ -1072,17 +1072,24 @@ def solve_min_cut(
     # backwards pass instead of only relying on whether it's unfusible in the
     # forwards.
 
+    tiebreak_count = 0
+    def get_tiebreak_count():
+        nonlocal tiebreak_count
+        tiebreak_count += 1
+        return tiebreak_count
+
     def find_first_unfusible(start_nodes: List[fx.Node], max_range: int) -> int:
         """
         Finds the first unfusible node in the chain of nodes starting from
         `start_nodes` and returns its position.
         """
         sorted_nodes: List[Tuple[int, fx.Node, bool]] = []
+
         for n in start_nodes:
-            heapq.heappush(sorted_nodes, (node_info.get_fw_order(n), n, True))
+            heapq.heappush(sorted_nodes, (node_info.get_fw_order(n), n, True, get_tiebreak_count()))
 
         while len(sorted_nodes) > 0:
-            _, node, node_is_fusible = heapq.heappop(sorted_nodes)
+            _, node, node_is_fusible, _tiebreak = heapq.heappop(sorted_nodes)
             if not node_is_fusible:
                 return node_info.get_fw_order(node)
             for user in node.users:
@@ -1091,7 +1098,7 @@ def solve_min_cut(
                         continue
                     heapq.heappush(
                         sorted_nodes,
-                        (node_info.get_fw_order(user), user, is_fusible(node, user)),
+                        (node_info.get_fw_order(user), user, is_fusible(node, user), get_tiebreak_count()),
                     )
         return max_range
 
@@ -1141,10 +1148,10 @@ def solve_min_cut(
         for start_node in joint_graph.nodes:
             if not node_info.is_required_fw(start_node):
                 continue
-            fusible = [(node_info.get_fw_order(start_node), start_node)]
+            fusible = [(node_info.get_fw_order(start_node), start_node, get_tiebreak_count())]
             start_order = node_info.get_fw_order(start_node)
             while len(fusible) > 0:
-                _, cur = heapq.heappop(fusible)
+                _, cur, _tiebreak = heapq.heappop(fusible)
                 if cur in visited:
                     continue
                 visited.add(cur)
@@ -1169,7 +1176,7 @@ def solve_min_cut(
                         and is_fusible(cur, user)
                         and user not in banned_nodes
                     ):
-                        heapq.heappush(fusible, (node_info.get_fw_order(user), user))
+                        heapq.heappush(fusible, (node_info.get_fw_order(user), user, get_tiebreak_count()))
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
