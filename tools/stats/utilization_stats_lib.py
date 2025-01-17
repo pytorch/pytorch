@@ -11,10 +11,13 @@ class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
 
-
 @dataclass
 class UtilizationMetadata:
     level: Optional[str] = None
+    workflow_id: Optional[str] = None
+    job_id: Optional[str] = None
+    workflow_name: Optional[str] = None
+    job_name: Optional[str] = None
     usage_collect_interval: Optional[float] = None
     data_model_version: Optional[float] = None
     gpu_count: Optional[int] = None
@@ -22,7 +25,6 @@ class UtilizationMetadata:
     gpu_type: Optional[str] = None
     start_at: Optional[float] = None
     error: Optional[str] = None
-
 
 @dataclass
 class GpuUsage:

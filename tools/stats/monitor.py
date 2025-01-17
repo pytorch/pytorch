@@ -34,6 +34,7 @@ import signal
 import threading
 import time
 from collections import defaultdict
+import os
 from typing import Any
 
 import psutil  # type: ignore[import]
@@ -47,10 +48,13 @@ from tools.stats.utilization_stats_lib import (
     UtilizationStats,
 )
 
-
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
+_job_name = os.environ.get('JOB_NAME','')
+_job_id = os.environ.get('JOB_ID','')
+_workflow_run_id =  os.environ.get('WORKFLOW_RUN_NAME','')
+_workflow_name = os.environ.get('WORKFLOW_NAME','')
 
 @dataclasses.dataclass
 class UsageData:
@@ -181,8 +185,11 @@ class UsageLogger:
             level="metadata",
             usage_collect_interval=self._log_interval,
             data_model_version=getDataModelVersion(),
+            job_id=_job_id,
+            job_name=_job_name,
+            workflow_id=_workflow_run_id,
+            workflow_name = _workflow_name,
         )
-
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
