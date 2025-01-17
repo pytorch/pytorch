@@ -54,7 +54,7 @@ _HAS_AMDSMI = False
 
 _job_name = os.environ.get("JOB_NAME", "")
 _job_id = os.environ.get("JOB_ID", "")
-_workflow_run_id = os.environ.get("WORKFLOW_RUN_NAME", "")
+_workflow_run_id = os.environ.get("WORKFLOW_RUN_ID", "")
 _workflow_name = os.environ.get("WORKFLOW_NAME", "")
 
 
