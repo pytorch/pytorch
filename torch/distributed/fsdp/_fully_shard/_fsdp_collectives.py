@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from typing import cast, List, NamedTuple, Optional, Union
 
 import torch
