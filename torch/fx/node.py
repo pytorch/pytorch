@@ -769,11 +769,18 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function based on schema.
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            if schema is not None and schema.is_mutable:
+                # impure since it mutates inputs
+                return True
+
+            tags: Optional[List[torch.Tag]] = getattr(self.target, "_tags", None)
+            if tags is not None and torch.Tag.nondeterministic_seeded in tags:
+                # impure since it mutates RNG state
+                return True
+
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":

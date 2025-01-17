@@ -119,13 +119,13 @@ class _Dependent(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         if self._is_discrete is NotImplemented:
             raise NotImplementedError(".is_discrete cannot be determined statically")
         return self._is_discrete
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         if self._event_dim is NotImplemented:
             raise NotImplementedError(".event_dim cannot be determined statically")
         return self._event_dim
@@ -233,11 +233,11 @@ class _IndependentConstraint(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return self.base_constraint.is_discrete
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         return self.base_constraint.event_dim + self.reinterpreted_batch_ndims
 
     def check(self, value):
@@ -599,11 +599,11 @@ class _Cat(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         return max(c.event_dim for c in self.cseq)
 
     def check(self, value):
@@ -631,11 +631,11 @@ class _Stack(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         dim = max(c.event_dim for c in self.cseq)
         if self.dim + dim < 0:
             dim += 1
