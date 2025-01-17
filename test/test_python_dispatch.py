@@ -202,6 +202,9 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    @unittest.skip(
+        "Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108"
+    )
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
