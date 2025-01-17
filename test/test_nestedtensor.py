@@ -4188,17 +4188,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
-        ):
-            # doesn't support backward for chunk (dim=0) yet
-            loss = (
-                chunks[0].values().sum()
-                + chunks[1].values().sum()
-                + chunks[2].values().sum()
-            )
-            loss.backward()
+        # doesn't support backward for chunk (dim=0) yet
+        loss = (
+            chunks[0].values().sum()
+            + chunks[1].values().sum()
+            + chunks[2].values().sum()
+        )
+        loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
