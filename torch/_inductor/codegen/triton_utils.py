@@ -80,6 +80,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
         return "nvTmaDesc"
+    if isinstance(arg, ConstexprArg):
+        return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 

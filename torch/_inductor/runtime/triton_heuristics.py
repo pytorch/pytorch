@@ -505,8 +505,11 @@ class CachingAutotuner(KernelInterface):
 
         if (
             get_triton_attrs_descriptor_version()
-            != TritonAttrsDescriptorVersion.V4_DICT
+            == TritonAttrsDescriptorVersion.V4_DICT
         ):
+            call_args = self.fn.arg_names
+            def_args = self.fn.arg_names
+        else:
             call_args = [
                 arg
                 for i, arg in enumerate(self.fn.arg_names)
@@ -518,9 +521,6 @@ class CachingAutotuner(KernelInterface):
                 for name in self.fn.arg_names
                 if name not in cfg.kwargs and name not in none_args
             ]
-        else:
-            call_args = self.fn.arg_names
-            def_args = self.fn.arg_names
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
