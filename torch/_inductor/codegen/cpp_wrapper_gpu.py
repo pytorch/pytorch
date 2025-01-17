@@ -614,7 +614,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
-                casted.append(f"({arg_type}){new_arg}")
+                casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 

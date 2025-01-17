@@ -71,6 +71,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -1838,6 +1839,7 @@ PyObject* initModule() {
   torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace

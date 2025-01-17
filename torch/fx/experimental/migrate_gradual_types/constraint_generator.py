@@ -1227,7 +1227,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     )
 
 
-@register_inference_rule("dim")  # type: ignore[attr-defined]
+@register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
@@ -1253,7 +1253,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
 
 
-@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+@register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
