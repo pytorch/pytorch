@@ -8481,7 +8481,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
     ),
     # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;
