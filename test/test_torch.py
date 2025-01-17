@@ -35,9 +35,9 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -53,7 +53,6 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA)
-from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -1739,6 +1738,7 @@ else:
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
+    @skipIfRocmArch(MI300_ARCH)
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyCUDA
     def test_deterministic_cumsum(self, device):
@@ -3511,7 +3511,7 @@ else:
 
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert (dim >= 0 and dim < 3)
         a = [5, 4, 3]
         a[dim] = 2000

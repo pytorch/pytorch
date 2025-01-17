@@ -135,6 +135,12 @@ guard_nn_modules = True
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
+# Flag to enable preparation for graph freezing, so that the named parameters and
+# buffers are passed as params_flat in tracing context by AOT autograd.
+# Non-Inductor backends can use this list for graph freezing.
+prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
+
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
@@ -426,6 +432,10 @@ track_nodes_for_deduplication = False
 # instructs user to attempt using 3.13.1+, where the CPython bug is fixed.
 # Should be disabled in dynamo-wrapped tests since some tests check that no warnings are issued.
 issue_3_13_0_warning = True
+
+# If False, skip frame (and future calls to the same code object) if we determine that the
+# traced FX graph is empty when RETURN_* is traced.
+allow_empty_graphs = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.

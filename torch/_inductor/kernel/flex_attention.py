@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Union
 
 import sympy
 
@@ -688,7 +688,7 @@ class Mode(Enum):
     bwd = auto()
 
 
-def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
@@ -721,7 +721,7 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
@@ -769,14 +769,14 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, mode=Mode.fwd)
     else:
         return _get_rocm_config(query, mode=Mode.fwd)
 
 
-def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, mode=Mode.bwd)
     else:
@@ -1103,6 +1103,13 @@ def flex_attention(
     )
 
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.evaluate_static_shape(v)
+        if isinstance(v, sympy.Symbol)
+        else v
+        for k, v in kernel_options.items()
+    }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
@@ -1208,7 +1215,7 @@ def flex_attention(
     )
 
     choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    configs: List[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
         configs += [
@@ -2188,6 +2195,13 @@ def flex_attention_backward(*args, **kwargs):
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.evaluate_static_shape(v)
+        if isinstance(v, sympy.Symbol)
+        else v
+        for k, v in kernel_options.items()
+    }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
         kernel_options.setdefault("IS_DIVISIBLE", False)
@@ -2294,7 +2308,7 @@ def flex_attention_backward(*args, **kwargs):
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    configs: List[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
