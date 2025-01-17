@@ -112,6 +112,7 @@ _ref_test_ops = tuple(
 if IS_MACOS:
     mps_op_db(op_db)
 
+
 def reduction_dtype_filter(op):
     if (
         not isinstance(op, ReductionPythonRefInfo)
@@ -2837,6 +2838,7 @@ class TestFakeTensor(TestCase):
             kwargs["layout"] = torch.strided
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
+
 
 print("Updating MPS")
 mps_op_db(op_db)
