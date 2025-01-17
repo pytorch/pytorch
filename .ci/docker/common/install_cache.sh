@@ -48,13 +48,6 @@ function write_sccache_stub() {
     cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
-# sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
-for arg in "\$@"; do
-  if [ "\$arg" = "-E" ]; then
-    exec $(which $1) "\$@"
-  fi
-done
-
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
   exec sccache $(which $1) "\$@"
 else
