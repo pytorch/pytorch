@@ -630,14 +630,26 @@ class CachingAutotuner(KernelInterface):
         return binary, launcher
 
     def _get_args_with_constexprs(self, args, launcher):
+        """
+        `args` is passed in with only the non-constexpr args (because the constexpr arg values
+        depend on the config). However, in later triton versions, the constexpr args need to be
+        added into the args list.
+        """
         if (
             get_triton_attrs_descriptor_version()
             == TritonAttrsDescriptorVersion.V4_DICT
         ):
-            new_args = [*args]
+            # first: aggregate the constexpr args in (index, val) pairs
+            # so we can sort them by index.
+            constexpr_args: list[tuple[int, Any]] = []
             for arg_name, arg_val in launcher.config.kwargs.items():
-                # TODO: need to make sure we iterate in the right order!
-                new_args.insert(self.fn.arg_names.index(arg_name), arg_val)
+                constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
+
+            constexpr_args.sort()
+            new_args = [*args]
+            for arg_idx, arg_val in constexpr_args:
+                new_args.insert(arg_idx, arg_val)
+
             return new_args
         return args
 
@@ -669,8 +681,9 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
             launcher(
-                *self._get_args_with_constexprs(cloned_args, launcher),
+                *args_with_constexprs,
                 **cloned_kwargs,
                 grid=grid,
                 stream=stream,

@@ -99,6 +99,7 @@ from .simd import (
 )
 from .triton_utils import (
     config_of,
+    non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_of,
     signature_to_meta,
@@ -3423,6 +3424,7 @@ class TritonKernel(SIMDKernel):
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             ):
+                # V4 needs constexpr args in the signature
                 constexprarg = ConstexprArg(var_name)
                 signature.append(constexprarg)
                 triton_meta_signature[var_name] = "constexpr"
@@ -3433,6 +3435,7 @@ class TritonKernel(SIMDKernel):
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             ):
+                # V4 needs constexpr args in the signature
                 constexprarg = ConstexprArg("RSPLIT")
                 signature.append(constexprarg)
                 triton_meta_signature["RSPLIT"] = "constexpr"
@@ -3441,15 +3444,15 @@ class TritonKernel(SIMDKernel):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        # Triton compiler includes equal_to_1 args into constants even
-        # when they are not constexpr. otherwise there may be a segfault
-        # during launching the Inductor-compiled Triton kernel.
-        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         if (
             get_triton_attrs_descriptor_version()
             != TritonAttrsDescriptorVersion.V4_DICT
         ):
+            # Triton compiler includes equal_to_1 args into constants even
+            # when they are not constexpr. otherwise there may be a segfault
+            # during launching the Inductor-compiled Triton kernel.
+            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
                 triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
 
@@ -3486,7 +3489,9 @@ class TritonKernel(SIMDKernel):
         else:
             tile_hint = ""
             if len(size_hints) == 2:
-                if len(signature) == 4:  # input, output and 2 args
+                if (
+                    len(non_constexpr_signature(signature)) == 4
+                ):  # input, output and 2 args
                     tile_hint = "tile_hint=TileHint.SQUARE,"
                 else:
                     tile_hint = "tile_hint=TileHint.DEFAULT,"
