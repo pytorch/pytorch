@@ -13,7 +13,7 @@ from torch._inductor.config import use_experimental_benchmarker
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and not torch.xpu._is_compiled()
+    use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
