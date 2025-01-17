@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 import math
 import os
 import socket
