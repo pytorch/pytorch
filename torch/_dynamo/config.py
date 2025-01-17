@@ -415,7 +415,7 @@ enable_cpp_guard_manager = True
 enable_trace_contextlib = True
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = True
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
