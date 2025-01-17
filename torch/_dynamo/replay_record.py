@@ -1,7 +1,7 @@
 import dataclasses
 from dataclasses import field
 from types import CellType, CodeType, ModuleType
-from typing import Any, BinaryIO, Dict, IO, Tuple
+from typing import Any, BinaryIO, Dict, IO
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
@@ -29,7 +29,7 @@ class DummyModule:
 @dataclasses.dataclass
 class ExecutionRecord:
     code: CodeType
-    closure: Tuple[CellType]
+    closure: tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
@@ -50,7 +50,7 @@ class ExecutionRecorder:
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
-    closure: Tuple[CellType]
+    closure: tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
