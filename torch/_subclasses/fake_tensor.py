@@ -721,10 +721,10 @@ class FakeTensor(Tensor):
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
+            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            if getattr(torch, device.type).is_initialized():
+            if device.type != "mps" and getattr(torch, device.type).is_initialized():
                 device = torch.device(
                     f"{device.type}:{getattr(torch, device.type).current_device()}"
                 )
