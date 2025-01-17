@@ -8,7 +8,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import requires_gpu, requires_triton, GPU_TYPE
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    requires_gpu,
+    requires_triton,
+)
 
 
 @instantiate_parametrized_tests

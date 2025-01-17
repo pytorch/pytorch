@@ -3063,7 +3063,8 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst):
         if (
-            self.output.count_calls() == 0
+            not config.allow_empty_graphs
+            and self.output.count_calls() == 0
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
