@@ -8150,14 +8150,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
     ),
-    # Bug: this op returns a tuple of Tensors so it doesn't work with NJT's unary
-    # pointwise logic
-    XFailRule(
-        error_type=AttributeError,
-        error_msg="'tuple' object has no attribute 'device'",
-        op_match_fn=lambda device, op: op.full_name == "frexp",
-        name="frexp_tuple_return",
-    ),
     # Bug: fill doesn't work with NJTs at all for some reason
     XFailRule(
         error_type=TypeError,
