@@ -1166,7 +1166,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 12) + 1
+    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1284,6 +1284,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
@@ -1291,6 +1292,8 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",

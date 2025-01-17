@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-import os
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
 import sympy
 
@@ -82,18 +81,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
-    def write_header(self):
-        if V.graph.is_const_graph:
-            # We do not write header for constant graph, it will be written by main module.
-            return
-
-        super().write_header()
-        with open(
-            os.path.join(
-                os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
-            )
-        ) as f:
-            self.header.splice(f.read())
+    def get_device_include(self):
+        assert self.device == "cpu", "ArrayRef only supported on CPU!"
+        if V.graph.aot_mode:
+            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
+        return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
 
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
@@ -834,7 +826,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         call_strs = []
         final_tmp_name = None
 
-        def create_reinterpret_call() -> Tuple[str, str]:
+        def create_reinterpret_call() -> tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             args = [
                 f"{data.get_name()}",
@@ -858,7 +850,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> Tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]

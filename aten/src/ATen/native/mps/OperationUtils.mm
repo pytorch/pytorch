@@ -870,7 +870,12 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
   library = [device newLibraryWithSource:str options:options error:&error];
-  TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  if (library == nil) {
+    if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
+      throw c10::SyntaxError([[error localizedDescription] UTF8String]);
+    }
+    TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  }
   return library;
 }
 

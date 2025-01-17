@@ -27,9 +27,9 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     scoped_load_inline,
     skipIfWindows,
-    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -2817,7 +2817,20 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             not in logs.getvalue()
         )
 
-    @xfailIfS390X
+    def test_logs_aot_bwd_reuse(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x.sum()
+
+        with compiled_autograd._enable(compiler_fn):
+            x = torch.randn(4, 4, requires_grad=True)
+            y = torch.randn(4, 4, requires_grad=True)
+            z = torch.randn(4, 4, requires_grad=True)
+            # reuse the same AOT bwd graph 3 times
+            out = fn(x) + fn(y) + fn(z)
+            out.backward()
+        # should not RuntimeError: Node redefined name aot0_expand!
+
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -3030,7 +3043,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
     @skipIfWindows(msg="AssertionError: Scalars are not equal!")
-    @xfailIfS390X
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -3221,12 +3233,16 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_flex_attention(self):
+        def _squared(score, b, h, m, n):
+            """Joint graph needed for correctness"""
+            return score * score
+
         def fn():
             @torch.compile(backend="aot_eager")
             def fwd_bwd(x: torch.Tensor):
-                flex_attention(x, x, x).sum().backward()
+                flex_attention(x, x, x, score_mod=_squared).sum().backward()
 
-            for a, b in zip([12, 24, 48], [64, 128, 256]):
+            for a, b in zip([12, 24, 12], [64, 128, 64]):
                 v = torch.zeros(
                     1,
                     1,
@@ -3239,9 +3255,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fwd_bwd(v)
                 yield v.grad
 
-        # TODO: Dynamo graph breaks on torch.ops.higher_order.flex_attention_backward
         self.check_output_and_recompiles(
-            fn, count=3, compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
         )
 
     @unittest.expectedFailure
@@ -3594,6 +3609,14 @@ known_failing_tests = {
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
+    # Category: Subclasses
+    "test_dtensor_basic",
+    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",
+    "test_dtensor_different_gradient_placement",
+    "test_dtensor_noncontiguous_output",
+    "test_dtensor_partial_placement_graph_output",
+    "test_tp_compile_comm_reordering",
+    "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
 }
 
@@ -3601,11 +3624,19 @@ if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 
+if IS_S390X:
+    known_failing_tests.add("test_deep_reentrant")
+
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+if torch.distributed.is_available() and HAS_CUDA:
+    test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
+    TestDTensorCompileWithCompiledAutograd = wrap_test_class(
+        test_dtensor.TestDTensorCompile
+    )
 
 if __name__ == "__main__":
     if HAS_CPU:
