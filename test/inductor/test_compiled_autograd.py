@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     scoped_load_inline,
     skipIfWindows,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -3232,6 +3233,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @unittest.skipIf(TEST_WITH_ROCM, "flexattention has some ROCm incompatibilities")
     def test_flex_attention(self):
         def fn():
             @torch.compile(backend="aot_eager")
