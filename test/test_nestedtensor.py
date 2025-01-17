@@ -8317,15 +8317,16 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         name="broken_narrow_backward",
     ),
-    # min / max: need to examine backwards formula for non-full reduction
+    # min / max: need factory function support for ragged dim reductions
+    # where the output is dense but sizes still contain a nested int
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
-        name="broken_min_max_reduction_with_dim_backward",
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
+        name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
     # matmul(): unimplemented backward
     XFailRule(
@@ -8496,7 +8497,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
     ),
     # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;
