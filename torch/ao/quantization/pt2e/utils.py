@@ -4,7 +4,6 @@ import types
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
-import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
 
 # Makes sure that quantized_decomposed ops are registered
