@@ -19,7 +19,6 @@ from typing import (
     no_type_check,
     Optional,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
 )
@@ -263,7 +262,7 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
 
 def _named_parameters_with_duplicates(
     module: nn.Module, **kwargs: Any
-) -> List[Tuple[str, nn.Parameter]]:
+) -> List[tuple[str, nn.Parameter]]:
     """
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.

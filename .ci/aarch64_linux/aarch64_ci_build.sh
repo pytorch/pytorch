@@ -3,6 +3,9 @@ set -eux -o pipefail
 
 GPU_ARCH_VERSION=${GPU_ARCH_VERSION:-}
 
+# cuda arm build for Grace Hopper solely
+export TORCH_CUDA_ARCH_LIST="9.0"
+
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 source $SCRIPTPATH/aarch64_ci_setup.sh
 
