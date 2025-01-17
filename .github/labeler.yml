@@ -107,3 +107,6 @@
 - torch/csrc/dynamo/compiled_autograd.h
 - torch/_dynamo/compiled_autograd.py
 - torch/inductor/test_compiled_autograd.py
+
+"ciflow/xpu":
+- torch/csrc/inductor/**/xpu.h
