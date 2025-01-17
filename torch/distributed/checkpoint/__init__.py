@@ -1,6 +1,7 @@
 from .api import CheckpointException
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter
+from ._hugging_face_storage import HuggingFaceHubReader, HuggingFaceHubWriter
 from .metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,

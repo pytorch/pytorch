@@ -90,6 +90,14 @@ We provide a filesystem based storage layer:
 .. autoclass:: torch.distributed.checkpoint.FileSystemWriter
   :members:
 
+We provide a storage layer that interacts with HuggingFace:
+
+.. autoclass:: torch.distributed.checkpoint.HuggingFaceHubReader
+  :members:
+
+.. autoclass:: torch.distributed.checkpoint.HuggingFaceHubWriter
+  :members:
+
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
 can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor and DistributedTensor.
 
