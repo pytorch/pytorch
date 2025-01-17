@@ -19,7 +19,7 @@ import datetime
 import json
 import signal
 import time
-from typing import Any, Dict
+from typing import Any
 
 import psutil  # type: ignore[import]
 
@@ -166,7 +166,7 @@ class UsageLogger:
             return
         print(json.dumps(stats))
 
-    def _collect_gpu_data(self) -> list[Dict[str, Any]]:
+    def _collect_gpu_data(self) -> list[dict[str, Any]]:
         gpu_data_list = []
         if self._has_pynvml:
             # Iterate over the available GPUs
