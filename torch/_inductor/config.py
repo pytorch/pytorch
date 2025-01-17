@@ -1041,6 +1041,10 @@ class triton:
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
 
+    # Whether PyTorch will skip CUDA compute capability checks, allowing custom Triton
+    # builds for older hardware to be used.
+    skip_cc_checks = os.environ.get("TORCHINDUCTOR_SKIP_CC_CHECKS", "0") == "1"
+
 
 class aot_inductor:
     # AOTInductor output path

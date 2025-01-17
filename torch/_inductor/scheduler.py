@@ -35,6 +35,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor import config as inductor_config
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -3617,7 +3618,7 @@ class Scheduler:
             if (
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
-                and os.getenv("TORCH_TRITON_SKIP_CC_CHECKS") != "1"
+                and not inductor_config.triton.skip_cc_checks
             ):
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
             elif is_gpu(device.type) and not device.type == "mps":

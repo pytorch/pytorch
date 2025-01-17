@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
-import os
+
+from torch._inductor import config as inductor_config
 
 
 @functools.lru_cache(None)
@@ -72,7 +73,7 @@ def has_triton() -> bool:
     def cuda_extra_check(device_interface):
         return (
             device_interface.Worker.get_device_properties().major >= 7
-            or os.getenv("TORCH_TRITON_SKIP_CC_CHECKS") == "1"
+            or inductor_config.triton.skip_cc_checks
         )
 
     def cpu_extra_check(device_interface):
