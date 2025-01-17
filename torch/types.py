@@ -62,6 +62,9 @@ PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
+# tuple for isinstance(x, Number) checks.
+# FIXME: refactor once python 3.9 support is dropped.
+_Number = (int, float, bool)
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
