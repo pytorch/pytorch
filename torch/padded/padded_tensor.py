@@ -63,7 +63,7 @@ class RegularOp:
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         raise NotImplementedError
 
     def modify_out_shape(self, out, args, kwargs):
@@ -79,7 +79,7 @@ class SliceRunRepadOp(RegularOp):
     def __init__(self) -> None:
         pass
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         raise NotImplementedError
 
     def modify_args(self, args, kwargs):
@@ -106,8 +106,8 @@ class OnesLikeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape]
 
 
@@ -115,7 +115,7 @@ class ViewOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs) -> List[torch.Size]:
+    def infer_shape(self, input_shapes, args, kwargs) -> List[torch.Size]:
         def find_mapping(input_shape: torch.Size, output_shape: List[int]):
             mapping = []
             input_index = 0
@@ -151,7 +151,7 @@ class ViewOp(SliceRunRepadOp):
 
             return output_shape
 
-        input_shape = args[0].orig_shape
+        input_shape = input_shapes[0]
         padded_input_shape = args[0].shape
         output_shape = list(args[1])
 
@@ -225,7 +225,7 @@ class ViewOp(SliceRunRepadOp):
 
             log("Result", shape)
         else:
-            shape = self.infer_shape(args, kwargs)[0]
+            shape = self.infer_shape([args[0].orig_shape], args, kwargs)[0]
 
         # if math.prod(inp.shape) != math.prod(shape):
         inp = slice_nd(inp, [0] * len(args[0].orig_shape), args[0].orig_shape)
@@ -243,8 +243,8 @@ class ViewAsRealOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape + (2,)]
 
 
@@ -252,8 +252,8 @@ class UnsqueezeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         dim = args[1]
 
         if dim < 0:
@@ -266,8 +266,8 @@ class PolarOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape]
 
 
@@ -275,8 +275,8 @@ class TransposeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         dim0 = args[1]
         dim1 = args[2]
 
@@ -296,8 +296,8 @@ class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape]
 
 
@@ -305,7 +305,7 @@ class ElementwiseBinaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         # Broadcasting
         lhs_shape = args[0].orig_shape if type(args[0]) is PaddedTensor else [1]
         rhs_shape = args[1].orig_shape if type(args[1]) is PaddedTensor else [1]
@@ -362,7 +362,7 @@ class MatmulOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
 
@@ -370,7 +370,7 @@ class BmmOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         b1, n1, m1 = args[0].orig_shape
         b2, m2, p2 = args[1].orig_shape
 
@@ -384,8 +384,8 @@ class ScaledDotProductAttentionOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
 
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
@@ -414,8 +414,8 @@ class IndexOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         input_shape_mod = list(input_shape)
         dims = args[1]
 
@@ -437,7 +437,7 @@ class SelectOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         input_shape = args[0].orig_shape
         dim = args[1]
         index = args[2]
@@ -454,8 +454,8 @@ class IndexPutOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [torch.Size(input_shape)]
 
 
@@ -463,8 +463,8 @@ class SplitWithSizesOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         indices_or_sections = args[1]
         dim = args[2]
 
@@ -498,7 +498,7 @@ class StackOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         input = args[0]
         dim = args[1]
 
@@ -512,8 +512,8 @@ class DetachOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape]
 
 
@@ -521,9 +521,9 @@ class EmbeddingOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
+    def infer_shape(self, input_shapes, args, kwargs):
         # Embedding is a special case, where we don't do any padding
-        input_shape = args[0].orig_shape
+        input_shape = input_shapes[0]
         indices = args[1]
 
         out_shape = list(indices.orig_shape) + list(input_shape)[1:]
@@ -535,8 +535,8 @@ class NoOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
         return [input_shape]
 
 
@@ -815,17 +815,21 @@ class PaddedTensor(torch.Tensor):
         args = tuple(args_new)
 
         # Infer shape
-        orig_shape = op.infer_shape(args, kwargs)
+        orig_in_shapes = pytree.tree_map_only(
+            PaddedTensor, lambda x: x.orig_shape, args
+        )
+
+        orig_out_shape = op.infer_shape(orig_in_shapes, args, kwargs)
         # log_function_with_shapes(func, args, args, orig_shape)
 
         # Modify args and shape
         args, kwargs, tensor_args, tensor_kwargs = op.modify_args(args, kwargs)
-        orig_shape = op.modify_out_shape(orig_shape, args, kwargs)
+        orig_out_shape = op.modify_out_shape(orig_out_shape, args, kwargs)
 
         # Run function
         out = func(*tensor_args, **tensor_kwargs)
 
-        log_function_with_shapes(func, args, tensor_args, out, orig_shape)
+        log_function_with_shapes(func, args, tensor_args, out, orig_out_shape)
 
         # Merge arguments view_shape_stacks
         view_shape_stack = list(
@@ -839,9 +843,9 @@ class PaddedTensor(torch.Tensor):
         out_flat_padded = []
         for idx, t in enumerate(out_flat):
             if type(t) in [torch.Tensor, FakeTensor, FunctionalTensor] and idx < len(
-                orig_shape
+                orig_out_shape
             ):
-                s = orig_shape[idx]
+                s = orig_out_shape[idx]
                 out_flat_padded.append(
                     PaddedTensor(t, multipliers, s, view_shape_stack)
                 )
