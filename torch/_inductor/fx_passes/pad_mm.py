@@ -391,9 +391,18 @@ def should_pad_bench(*args, **kwargs):
         return _should_pad_bench(*args, **kwargs)
 
 
+def get_do_bench():
+    with dynamo_timed("pad_mm_benchmark_get_do_bench"):
+        return functools.partial(
+            benchmarker.benchmark_gpu,
+            warmup=5,
+        )
+
+
 def _should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
+    do_bench = get_do_bench()
     m_padded_length = 0
     n_padded_length = 0
     with no_dispatch():
@@ -597,7 +606,7 @@ def _should_pad_bench(
             )
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
         else:
-            pad_time = benchmarker.benchmark_gpu(pad_bench_fn, warmup=5)
+            pad_time = do_bench(pad_bench_fn)
 
         return should_pad(key, ori_time, pad_time)
 
