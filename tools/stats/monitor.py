@@ -19,7 +19,12 @@ Usage:
 
 from __future__ import annotations
 
-from utilization_stats_lib import *
+import sys
+import os
+
+# adding this makes the monitor script able to run locally with import path tools.stats.utilization_stats_lib
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from tools.stats.utilization_stats_lib import *
 import argparse
 import copy
 import dataclasses
