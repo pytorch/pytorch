@@ -37,6 +37,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
     rand_strided,
+    reset_rng_state,
     same,
     skipIfPy312,
 )
@@ -88,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_X86,
+    MACOS_VERSION,
     parametrize,
     serialTest,
     skipIfNNModuleInlined,
@@ -5685,6 +5687,10 @@ class CommonTemplate:
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
 
+        # pow is broken in MPSGraph for MacOS before version 13.3
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
+
         self.common(
             fn,
             (
@@ -6548,8 +6554,11 @@ class CommonTemplate:
         def fn(a):
             return a + torch.full_like(a, 7.777)
 
+        device_interface = get_interface_for_device(self.device)
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
+            ctx = contextlib.nullcontext() if device_interface.is_dtype_supported(dtype) else self.assertRaises(TypeError)
+            with ctx:
+                self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),), check_lowp=False)
 
     def test_full_boolean(self):
         def fn(n):
@@ -12263,6 +12272,46 @@ class CommonTemplate:
 
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
+
+    @requires_gpu()
+    @config.patch(fallback_random=True)
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "cpp wrapper does not support sort properly: https://gist.github.com/shunting314/e58f637f9972f1ad1a033d73cee6e42a",
+    )
+    def test_mix_device_index(self):
+        """
+        A tiny repro for this meta internal issue: https://fb.workplace.com/groups/1075192433118967/posts/1567334737238065
+        whose root cause is Inductor having wrong assumption of index.Tensor's output
+        stride.
+        """
+        image_latent = (
+            torch.randn((24, 16, 32, 32), device=GPU_TYPE)
+            .to(memory_format=torch.channels_last)
+            .view(2, 12, 16, 32, 32)
+        )
+
+        def f(image_latent):
+            indices = torch.argsort(torch.rand(2, 12), dim=-1)
+
+            tar_latent = image_latent[torch.arange(2).unsqueeze(-1), indices[:, :3]]
+
+            # The original model uses einops. In this unit test, we use view op directly
+            # to avoid importing einops
+            #   tar_latent_rearranged = einops.rearrange(
+            #     tar_latent, "b n c h w -> (b n) c h w"
+            #   )
+            tar_latent_rearranged = tar_latent.view(-1, *tar_latent.size()[2:])
+
+            return tar_latent_rearranged
+
+        reset_rng_state()
+        ref = f(image_latent)
+        opt_f = torch.compile(f)
+        reset_rng_state()
+        act = opt_f(image_latent)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
 
 @dataclasses.dataclass

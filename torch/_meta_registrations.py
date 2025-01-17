@@ -36,6 +36,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
 
 
@@ -2433,6 +2434,34 @@ if torch._C._has_mkldnn:
         out = out.to(memory_format=torch.channels_last)
         return out
 
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
+    def meta_qconv2d_pointwise_binary(
+        x,
+        x_scale,
+        x_zp,
+        w,
+        w_scale,
+        w_zp,
+        accum,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        output_scale,
+        output_zero_point,
+        output_dtype,
+        accum_scale,
+        accum_zero_point,
+        binary_op_name,
+        alpha,
+        unary_op_name,
+        unary_op_args,
+        unary_op_algorithm,
+    ):
+        assert binary_op_name == "sum"
+        return accum
+
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
     @register_meta(torch.ops.onednn.qlinear_pointwise.tensor)
     def meta_qlinear_pointwise(
@@ -3115,6 +3144,25 @@ def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
+@register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
+@out_wrapper()
+def nonzero(self):
+    torch._check_not_implemented(
+        exp_config.meta_nonzero_assume_all_nonzero,
+        lambda: "The register_meta function for torch.nonzero() raises unimplemented by default, "
+        "as a correct data-independent implementation does not exist. This implementation "
+        "returns a fake value, assuming all elements of the tensor are non-zero. "
+        "To enable this registration, please set "
+        "'torch.fx.experimental._config.meta_nonzero_assume_all_nonzero' to True.",
+    )
+    return torch.empty_strided(
+        (self.numel(), self.dim()),
+        (1, self.numel()),
+        dtype=torch.long,
+        device=self.device,
+    )
+
+
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
@@ -3212,7 +3260,38 @@ def meta_index_Tensor(self, indices):
                 before_shape.append(self.shape[dim])
         else:
             replacement_shape = list(index.shape)
-    return self.new_empty(before_shape + replacement_shape + after_shape)
+
+    def _restride_src(self):
+        """
+        This follows restride_src in TensorAdvancedIndexing.cpp
+        """
+        shape = before_shape + replacement_shape + after_shape
+        strides = list(self.stride())
+        strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
+            replacement_shape
+        )
+        return self.as_strided(shape, strides)
+
+    out = self.new_empty(before_shape + replacement_shape + after_shape)
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(self.numel() == 0):
+        # No need to worry about the output strides if self is empty.
+        return out
+
+    # Try to follow eager to decide the output stride based on self.
+    # Note that perm here is the reverse of the 'perm_' decided by
+    # TensorIteratorBase::reorder_dimensions
+    restrided_self = _restride_src(self)
+    perm = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
+
+    # Follow TensorIteratorBase::allocate_or_resize_outputs
+    if list(perm) != list(range(len(perm))):
+        perm_shape = utils.apply_perm(out.shape, perm)
+        new_stride = utils.make_contiguous_strides_for(perm_shape)
+        new_stride = utils.apply_perm(new_stride, utils.invert_perm(perm))
+        out = out.as_strided(out.size(), new_stride)
+    return out
 
 
 @register_meta([aten.convolution_backward.default])
@@ -6512,6 +6591,34 @@ def meta_upsample_bimode2d_aa(
     )
     return input.new_empty(full_output_size).to(
         memory_format=utils.suggest_memory_format(input)
+    )
+
+
+@register_meta([aten._upsample_bilinear2d_aa_backward.default])
+def meta_upsample_bimode2d_aa_backward(
+    grad_output,
+    output_size,
+    input_size,
+    align_corners,
+    scales_h=None,
+    scales_w=None,
+):
+    full_output_size = upsample_common_check(
+        input_size, output_size, num_spatial_dims=2
+    )
+    torch._check(
+        grad_output.ndim == 4,
+        lambda: f"Expected grad_output to be a tensor of dimension 4 but got: dimension {grad_output.ndim}",
+    )
+    for i in range(4):
+        torch._check(
+            grad_output.shape[i] == full_output_size[i],
+            lambda: f"""
+Expected grad_output to have the same shape as output; output.size({i}) = {full_output_size[i]}
+but got grad_output_size({i}) = {grad_output.size(i)}""",
+        )
+    return grad_output.new_empty(input_size).to(
+        memory_format=utils.suggest_memory_format(grad_output)
     )
 
 

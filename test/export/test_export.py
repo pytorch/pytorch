@@ -2096,8 +2096,6 @@ graph():
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
-    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2108,8 +2106,6 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -7524,8 +7520,8 @@ graph():
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = export(mod, inp)
+        ep_non_strict = export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
