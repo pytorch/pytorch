@@ -6619,7 +6619,7 @@ class FallbackKernel(ExternKernelAlloc):
             # For non-aten OpOverload, i.e. custom ops
             self.use_runtime_dispatch = True
 
-        def do_runtime_dispatch():
+        def do_runtime_dispatch() -> None:
             exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
