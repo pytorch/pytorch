@@ -51,11 +51,25 @@ echo "install_path: $install_path  version: $version"
 build_docs () {
   set +e
   set -o pipefail
-  # Get number of CPU cores and subtract 1 to leave headroom
-  CORES=$(( $(nproc) - 1 ))
-  # Ensure at least 1 core is used
-  CORES=$(( CORES > 0 ? CORES : 1 ))
-  time make SPHINXOPTS="-j${CORES} -v" "$1" 2>&1 | tee /tmp/docs_build.txt
+
+  echo "=== Build Start Time: $(date) ==="
+  echo "=== System Resources Before Build ==="
+  free -h
+  df -h
+
+  time make "$1" 2>&1 | tee /tmp/docs_build.txt
+  
+  echo "=== Build End Time: $(date) ==="
+  echo "=== System Resources After Build ==="
+  free -h
+  df -h
+
+  code=$?
+  # Analyze the build log
+  echo "=== Build Statistics ==="
+  echo "Top 10 most time-consuming operations:"
+  grep "building" /tmp/docs_build.txt | sort -k4 -n | tail -n 10
+
   code=$?
   if [ $code -ne 0 ]; then
     set +x
@@ -91,7 +105,7 @@ pushd docs
 if [ "$is_main_doc" = true ]; then
   build_docs html || exit $?
 
-  make -j${CORES} coverage
+  make coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
   # $lines. The `cut -f1 ...` is to only parse the number, not the filename
