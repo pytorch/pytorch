@@ -15,6 +15,7 @@ import torch
 import torch._inductor.inductor_prims
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -324,7 +325,7 @@ def _extract_fwd_bwd_modules(
     # we propagate all symbols which are referenced by backwards inputs.
     # These are not directly used in the graph but are required for downstream
     # sizevar assignment
-    saved_symbols: Set[sympy.Symbol] = set()
+    saved_symbols: Set[sympy.Symbol] = OrderedSet()
     saved_sym_nodes_binding = []
     saved_sym_nodes_derived = []
 
@@ -578,7 +579,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     def insert_node_in_graph(node):
         cur_nodes = [node]
-        insertable_nodes = set()
+        insertable_nodes = OrderedSet()
         while len(cur_nodes) > 0:
             node = cur_nodes.pop()
             if node in insertable_nodes or node in env:
@@ -818,7 +819,7 @@ def solve_min_cut(
     dont_ban=None,
 ):
     if dont_ban is None:
-        dont_ban = set()
+        dont_ban = OrderedSet()
     op_types = get_default_op_list()
 
     if AOT_PARTITIONER_DEBUG:
@@ -979,7 +980,7 @@ def solve_min_cut(
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
-    banned_nodes = set()
+    banned_nodes = OrderedSet()
 
     def ban_recomputation_if_allowed(node):
         if op_types.is_view(node):
@@ -1144,7 +1145,7 @@ def solve_min_cut(
     # Some models it improves perf on are cait_m36_384, mixer_b16_224, poolformer_m36
 
     if min_cut_options.ban_if_long_fusible_chains:
-        visited = set()
+        visited = OrderedSet()
         for start_node in joint_graph.nodes:
             if not node_info.is_required_fw(start_node):
                 continue
@@ -1187,11 +1188,11 @@ def solve_min_cut(
         raise
 
     reachable, non_reachable = partition
-    cutset: Set[Tuple[str, str]] = set()
+    cutset: Set[Tuple[str, str]] = OrderedSet()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
-    cut_nodes = set()
+    cut_nodes = OrderedSet()
     for node_in, node_out in cutset:
         assert node_in[:-3] == node_out[:-4]
         node_name = node_in[:-3]
@@ -1361,7 +1362,7 @@ def get_default_op_list() -> OpTypes:
     ]
 
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
-    recomputable_ops = set(default_recomputable_ops)
+    recomputable_ops = OrderedSet(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [
@@ -1378,13 +1379,13 @@ def get_default_op_list() -> OpTypes:
         aten._scaled_mm,
     ]  # noqa: E501,B950
 
-    fusible_ops = recomputable_ops | set(random_ops)
+    fusible_ops = recomputable_ops | OrderedSet(random_ops)
     return OpTypes(
-        set(fusible_ops),
-        set(compute_intensive_ops),
-        set(random_ops),
-        set(view_ops),
-        set(recomputable_ops),
+        OrderedSet(fusible_ops),
+        OrderedSet(compute_intensive_ops),
+        OrderedSet(random_ops),
+        OrderedSet(view_ops),
+        OrderedSet(recomputable_ops),
     )
 
 
@@ -1634,7 +1635,7 @@ Activation Checkpointing - Knapsack Problem Summary:
                     payload_fn=lambda: knapsack_summary,
                 )
                 log.info(knapsack_summary)
-        dont_ban = set()
+        dont_ban = OrderedSet()
         for idx in recomputable_node_idxs:
             # if idx in all_recomputable_banned_nodes:
             try:
@@ -1757,7 +1758,7 @@ def min_cut_rematerialization_partition(
 
     def classify_nodes(joint_module):
         name_to_node = get_name_to_node(joint_module.graph)
-        required_bw_nodes = set()
+        required_bw_nodes = OrderedSet()
         for node in joint_module.graph.nodes:
             if node.op == "placeholder" and "tangents" in node.target:
                 required_bw_nodes.add(node)
@@ -1782,11 +1783,11 @@ def min_cut_rematerialization_partition(
         forward_only_graph = _extract_graph_with_inputs_outputs(
             joint_module.graph, inputs, fwd_outputs, "forward"
         )
-        required_fw_nodes: Set[fx.Node] = {
+        required_fw_nodes: Set[fx.Node] = OrderedSet([
             name_to_node[node.name]
             for node in forward_only_graph.nodes
             if node.op != "output"
-        }
+        ])
         unclaimed_nodes = {
             node
             for node in joint_module.graph.nodes
