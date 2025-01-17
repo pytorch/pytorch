@@ -2787,10 +2787,12 @@ class CppVecKernel(CppKernel):
             reduction_size = functools.reduce(
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
             )
-            reduction_factor = (
-                self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
+            self.weight_recp_vec_range = (
+                CeilDiv(reduction_size, self.ranges[self.tiling_idx])
+                * CeilDiv(self.ranges[self.tiling_idx], self.tiling_factor)
+                if self.tiling_idx >= self.reduction_depth
+                else reduction_size
             )
-            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
             if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
                 self.weight_recps_val = self.weight_recps_cse.generate(
                     self.compute, f"reduction {self.weight_recp_vec_range}", write=False
