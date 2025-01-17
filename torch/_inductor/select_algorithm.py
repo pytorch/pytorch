@@ -239,8 +239,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            return f"tl.load({var} + {index_str})"
-        return f"({self.fixed_inputs[name]})"
+            var_dtype = V.graph.get_buffer(name).dtype
+            return self.kernel.cse.generate(self.kernel.compute, f"tl.load({var} + {index_str})", dtype=var_dtype)
+            return out
+        return self.kernel.cse.generate(self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32)
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

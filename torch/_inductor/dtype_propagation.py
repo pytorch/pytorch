@@ -74,15 +74,6 @@ def promote_types(
     dtype_prop_candidates = []
 
     for arg in args:
-        if isinstance(arg, str):
-            # TODO: fix the flex attention instances, enable internally
-            if not config.is_fbcode():
-                assert isinstance(
-                    V.get_ops_handler(),
-                    torch._inductor.select_algorithm.ModificationWrapper,
-                )
-            continue
-
         if isinstance(arg, OpsValue):
             arg = arg.value
             assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
@@ -91,6 +82,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        print(arg)
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(

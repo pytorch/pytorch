@@ -757,8 +757,7 @@ def maybe_upcast_float32(convert_output: bool = True):
 
     def needs_upcast(var) -> bool:
         return (
-            not config.triton.codegen_upcast_to_fp32
-            and isinstance(var, CSEVariable)
+            isinstance(var, CSEVariable)
             and var.dtype in (torch.float16, torch.bfloat16)
         )
 
