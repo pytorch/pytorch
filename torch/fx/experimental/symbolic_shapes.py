@@ -37,6 +37,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     NoReturn,
     Optional,
     Sequence,
@@ -1948,12 +1949,19 @@ def safe_expand(r: _SympyT) -> _SympyT:
         return r
 
 
+class _SymbolInfo(NamedTuple):
+    k: sympy.Symbol
+    vr: Optional[ValueRanges]
+    val: Optional[sympy.Integer]
+    is_size_like: bool
+    oblivious_upper_bound_exclusive: sympy.Integer
+
+
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: _SympyT,
-    symbol_info: Tuple[
-        Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool, sympy.Integer], ...
-    ],
+    # NB: this is a tuple to ensure it can be LRU cached
+    symbol_info: Tuple[_SymbolInfo, ...],
     unbacked_only: bool,
     size_oblivious: bool,
 ) -> Optional[_SympyT]:
@@ -1973,6 +1981,7 @@ def _maybe_evaluate_static_worker(
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
+        assert vr is not None
         if size_oblivious and is_size_like:
             lower = max(2, vr.lower)
             # Clamping size-oblivious to some quantity below sys.maxsize
@@ -5621,7 +5630,7 @@ class ShapeEnv:
             var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            (
+            _SymbolInfo(
                 s,
                 var_ranges.get(s),
                 self.var_to_val.get(s),
