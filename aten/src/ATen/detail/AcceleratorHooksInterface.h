@@ -72,6 +72,10 @@ struct TORCH_API AcceleratorHooksInterface {
       [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
+
+  virtual Allocator* getDeviceAllocator() const {
+    TORCH_CHECK(false, "Backend doesn`t support getDeviceAllocator()");
+  }
 };
 
 } // namespace at
