@@ -56,7 +56,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(
       const Tensor& view_value,
       const FunctionalTensorWrapper* base,
-      const functionalization::ViewMeta& meta);
+      const std::shared_ptr<functionalization::ViewMeta>& meta);
 
   // Get the underlying, actual tensor, that doesn't know anything about
   // functionalization.
@@ -97,17 +97,17 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
-  void maybe_mark_symbolic(const functionalization::ViewMeta& meta) {
-    is_symbolic_ = is_symbolic_ | meta.has_symbolic_inputs;
+  void maybe_mark_symbolic(functionalization::ViewMeta* meta) {
+    is_symbolic_ = is_symbolic_ | meta->has_symbolic_inputs;
   }
 
   bool is_symbolic() const {
     return is_symbolic_;
   }
 
-  // Runs the forward_fn of every ViewMeta collected in the current instance
-  // to some other base.
-  Tensor apply_view_metas(const Tensor& base);
+  // Retrieves the ViewMeta sequence of this tensor.
+  const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas()
+      const;
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -144,7 +144,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // from the base tensor. This method is used by inplace-view ops like
   // transpose_. It appends a ViewMeta to the existing stack, and refreshes the
   // tensor by replaying the views off of the alias.
-  void mutate_view_meta(const at::functionalization::ViewMeta& meta);
+  void mutate_view_meta(
+      const std::shared_ptr<at::functionalization::ViewMeta>& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);
@@ -273,7 +274,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_symbolic_ = false;
 
   size_t generation_ = 0;
-  std::vector<at::functionalization::ViewMeta> view_metas_;
+  std::vector<std::shared_ptr<at::functionalization::ViewMeta>> view_metas_;
 
  protected:
   static void copy_tensor_metadata(
@@ -365,16 +366,20 @@ TORCH_API void propagate_xla_data_direct(
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
     const Tensor& base,
-    functionalization::ViewMeta meta,
+    const std::shared_ptr<functionalization::ViewMeta>& meta,
     int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(
     ITensorListRef view_to_wrap,
     const Tensor& base,
-    const functionalization::ViewMeta& meta);
+    const std::shared_ptr<functionalization::ViewMeta>& meta);
 
 void mutate_view_meta(
     const Tensor& self,
-    const functionalization::ViewMeta& meta);
+    const std::shared_ptr<functionalization::ViewMeta>& meta);
+
+TORCH_API Tensor apply_view_meta_sequence(
+    const Tensor& base,
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(
