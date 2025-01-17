@@ -67,7 +67,7 @@ class Distribution:
                     continue  # skip checking lazily-constructed args
                 value = getattr(self, param)
                 valid = constraint.check(value)
-                if not valid.all():
+                if not torch._is_all_true(valid):
                     raise ValueError(
                         f"Expected parameter {param} "
                         f"({type(value).__name__} of shape {tuple(value.shape)}) "
@@ -312,7 +312,7 @@ class Distribution:
             return
         assert support is not None
         valid = support.check(value)
-        if not valid.all():
+        if not torch._is_all_true(valid):
             raise ValueError(
                 "Expected value argument "
                 f"({type(value).__name__} of shape {tuple(value.shape)}) "
