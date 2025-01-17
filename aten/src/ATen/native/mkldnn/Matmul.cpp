@@ -343,7 +343,7 @@ void mkldnn_matmul_prepacked(
   // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
   // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
   TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16) || (mat1.scalar_type() == at::kHalf)),
               "mkldnn_matmul:  only enabled for fp32 and bf16 path");
   // device needs to support bf16 if the inputs are of bf16 type
   if (mat1.scalar_type() == at::kBFloat16) {
