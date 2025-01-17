@@ -3,7 +3,14 @@
 // Make this a proper CPython module
 static struct PyModuleDef openreg_C_module = {
     PyModuleDef_HEAD_INIT,
-    .m_name = "pytorch_openreg._C",
+    "pytorch_openreg._C",
+    nullptr,
+    -1,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr
 };
 
 PyMODINIT_FUNC PyInit__C(void) {

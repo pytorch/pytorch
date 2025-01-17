@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import functools
 import inspect
+import json
 import math
 import operator
 import re
@@ -24,7 +26,7 @@ from typing import (
 
 import torch
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -37,7 +39,12 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
+from torch.fx._pytree import (
+    _deregister_pytree_flatten_spec,
+    register_pytree_flatten_spec,
+)
 from torch.utils._pytree import (
+    _deregister_pytree_node,
     _register_pytree_node,
     Context,
     FlattenFunc,
@@ -378,7 +385,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn(obj: Any) -> tuple[List[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -395,7 +402,7 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
-    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[List[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
@@ -726,7 +733,11 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     else:
         sig = inspect.signature(mod.forward)
 
-    return sig.bind(*fake_args, **fake_kwargs).arguments
+    # Rather than binding both fake_args and fake_kwargs to sig names, we
+    # (partially) bind only fake_args, while reusing fake_kwarg names. This
+    # ensures that fake_kwargs do not get reordered, which is important to
+    # match flattened user inputs.
+    return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
@@ -737,7 +748,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     and gather the top-level named placeholder nodes.
     """
     # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    subgraph_ph_tuples: List[tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.HigherOrderOperator
@@ -1150,3 +1161,157 @@ def _compiling_state_context():
     finally:
         torch.compiler._is_compiling_flag = old_compiling_flag
         torch.compiler._is_exporting_flag = old_exporting_flag
+
+
+def _fakify_params_buffers(
+    fake_mode: FakeTensorMode,
+    mod: torch.nn.Module,
+) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+    params_buffers = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+
+    faked_params_buffers = {}
+    memo: Dict[int, FakeTensor] = {}
+    for key, value in params_buffers.items():
+        if id(value) in memo:
+            fake_tensor = memo[id(value)]
+        else:
+            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            memo[id(value)] = fake_tensor
+        faked_params_buffers[key] = fake_tensor
+    return faked_params_buffers  # type: ignore[return-value]
+
+
+def register_module_as_pytree_input_node(cls: Type[torch.nn.Module]) -> None:
+    """
+    Registers a module as a valid input type for :func:`torch.export.export`.
+
+    Args:
+        mod: the module instance
+        serialized_type_name: The serialized name for the module. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        module.
+
+    Example::
+
+        import torch
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
+        class Mod(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) + x
+
+        ep = torch.export.export(Mod(), (torch.randn(3), Module()))
+        print(ep)
+
+    """
+    assert issubclass(cls, torch.nn.Module)
+
+    import weakref
+
+    class PrototypeModule(weakref.ref):
+        def __init__(self, m, *args, **kwargs):
+            super().__init__(m, *args, **kwargs)
+            assert isinstance(m, torch.nn.Module)
+            assert not hasattr(self, "_proto_cls")
+            self._proto_cls = cls
+
+        def __eq__(self, other):
+            return self._proto_cls == other._proto_cls
+
+        def __deepcopy__(self, memo):
+            return PrototypeModule(self())
+
+    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+        named_parameters = dict(obj.named_parameters())
+        named_buffers = dict(obj.named_buffers())
+        params_buffers = {**named_parameters, **named_buffers}
+        return list(params_buffers.values()), [
+            list(params_buffers.keys()),
+            PrototypeModule(obj),
+        ]
+
+    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+        flat_names, ref = context
+        if ref is None or ref() is None:
+            raise RuntimeError("Module has been garbage collected")
+        obj = ref()
+        assert flatten_fn is not None
+        flattened, _ = flatten_fn(obj)
+
+        # NOTE: This helper function will replicate an nn.Module in the exactly same
+        #       structure to be used together with _reparametrize_module. This will
+        #       create a clone of the module with the new parameters and buffers without
+        #       affecting the original module.
+        def copy_module(mod: torch.nn.Module):
+            ret = copy.copy(mod)
+            ret.__dict__ = {copy.copy(k): copy.copy(v) for k, v in mod.__dict__.items()}
+            for name, child in ret.named_children():
+                setattr(ret, name, copy_module(child))
+            return ret
+
+        if any(v is not o for v, o in zip(values, flattened)):
+            with torch.nn.utils.stateless._reparametrize_module(
+                obj, dict(zip(flat_names, values)), tie_weights=True, strict=True
+            ):
+                ret = copy_module(obj)
+        else:
+            ret = obj
+        return ret
+
+    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+        flattened, [flat_names, *args] = flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], [
+            flat_names,
+            *args,
+        ]
+
+    flatten_fn = default_flatten_fn
+    unflatten_fn = default_unflatten_fn
+
+    serialized_type_name = cls.__module__ + "." + cls.__qualname__
+
+    def to_dumpable_context(context):
+        keys, *_ = context
+        return json.dumps([keys, *([None] * len(_))])
+
+    def from_dumpable_context(dumpable):
+        s = json.loads(dumpable)
+        s[1] = PrototypeModule(torch.nn.Module())
+        return s
+
+    _register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=default_flatten_fn_with_keys,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+    def default_flatten_fn_spec(obj, spec) -> List[Any]:
+        flats, context = flatten_fn(obj)
+        assert context == spec.context
+        return flats
+
+    register_pytree_flatten_spec(
+        cls,
+        default_flatten_fn_spec,
+    )
+
+
+def deregister_module_as_pytree_input_node(cls: Type[torch.nn.Module]) -> None:
+    _deregister_pytree_node(cls)
+    _deregister_pytree_flatten_spec(cls)
