@@ -347,13 +347,13 @@ class _ReaderView(io.IOBase):
         self.base_stream = base_stream
         self.seek(0)
 
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return self.base_stream.seek(__offset, __whence)
+    def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
+        if whence == os.SEEK_SET:
+            offset = self.offset + offset
+        elif whence == os.SEEK_END:
+            whence = os.SEEK_SET
+            offset = (self.offset + self.len) - offset
+        return self.base_stream.seek(offset, whence)
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
@@ -365,9 +365,17 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
+        max_size = self.len - self.tell()
+        if max_size == 0:
+            return 0
+        if len(b) > max_size:
+            b = memoryview(b)[:max_size]
         return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
+        max_size = self.len - self.tell()
+        if size == -1 or size > max_size:
+            size = max_size
         return self.base_stream.read(size)
 
 

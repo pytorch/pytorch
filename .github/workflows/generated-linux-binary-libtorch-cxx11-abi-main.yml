@@ -16,11 +16,9 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
-  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -47,7 +45,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -69,7 +66,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

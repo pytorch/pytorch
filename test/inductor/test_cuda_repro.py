@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
+
 import functools
 import gc
 import math
@@ -26,6 +28,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
+    SM90OrLater,
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
@@ -34,6 +37,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
     TEST_WITH_ASAN,
+    xfailIfPy312Plus,
 )
 
 
@@ -1578,7 +1582,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",
     )
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
     def test_atomic_add_bfloat16(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -1597,7 +1603,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
     @unittest.skipIf(
         config.is_fbcode(),
         "bfloat16 atomic add is supported in fbcode, so we won't fallback",
@@ -1665,6 +1673,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
