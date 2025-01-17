@@ -76,20 +76,20 @@ def get_dequantized(
     if qscheme is torch.per_tensor_affine:
         return dequantize_per_tensor(
             val,
-            scale,
-            zero_point,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     elif qscheme is torch.per_channel_affine:
         return dequantize_per_channel(
             val,
-            scale,
-            zero_point,
-            axis,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            axis,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     else:
