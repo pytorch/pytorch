@@ -277,9 +277,9 @@ class FSDPState(_State):
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
                 fsdp_param_group = state._fsdp_param_group
-                if fsdp_param_group and (
-                    fsdp_param_group.is_unsharded
-                    or not fsdp_param_group.unshard_in_backward
+                if (
+                    fsdp_param_group
+                    and fsdp_param_group._training_state != TrainingState.POST_BACKWARD
                 ):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
