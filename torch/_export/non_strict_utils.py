@@ -3,7 +3,18 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,6 +28,7 @@ from torch._dynamo.source import (
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
 from torch._export.passes.lift_constants_pass import ConstantAttrMap
+from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -89,7 +101,7 @@ def fakify(
     sources: Dict[tuple[int, int], List[Source]],
 ):
     source = key_path_to_source(kp)
-    if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
+    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
 
     if not isinstance(t, torch.Tensor):
@@ -444,6 +456,78 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
     inner(m, [], constants)
     return constants
+
+
+def _get_graph_inputs_of_type_nn_module(
+    args: Optional[Tuple[Tuple[Any], Dict[Any, Any]]],
+) -> Set[Type[torch.nn.Module]]:
+    if args is None:
+        return set()
+    module_types = set()
+    for arg in pytree.tree_leaves(args):
+        if isinstance(arg, torch.nn.Module):
+            module_types.add(type(arg))
+    return module_types
+
+
+def _enter_enable_graph_inputs_of_type_nn_module(
+    module_types: Set[Type[torch.nn.Module]],
+) -> None:
+    for t in module_types:
+        torch._export.utils.register_module_as_pytree_input_node(t)
+
+
+def _exit_enable_graph_inputs_of_type_nn_module(
+    module_types: Set[Type[torch.nn.Module]],
+) -> None:
+    for t in module_types:
+        torch._export.utils.deregister_module_as_pytree_input_node(t)
+
+
+@contextlib.contextmanager
+def _enable_graph_inputs_of_type_nn_module(
+    args: Optional[Tuple[Tuple[Any], Dict[Any, Any]]],
+):
+    if args is None:
+        yield
+        return
+
+    module_types = _get_graph_inputs_of_type_nn_module(args)
+    _enter_enable_graph_inputs_of_type_nn_module(module_types)
+    try:
+        yield
+    finally:
+        _exit_enable_graph_inputs_of_type_nn_module(module_types)
+
+
+@contextlib.contextmanager
+def _fakify_module_inputs(
+    args: Tuple[Any],
+    kwargs: Dict[Any, Any],
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+):
+    # This context manager is used to fakify module inputs.
+    # Inputs:
+    #   args, kwargs: the args and kwargs containing module inputs that haven't been fakified.
+    #   fake_mode: the fake mode to be used for fakifying script objects. It's the same mode that fakify input tensors.
+
+    ctxs = [_enable_graph_inputs_of_type_nn_module((args, kwargs))]
+    for arg in pytree.tree_leaves((args, kwargs)):
+        if isinstance(arg, torch.nn.Module):
+            fake_params_buffers = _fakify_params_buffers(fake_mode, arg)
+            ctxs.append(
+                torch.nn.utils.stateless._reparametrize_module(
+                    arg,
+                    fake_params_buffers,
+                    tie_weights=True,
+                    strict=True,
+                    stack_weights=True,
+                )
+            )
+    with contextlib.ExitStack() as stack:
+        for ctx in ctxs:
+            stack.enter_context(ctx)
+        yield
 
 
 @contextlib.contextmanager
