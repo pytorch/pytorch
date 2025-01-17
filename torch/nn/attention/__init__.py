@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 """ This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
-from typing import Iterable, List, Union
+from collections.abc import Iterable
+from typing import List, Union
 from warnings import warn
 
 import torch.backends.cuda
@@ -13,7 +14,7 @@ from torch.backends.cuda import (
 )
 
 
-__all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+__all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -73,7 +74,7 @@ def _backend_from_string(name: str):
 
 
 def _cur_sdpa_kernel_backends():
-    backends: List[SDPBackend] = []
+    backends: list[SDPBackend] = []
     for name, val in _backend_names.items():
         if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
@@ -88,7 +89,7 @@ def _sdpa_kernel(backends: Iterable[SDPBackend]):
 
 @contextlib.contextmanager
 def sdpa_kernel(
-    backends: Union[List[SDPBackend], SDPBackend], set_priority: bool = False
+    backends: Union[list[SDPBackend], SDPBackend], set_priority: bool = False
 ):
     r"""
     Context manager to select which backend to use for scaled dot product attention.

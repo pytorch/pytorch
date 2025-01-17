@@ -4,7 +4,7 @@ import functools
 import logging
 import operator
 import warnings
-from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import cast, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 def decompose_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     """
@@ -59,7 +59,7 @@ def decompose_handler(
 
 def is_same_size_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> bool:
     lhs = cast(torch.Tensor, args[0])
@@ -69,14 +69,14 @@ def is_same_size_handler(
 
 def found_inf_reduce_handler(
     op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
+    args: tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(List[object], op_info.local_args), op_info.args_tree_spec
+        cast(List[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
     )
-    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+    local_tensor_args = cast(tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)
 
     grad_dtensor = cast(list[dtensor.DTensor], args[0])[0]
@@ -153,7 +153,7 @@ class OpDispatcher:
     def dispatch(
         self,
         op_call: torch._ops.OpOverload,
-        args: Tuple[object, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> object:
         """
@@ -192,7 +192,7 @@ class OpDispatcher:
             )
 
             # run local op computation with potentially modified args/kwargs
-            local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+            local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
@@ -329,7 +329,7 @@ class OpDispatcher:
     def unwrap_to_op_info(
         self,
         op_call: torch._ops.OpOverload,
-        args: Tuple[object, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> OpInfo:
         # get runtime schema info to determine whether to use pytree to flatten inputs

@@ -5,8 +5,9 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
+import collections
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -24,6 +25,8 @@ from .utils import strict_zip
 
 
 zip = strict_zip
+
+T = TypeVar("T", bound=torch.Tensor)
 
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
@@ -54,15 +57,26 @@ def maybe_suggest_memory_format(
     return suggest_memory_format(t)
 
 
-def get_types_for_subclass(tensor_subclass):
-    if not is_traceable_wrapper_subclass(tensor_subclass):
-        return ["Tensor"]
-    inner_keys, _ = tensor_subclass.__tensor_flatten__()
-    result = []
-    for key in inner_keys:
-        inner_tensor = getattr(tensor_subclass, key)
-        result.extend(get_types_for_subclass(inner_tensor))
-    return result
+def get_subclass_typing_container(
+    tensor_subclass: torch.Tensor,
+) -> Dict[Type[torch.Tensor], List[Type[torch.Tensor]]]:
+    """
+    Given a subclass, returns a recursive dictionary mapping each
+    inner tensors to its' subclass types.
+    """
+
+    def _get_types_for_subclass(tensor_subclass: torch.Tensor) -> None:
+        if not is_traceable_wrapper_subclass(tensor_subclass):
+            return
+        tracker[type(tensor_subclass)].append(tensor_subclass)
+        inner_keys, _ = tensor_subclass.__tensor_flatten__()
+        for key in inner_keys:
+            inner_tensor = getattr(tensor_subclass, key)
+            _get_types_for_subclass(inner_tensor)
+
+    tracker: Dict[Any, List[Any]] = collections.defaultdict(list)
+    _get_types_for_subclass(tensor_subclass)
+    return tracker
 
 
 def create_subclass_metadata(

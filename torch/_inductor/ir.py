@@ -24,7 +24,6 @@ from typing import (
     Optional,
     overload,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -956,8 +955,8 @@ def get_reduction_combine_fn(
     elif reduction_type in ("argmax", "argmin"):
 
         def argmax_combine_fn(
-            a: Tuple[object, object], b: Tuple[object, object]
-        ) -> Tuple[OpsValue, OpsValue]:
+            a: tuple[object, object], b: tuple[object, object]
+        ) -> tuple[OpsValue, OpsValue]:
             a_value, a_index = a
             b_value, b_index = b
 
@@ -989,9 +988,9 @@ def get_reduction_combine_fn(
     elif reduction_type == "welford_combine":
 
         def welford_combine_fn(
-            a: Tuple[OpsValue, OpsValue, OpsValue],
-            b: Tuple[OpsValue, OpsValue, OpsValue],
-        ) -> Tuple[OpsValue, OpsValue, OpsValue]:
+            a: tuple[OpsValue, OpsValue, OpsValue],
+            b: tuple[OpsValue, OpsValue, OpsValue],
+        ) -> tuple[OpsValue, OpsValue, OpsValue]:
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
@@ -1104,7 +1103,7 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
-    ) -> Tuple[ReductionHint, _IntLike]:
+    ) -> tuple[ReductionHint, _IntLike]:
         def _is_static(x: object) -> bool:
             return isinstance(x, (int, Integer))
 
@@ -1190,7 +1189,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
         )
 
-        def get_read_indices(r: Reduction) -> Tuple[Sequence[Expr], bool]:
+        def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -1289,7 +1288,7 @@ class Reduction(Loops):
 
             def value_fn(
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
-            ) -> Tuple[OpsValue, OpsValue]:
+            ) -> tuple[OpsValue, OpsValue]:
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
@@ -1731,7 +1730,7 @@ class WelfordReduction(Reduction):
 
             def loader(
                 idx: Sequence[Expr], reduction_idx: Sequence[Expr]
-            ) -> Tuple[OpsValue, ...]:
+            ) -> tuple[OpsValue, ...]:
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
@@ -1986,13 +1985,13 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Integer]
     size: List[Integer]
-    combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]]
+    combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]]
     reindex: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Sequence[_IntLike]]
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
-    dtypes: Tuple[torch.dtype, ...]
-    inner_fns: Tuple[Callable[..., Any], ...]
+    dtypes: tuple[torch.dtype, ...]
+    inner_fns: tuple[Callable[..., Any], ...]
 
     # HACK we mimick reduction
 
@@ -2054,11 +2053,11 @@ class Scan(Loops):
     def create(  # type: ignore[override]
         cls,
         device: torch.device,
-        dtypes: Tuple[torch.dtype, ...],
-        inner_fns: Tuple[Callable[[Sequence[Expr]], Any], ...],
+        dtypes: tuple[torch.dtype, ...],
+        inner_fns: tuple[Callable[[Sequence[Expr]], Any], ...],
         size: List[Integer],
         axis: int,
-        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
+        combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         *,
         # Whether we have the option to fallback to aten
@@ -2155,9 +2154,9 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Integer],
         scan_ranges: List[Integer],
-        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
+        combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         scan_numel: Expr,
-    ) -> Tuple[ReductionHint, _IntLike]:
+    ) -> tuple[ReductionHint, _IntLike]:
         # TODO: custom splitting heuristic for scan
         def wrapper_fn(idx: Sequence[Expr], reduction_idx: Sequence[Expr]) -> OpsValue:
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
@@ -2189,8 +2188,8 @@ class Sort(Loops):
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
-    dtypes: Tuple[torch.dtype, ...]
-    inner_fns: Tuple[Callable[..., Any], ...]
+    dtypes: tuple[torch.dtype, ...]
+    inner_fns: tuple[Callable[..., Any], ...]
 
     stable: bool
     descending: bool
@@ -2251,8 +2250,8 @@ class Sort(Loops):
     def create(  # type: ignore[override]
         cls,
         device: torch.device,
-        dtypes: Tuple[torch.dtype, ...],
-        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
+        dtypes: tuple[torch.dtype, ...],
+        inner_fns: tuple[Callable[[List[Expr]], Any], ...],
         size: List[Integer],
         axis: int,
         stable: bool,
@@ -2354,7 +2353,7 @@ def as_storage_and_layout(
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
     exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
-) -> Tuple[StorageBox, Layout]:
+) -> tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2677,7 +2676,7 @@ class SqueezeView(BaseView):
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
+        def reindex(index: List[sympy.Expr]) -> tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
@@ -4028,10 +4027,10 @@ class ComputedBuffer(OperationBuffer):
     @cache_on_self
     def get_default_sizes_body(
         self,
-    ) -> Tuple[
-        Tuple[List[sympy.Expr], List[sympy.Expr]],
+    ) -> tuple[
+        tuple[List[sympy.Expr], List[sympy.Expr]],
         LoopBody,
-        Tuple[List[sympy.Expr], List[sympy.Expr]],
+        tuple[List[sympy.Expr], List[sympy.Expr]],
     ]:
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
@@ -4060,9 +4059,9 @@ class ComputedBuffer(OperationBuffer):
 
     def simplify_and_reorder(
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
-    ) -> Tuple[Tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
+    ) -> tuple[tuple[List[sympy.Expr], List[sympy.Expr]], LoopBody]:
         """
         This is a main place where we do loop transformations in a
         backend-agnostic way.
@@ -4283,7 +4282,7 @@ class TemplateBuffer(OperationBuffer):
 
     def simplify_and_reorder(  # type: ignore[no-untyped-def]
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ):
         return (
@@ -4469,7 +4468,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
-    def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
+    def get_min_choice(self) -> tuple[ChoiceCaller, float]:
         min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
         return (min_choice, self.choice_timings[min_choice])
 
@@ -4497,6 +4496,18 @@ class CppTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
+        self.outputs: Optional[List[Buffer]] = None
+
+    def get_layout(self) -> Layout:
+        if isinstance(self.layout, MultiOutputLayout):
+            assert isinstance(self.outputs, Iterable)
+            first_output = self.outputs[0]
+            assert isinstance(first_output, Buffer)
+            layout = first_output.layout
+            assert isinstance(layout, Layout)
+            return layout
+        else:
+            return super().get_layout()
 
 
 @ir_dataclass(frozen=False)
@@ -4740,7 +4751,7 @@ class ConcatKernel(NopKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
-    constant_args: Tuple[Any, ...] = ()
+    constant_args: tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
     python_kernel_name: Optional[str] = None
@@ -4906,7 +4917,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def process_kernel(  # type: ignore[no-untyped-def]
         cls, kernel, *args, **kwargs
-    ) -> Tuple[
+    ) -> tuple[
         Any,
         List[Any],
         List[Any],
@@ -5356,13 +5367,18 @@ class ExternKernel(InputsKernel):
             args.extend(self.codegen_const_args())
         return args
 
-    def get_kwargs_value(self, arg_name):  # type: ignore[no-untyped-def]
+    def get_kwargs_value(self, arg_name, **kwargs):  # type: ignore[no-untyped-def]
+        """Given an argument name, queries for values in (in order):
+        1. any provided kwargs for this function.
+        2. the class self.kwargs member.
+        3. any available default arguments in self.allarg_properties."""
+        if arg_name in kwargs:
+            return kwargs.get(arg_name)
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.allarg_properties and self.allarg_properties.get(arg_name):
+        if self.allarg_properties and arg_name in self.allarg_properties:
             return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
-        else:
-            raise AssertionError(f"{arg_name} not in self.allarg_properties")
+        raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):  # type: ignore[no-untyped-def]
         if V.graph.cpp_wrapper:
@@ -6070,7 +6086,7 @@ class ScatterFallback(ExternKernel):
     ) -> None:
         self.src_is_tensor = isinstance(src, TensorBox)
 
-        constant_args: Tuple[Any, ...]
+        constant_args: tuple[Any, ...]
         if self.src_is_tensor:
             tensors = [self.realize_input(t) for t in [x, index, src]]
             constant_args = (dim,)
@@ -6537,7 +6553,8 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
-            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+            self.get_kwargs_value(key, **kwargs)
+            for key in self.ordered_kwargs_for_cpp_kernel
         ]
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
@@ -6602,7 +6619,24 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if kernel.namespace == "aten":  # type: ignore[union-attr]
+        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
+            # If any inputs to this fallback op are complex, they may have the Conjugate
+            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
+            # _aren't_ runtime dispatched implicitly bypass the conversions for those
+            # keys internally (since they're applied at dispatch time).  Since there's
+            # no way to tell at compile time whether a tensor will have these keys
+            # applied, pessimize complex fallback ops by always using the runtime
+            # dispatched fallback.
+            #
+            # This is not currently expected to be a performance issue, since few models
+            # utilized complex ops, but this decision may need to be reconsidered if
+            # that changes.
+            log_msg = (
+                f"Using proxy executor as fallback for {kernel} due to complex inputs."
+            )
+            log.warning(log_msg)
+            self.use_runtime_dispatch = True
+        elif kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6619,10 +6653,9 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-        else:
+        elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
-            if V.graph.cpp_wrapper:
-                self.use_runtime_dispatch = True
+            self.use_runtime_dispatch = True
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
@@ -6801,7 +6834,7 @@ class MultiOutput(ExternKernel):
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
 
-    def __init__(self, layout: OutputSpec, input, indices: List[Tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, layout: OutputSpec, input, indices: List[tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
@@ -6811,6 +6844,10 @@ class MultiOutput(ExternKernel):
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self) -> bool:
+        if len(self.inputs) == 1 and (
+            isinstance(self.inputs[0], CppTemplateBuffer)  # Grouped GEMM
+        ):
+            return True
         return False
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:

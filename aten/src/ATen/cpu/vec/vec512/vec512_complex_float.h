@@ -756,24 +756,26 @@ public:
     return map(std::log1p);
   }
   Vectorized<c10::complex<float>> asin() const {
-    // asin(x)
-    // = -i*ln(iz + sqrt(1 -z^2))
-    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
-    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-    const __m512 one = _mm512_set1_ps(1);
+    // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+    // // asin(x)
+    // // = -i*ln(iz + sqrt(1 -z^2))
+    // // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    // const __m512 one = _mm512_set1_ps(1);
 
-    auto conj = conj_();
-    auto b_a = _mm512_permute_ps(conj, 0xB1);                         //-b        a
-    auto ab = _mm512_mul_ps(conj, b_a);                               //-ab       -ab
-    auto im = _mm512_add_ps(ab, ab);                                  //-2ab      -2ab
+    // auto conj = conj_();
+    // auto b_a = _mm512_permute_ps(conj, 0xB1);                         //-b        a
+    // auto ab = _mm512_mul_ps(conj, b_a);                               //-ab       -ab
+    // auto im = _mm512_add_ps(ab, ab);                                  //-2ab      -2ab
 
-    auto val_2 = _mm512_mul_ps(values, values);                       // a*a      b*b
-    auto re = hsub_ps(val_2, _mm512_permute_ps(val_2, 0xB1));  // a*a-b*b  b*b-a*a
-    re = _mm512_sub_ps(one, re);
+    // auto val_2 = _mm512_mul_ps(values, values);                       // a*a      b*b
+    // auto re = hsub_ps(val_2, _mm512_permute_ps(val_2, 0xB1));  // a*a-b*b  b*b-a*a
+    // re = _mm512_sub_ps(one, re);
 
-    auto root = Vectorized(_mm512_mask_blend_ps(0xAAAA, re, im)).sqrt();         //sqrt(re + i*im)
-    auto ln = Vectorized(_mm512_add_ps(b_a, root)).log();                 //ln(iz + sqrt())
-    return Vectorized(_mm512_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
+    // auto root = Vectorized(_mm512_mask_blend_ps(0xAAAA, re, im)).sqrt();         //sqrt(re + i*im)
+    // auto ln = Vectorized(_mm512_add_ps(b_a, root)).log();                 //ln(iz + sqrt())
+    // return Vectorized(_mm512_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
+    return map(std::asin);
   }
   Vectorized<c10::complex<float>> acos() const {
     return map(std::acos);

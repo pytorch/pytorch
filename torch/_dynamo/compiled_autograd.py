@@ -4,7 +4,8 @@ import functools
 import itertools
 import operator
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -117,7 +118,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        origins: List[List[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -480,10 +481,16 @@ class AutogradCompilerInstance:
                 and len(ca.all_input_nodes) == len(aot.all_input_nodes)
             )
 
+        # number of times we saw this AOT backward graph, used to dedup reused graphs
+        aot_id_counter: Dict[int, int] = defaultdict(int)
         for nodecall_index, info in self.aot_graph_infos.items():
             ca_node_start_idx = info["ca_node_start_idx"]
             aot_id = info["aot_id"]
+            aot_id_postfix = ""
             aot_graph = info["aot_gm"].graph
+            if aot_id_counter[aot_id]:
+                aot_id_postfix = f"_{aot_id_counter[aot_id]}"
+            aot_id_counter[aot_id] += 1
 
             # 1. Find the first op from user code in the AOT graph
             aot_it = iter(aot_graph.nodes)
@@ -520,9 +527,11 @@ class AutogradCompilerInstance:
                         # So any deviation is an error
                         raise StopIteration
 
-                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    ca_node.name = f"aot{aot_id}{aot_id_postfix}_{aot_node.name}"
                     for i, inp in enumerate(aot_node.all_input_nodes):
-                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+                        ca_node.all_input_nodes[
+                            i
+                        ].name = f"aot{aot_id}{aot_id_postfix}_{inp.name}"
 
                     aot_node = next(aot_it)
                     ca_node = next(ca_it)
@@ -776,7 +785,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[List[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:
@@ -811,6 +820,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 self.aot_graph_cls_name = node_name
                 maybe_aot_id = forward_cls._aot_id
                 self.aot_graph_infos[nodecall_index] = {

@@ -2,7 +2,7 @@
 import operator
 import warnings
 from collections import namedtuple
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -335,7 +335,7 @@ def is_equalization_observer(observer: nn.Module) -> bool:
 
 def get_op_node_and_weight_eq_obs(
     input_eq_obs_node: Node, model: GraphModule, modules: Dict[str, nn.Module]
-) -> Tuple[Optional[Node], Optional[_WeightEqualizationObserver]]:
+) -> tuple[Optional[Node], Optional[_WeightEqualizationObserver]]:
     """Gets the following weight equalization observer. There should always
     exist a weight equalization observer after an input equalization observer.
 
