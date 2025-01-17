@@ -3255,6 +3255,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ), f"Expected 1 graph, but got {counter.frame_count} graphs"
 
     @supported_platform
+    def test_dynamic_shapes_with_custom_kernel_options(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 1024, 64),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        kernel_options = {"BLOCK_M": 64, "BLOCK_N": 64}
+        out_eager = flex_attention(query, key, value, kernel_options=kernel_options)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3

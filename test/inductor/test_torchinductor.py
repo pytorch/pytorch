@@ -37,6 +37,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
     rand_strided,
+    reset_rng_state,
     same,
     skipIfPy312,
 )
@@ -869,6 +870,10 @@ class skip_if_cpp_wrapper:
 
 @instantiate_parametrized_tests
 class CommonTemplate:
+    def is_dtype_supported(self, dtype: torch.dtype) -> bool:
+        device_interface = get_interface_for_device(self.device)
+        return device_interface.is_dtype_supported(dtype)
+
     def test_bool(self):
         def fn(a, b):
             return (
@@ -6053,10 +6058,8 @@ class CommonTemplate:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
-        device_interface = get_interface_for_device(self.device)
-
         for lowp_dtype in [torch.float16, torch.bfloat16]:
-            if not device_interface.is_dtype_supported(lowp_dtype):
+            if not self.is_dtype_supported(lowp_dtype):
                 continue
             inps = [
                 torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
@@ -6250,6 +6253,18 @@ class CommonTemplate:
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
             ):
                 model(x)
+
+    @torch._dynamo.config.patch(recompile_limit=12)
+    def test_avg_pool_errors_with_uint(self):
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                x = torch.randn([2] * (dim + 2)).to(dtype)
+                op = eval(f"torch.nn.functional.avg_pool{dim}d")
+                c_op = torch.compile(op)
+                with self.assertRaisesRegex(
+                    RuntimeError, r".*(not implemented|aoti_torch_).*"
+                ):
+                    c_op(x, kernel_size=2, stride=2)
 
     def test_log1p(self):
         def fn(x):
@@ -6554,7 +6569,17 @@ class CommonTemplate:
             return a + torch.full_like(a, 7.777)
 
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
+            ctx = (
+                contextlib.nullcontext()
+                if self.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
+            with ctx:
+                self.common(
+                    fn,
+                    (make_tensor(8, dtype=dtype, device=self.device),),
+                    check_lowp=False,
+                )
 
     def test_full_boolean(self):
         def fn(n):
@@ -7412,15 +7437,14 @@ class CommonTemplate:
             return x.isinf(), x.isnan()
 
         values = [1, float("inf"), 2, float("-inf"), float("nan")]
-        device_interface = get_interface_for_device(self.device)
-        for dtype in [torch.float32, torch.float64]:
+        for dtype in [torch.float32, torch.float64, torch.half, torch.bfloat16]:
             ctx = (
                 contextlib.nullcontext()
-                if device_interface.is_dtype_supported(dtype)
+                if self.is_dtype_supported(dtype)
                 else self.assertRaises(TypeError)
             )
             with ctx:
-                self.common(fn, [torch.tensor(values, dtype=dtype)])
+                self.common(fn, [torch.tensor(values, dtype=dtype)], check_lowp=False)
 
     @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
@@ -11754,6 +11778,8 @@ class CommonTemplate:
             torch.bfloat16,
         ]
         for cpu_dtype in test_dtypes:
+            if not self.is_dtype_supported(cpu_dtype):
+                continue
             x = torch.rand([20], device=GPU_TYPE)
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
             self.common(
@@ -12269,6 +12295,46 @@ class CommonTemplate:
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    @requires_gpu()
+    @config.patch(fallback_random=True)
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "cpp wrapper does not support sort properly: https://gist.github.com/shunting314/e58f637f9972f1ad1a033d73cee6e42a",
+    )
+    def test_mix_device_index(self):
+        """
+        A tiny repro for this meta internal issue: https://fb.workplace.com/groups/1075192433118967/posts/1567334737238065
+        whose root cause is Inductor having wrong assumption of index.Tensor's output
+        stride.
+        """
+        image_latent = (
+            torch.randn((24, 16, 32, 32), device=GPU_TYPE)
+            .to(memory_format=torch.channels_last)
+            .view(2, 12, 16, 32, 32)
+        )
+
+        def f(image_latent):
+            indices = torch.argsort(torch.rand(2, 12), dim=-1)
+
+            tar_latent = image_latent[torch.arange(2).unsqueeze(-1), indices[:, :3]]
+
+            # The original model uses einops. In this unit test, we use view op directly
+            # to avoid importing einops
+            #   tar_latent_rearranged = einops.rearrange(
+            #     tar_latent, "b n c h w -> (b n) c h w"
+            #   )
+            tar_latent_rearranged = tar_latent.view(-1, *tar_latent.size()[2:])
+
+            return tar_latent_rearranged
+
+        reset_rng_state()
+        ref = f(image_latent)
+        opt_f = torch.compile(f)
+        reset_rng_state()
+        act = opt_f(image_latent)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -12308,6 +12374,10 @@ def copy_tests(
                 new_test = skip_func(new_test)
 
             setattr(other_cls, f"{name}_{suffix}", new_test)
+
+    # Special case convenience routine
+    if hasattr(my_cls, "is_dtype_supported"):
+        other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
 if HAS_CPU:
