@@ -124,6 +124,9 @@ class MPSBasicTests(TestCase):
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
+    def test_pointwise_i0(self):
+        self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
