@@ -100,27 +100,28 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_reuse(self, line: Line):
         assert isinstance(line, ReuseLine)
-        old = self.node
-        new = self.reused_as
+        old = line.node
+        new = line.reused_as
         assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
         assert old.get_dtype() == new.get_dtype()
 
-        old_name = old.get_name()
-        new_name = new.get_name()
-        del_line = ";"
+        result_node = self.buffer_to_node[old]
 
-        if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-            # No operation necessary. Simply update the symbol table.
-            self._record_allocation(new, self.buffer_to_node[old])
-        else:
-            return
-            reinterpret_view = self.codegen_reinterpret_view(
-                old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
-            )
-            return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
-
-        if old_name not in V.graph.get_output_names() and delete_old:
+        # Free the old buffer.
+        if old.get_name() not in V.graph.get_output_names() and delete_old:
             self._free(old)
+
+        # Change shape and stride.
+        size = new.get_size()
+        stride = new.get_stride()
+        offset = old.offset()
+        if old.get_size() != size or old.get_stride() != stride or old.offset() != offset:
+            result_node = self.graph.call_function(
+                torch.as_strided,
+                args=(size, stride, offset)
+            )
+
+        self._record_allocation(new, result_node)
 
     def _generate_null(self, line: Line):
         assert isintstance(line, NullLine)
