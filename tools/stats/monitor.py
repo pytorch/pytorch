@@ -19,12 +19,12 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
 
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from tools.stats.utilization_stats_lib import *
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
 import copy
 import dataclasses
@@ -38,9 +38,19 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
+from tools.stats.utilization_stats_lib import (
+    getDataModelVersion,
+    GpuUsage,
+    RecordData,
+    UtilizationMetadata,
+    UtilizationRecord,
+    UtilizationStats,
+)
+
 
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
+
 
 @dataclasses.dataclass
 class UsageData:
@@ -168,9 +178,9 @@ class UsageLogger:
         """
         self._log_interval = log_interval
         self._metadata = UtilizationMetadata(
-            level= "metadata",
+            level="metadata",
             usage_collect_interval=self._log_interval,
-            data_model_version= getDataModelVersion(),
+            data_model_version=getDataModelVersion(),
         )
 
         self._data_collect_interval = data_collect_interval
@@ -299,9 +309,7 @@ class UsageLogger:
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
 
-    def _calculate_gpu_utilization(
-        self, data_list: list[UsageData]
-    ) -> list[GpuUsage]:
+    def _calculate_gpu_utilization(self, data_list: list[UsageData]) -> list[GpuUsage]:
         """
         Calculates the GPU utilization.
         """
