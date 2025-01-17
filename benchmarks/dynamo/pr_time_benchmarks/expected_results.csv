@@ -14,7 +14,7 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,45210000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,27530000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,27740000000,0.015
 
 
 
@@ -38,7 +38,7 @@ update_hint_regression,compile_time_instruction_count,1686000000,0.02
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,1040000000,0.015
+sum_floordiv_regression,compile_time_instruction_count,1031000000,0.015
 
 
 
@@ -50,11 +50,11 @@ aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2018000000
 
 
 
-aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5800000000,0.015
+aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5764000000,0.015
 
 
 
-aotdispatcher_partitioner_cpu,compile_time_instruction_count,9158000000,0.015
+aotdispatcher_partitioner_cpu,compile_time_instruction_count,9203000000,0.015
 
 
 
