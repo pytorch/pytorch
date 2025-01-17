@@ -25,7 +25,7 @@ function(air_to_metallib TARGET OBJECTS)
 endfunction()
 
 function(metal_to_metallib_h SRC TGT)
-    execute_process(COMMAND Python::Interpreter torch/utils/cpp_embed_headers.py ${SRC}
+    execute_process(COMMAND Python::Interpreter torch/utils/_cpp_embed_headers.py ${SRC}
                     OUTPUT SHADER_CONTENT)
     file(WRITE ${TGT} "#include <ATen/native/mps/OperationUtils.h>\n")
     file(APPEND ${TGT} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")

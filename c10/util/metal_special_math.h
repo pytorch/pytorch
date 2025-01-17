@@ -77,7 +77,8 @@ T i0(T _x) {
                      6.88975834691682398426E-5,   3.36911647825569408990E-3,
                      8.04490411014108831608E-1};
 
-  return static_cast<T>((metal::exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / metal::sqrt(x));
+  return static_cast<T>(
+      (metal::exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / metal::sqrt(x));
 }
 
 // Copied from
@@ -128,7 +129,8 @@ T i1(T _x) {
       -2.51223623787020892529E-7,  -3.88256480887769039346E-6,
       -1.10588938762623716291E-4,  -9.76109749136146840777E-3,
       7.78576235018280120474E-1};
-  const auto out = (metal::exp(x) * chbevl(32. / x - 2., coefficients, 25)) / metal::sqrt(x);
+  const auto out =
+      (metal::exp(x) * chbevl(32. / x - 2., coefficients, 25)) / metal::sqrt(x);
   return static_cast<T>(_x < T(0.) ? -out : out);
 }
 
