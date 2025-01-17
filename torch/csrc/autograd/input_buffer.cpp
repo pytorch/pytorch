@@ -158,15 +158,15 @@ void InputBuffer::add(
   //  the consumer or producer.
   //      Accumulation happens on the var device's default stream.
 
-  TORCH_INTERNAL_ASSERT(device_of(var));
+  auto const device = device_of(var);
+  TORCH_INTERNAL_ASSERT(device.has_value());
   std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
-  const auto device_type = device_of(var).value().type();
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
+  const auto device_type = device->type();
+  if (device->is_cuda() || device->is_privateuseone()) {
     const auto on_producer =
-        opt_producer_stream && device_of(var) == opt_producer_stream->device();
+        opt_producer_stream && device == opt_producer_stream->device();
     const auto on_consumer =
-        opt_consumer_stream && device_of(var) == opt_consumer_stream->device();
+        opt_consumer_stream && device == opt_consumer_stream->device();
 
     if (on_producer && on_consumer) {
       // (2a)
@@ -192,8 +192,7 @@ void InputBuffer::add(
         opt_sync_stream = opt_producer_stream;
       } else {
         // (5)
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
+        opt_accumulate_stream = guard.getDefaultStream(*device);
       }
       if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
         // (3b), (4b)
@@ -217,7 +216,7 @@ void InputBuffer::add(
     } else {
       // (1) non-CUDA/privateuse1 variable
       //     Accumulation happens on variable's device
-      c10::OptionalDeviceGuard device_guard{device_of(var)};
+      c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
     }
   }

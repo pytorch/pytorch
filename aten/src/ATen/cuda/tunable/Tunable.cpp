@@ -13,6 +13,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
@@ -391,11 +392,13 @@ TuningContext::TuningContext() :
     rotating_buffer_size_{-1},
     filename_{},
     untuned_file_{},
-    results_count_from_input_file_{0}
+    results_count_from_input_file_{0},
+    is_shutting_down_{false}
 {
 }
 
 TuningContext::~TuningContext() {
+  is_shutting_down_ = true;
   if (!manager_initialized_) {
     // TuningResultsManager was never initialized, no tuning requested or performed.
     // This can happen in a DDP job where a python process spawns other workers
@@ -433,8 +436,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
+  if (eval) {
     return true;
   }
   return enable_;
@@ -460,16 +463,16 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
+  if (eval) {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
+  if (eval) {
     return true;
   }
   return record_untuned_enable_;
@@ -477,8 +480,8 @@ bool TuningContext::IsRecordUntunedEnabled() const {
 
 std::ofstream& TuningContext::GetUntunedFile(){
   if (!untuned_file_.is_open()) {
-    const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
-    std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
+    const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
+    std::string filename = (!env.has_value()) ? "tunableop_untuned.csv" : env.value();
 
     std::string device = c10::str(int(c10::cuda::current_device()));
     std::size_t found = filename.rfind('.');
@@ -515,9 +518,9 @@ void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_tuning_duration_ms_;
@@ -528,9 +531,9 @@ void TuningContext::SetMaxTuningIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxTuningIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
@@ -541,9 +544,9 @@ void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxWarmupDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_warmup_duration_ms_;
@@ -554,9 +557,9 @@ void TuningContext::SetMaxWarmupIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxWarmupIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
-  if (env != nullptr) {
-    int val = atoi(env);
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
+  if (env.has_value()) {
+    int val = stoi(env.value());
     return val < 0 ? 0 : val;
   }
   return max_warmup_iterations_;
@@ -567,28 +570,36 @@ void TuningContext::EnableICacheFlush(bool value) {
 }
 
 bool TuningContext::IsICacheFlushEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
+  if (env == "0") {
     return false;
   }
   return icache_flush_;
 }
 
 void TuningContext::SetRotatingBufferSize(int size) {
-  rotating_buffer_size_ = size < 0 ? 0 : size;
+  // Any negative rotating buffer size means l2_cache_size
+  // see GetRotatingBufferSize
+  //
+  // size is set in MB like the environment variable
+  constexpr int MB = 1024 * 1024;
+  rotating_buffer_size_ = size * MB;
 }
 
 int TuningContext::GetRotatingBufferSize() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-  if (env != nullptr) {
+  // If the environment variable is negative or not set, return the L2 cache size.
+  // The default rotating_buffer_size is -1, but this member function will
+  // return l2_cache size.
+  // This member function will always return a zero or a positive integer.
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  if (env.has_value()) {  // env variable is set
     constexpr int MB = 1024 * 1024;
-    int val = atoi(env);
-    return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
+    int val = stoi(env.value());
+    return val < 0 ? l2_cache_size : val * MB;  // env var is specified as MB, returned as bytes
   }
-  else {
+  else {  // env variable is not set
     if (rotating_buffer_size_ < 0) {
-      // negative buffer size (default) means query for L2 cache size
-      int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
       return l2_cache_size;
     }
     else {
@@ -602,8 +613,8 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
     manager_initialized_ = true;
     if (GetFilename().empty()) {
       // if SetFilename() was not already called, call it now with the default or env var
-      const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
-      std::string filename = (env == nullptr) ? "tunableop_results.csv" : env;
+      const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_FILENAME");
+      std::string filename = (!env.has_value()) ? "tunableop_results.csv" : env.value();
       SetFilename(filename, true);
     }
     auto filename = GetFilename();
@@ -738,6 +749,50 @@ bool TuningContext::WriteFile(const std::string& filename_) {
   }
   file.close();
   return true;
+}
+
+namespace {
+
+struct MaybeDelete {
+  bool owns_pointer;
+  void operator()(std::ostream* os) const { if (owns_pointer) delete os; }
+};
+
+using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
+
+inline OstreamPtr get_stream(const std::string& filename) {
+  if (filename == "out") {
+    return OstreamPtr { &std::cout, MaybeDelete {false} };
+  }
+  else if (filename == "err") {
+    return OstreamPtr { &std::cerr, MaybeDelete {false} };
+  }
+  else {
+    return OstreamPtr { new std::ofstream {filename.c_str()}, MaybeDelete {true} };
+  }
+}
+
+} // anonymous namespace
+
+std::string TuningContext::GetLogFilename() const {
+  static const auto env_file = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static std::string val_file = env_file.has_value() ? env_file.value() : "err";
+  return val_file;
+}
+
+int TuningContext::GetLogLevel() const {
+  static const auto env_verbose = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE");
+  static int val_verbose = env_verbose.has_value() ? stoi(env_verbose.value()) : 0;
+  return val_verbose;
+}
+
+bool TuningContext::GetLogOkay() const {
+  return !is_shutting_down_;
+}
+
+std::ostream& TuningContext::GetLog() const {
+  static auto streamptr = get_stream(GetLogFilename());
+  return *streamptr;
 }
 
 } // namespace at::cuda::tunable
