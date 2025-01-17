@@ -23,6 +23,7 @@ from torch._export.db.logging import (
     get_class_if_classified_error,
 )
 from torch._export.non_strict_utils import (
+    _fakify_module_inputs,
     _fakify_script_objects,
     _gather_constant_attrs,
     _NonStrictTorchFunctionHandler,
@@ -39,6 +40,7 @@ from torch._export.passes.lift_constants_pass import (
 from torch._export.utils import (
     _collect_param_buffer_metadata,
     _compiling_state_context,
+    _fakify_params_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
@@ -64,7 +66,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
@@ -134,6 +136,7 @@ class ATenExportArtifact:
 @dataclasses.dataclass(frozen=True)
 class ExportArtifact:
     aten: ATenExportArtifact
+    in_spec: TreeSpec
     out_spec: TreeSpec
     fake_mode: FakeTensorMode
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]]
@@ -809,27 +812,6 @@ def _export_to_aten_ir(
     )
 
 
-def _fakify_params_buffers(
-    fake_mode: FakeTensorMode,
-    mod: torch.nn.Module,
-) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
-    params_buffers = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-
-    faked_params_buffers = {}
-    memo: Dict[int, FakeTensor] = {}
-    for key, value in params_buffers.items():
-        if id(value) in memo:
-            fake_tensor = memo[id(value)]
-        else:
-            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
-            memo[id(value)] = fake_tensor
-        faked_params_buffers[key] = fake_tensor
-    return faked_params_buffers  # type: ignore[return-value]
-
-
 def _get_forward_arg_names(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
@@ -1114,7 +1096,6 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
 
 def _get_module_call_graph(
     export_artifact: ExportArtifact,
-    original_in_spec: TreeSpec,
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
     forward_arg_names: Optional[List[str]] = None,
@@ -1128,6 +1109,7 @@ def _get_module_call_graph(
     module_call_specs: Dict[
         str, Dict[str, TreeSpec]
     ] = export_artifact.module_call_specs
+    in_spec: TreeSpec = export_artifact.in_spec
     out_spec: TreeSpec = export_artifact.out_spec
 
     # Make module signatures.
@@ -1151,7 +1133,7 @@ def _get_module_call_graph(
 
     assert _EXPORT_MODULE_HIERARCHY is not None
     module_call_graph = _make_module_call_graph(
-        original_in_spec,
+        in_spec,
         out_spec,
         module_call_signatures,
         forward_arg_names,
@@ -1438,6 +1420,7 @@ def _strict_export_lower_to_aten_ir(
 
     return ExportArtifact(
         aten=aten_export_artifact,
+        in_spec=orig_in_spec,
         out_spec=orig_out_spec,
         fake_mode=dynamo_fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
@@ -1759,6 +1742,7 @@ def _non_strict_export(
     """
     assert dispatch_tracing_mode in ["make_fx", "aot_export"]
     out_spec: Optional[TreeSpec] = None
+    in_spec: Optional[TreeSpec] = None
 
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
@@ -1773,7 +1757,9 @@ def _non_strict_export(
 
                 def forward(self, *args, **kwargs):
                     nonlocal out_spec
+                    nonlocal in_spec
                     mod = self._export_root
+                    _, in_spec = pytree.tree_flatten((args, kwargs))
                     if isinstance(mod, torch.fx.GraphModule):
                         # NOTE: We're going to run this graph module with an fx interpreter,
                         # which will not run any forward hooks. Thus, ideally, we should run
@@ -1865,7 +1851,7 @@ def _non_strict_export(
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ):
+        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
             _to_aten_func = (
                 _export_to_aten_ir_make_fx
                 if dispatch_tracing_mode == "make_fx"
@@ -1895,9 +1881,11 @@ def _non_strict_export(
     )
 
     assert out_spec is not None
+    assert in_spec is not None
 
     return ExportArtifact(
         aten=aten_export_artifact,
+        in_spec=in_spec,
         out_spec=out_spec,
         fake_mode=fake_mode,
         module_call_specs=module_call_specs,
@@ -1967,7 +1955,6 @@ def _export_for_training(
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
-        orig_in_spec,
         preserve_module_call_signature,
         strict,
         forward_arg_names,
@@ -2124,7 +2111,6 @@ def _export(
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
-        original_in_spec,
         preserve_module_call_signature,
         strict,
         forward_arg_names,
