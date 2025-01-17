@@ -3,6 +3,7 @@
 import sys
 import unittest
 from typing import List, Literal
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor import config as inductor_config
@@ -151,6 +152,38 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(results), num_attempts)
         for res in results:
             self.assertEqual(res, key_1)
+
+        new_results = fuzzer.reproduce(results)
+        self.assertEqual(len(new_results), 1)
+        self.assertEqual(set(key_1.keys()), {j for i in new_results.keys() for j in i})
+
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @patch("torch.compile")
+    def test_fuzzer_inductor_calling_compile(self, compile):
+        def create_key_1():
+            def myfn():
+                return True
+
+            return myfn
+
+        fuzzer = ConfigFuzzer(inductor_config, create_key_1, seed=100)
+        num_attempts = 3
+        fuzzer.bisect(num_attempts=num_attempts, p=0.5)
+        self.assertEqual(compile.call_count, num_attempts)
+
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    def test_fuzzer_running_test(self):
+        def create_key_1():
+            def myfn():
+                return True
+
+            return myfn
+
+        fuzzer = ConfigFuzzer(inductor_config, create_key_1, seed=100)
+        fuzzer.test_config = MagicMock(return_value=Status.PASSED)
+        num_attempts = 20
+        fuzzer.bisect(num_attempts=num_attempts, p=0.5)
+        self.assertEqual(fuzzer.test_config.call_count, num_attempts)
 
 
 if __name__ == "__main__":
