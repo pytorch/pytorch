@@ -11,6 +11,7 @@ class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
 
+
 @dataclass
 class UtilizationMetadata:
     level: Optional[str] = None
@@ -25,6 +26,7 @@ class UtilizationMetadata:
     gpu_type: Optional[str] = None
     start_at: Optional[float] = None
     error: Optional[str] = None
+
 
 @dataclass
 class GpuUsage:
