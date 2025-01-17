@@ -307,7 +307,7 @@ NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backen
 DEVICE_LIST_SUPPORT_PROFILING_TEST = ('cpu', 'cuda', 'xpu')
 ALLOW_XPU_PROFILING_TEST = True
 
-check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra', 'thor']
 IS_JETSON = any(name in platform.platform() for name in check_names)
 
 def gcIfJetson(fn):

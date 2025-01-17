@@ -128,7 +128,8 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.26.2; python_version <= "3.12"
+numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13"
 
 pandas==2.0.3; python_version < "3.13"
@@ -243,10 +244,11 @@ scikit-image==0.22.0 ; python_version >= "3.10"
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.14.1
+scipy==1.10.1 ; python_version <= "3.11"
+scipy==1.14.1 ; python_version >= "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
-#Pinned versions: 1.14.1
+#Pinned versions: 1.10.1
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
 #test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
 #test_linalg.py, test_binary_ufuncs.py
@@ -361,6 +363,7 @@ pwlf==2.2.1 ; python_version >= "3.8"
 astunparse
 PyYAML
 setuptools
+zstandard
 
 ninja==1.11.1 ; platform_machine == "aarch64"
 scons==4.5.2 ; platform_machine == "aarch64"
