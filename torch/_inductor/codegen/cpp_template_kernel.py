@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from collections.abc import Iterable
+from typing import Any, Callable, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -54,11 +55,11 @@ class CppTemplateKernel(CppKernel):
 
     def def_kernel(
         self,
-        inputs: Dict[str, ir.Buffer],
-        outputs: Dict[str, ir.Buffer],
-        aliases: Optional[Dict[str, str]] = None,
+        inputs: dict[str, ir.Buffer],
+        outputs: dict[str, ir.Buffer],
+        aliases: Optional[dict[str, str]] = None,
         function_name: str = "",
-        extra_sizevars: Optional[List[sympy.Expr]] = None,
+        extra_sizevars: Optional[list[sympy.Expr]] = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -137,7 +138,7 @@ class CppTemplateKernel(CppKernel):
     def stride(self, node: ir.Buffer, dim: int) -> str:
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
-    def index(self, node: ir.Buffer, indices: List[Any]) -> str:
+    def index(self, node: ir.Buffer, indices: list[Any]) -> str:
         indexer = node.get_layout().as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
@@ -149,7 +150,7 @@ class CppTemplateKernel(CppKernel):
         )
         return f"{inner_name}[{cexpr_index(index)}]"
 
-    def slice_nd(self, node, ranges: List[tuple[Any, Any]]) -> ir.ReinterpretView:
+    def slice_nd(self, node, ranges: list[tuple[Any, Any]]) -> ir.ReinterpretView:
         """
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
@@ -174,7 +175,7 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
-    def view(self, node, sizes: List[Any]) -> ir.View:
+    def view(self, node, sizes: list[Any]) -> ir.View:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
         return L.view(node, sizes).data
@@ -199,7 +200,7 @@ class CppTemplateKernel(CppKernel):
         else:
             return f"#pragma unroll {unroll}"
 
-    def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
+    def define_buffer(self, name, sizes: list[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
         buf = ir.Buffer(
@@ -226,9 +227,9 @@ class CppTemplateKernel(CppKernel):
     def store_pointwise_nodes(
         self,
         dst: ir.Buffer,
-        nodes: List[ir.IRNode],
-        offsets: Optional[List[sympy.Expr]] = None,
-        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+        nodes: list[ir.IRNode],
+        offsets: Optional[list[sympy.Expr]] = None,
+        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -281,10 +282,10 @@ class CppTemplateKernel(CppKernel):
     def store_grouped_gemm_pointwise_nodes(
         self,
         dst: tuple[ir.Buffer],
-        nodes: List[ir.IRNode],
-        offsets: List[sympy.Expr],
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-        output_names: List[str],
+        nodes: list[ir.IRNode],
+        offsets: list[sympy.Expr],
+        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+        output_names: list[str],
     ) -> str:
         ref_dst = dst[0]
         var_sizes = (tuple(ref_dst.get_size()), ())
@@ -337,9 +338,9 @@ class CppTemplateKernel(CppKernel):
         dst: ir.Buffer,
         src: ir.Buffer,
         orig_src: Optional[ir.Buffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-        offsets: Optional[List[Any]] = None,
-        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        offsets: Optional[list[Any]] = None,
+        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -395,9 +396,9 @@ class CppTemplateKernel(CppKernel):
         dst: tuple[ir.Buffer],
         src: tuple[ir.IRNode],
         orig_src: Optional[tuple[ir.IRNode]] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-        offsets: Optional[List[Any]] = None,
-        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        offsets: Optional[list[Any]] = None,
+        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
         multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
     ):
         assert isinstance(dst, Iterable)
@@ -518,20 +519,20 @@ class CppTemplateCaller(ir.ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[ir.Buffer],
+        input_nodes: list[ir.Buffer],
         layout: ir.Layout,
         make_kernel_render: Callable[
             [
                 ir.CppTemplateBuffer,
                 bool,
-                Optional[List[ir.IRNode]],
+                Optional[list[ir.IRNode]],
             ],
             str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
         info_kwargs: Optional[
-            Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
+            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
         ] = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
@@ -559,7 +560,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:

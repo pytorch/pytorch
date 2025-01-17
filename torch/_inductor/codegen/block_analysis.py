@@ -1,7 +1,7 @@
 import collections
 import functools
 import textwrap
-from typing import List, Optional
+from typing import Optional
 
 import sympy
 from sympy import Expr, Symbol
@@ -31,7 +31,7 @@ class BlockPatternMatcher:
         )
 
     @staticmethod
-    def get_slice_numels(dims: List[Expr]) -> List[Expr]:
+    def get_slice_numels(dims: list[Expr]) -> list[Expr]:
         """
         Compute the cumulative size of each dimension's slice.
         This proceeds from the last dim up to the second.
@@ -49,7 +49,7 @@ class BlockPatternMatcher:
         index_var: Symbol,
         numel: Expr,
         num_dims: int,
-    ) -> Optional[tuple[List[Expr], List[Expr], List[Expr]]]:
+    ) -> Optional[tuple[list[Expr], list[Expr], list[Expr]]]:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -57,8 +57,8 @@ class BlockPatternMatcher:
 
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
-        dims: List[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
-        strides: List[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
+        dims: list[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
+        strides: list[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
 
         # The first dimension's index is computed by division.
         # The remaining are computed by modulo.
