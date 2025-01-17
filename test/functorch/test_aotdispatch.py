@@ -6501,9 +6501,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_upsample_bilinear2d_aa"
-    ),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
@@ -6900,7 +6897,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         {
             "enable_autograd_cache": True,
             "strict_autograd_cache": True,
-            "view_replay_for_aliased_outputs": False,
         }
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
