@@ -3,12 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    skipIfRocm,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -83,7 +78,6 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         try:

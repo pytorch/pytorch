@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import sympy
 
@@ -96,7 +96,7 @@ def jagged_idx_to_dense_idx(
     batch_size: Union[int, sympy.Expr],
     max_seq_len: Union[int, sympy.Expr],
     offsets_dtype: torch.dtype,
-) -> Tuple[sympy.Expr, sympy.Expr]:
+) -> tuple[sympy.Expr, sympy.Expr]:
     batch_idx = ops.indirect_indexing(
         inverse_offsets_loader([jagged_idx]),
         batch_size + 1,
