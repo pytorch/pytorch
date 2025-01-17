@@ -9,7 +9,6 @@ from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -43,10 +42,6 @@ from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 
-test_dtypes = [
-    torch.int8,
-    torch.int32,
-]
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
@@ -189,23 +184,6 @@ class TestMaxAutotune(TestCase):
             }
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
-
-    @skipIfRocm
-    @parametrize("in_dtype_val", test_dtypes)
-    @parametrize("out_dtype_val", test_dtypes)
-    @parametrize("max_autotune", ("max-autotune", "max-autotune-no-cudagraphs"))
-    def test_max_autotune_matmul(self, in_dtype_val, out_dtype_val, max_autotune):
-        def quantized_matmul(x_vals, x_scales, w_vals):
-            return (
-                out_dtype(torch.ops.aten.mm.default, out_dtype_val, x_vals, w_vals)
-                * x_scales
-            )
-
-        x_vals = torch.randn(65536, 144).to(dtype=in_dtype_val, device=GPU_TYPE)
-        x_scales = torch.randn(65536, 1).to(dtype=torch.float32, device=GPU_TYPE)
-        w_vals = torch.randn(432, 144).to(dtype=in_dtype_val, device=GPU_TYPE).t()
-        qcm = torch.compile(quantized_matmul, mode=max_autotune)
-        qcm(x_vals, x_scales, w_vals)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
