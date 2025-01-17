@@ -4188,17 +4188,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
-        ):
-            # doesn't support backward for chunk (dim=0) yet
-            loss = (
-                chunks[0].values().sum()
-                + chunks[1].values().sum()
-                + chunks[2].values().sum()
-            )
-            loss.backward()
+        # doesn't support backward for chunk (dim=0) yet
+        loss = (
+            chunks[0].values().sum()
+            + chunks[1].values().sum()
+            + chunks[2].values().sum()
+        )
+        loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
@@ -6232,18 +6228,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         c = torch.nested.nested_tensor_from_jagged(
             torch.ones(4, 3, device=device), offsets_2
         )
-        # fail when tensors have the same size but not the exact same offset tensor.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
-        ):
-            a.copy_(c)
+        # should work even though the nested ints are different due to unbound-based copy
+        a.copy_(c)
 
         # fail when tensors have different sizes
         a = a.transpose(1, 2)
         with self.assertRaisesRegex(
             RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+            "expected compatible input and src shapes, but got",
         ):
             a.copy_(b)
 
@@ -8342,14 +8334,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_backward",
-    ),
-    # chunk(): backward doesn't work for the batch dim yet
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Nested Tensor doesn't support chunk backward on dim=0 yet",
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_backward",
     ),
     # amin() / amax(): broken in a host of ways I don't think it's a good use of time
     # to try to sift through
