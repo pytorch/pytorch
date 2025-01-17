@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 import os
 
-# adding sys.path makes the monitor script able to run locally with import path tools.stats.utilization_stats_lib
+# adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from tools.stats.utilization_stats_lib import *
 import argparse
