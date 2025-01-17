@@ -6288,18 +6288,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         c = torch.nested.nested_tensor_from_jagged(
             torch.ones(4, 3, device=device), offsets_2
         )
-        # fail when tensors have the same size but not the exact same offset tensor.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
-        ):
-            a.copy_(c)
+        # should work even though the nested ints are different due to unbound-based copy
+        a.copy_(c)
 
         # fail when tensors have different sizes
         a = a.transpose(1, 2)
         with self.assertRaisesRegex(
             RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+            "expected compatible input and src shapes, but got",
         ):
             a.copy_(b)
 

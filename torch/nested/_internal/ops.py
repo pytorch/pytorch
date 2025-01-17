@@ -652,7 +652,8 @@ def copy_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     src = new_kwargs.pop("src")
     if inp._size != src._size:
-        # try to recursively copy_ on unbound components
+        # try to recursively copy_ on unbound components to get around nested int mismatch
+        # TODO: eventually do a direct copy when this is possible
         inp_comps = inp.unbind()
         inp_comp_shapes = [c.shape for c in inp_comps]
         src_comps = src.unbind()
