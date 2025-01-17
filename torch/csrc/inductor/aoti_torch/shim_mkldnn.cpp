@@ -149,8 +149,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
+AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,
@@ -281,7 +280,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -322,8 +321,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu__qlinear_pointwise_binary_tensor(
+AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -374,7 +372,7 @@ aoti_torch_cpu__qlinear_pointwise_binary_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -433,8 +431,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
+AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -505,7 +502,7 @@ aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
 
 #if AT_MKL_ENABLED()
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
+AOTITorchError aoti_torch_cpu__mkl_linear(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle origin_W,

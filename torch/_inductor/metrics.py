@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Tuple, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -24,12 +24,12 @@ generated_kernel_count = 0
 generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
 nodes_num_elem: List[
-    Tuple[
+    tuple[
         BaseSchedulerNode,
         int,
     ]
 ] = []
-node_runtimes: List[Tuple[BaseSchedulerNode, float]] = []
+node_runtimes: List[tuple[BaseSchedulerNode, float]] = []
 
 # counters for tracking fusions
 ir_nodes_pre_fusion = 0
