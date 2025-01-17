@@ -55,7 +55,7 @@ build_docs () {
   CORES=$(( $(nproc) - 1 ))
   # Ensure at least 1 core is used
   CORES=$(( CORES > 0 ? CORES : 1 ))
-  make -j${CORES} "$1" 2>&1 | tee /tmp/docs_build.txt
+  time make SPHINXOPTS="-j${CORES} -v" "$1" 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
     set +x
