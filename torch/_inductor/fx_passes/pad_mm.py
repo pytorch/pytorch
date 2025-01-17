@@ -390,13 +390,19 @@ def should_pad_bench(*args, **kwargs):
         return _should_pad_bench(*args, **kwargs)
 
 
+def get_do_bench():
+    with dynamo_timed("pad_mm_benchmark_get_do_bench"):
+        return functools.partial(
+            torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
+            warmup=5,
+        )
+
+
 def _should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
-    do_bench = functools.partial(
-        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
-        warmup=5,
-    )
+    do_bench = get_do_bench()
+
     m_padded_length = 0
     n_padded_length = 0
     with no_dispatch():
