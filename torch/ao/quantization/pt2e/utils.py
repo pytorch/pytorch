@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from torch._export import capture_pre_autograd_graph
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -34,28 +33,6 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
-# Example inputs for conv-bn1d patterns
-_conv1d_bn_example_inputs = (
-    torch.randn(1, 1, 3),  # x
-    torch.randn(1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
-# Example inputs for conv-bn2d patterns
-_conv2d_bn_example_inputs = (
-    torch.randn(1, 1, 3, 3),  # x
-    torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -76,7 +53,7 @@ def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
 
 def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     """
     Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
@@ -346,9 +323,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.recompile()
 
 
-def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
+def _get_node_name_to_scope(model: GraphModule) -> Dict[str, tuple[str, type]]:
     # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+    node_name_to_scope: Dict[str, tuple[str, type]] = {}
     for n in model.graph.nodes:
         nn_module_stack = n.meta.get("nn_module_stack", None)
         current_scope = ("", type(None))
@@ -361,9 +338,8 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 
 def _get_aten_graph_module_for_pattern(
     pattern: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool = False,
-    using_training_ir: bool = True,
     **kwargs,
 ) -> GraphModule:
     """
@@ -374,18 +350,12 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
 
-    if using_training_ir:
-        aten_pattern = torch.export.export_for_training(
-            pattern,  # type: ignore[arg-type]
-            example_inputs,
-            kwargs,
-        ).module()
-    else:
-        aten_pattern = capture_pre_autograd_graph(
-            pattern,  # type: ignore[arg-type]
-            example_inputs,
-            kwargs,
-        )
+    aten_pattern = torch.export.export_for_training(
+        pattern,  # type: ignore[arg-type]
+        example_inputs,
+        kwargs,
+    ).module()
+
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]
 

@@ -146,12 +146,12 @@ class TestFixedConfigs(TestCase):
     @parametrize(
         "persistent,cooperative,cfg",
         [
-            (False, False, {"XBLOCK": 1, "RBLOCK": 128}),
-            (False, False, {"XBLOCK": 2, "RBLOCK": 128}),
+            (False, False, {"XBLOCK": 1, "R0_BLOCK": 128}),
+            (False, False, {"XBLOCK": 2, "R0_BLOCK": 128}),
             (True, False, {"XBLOCK": 1}),
             (True, False, {"XBLOCK": 2}),
-            (False, True, {"XBLOCK": 1, "RBLOCK": 128, "RSPLIT": 16}),
-            (False, True, {"XBLOCK": 2, "RBLOCK": 128, "RSPLIT": 16}),
+            (False, True, {"XBLOCK": 1, "R0_BLOCK": 128, "RSPLIT": 16}),
+            (False, True, {"XBLOCK": 2, "R0_BLOCK": 128, "RSPLIT": 16}),
             (True, True, {"XBLOCK": 1, "RSPLIT": 16}),
             (True, True, {"XBLOCK": 2, "RSPLIT": 16}),
         ],

@@ -1,14 +1,16 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
+import types
 import warnings
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch._dynamo
@@ -21,6 +23,7 @@ from torch._export.db.logging import (
     get_class_if_classified_error,
 )
 from torch._export.non_strict_utils import (
+    _fakify_module_inputs,
     _fakify_script_objects,
     _gather_constant_attrs,
     _NonStrictTorchFunctionHandler,
@@ -36,6 +39,8 @@ from torch._export.passes.lift_constants_pass import (
 )
 from torch._export.utils import (
     _collect_param_buffer_metadata,
+    _compiling_state_context,
+    _fakify_params_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
@@ -61,12 +66,17 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import (
+    get_proxy_slot,
+    make_fx,
+    PreDispatchTorchFunctionMode,
+    track_tensor_tree,
+)
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -126,6 +136,7 @@ class ATenExportArtifact:
 @dataclasses.dataclass(frozen=True)
 class ExportArtifact:
     aten: ATenExportArtifact
+    in_spec: TreeSpec
     out_spec: TreeSpec
     fake_mode: FakeTensorMode
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]]
@@ -154,6 +165,20 @@ def _ignore_backend_decomps():
     finally:
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
+
+
+@contextmanager
+def _disable_custom_triton_op_functional_decomposition():
+    old = torch._functorch.config.decompose_custom_triton_ops
+    try:
+        torch._functorch.config.decompose_custom_triton_ops = False
+        yield torch._functorch.config.decompose_custom_triton_ops
+    finally:
+        torch._functorch.config.decompose_custom_triton_ops = old
+
+
+def custom_triton_ops_decomposition_disabled():
+    return not torch._functorch.config.decompose_custom_triton_ops
 
 
 def _fixup_key(x):
@@ -285,7 +310,8 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                         class Path:
                             def __getattr__(self, name):
-                                parts.append(name)
+                                if name != "_modules":
+                                    parts.append(name)
                                 return self
 
                             def __getitem__(self, idx):
@@ -656,9 +682,12 @@ def _export_to_torch_ir(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(
-                f, preserve_module_call_signature, module_call_specs
-            ), _ignore_backend_decomps():
+            ctx = nullcontext()
+            if not isinstance(f, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    f, preserve_module_call_signature, module_call_specs
+                )
+            with ctx, _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
@@ -705,6 +734,7 @@ def _export_to_aten_ir(
     decomp_table=None,
     _check_autograd_state: bool = True,
     _is_torch_jit_trace: bool = False,
+    decompose_custom_triton_ops: bool = False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -718,15 +748,11 @@ def _export_to_aten_ir(
         if not pre_dispatch and is_grad_enabled:
             grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
-    @contextmanager
-    def _compiling_state_context():
-        old_value = torch.compiler._is_compiling_flag
-        try:
-            torch.compiler._is_compiling_flag = True
-            yield
-        finally:
-            torch.compiler._is_compiling_flag = old_value
-
+    custom_triton_ops_decomposition_ctx = (
+        nullcontext
+        if decompose_custom_triton_ops
+        else _disable_custom_triton_op_functional_decomposition
+    )
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -736,7 +762,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context(), custom_triton_ops_decomposition_ctx():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -784,27 +810,6 @@ def _export_to_aten_ir(
         fake_kwargs=fake_kwargs,
         fake_params_buffers=fake_params_buffers,
     )
-
-
-def _fakify_params_buffers(
-    fake_mode: FakeTensorMode,
-    mod: torch.nn.Module,
-) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
-    params_buffers = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-
-    faked_params_buffers = {}
-    memo: Dict[int, FakeTensor] = {}
-    for key, value in params_buffers.items():
-        if id(value) in memo:
-            fake_tensor = memo[id(value)]
-        else:
-            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
-            memo[id(value)] = fake_tensor
-        faked_params_buffers[key] = fake_tensor
-    return faked_params_buffers  # type: ignore[return-value]
 
 
 def _get_forward_arg_names(
@@ -1060,7 +1065,7 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     return example_inputs, example_kwarg_inputs
 
 
-def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
+def _get_original_state_dict(mod: torch.nn.Module) -> Dict[str, Any]:
     # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
     # but the running module state so we can always match by id() the entries here with the graph inputs
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -1071,6 +1076,10 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
 
+    return original_state_dict
+
+
+def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -1082,12 +1091,11 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if isinstance(dynamic_shapes, torch.export.ShapesCollection):
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, original_state_dict, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes
 
 
 def _get_module_call_graph(
     export_artifact: ExportArtifact,
-    original_in_spec: TreeSpec,
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
     forward_arg_names: Optional[List[str]] = None,
@@ -1101,6 +1109,7 @@ def _get_module_call_graph(
     module_call_specs: Dict[
         str, Dict[str, TreeSpec]
     ] = export_artifact.module_call_specs
+    in_spec: TreeSpec = export_artifact.in_spec
     out_spec: TreeSpec = export_artifact.out_spec
 
     # Make module signatures.
@@ -1124,7 +1133,7 @@ def _get_module_call_graph(
 
     assert _EXPORT_MODULE_HIERARCHY is not None
     module_call_graph = _make_module_call_graph(
-        original_in_spec,
+        in_spec,
         out_spec,
         module_call_signatures,
         forward_arg_names,
@@ -1411,6 +1420,7 @@ def _strict_export_lower_to_aten_ir(
 
     return ExportArtifact(
         aten=aten_export_artifact,
+        in_spec=orig_in_spec,
         out_spec=orig_out_spec,
         fake_mode=dynamo_fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
@@ -1426,17 +1436,11 @@ def _export_to_aten_ir_make_fx(
     produce_guards_callback=None,
     transform=lambda x: x,
 ) -> ATenExportArtifact:
-    @contextmanager
-    def _compiling_state_context():
-        old_value = torch.compiler._is_compiling_flag
-        try:
-            torch.compiler._is_compiling_flag = True
-            yield
-        finally:
-            torch.compiler._is_compiling_flag = old_value
-
     def _make_fx_helper(mod, args, kwargs, **flags):
         from torch._functorch._aot_autograd.schemas import GraphSignature
+        from torch._functorch._aot_autograd.subclass_utils import (
+            get_subclass_typing_container,
+        )
 
         kwargs = kwargs or {}
 
@@ -1481,7 +1485,88 @@ def _export_to_aten_ir_make_fx(
                     non_strict_root, assigned_buffers
                 )
 
-            with ctx:
+            def custom_getattribute(self, attr, *, original_getattr, attrs_to_proxy):
+                """
+                The idea here is that we override subclass getattr methods to proxy
+                inner tensors and metadata. Because of infinite loop shenanigans, we have
+                to manually construct the getattr proxy nodes without relying on torch function
+                system.
+                """
+                out = original_getattr(self, attr)
+                if attr in attrs_to_proxy:
+                    if torch._C._is_torch_function_mode_enabled():
+                        # If it is a static function or method, we should always inline
+                        if not isinstance(out, (types.FunctionType, types.MethodType)):
+                            # When we get here there is no guarantee that we will hit the
+                            # PreDispatchTorchFunctionMode, so we manually peak into the torch
+                            # function mode list and tweak the PreDispatchTorchFunctionMode.
+                            # This has side effect of proxying stuff like
+                            # proxy.node.meta["val"] = extract_val(val) because at that time, torch function
+                            # mode is still active. It seems bad to turn it off inside proxy_tensor.py, so
+                            # I guess we will just rely on DCE for now to remove extra stuff like detach
+                            torch_function_mode_stack = (
+                                torch.overrides._get_current_function_mode_stack()
+                            )
+                            for mode in torch_function_mode_stack:
+                                if isinstance(mode, PreDispatchTorchFunctionMode):
+                                    tracer = mode.tracer
+                                    proxy = get_proxy_slot(self, tracer).proxy
+                                    inner_proxy = tracer.create_proxy(
+                                        "call_function",
+                                        builtins.getattr,
+                                        (proxy, attr),
+                                        {},
+                                    )
+                                    track_tensor_tree(
+                                        out, inner_proxy, constant=None, tracer=tracer
+                                    )
+                return out
+
+            @contextmanager
+            def override_getattribute_for_subclasses(args):
+                """
+                Context manager that temporarily monkey patches
+                tensor.__getattribute__ so that we can intercept it at
+                torch_function layer.
+                """
+
+                # Dictionary that tracks subclass type to original getattr function
+                # and the attributes we can proxy.
+                tensor_type_to_old_getattribute: Dict[
+                    Type[torch.Tensor], Tuple[Callable, Set[str]]
+                ] = {}
+                for arg in args:
+                    subclass_types_to_instances: Dict[
+                        Type[torch.Tensor], List[Type[torch.Tensor]]
+                    ] = get_subclass_typing_container(arg)
+                    for subclass_type in subclass_types_to_instances:
+                        if subclass_type not in tensor_type_to_old_getattribute:
+                            assert len(subclass_types_to_instances[subclass_type]) > 0
+                            instance = subclass_types_to_instances[subclass_type][0]
+                            # Query subclass specific attrs
+                            attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
+                            tensor_type_to_old_getattribute[subclass_type] = (
+                                subclass_type.__getattribute__,  # type: ignore[attr-defined]
+                                attrs_to_proxy,
+                            )
+
+                try:
+                    for k, (
+                        old_getattr,
+                        attrs_to_proxy,
+                    ) in tensor_type_to_old_getattribute.items():
+                        custom = functools.partialmethod(
+                            custom_getattribute,
+                            original_getattr=old_getattr,
+                            attrs_to_proxy=attrs_to_proxy,
+                        )
+                        k.__getattribute__ = custom  # type: ignore[assignment, attr-defined]
+                    yield
+                finally:
+                    for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
+                        k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
+
+            with ctx, override_getattribute_for_subclasses(flat_args):
                 gm = make_fx(
                     wrapped_fn,
                     record_module_stack=True,
@@ -1509,16 +1594,21 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
-            # In export, we ignore any op that is related to
-            # eager mode profiling call. The expectation is
-            # that either runtimes provide their own profiling
-            # OR user wrap the compiled region on a profiling in
-            # later stage.
             def _is_impure(node):
                 if node.op == "call_function" and node.target in (
+                    # In export, we ignore any op that is related to
+                    # eager mode profiling call. The expectation is
+                    # that either runtimes provide their own profiling
+                    # OR user wrap the compiled region on a profiling in
+                    # later stage.
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
                     torch.ops.profiler._record_function_exit._RecordFunction,
+                    # In theory, we could fix this dead detach and getattr nodes
+                    # from subclass tensors if we carefully rewrite track_tensor_tree
+                    # in a way that it doesn't do any tensor methods.
+                    torch.ops.aten.detach.default,
+                    builtins.getattr,
                 ):
                     return False
                 return True
@@ -1557,10 +1647,6 @@ def _export_to_aten_ir_make_fx(
         strict=True,
         stack_weights=True,
     ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
-        param_len = len(dict(mod.named_parameters(remove_duplicate=False)))
-        buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
-        params_len = param_len + buffer_len
-
         gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
@@ -1656,6 +1742,7 @@ def _non_strict_export(
     """
     assert dispatch_tracing_mode in ["make_fx", "aot_export"]
     out_spec: Optional[TreeSpec] = None
+    in_spec: Optional[TreeSpec] = None
 
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
@@ -1670,7 +1757,9 @@ def _non_strict_export(
 
                 def forward(self, *args, **kwargs):
                     nonlocal out_spec
+                    nonlocal in_spec
                     mod = self._export_root
+                    _, in_spec = pytree.tree_flatten((args, kwargs))
                     if isinstance(mod, torch.fx.GraphModule):
                         # NOTE: We're going to run this graph module with an fx interpreter,
                         # which will not run any forward hooks. Thus, ideally, we should run
@@ -1696,9 +1785,12 @@ def _non_strict_export(
             new_preserved_call_signatures = [
                 "_export_root." + i for i in preserve_module_call_signature
             ]
-            with _wrap_submodules(
-                wrapped_mod, new_preserved_call_signatures, module_call_specs
-            ):
+            ctx = nullcontext()
+            if not isinstance(mod, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    wrapped_mod, new_preserved_call_signatures, module_call_specs
+                )
+            with ctx:
                 gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
                 log.debug("Exported program from AOTAutograd:\n%s", gm)
 
@@ -1759,7 +1851,7 @@ def _non_strict_export(
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ):
+        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
             _to_aten_func = (
                 _export_to_aten_ir_make_fx
                 if dispatch_tracing_mode == "make_fx"
@@ -1789,9 +1881,11 @@ def _non_strict_export(
     )
 
     assert out_spec is not None
+    assert in_spec is not None
 
     return ExportArtifact(
         aten=aten_export_artifact,
+        in_spec=in_spec,
         out_spec=out_spec,
         fake_mode=fake_mode,
         module_call_specs=module_call_specs,
@@ -1816,9 +1910,10 @@ def _export_for_training(
         args,
         kwargs,
         orig_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     export_func = (
         functools.partial(
@@ -1860,7 +1955,6 @@ def _export_for_training(
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
-        orig_in_spec,
         preserve_module_call_signature,
         strict,
         forward_arg_names,
@@ -1980,9 +2074,10 @@ def _export(
         args,
         kwargs,
         original_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
@@ -2016,7 +2111,6 @@ def _export(
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
-        original_in_spec,
         preserve_module_call_signature,
         strict,
         forward_arg_names,

@@ -151,6 +151,31 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
+def record_memory_history(
+    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+) -> None:
+    r"""Enable/Disable the memory profiler on MTIA allocator
+
+    Args:
+        enabled (all or state, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+
+        stacks ("python" or "cpp", optional). Select the stack trace to record.
+
+        max_entries (int, optional). Maximum number of entries to record.
+    """
+    if not is_initialized():
+        return
+    torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
+
+
+def snapshot() -> Dict[str, Any]:
+    r"""Return a dictionary of MTIA memory allocator history"""
+
+    return torch._C._mtia_memorySnapshot()
+
+
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -277,7 +302,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
+    .. note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
     """
     return StreamContext(stream)
 
@@ -327,7 +352,10 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "max_memory_allocated",
     "get_device_capability",
+    "record_memory_history",
+    "snapshot",
     "empty_cache",
     "set_device",
     "set_stream",

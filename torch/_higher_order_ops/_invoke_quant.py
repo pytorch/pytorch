@@ -1,16 +1,14 @@
-from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
+# mypy: allow-untyped-defs
+# need to fix prim_hop_base type annotations first
 
 import dataclasses
 
 import torch
-import torch.utils._pytree as pytree
-from torch._C import DispatchKey
-from torch._subclasses import FakeTensorMode
-from torch.fx.graph_module import GraphModule
+from torch._higher_order_ops.prim_hop_base import PrimHOPBase
 
 
 class InvokeQuantTracer(PrimHOPBase):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("invoke_quant_packed")
 
     def __call__(self, subgraph, operands, *, scheme=None, quant_options=None):
@@ -18,17 +16,16 @@ class InvokeQuantTracer(PrimHOPBase):
             subgraph, operands, scheme=scheme, quant_options=quant_options
         )
 
+
 invoke_quant_packed = InvokeQuantTracer()
 
 
 class InvokeQuantUnpacked(PrimHOPBase):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("invoke_quant")
 
     def __call__(self, subgraph, *operands, scheme=None):
-        return super().__call__(
-            subgraph, operands, scheme=scheme
-        )
+        return super().__call__(subgraph, operands, scheme=scheme)
 
     def _call_FakeTensorMode(self, mode, subgraph, operands, **kwargs):
         # TODO: this should probably route through FakeTensorMode to reuse caching
@@ -68,6 +65,5 @@ class InvokeQuant:
     ):
         if not torch._utils.is_compiling():
             return args[0](*args[1])
-
 
         return invoke_quant_packed(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]

@@ -211,7 +211,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
         enable_cudnn=config.enable_cudnn,
-    ) as kernel_choice, torch.inference_mode() as inference_mode:
+    ):
         dropout_p = 0.0
         mask = None
 

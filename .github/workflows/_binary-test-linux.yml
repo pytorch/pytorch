@@ -19,10 +19,6 @@ on:
         required: true
         type: string
         description: Root directory for the pytorch/pytorch repository
-      BUILDER_ROOT:
-        required: true
-        type: string
-        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -86,7 +82,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
-      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -99,9 +94,7 @@ jobs:
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
-      # Needed for conda builds
       ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
-      ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
@@ -116,7 +109,6 @@ jobs:
         run: |
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
-            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
 
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
@@ -130,7 +122,6 @@ jobs:
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
 
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
-            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
@@ -170,10 +161,11 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
           path: pytorch
 
       - name: Clean PyTorch checkout

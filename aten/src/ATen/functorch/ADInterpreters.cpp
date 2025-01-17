@@ -42,8 +42,9 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
   }
-  TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
-  if (wrapper->level() == current_level) {
+  auto level = wrapper->level();
+  TORCH_INTERNAL_ASSERT(level.has_value() && level <= current_level, "escaped?");
+  if (level == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }

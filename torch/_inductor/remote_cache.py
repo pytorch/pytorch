@@ -247,10 +247,13 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             # We had trouble importing redis - just skip init.
             return
 
-        self._redis = redis.Redis(
-            host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
-            port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
-        )
+        if "TORCHINDUCTOR_REDIS_URL" in os.environ:
+            self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
+        else:
+            self._redis = redis.Redis(
+                host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
+                port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
+            )
 
     @override
     def _get(self, key: str) -> Optional[bytes]:
