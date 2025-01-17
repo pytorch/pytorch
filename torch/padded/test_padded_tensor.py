@@ -1,10 +1,8 @@
 import time
 
 import torch
-import torch._dynamo as dynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 
 from padded_tensor import *
@@ -37,7 +35,7 @@ class TransformerModel(nn.Module):
         )
 
     def create_kv_cache(self):
-        max_batch_size = 16
+        max_batch_size = 15
         max_seq_length = 1024
         cache_shape = (
             max_batch_size,
@@ -56,23 +54,16 @@ class TransformerModel(nn.Module):
         self.k_cache.zero_()
         self.v_cache.zero_()
 
-    def f_0(self, idx):
+    def f_1(self, idx):
         x = self.tok_embeddings(idx)
 
-        return (x,)
-
-    def f_1(self, x):
-        yy = self.wqkv(x)
-
-        return (yy,)
-
-    def f_2(self, yy):
         kv_size = self.n_local_heads * self.head_dim
+        yy = self.wqkv(x)
         q, k, v = yy.split([self.dim, kv_size, kv_size], dim=-1)
 
         return q, k, v
 
-    def f_3(self, q, k, v, bsz, seqlen):
+    def f_2(self, q, k, v, bsz, seqlen):
         q = q.view(bsz, seqlen, self.n_head, self.head_dim)
         k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -95,7 +86,7 @@ class TransformerModel(nn.Module):
         x_out2 = x_out2.flatten(3)
         return x_out2.type_as(x)
 
-    def f_4(self, q, k, v, freqs_cis):
+    def f_3(self, q, k, v, freqs_cis):
         q = self.apply_rotary_emb(q, freqs_cis)
         k = self.apply_rotary_emb(k, freqs_cis)
 
@@ -114,7 +105,7 @@ class TransformerModel(nn.Module):
 
         return k_out, v_out
 
-    def f_5(self, k, v, input_pos, k_cache, v_cache):
+    def f_4(self, k, v, input_pos, k_cache, v_cache):
         k, v = self.kv_update(input_pos, k, v, k_cache, v_cache)
 
         k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
@@ -122,112 +113,32 @@ class TransformerModel(nn.Module):
 
         return k, v
 
-    def f_6(self, q, k, v, mask):
+    def f_5(self, q, k, v, mask):
         outs = torch.ops.aten._scaled_dot_product_flash_attention(
             q, k, v, dropout_p=0.0
         )
         y = outs[0]
         return (y,)
 
-    def f_7(self, y, bsz, seqlen):
+    def f_6(self, y, bsz, seqlen):
         y = y.transpose(1, 2).contiguous().view(bsz, seqlen, self.dim)
         return (y,)
 
-    def f_8(self, y):
+    def f_7(self, y):
         y = self.wo(y)
         return (y,)
 
     def f_attention(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
         bsz, seqlen = x.shape
 
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        k, v = self.f_5(k, v, input_pos, k_cache, v_cache)
-        (y,) = self.f_6(q, k, v, mask)
-        (y,) = self.f_7(y, bsz, seqlen)
-        (y,) = self.f_8(y)
+        q, k, v = self.f_1(x)
+        q, k, v = self.f_2(q, k, v, bsz, seqlen)
+        q, k, v = self.f_3(q, k, v, freqs_cis)
+        k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
+        (y,) = self.f_5(q, k, v, mask)
+        (y,) = self.f_6(y, bsz, seqlen)
+        (y,) = self.f_7(y)
 
-        return (y,)
-
-    def f_attention_0(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        (x,) = self.f_0(x)
-        return (x,)
-
-    def f_attention_1(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        return (yy,)
-
-    def f_attention_2(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        return (q, k, v)
-
-    def f_attention_3(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        return (q, k, v)
-
-    def f_attention_4(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        return (q, k, v)
-
-    def f_attention_5(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        k, v = self.f_5(k, v, input_pos, k_cache, v_cache)
-        return (k, v)
-
-    def f_attention_6(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        k, v = self.f_5(k, v, input_pos, k_cache, v_cache)
-        (y,) = self.f_6(q, k, v, mask)
-        return (y,)
-
-    def f_attention_7(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        k, v = self.f_5(k, v, input_pos, k_cache, v_cache)
-        (y,) = self.f_6(q, k, v, mask)
-        (y,) = self.f_7(y, bsz, seqlen)
-        return (y,)
-
-    def f_attention_8(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
-        bsz, seqlen = x.shape
-        (x,) = self.f_0(x)
-        (yy,) = self.f_1(x)
-        q, k, v = self.f_2(yy)
-        q, k, v = self.f_3(q, k, v, bsz, seqlen)
-        q, k, v = self.f_4(q, k, v, freqs_cis)
-        k, v = self.f_5(k, v, input_pos, k_cache, v_cache)
-        (y,) = self.f_6(q, k, v, mask)
-        (y,) = self.f_7(y, bsz, seqlen)
-        (y,) = self.f_8(y)
         return (y,)
 
 
@@ -268,17 +179,9 @@ class TestAttention(TestCase):
                 model.reset_kv_cache()
                 inps = pytree.tree_map(lambda x: x.clone(), inputs)
 
-                # warmup
-                for _ in range(5):
-                    fn(*inps)
-
-                t = benchmarker.benchmark_gpu(lambda: fn(*inps))
-                torch.cuda.synchronize()
-
+                start = time.time()
                 outputs = fn(*inps)
-                torch.cuda.synchronize()
-                times.append(t)
-            dynamo.reset()
+                times.append(time.time() - start)
 
             outputs = pytree.tree_map(lambda x: x.clone(), outputs)
             return median(times), outputs
@@ -304,7 +207,90 @@ class TestAttention(TestCase):
         print(f"Unpadded time (compiled): {time_compiled}")
         print(f"Padded time (compiled): {time_compiled_padded}")
 
-        return time_eager, time_eager_padded, time_compiled, time_compiled_padded
+    def test_attention_1(self):
+        model = TransformerModel()
+
+        inputs = [torch.ones(4, 2, dtype=torch.int32)]
+        MULTIPLIERS = {0: 128, 1: 128, 2: 1}
+        inputs_p = pytree.tree_map(
+            lambda x: PaddedTensor(x, {0: 128, 1: 128, 2: 1}, None), inputs
+        )
+
+        self.run_unpadded_padded(model.f_1, inputs, inputs_p)
+
+    def test_attention_2(self):
+        model = TransformerModel()
+
+        inputs = [torch.randn(4, 2, 10), torch.randn(4, 2, 10), torch.randn(4, 2, 10)]
+        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+
+        self.run_unpadded_padded(model.f_2, inputs + [4, 2], inputs_p + [8, 8])
+
+    def test_attention_3(self):
+        model = TransformerModel()
+
+        inputs = [
+            torch.randn(4, 2, 5, 2),
+            torch.randn(4, 2, 5, 2),
+            torch.randn(4, 2, 5, 2),
+            torch.randn(2, 1, 2),
+        ]
+        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        inputs_p = [PaddedTensor(x, MULTIPLIERS, None) for x in inputs[:-1]] + [
+            PaddedTensor(inputs[-1], {0: 8, 1: 1, 2: 1}, None)
+        ]
+
+        self.run_unpadded_padded(model.f_3, inputs, inputs_p)
+
+    def test_attention_4(self):
+        model = TransformerModel()
+
+        k_cache, v_cache = self.create_kv_cache()
+
+        inputs = [
+            torch.randn(4, 5, 2, 2),
+            torch.randn(4, 5, 2, 2),
+            torch.ones(2, dtype=torch.int32),
+            k_cache,
+            v_cache,
+        ]
+        MULTIPLIERS = {0: 1, 1: 1, 2: 1, 3: 1}
+        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+
+        self.run_unpadded_padded(model.f_4, inputs, inputs_p)
+
+    def test_attention_5(self):
+        model = TransformerModel()
+
+        inputs = [
+            torch.randn([4, 5, 2, 2]),
+            torch.randn([4, 5, 16, 2]),
+            torch.randn([4, 5, 16, 2]),
+            torch.ones([1, 1, 2, 16]),
+        ]
+        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+
+        self.run_unpadded_padded(model.f_5, inputs, inputs_p)
+
+    def test_attention_6(self):
+        model = TransformerModel()
+
+        inputs = [torch.randn([4, 5, 2, 2])]
+        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+
+        self.run_unpadded_padded(model.f_6, inputs + [4, 2], inputs_p + [4, 2])
+
+    def test_attention_7(self):
+        model = TransformerModel()
+
+        inputs = [torch.randn([4, 2, 10])]
+        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+
+        self.run_unpadded_padded(model.f_7, inputs, inputs_p)
 
     def gen_rand_inputs(self, model, batchsize, seqlen):
         x = torch.randint(0, 128256, (batchsize, seqlen)).to(device="cuda")
@@ -340,48 +326,16 @@ class TestAttention(TestCase):
 
         self.run_unpadded_padded(model.f_attention, inputs, inputs_p)
 
-    def test_attention_bench_full(self):
+    def test_attention_bench(self):
         model = TransformerModel()
 
         with torch.no_grad():
-            inputs = self.gen_rand_inputs(model, 15, 1023)
+            inputs = self.gen_rand_inputs(model, 15, 991)
             inputs_p = self.pad_inputs(inputs, 16)
 
             self.run_unpadded_padded_bench(
                 model, model.f_attention, inputs, inputs_p, None
             )
-
-    def test_attention_bench_parts(self):
-        def run_part(fn_str):
-            model = TransformerModel()
-
-            with torch.no_grad():
-                inputs = self.gen_rand_inputs(model, 16, 1024)
-                inputs_p = self.pad_inputs(inputs, 16)
-
-                fn = getattr(model, fn_str)
-                times = self.run_unpadded_padded_bench(
-                    model, fn, inputs, inputs_p, None
-                )
-
-                return times
-
-        # Write csv header
-        csv_report = "part,eager,eager_padded,compiled,compiled_padded\n"
-
-        for fn_str in ["f_attention_%d" % i for i in range(9)]:
-            print()
-            print(fn_str)
-            time_eager, time_eager_padded, time_compiled, time_compiled_padded = (
-                run_part(fn_str)
-            )
-
-            csv_report += f"{fn_str},{time_eager},{time_eager_padded},{time_compiled},{time_compiled_padded}\n"
-
-        with open("report.csv", "w") as f:
-            f.write(csv_report)
-
-        print(csv_report)
 
 
 if __name__ == "__main__":
