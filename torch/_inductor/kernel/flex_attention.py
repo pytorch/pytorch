@@ -236,6 +236,20 @@ def get_bounded_indices(indices, max_len=None):
     return indices % max_len if max_len is not None else indices
 """
 
+
+make_boundary_check_func = r"""
+@triton.jit
+def make_boundary_check(is_divisible: tl.constexpr, safe_head_dim: tl.constexpr):
+    if not is_divisible and not safe_head_dim:
+        return (0, 1)
+    elif not is_divisible:
+        return (0,)
+    elif not safe_head_dim:
+        return (1,)
+    else:
+        return ()
+"""
+
 compute_flex_attention = r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
@@ -338,8 +352,8 @@ compute_flex_attention = r"""
         order=(1, 0)
     )
 
-    # load q: it stays in SRAM throughout the inner loop.
-    if IS_DIVISIBLE and SAFE_HEAD_DIM:
+    # boundary = make_boundary_check(IS_DIVISIBLE, SAFE_HEAD_DIM)
+    if False:
         q = tl.load(Q_block_ptr)
     else:
         # boundary check is not free, so we only do it when necessary.
@@ -635,7 +649,8 @@ flex_attention_template = TritonTemplate(
     source=compute_flex_attention
     + compute_forward_inner
     + compute_next_offset_func
-    + compute_forward_block_mn,
+    + compute_forward_block_mn
+    + make_boundary_check_func,
 )
 
 
@@ -1498,8 +1513,8 @@ flex_attention_backward_template = TritonTemplate(
         else:
             # q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=offs_m2[:, None] < Q_LEN)
             # do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=offs_m2[:, None] < Q_LEN)
-            q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=(offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM))
-            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=(offs_m2[:, None] < Q_LEN) & (offs_v[None, :] < V_HEAD_DIM))
+            q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=(offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM), other=0.0)
+            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=(offs_m2[:, None] < Q_LEN) & (offs_v[None, :] < V_HEAD_DIM), other=0.0)
 
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -1584,8 +1599,8 @@ flex_attention_backward_template = TritonTemplate(
         else:
             # k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=offs_n1[:, None] < KV_LEN)
             # v = tl.load(V + offs_n1[:, None] * stride_vn + offs_v[None, :] * stride_vd, mask=offs_n1[:, None] < KV_LEN)
-            k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=(offs_n1[:, None] < KV_LEN) & (offs_k[None, :] < QK_HEAD_DIM))
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd, mask=(offs_n1[:, None] < KV_LEN) & (offs_v[None, :] < V_HEAD_DIM))
+            k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=(offs_n1[:, None] < KV_LEN) & (offs_k[None, :] < QK_HEAD_DIM), other=0.0)
+            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd, mask=(offs_n1[:, None] < KV_LEN) & (offs_v[None, :] < V_HEAD_DIM), other=0.0)
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
@@ -1970,7 +1985,7 @@ def bwd_dkdv_block_mn(
         qT = tl.load(qT_ptrs)
         lse = tl.load(LSE + offs_m1)
     else:
-        qT = tl.load(qT_ptrs, mask=(offs_m1[None, :] < Q_LEN) & (offs_k[:, None] < QK_HEAD_DIM))
+        qT = tl.load(qT_ptrs, mask=(offs_m1[None, :] < Q_LEN) & (offs_k[:, None] < QK_HEAD_DIM), other=0.0)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
@@ -2077,7 +2092,8 @@ def bwd_dkdv_block_mn(
     return dk, dv
  """
     + compute_next_offset_func
-    + get_bounded_indices_func,
+    + get_bounded_indices_func
+    + make_boundary_check_func,
 )
 
 
