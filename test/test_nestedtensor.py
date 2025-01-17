@@ -5262,7 +5262,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
             self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
+            pinned = nt.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(nt, pinned)
             self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
@@ -7909,6 +7909,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             # unary
             # needs log_sigmoid_forward, which returns a tuple
             "nn.functional.logsigmoid",
+            "nn.functional.prelu",
             # needs rrelu_with_noise
             "nn.functional.rrelu",
             # binary
@@ -7971,13 +7972,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             "masked.var",
         },
         name="no_masked_jagged_support",
-    ),
-    # Need to adjust sample input func to pass the right thing
-    XFailRule(
-        error_type=TypeError,
-        error_msg="missing 1 required positional arguments",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.prelu"),
-        name="invalid_prelu_sample_input_func",
     ),
     # Op doesn't support lengths being present
     XFailRule(
