@@ -1501,15 +1501,10 @@ def load(
                 "please torch.save your checkpoint with this option in order to use mmap."
             )
         if weights_only:
-            try:
-                return _legacy_load(
-                    opened_file,
-                    map_location,
-                    _weights_only_unpickler,
-                    **pickle_load_args,
-                )
-            except pickle.UnpicklingError as e:
-                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+            raise RuntimeError(
+                "Cannot use ``weights_only=True`` with files saved in the "
+                ".tar format used before version 1.6. " + UNSAFE_MESSAGE
+            )
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
         )

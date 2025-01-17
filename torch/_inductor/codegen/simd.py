@@ -1841,14 +1841,15 @@ class SIMDScheduling(BaseScheduling):
             # Search the indexing expressions for more candidates.
             # If we see modular indexing, try to subdivide ranges into their implied
             # block shape.
-            for dep in node.read_writes.reads_and_writes():
-                # Check if we have any index variables in the first place.
-                all_var_ranges = [*dep.ranges.items()]
-                if len(all_var_ranges) == 0:
-                    continue
-
+            memory_deps = [
+                dep
+                for dep in node.read_writes.reads_and_writes()
+                if isinstance(dep, MemoryDep) and len(dep.ranges) > 0
+            ]
+            for dep in memory_deps:
                 # Attempt to partition variable ranges into pointwise and reduction groups.
                 # To achieve this, merge the leading ranges until we reach the pointwise numel.
+                all_var_ranges = [*dep.ranges.items()]
                 pointwise_vars_numel = sympy.S.One
                 sizevars = V.graph.sizevars
                 for pointwise_end_idx, (var, numel) in enumerate(all_var_ranges):
