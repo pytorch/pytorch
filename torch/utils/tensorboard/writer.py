@@ -61,7 +61,7 @@ class FileWriter:
           log_dir: A string. Directory where event file will be written.
           max_queue: Integer. Size of the queue for pending events and
             summaries before one of the 'add' calls forces a flush to disk.
-            Default is ten items.
+            Default is 10 bytes.
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk. Default is every two minutes.
           filename_suffix: A string. Suffix added to all event filenames
@@ -205,7 +205,7 @@ class SummaryWriter:
               Note that crashed and resumed experiments should have the same ``log_dir``.
             max_queue (int): Size of the queue for pending events and
               summaries before one of the 'add' calls forces a flush to disk.
-              Default is ten items.
+              Default is 10 bytes.
             flush_secs (int): How often, in seconds, to flush the
               pending events and summaries to disk. Default is every two minutes.
             filename_suffix (str): Suffix added to all event filenames in
