@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_MACOS,
     IS_SANDCASTLE,
     noncontiguous_like,
     parametrize,
@@ -73,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     unMarkDynamoStrictTest,
 )
+from torch.testing.mps_utils import mps_op_db
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -105,6 +107,10 @@ _ref_test_ops = tuple(
     )
 )
 
+# Apply mps-specific xfails to the op_db
+# Only done on MacOS to avoid unnecessary overhead
+if IS_MACOS:
+    mps_op_db(op_db)
 
 def reduction_dtype_filter(op):
     if (
@@ -1407,6 +1413,7 @@ class TestCommon(TestCase):
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
     @ops(op_db, allowed_dtypes=(torch.complex32,))
+    @skipMPS
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
@@ -1442,6 +1449,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
+    @skipMPS
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -2830,7 +2838,9 @@ class TestFakeTensor(TestCase):
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
 
-
+print("Updating MPS")
+mps_op_db(op_db)
+print("Updated MPS")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
