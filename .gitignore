@@ -63,6 +63,7 @@ dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
+test/cpp_extensions/open_registration_extension/install
 third_party/build/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
@@ -78,6 +79,7 @@ torch/return_types.pyi
 torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
+torch/csrc/functionalization/generated/*
 torch/csrc/lazy/generated/*.[!m]*
 torch_compile_debug/
 # Listed manually because some files in this directory are not generated

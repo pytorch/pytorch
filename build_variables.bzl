@@ -929,6 +929,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
+    "torch/csrc/functionalization/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
 ] + lazy_tensor_core_python_sources
 

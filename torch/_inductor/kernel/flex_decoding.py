@@ -362,6 +362,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     B = Bq
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.evaluate_static_shape(v)
+        if isinstance(v, sympy.Symbol)
+        else v
+        for k, v in kernel_options.items()
+    }
 
     # TODO: Fix flex decoding non-divisible case!
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
