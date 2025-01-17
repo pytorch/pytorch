@@ -222,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
