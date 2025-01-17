@@ -60,7 +60,6 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
-    get_triton_attrs_descriptor_version,
     is_welford_reduction,
     Placeholder,
     prefix_is_reduction,
@@ -68,7 +67,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     triton_type,
-    TritonAttrsDescriptorVersion,
+    triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
@@ -101,7 +100,6 @@ from .triton_utils import (
     config_of,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
-    signature_of,
     signature_to_meta,
 )
 
@@ -3365,6 +3363,35 @@ class TritonKernel(SIMDKernel):
 
         mutated_args = sorted(mutated_args)
 
+        for tree in self.active_range_trees():
+            sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+            signature.append(sizearg)
+            argdefs.append(sizearg.name)
+            # constexpr version causes issues, see
+            # https://github.com/pytorch/torchdynamo/pull/1362
+            # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
+            #     tree.numel
+            # )
+            # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+
+        def add_constexpr_arg(arg_name):
+            # new versions (but not old versions) of Triton need constexprs included in the signature
+            if triton_version_uses_attrs_dict():
+                signature.append(ConstexprArg(arg_name))
+            argdefs.append(f"{arg_name} : tl.constexpr")
+
+        for tree in self.range_trees:
+            if tree.is_reduction and self.persistent_reduction:
+                # Rn_BLOCK for persistent_reduction is defined in codegen_static_numels
+                continue
+            if tree.tensor_dim is None:
+                continue
+
+            add_constexpr_arg(f"{tree.prefix.upper()}BLOCK")
+
+        if self.cooperative_reduction:
+            add_constexpr_arg("RSPLIT")
+
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
@@ -3398,56 +3425,9 @@ class TritonKernel(SIMDKernel):
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
 
-        for tree in self.active_range_trees():
-            sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
-            signature.append(sizearg)
-            triton_meta_signature[sizearg.name] = signature_of(
-                sizearg, size_dtype=self.index_dtype
-            )
-            argdefs.append(f"{tree.prefix}numel")
-            # constexpr version causes issues, see
-            # https://github.com/pytorch/torchdynamo/pull/1362
-            # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
-            #     tree.numel
-            # )
-            # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
-
-        for tree in self.range_trees:
-            if tree.is_reduction and self.persistent_reduction:
-                # Rn_BLOCK for persistent_reduction is defined in codegen_static_numels
-                continue
-            if tree.tensor_dim is None:
-                continue
-
-            var_name = f"{tree.prefix.upper()}BLOCK"
-            if (
-                get_triton_attrs_descriptor_version()
-                == TritonAttrsDescriptorVersion.V4_DICT
-            ):
-                # V4 needs constexpr args in the signature
-                constexprarg = ConstexprArg(var_name)
-                signature.append(constexprarg)
-                triton_meta_signature[var_name] = "constexpr"
-            argdefs.append(f"{var_name} : tl.constexpr")
-
-        if self.cooperative_reduction:
-            if (
-                get_triton_attrs_descriptor_version()
-                == TritonAttrsDescriptorVersion.V4_DICT
-            ):
-                # V4 needs constexpr args in the signature
-                constexprarg = ConstexprArg("RSPLIT")
-                signature.append(constexprarg)
-                triton_meta_signature["RSPLIT"] = "constexpr"
-
-            argdefs.append("RSPLIT : tl.constexpr")
-
         triton_meta["configs"] = [config_of(signature)]
 
-        if (
-            get_triton_attrs_descriptor_version()
-            != TritonAttrsDescriptorVersion.V4_DICT
-        ):
+        if not triton_version_uses_attrs_dict():
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.

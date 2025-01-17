@@ -2476,7 +2476,7 @@ class TritonAttrsDescriptorVersion(enum.Enum):
 
 
 @functools.lru_cache(None)
-def get_triton_attrs_descriptor_version():
+def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
     if importlib.util.find_spec("triton") is None:
         return TritonAttrsDescriptorVersion.V0_NO_TRITON
 
@@ -2499,3 +2499,7 @@ def get_triton_attrs_descriptor_version():
         # After Jan 1, 2025
         # AttrsDescriptor was removed and replaced with a raw dict.
         return TritonAttrsDescriptorVersion.V4_DICT
+
+
+def triton_version_uses_attrs_dict() -> bool:
+    return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT

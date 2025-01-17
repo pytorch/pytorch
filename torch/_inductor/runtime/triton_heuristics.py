@@ -21,11 +21,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
-from ..utils import (
-    get_triton_attrs_descriptor_version,
-    prefix_is_reduction,
-    TritonAttrsDescriptorVersion,
-)
+from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
@@ -503,10 +499,7 @@ class CachingAutotuner(KernelInterface):
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
-        if (
-            get_triton_attrs_descriptor_version()
-            == TritonAttrsDescriptorVersion.V4_DICT
-        ):
+        if triton_version_uses_attrs_dict():
             call_args = self.fn.arg_names
             def_args = self.fn.arg_names
         else:
@@ -635,10 +628,7 @@ class CachingAutotuner(KernelInterface):
         depend on the config). However, in later triton versions, the constexpr args need to be
         added into the args list.
         """
-        if (
-            get_triton_attrs_descriptor_version()
-            == TritonAttrsDescriptorVersion.V4_DICT
-        ):
+        if triton_version_uses_attrs_dict():
             # first: aggregate the constexpr args in (index, val) pairs
             # so we can sort them by index.
             constexpr_args: list[tuple[int, Any]] = []

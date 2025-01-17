@@ -15,11 +15,7 @@ from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
-from ..utils import (
-    get_triton_attrs_descriptor_version,
-    Placeholder,
-    TritonAttrsDescriptorVersion,
-)
+from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
     ConstexprArg,
@@ -737,8 +733,8 @@ class ComboKernel(Kernel):
     def get_block_args(self) -> List[ConstexprArg]:
         """
         Calculate blocks from sub_kernels and range_trees.
-        Update self.block_args
-        Return the block args (ConstexprArg)s
+        **Update self.block_args**
+        Return the block args
         """
         block_names = {}
         for sub_kernel in self.sub_kernels:
@@ -841,10 +837,7 @@ class ComboKernel(Kernel):
         block_args = self.get_block_args()
         if self.enable_autotune:
             argdefs.extend([f"{x.name}: tl.constexpr" for x in block_args])
-            if (
-                get_triton_attrs_descriptor_version()
-                == TritonAttrsDescriptorVersion.V4_DICT
-            ):
+            if triton_version_uses_attrs_dict():
                 signature.extend(block_args)
 
         code.splice(
