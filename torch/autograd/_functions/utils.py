@@ -2,7 +2,6 @@
 import math
 
 
-
 def maybe_view(tensor, size, check_same_size=True):
     if check_same_size and tensor.size() == size:
         return tensor
