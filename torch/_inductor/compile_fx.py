@@ -591,7 +591,7 @@ def _compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    aot_mode: bool = graph_kwargs.setdefault("aot_mode", False)
+    aot_mode: bool = V.aot_compilation
 
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -819,7 +819,7 @@ class _InProcessFxCompile(FxCompile):
         is_backward: bool = graph_kwargs.get("is_backward", False)
         graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
-        aot_mode: bool = graph_kwargs.get("aot_mode", False)
+        aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
         extern_node_serializer: Optional[
             Callable[[List[ExternKernelNode]], Any]
@@ -1103,7 +1103,7 @@ class _InProcessFxCompile(FxCompile):
                                 disable = f"{disable} Found from {stack_trace}\n"
                             V.graph.disable_cudagraphs_reason = disable
 
-                    if V.aot_compilation is True:
+                    if V.aot_compilation:
                         assert isinstance(compiled_fn, (str, list))
                         return CompiledAOTI(compiled_fn)
 
@@ -1489,7 +1489,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if V.aot_compilation is True:
+    if V.aot_compilation:
         return optimized_function
 
     def wrapper(args: List[object]) -> Sequence[torch.Tensor]:
@@ -1867,7 +1867,7 @@ def compile_fx(
             or torch._guards.TracingContext(fake_mode)
         )
 
-        if V.aot_compilation is True:
+        if V.aot_compilation:
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
