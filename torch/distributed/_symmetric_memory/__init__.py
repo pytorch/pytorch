@@ -276,7 +276,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = backend_stream
         remote_rank = (step + rank) % group_size
         remote_p2p_bufs = get_p2p_bufs(remote_rank)
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
 
@@ -287,7 +287,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -371,7 +371,7 @@ def _pipelined_produce_and_all2all(
             stream = backend_stream
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
-        with torch.cuda.stream(stream):
+        with stream:
             # Parallelization strategy: every rank issues independent compute
             # -> barrier -> p2p copy sequences on two streams. In addition to
             # computation/communication overlapping, the strategy allows for
@@ -763,7 +763,7 @@ def _fused_all_gather_matmul_native(
     for step in range(1, world_size):
         src_rank = (rank + step) % world_size
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-        with torch.cuda.stream(backend_stream):
+        with backend_stream:
             A_shards[src_rank].copy_(src_buf)
             if not torch.cuda.is_current_stream_capturing():
                 # cuStreamWriteValue32 issues a system level fence before the write
@@ -1363,7 +1363,7 @@ def _low_contention_all_gather(
     chunks = output.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         if not input_is_symm_mem:
             local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
             local_buf.copy_(tensor)
@@ -1401,7 +1401,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     chunks = a2a_res.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
         for step in range(0, world_size):
@@ -1438,7 +1438,7 @@ def _low_contention_reduce_scatter_with_workspace(
     chunks = tensor.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
         for step in range(0, world_size):
