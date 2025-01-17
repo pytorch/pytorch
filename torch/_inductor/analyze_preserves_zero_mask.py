@@ -143,6 +143,8 @@ def can_codegen_without_upcasts(
 
     This is only true if the node only contains dtype conversions, indexing, and other non-arithmetic operators.
     """
+    if prologue.get_operation_names() <= V.graph.low_precision_codegen_ops:
+        return True
 
     low_prec_analysis = RecordLowPrecisionOps()
 

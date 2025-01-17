@@ -488,6 +488,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.aligned_inputs = OrderedSet[str]()
         self.no_fuse_buffer_names = OrderedSet[str]()
 
+        self.low_precision_codegen_ops = OrderedSet[str]()
+        # more aggressive prologue fusion
+        self.invoke_quant_ops = OrderedSet[str]()
+
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names = OrderedSet[str]()
 

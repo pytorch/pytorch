@@ -50,13 +50,9 @@ class InvokeQuant:
         codegen_low_precision: Use observed subgraph dtypes for codegen instead of
             upcasting to fp32. Can improve performance for prologue fusion but
             requires careful testing of numerics.
-
-        force_fuse_mm: Force fusion to Triton matrix multiplications even without
-            max-autotune enabled.
     """
 
     codegen_low_precision: bool = True
-    force_fuse_mm: bool = False
 
     def __call__(
         self,
