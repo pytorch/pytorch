@@ -2106,6 +2106,7 @@ SYMPY_INTERP = {
     "IsNonOverlappingAndDenseIndicator": eval_is_non_overlapping_and_dense,
     "cast_symbool_to_symint_guardless": cast_symbool_to_symint_guardless,
     "math": math,
+    "torch": torch,
 }
 
 

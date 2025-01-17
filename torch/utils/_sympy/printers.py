@@ -119,7 +119,20 @@ class ExprPrinter(StrPrinter):
 class PythonPrinter(ExprPrinter):
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
+        # NB: We use sym_float here because the printer is used for cache
+        # serialization, and cache guards get evaluated with SymInt to
+        # propagate guards to the parent ShapeEnv.  However, this comes at a
+        # runtime cost for guards involving float.  If this is unacceptable
+        # overhead, what you want to do is have two separate printers for
+        # SymInt, one for when the inputs are guaranteed to be int, and
+        # another for when they could be SymInt.
+        #
+        # NB: sym_min/sym_max also have this problem, but I chose not to fix
+        # those.
+        #
+        # See https://github.com/pytorch/pytorch/issues/142507 for more
+        # context.
+        return f"torch.sym_float({self._print(expr.args[0])})"
 
     def _print_And(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " and ", precedence(expr))
