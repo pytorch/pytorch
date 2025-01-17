@@ -17,14 +17,13 @@ ternary_ops = op_bench.op_list(
 ternary_configs_short = op_bench.config_list(
     attr_names=["M", "N"],
     attrs=[
-        [1, 2], [32, 64],
+        [1, 2],
+        [32, 64],
     ],
-    
     cross_product_configs={
         "device": ["cpu"],
         "dtype": [torch.float, torch.bfloat16],
     },
-    
     tags=["short"],
 )
 
@@ -36,12 +35,13 @@ ternary_configs_long = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+
 class TernaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device, dtype, op_func):
         self.inputs = {
-            "input_":  torch.rand((M, N), device=device).to(dtype=dtype),
+            "input_": torch.rand((M, N), device=device).to(dtype=dtype),
             "tensor1": torch.rand((M, N), device=device).to(dtype=dtype),
-            "tensor2": torch.rand((M, N), device=device).to(dtype=dtype)
+            "tensor2": torch.rand((M, N), device=device).to(dtype=dtype),
         }
         self.op_func = op_func
 

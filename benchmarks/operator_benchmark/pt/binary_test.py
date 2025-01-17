@@ -13,7 +13,7 @@ binary_ops_bcast_list = op_bench.op_list(
         ["add", torch.add],
         ["sub", torch.sub],
         ["div", torch.div],
-        ["mul", torch.mul]
+        ["mul", torch.mul],
     ],
 )
 
@@ -55,7 +55,7 @@ binary_ops_list = op_bench.op_list(
         ["add", torch.add],
         ["sub", torch.sub],
         ["div", torch.div],
-        ["mul", torch.mul]
+        ["mul", torch.mul],
     ],
 )
 
@@ -110,9 +110,7 @@ op_bench.generate_pt_tests_from_op_list(
 # Benchmark ops performance with broadcast
 binary_ops_bcast_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
-    attrs=[
-        ["logical_and", torch.logical_and]
-    ],
+    attrs=[["logical_and", torch.logical_and]],
 )
 
 # Configs with broadcast
@@ -128,11 +126,16 @@ binary_configs_broadcast = op_bench.config_list(
     tags=["short"],
 )
 
+
 class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_one, in_two, dtype, device, op_func):
         self.inputs = {
-            "in_one": torch.bernoulli(0.5 * torch.ones(in_one, device=device)).to(dtype=dtype),
-            "in_two": torch.bernoulli(0.5 * torch.ones(in_two, device=device)).to(dtype=dtype),
+            "in_one": torch.bernoulli(0.5 * torch.ones(in_one, device=device)).to(
+                dtype=dtype
+            ),
+            "in_two": torch.bernoulli(0.5 * torch.ones(in_two, device=device)).to(
+                dtype=dtype
+            ),
         }
         self.op_func = op_func
 
@@ -148,9 +151,7 @@ op_bench.generate_pt_tests_from_op_list(
 # Benchmark ops performance without broadcast
 binary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
-    attrs=[
-        ["logical_and", torch.logical_and]
-    ],
+    attrs=[["logical_and", torch.logical_and]],
 )
 
 binary_short_configs = op_bench.config_list(
@@ -182,8 +183,12 @@ binary_long_configs = op_bench.cross_product_configs(
 class BinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, dtype_one, dtype_two, op_func):
         self.inputs = {
-            "input_one": torch.bernoulli(0.5 * torch.ones(M, N, K, device=device)).to(dtype=dtype_one),
-            "input_two": torch.bernoulli(0.5 * torch.ones(M, N, K, device=device)).to(dtype=dtype_two),
+            "input_one": torch.bernoulli(0.5 * torch.ones(M, N, K, device=device)).to(
+                dtype=dtype_one
+            ),
+            "input_two": torch.bernoulli(0.5 * torch.ones(M, N, K, device=device)).to(
+                dtype=dtype_two
+            ),
         }
         self.op_func = op_func
 

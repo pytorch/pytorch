@@ -71,8 +71,9 @@ def half_(input):
 def long_(input):
     return input.long()
 
+
 def clamp(input):
-    return torch.clamp(input, min = 0.25, max = 0.75)
+    return torch.clamp(input, min=0.25, max=0.75)
 
 
 unary_ops_list = op_bench.op_list(

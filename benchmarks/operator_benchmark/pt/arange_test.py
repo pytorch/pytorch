@@ -19,27 +19,30 @@ configs_short = op_bench.config_list(
 configs_long = op_bench.cross_product_configs(
     start=[-1024, 8],
     end=[16, 2048],
-    step = [8, 0.1],
+    step=[8, 0.1],
     device=["cpu", "cuda"],
     dtype=[torch.float, torch.bfloat16],
     tags=["long"],
 )
 
+
 class ArangeBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, start, end, step, dtype, device):
-        
         self.inputs = {
-            "start": start, "end": end, "step": step,
-            "dtype": dtype, "device": device
+            "start": start,
+            "end": end,
+            "step": step,
+            "dtype": dtype,
+            "device": device,
         }
 
         self.set_module_name("arange")
 
     def forward(self, start, end, step, dtype, device):
-        return torch.arange(start = start, end = end, step = step, dtype = dtype, device = device)
+        return torch.arange(start=start, end=end, step=step, dtype=dtype, device=device)
 
 
-op_bench.generate_pt_test( configs_short + configs_long, ArangeBenchmark)
+op_bench.generate_pt_test(configs_short + configs_long, ArangeBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

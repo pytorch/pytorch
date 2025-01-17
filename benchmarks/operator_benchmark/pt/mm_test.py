@@ -8,9 +8,7 @@ import torch
 # Benchmark ops performance without broadcast
 ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
-    attrs=[
-        ["mm", torch.mm]
-    ],
+    attrs=[["mm", torch.mm]],
 )
 
 mm_short_configs = op_bench.config_list(
@@ -20,10 +18,7 @@ mm_short_configs = op_bench.config_list(
         [64, 64, 64],
         [64, 64, 128],
     ],
-    cross_product_configs={
-        "device": ["cpu"],
-        "dtype": [torch.float]
-    },
+    cross_product_configs={"device": ["cpu"], "dtype": [torch.float]},
     tags=["short"],
 )
 

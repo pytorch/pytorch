@@ -5,31 +5,38 @@ import torch
 
 """Microbenchmarks for inplace binary operators."""
 
+
 def add_(in1, in2):
     return in1.add_(in2)
+
 
 def sub_(in1, in2):
     return in1.sub_(in2)
 
+
 def div_(in1, in2):
     return in1.div_(in2)
+
 
 def mul_(in1, in2):
     return in1.mul_(in2)
 
+
 def copy_(in1, in2):
     return in1.copy_(in2)
+
+
 ######
 ## Benchmark ops performance for inplace add + sub + mul + copy
 ######
 binary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
-        ["add_",  add_ ],
-        ["sub_",  sub_ ],
-        #["div_",  div_ ], # done separately below because of data type
-        ["mul_",  mul_ ],
-        ["copy_", copy_]
+        ["add_", add_],
+        ["sub_", sub_],
+        # ["div_",  div_ ], # done separately below because of data type
+        ["mul_", mul_],
+        ["copy_", copy_],
     ],
 )
 
@@ -83,7 +90,7 @@ op_bench.generate_pt_tests_from_op_list(
 binary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
-        ["div_",  div_ ],
+        ["div_", div_],
     ],
 )
 
