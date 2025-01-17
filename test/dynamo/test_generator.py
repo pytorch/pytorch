@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import itertools
-import unittest
 import sys
+import unittest
 from collections import OrderedDict
 
 import torch
