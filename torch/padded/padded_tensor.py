@@ -385,23 +385,6 @@ class BmmOp(RegularOp):
         return [torch.Size([b1, n1, p2])]
 
 
-class MeanOp(SliceRunRepadOp):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0].orig_shape
-        dims = args[1]
-        assert len(dims) == 1
-        dim = dims[0]
-
-        if dim < 0:
-            dim += len(input_shape)
-
-        # Eliminate last dim
-        return [torch.Size(list(input_shape[:dim]) + [1])]
-
-
 class ScaledDotProductAttentionOp(SliceRunRepadOp):
     def __init__(self) -> None:
         super().__init__()
@@ -516,15 +499,6 @@ class SplitWithSizesOp(SliceRunRepadOp):
     #    return args, kwargs, tensor_args, tensor_kwargs
 
 
-class CatOp(SliceRunRepadOp):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def infer_shape(self, args, kwargs):
-        input_shape = args[0][0].orig_shape
-        return [input_shape]
-
-
 class StackOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -597,7 +571,6 @@ class OpDatabase:
             # Contraction / Reduction operations
             "mm": MatmulOp(),
             "bmm": BmmOp(),
-            "mean": MeanOp(),
             "_scaled_dot_product_flash_attention": ScaledDotProductAttentionOp(),
             # Indexing operations
             "index": IndexOp(),
@@ -605,7 +578,6 @@ class OpDatabase:
             "index_put_": IndexPutOp(),
             # Splitting / Stacking
             "split_with_sizes": SplitWithSizesOp(),
-            "cat": CatOp(),
             "stack": StackOp(),
             # Other
             "detach": DetachOp(),
