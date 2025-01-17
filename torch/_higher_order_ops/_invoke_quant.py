@@ -45,7 +45,6 @@ class InvokeQuant:
     The operation appears as:
         torch.ops.higher_order.invoke_quant(subgraph, *args, scheme=scheme)
 
-
     Args:
         codegen_low_precision: Use observed subgraph dtypes for codegen instead of
             upcasting to fp32. Can improve performance for prologue fusion but
