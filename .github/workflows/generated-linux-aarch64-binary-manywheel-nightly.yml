@@ -21,7 +21,6 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "arm64v8/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-aarch64-binary-manywheel
@@ -112,8 +111,6 @@ jobs:
       build_name: manywheel-py3_9-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda-aarch64-build:
@@ -159,8 +156,6 @@ jobs:
       build_name: manywheel-py3_9-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-aarch64-build:
@@ -230,8 +225,6 @@ jobs:
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda-aarch64-build:
@@ -277,8 +270,6 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-aarch64-build:
@@ -348,8 +339,6 @@ jobs:
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda-aarch64-build:
@@ -395,8 +384,6 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-aarch64-build:
@@ -466,8 +453,6 @@ jobs:
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda-aarch64-build:
@@ -513,8 +498,6 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-aarch64-build:
@@ -584,8 +567,6 @@ jobs:
       build_name: manywheel-py3_13-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda-aarch64-build:
@@ -631,8 +612,6 @@ jobs:
       build_name: manywheel-py3_13-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cpu-aarch64-build:
@@ -702,8 +681,6 @@ jobs:
       build_name: manywheel-py3_13t-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cuda-aarch64-build:
@@ -749,6 +726,4 @@ jobs:
       build_name: manywheel-py3_13t-cuda-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
