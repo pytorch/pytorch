@@ -1790,17 +1790,25 @@ class TritonKernel(SIMDKernel):
                 using range tree numels and the other dims.
                 """
 
+                index_var = range_tree.symbol()
+
                 # Bound the possible number of dims. We use the following heuristics:
                 # - At least one dim for each range tree node.
                 # - At least one dim for every FloorDiv or ModularIndexing op.
                 # - At least 2 dims to pattern match.
+                denom, modulo = sympy.symbols(
+                    "denom modulo",
+                    cls=functools.partial(sympy.Wild, exclude=[index_var]),
+                )
                 num_dims = max(
                     2,
                     len(self.range_tree_nodes),
-                    (index.count(FloorDiv) + index.count(ModularIndexing)),
+                    (
+                        index.count(FloorDiv(index_var, denom))
+                        + index.count(ModularIndexing(index_var, denom, modulo))
+                    ),
                 )
 
-                index_var = range_tree.symbol()
                 match_result = BlockPatternMatcher.match_mod_div_block_expr(
                     index, index_var, range_tree.numel, num_dims
                 )
@@ -1951,7 +1959,9 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+        return IndexingOptions(
+            index_str, mask_vars, mask_str, expand_str, has_rindex, index
+        )  # type: ignore[arg-type]
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""

@@ -28,7 +28,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQu
 from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -692,7 +692,7 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
@@ -3186,7 +3186,10 @@ class AOTInductorTestsTemplate:
         torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
-    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+    )
     def test_runtime_checks_fp8(self):
         # cuda only
         if self.device != "cuda":
