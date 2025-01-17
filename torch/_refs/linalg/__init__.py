@@ -155,11 +155,11 @@ def vector_norm(
             dim is not None
             and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))
         ):
-            x = torch.abs(x)
             if x.ndim > 64:
                 raise RuntimeError(
                     f"Received a tensor with {x.ndim} dimensions, but only tensors with up to 64 dims are supported!"
                 )
+            x = torch.abs(x)
             if keepdim or x.ndim == 0:
                 return to_result_dtype(x).contiguous()
             elif dim is None:
