@@ -115,6 +115,7 @@ if TEST_ON_CUDA:
         else [torch.float16, torch.float32]
     )
     test_dtypes_fast = [torch.float16]
+    SKIP_UT_ON_CPU = False
 else:
     test_device = "cpu"
     torch_config_string = torch.__config__.show()
