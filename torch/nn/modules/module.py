@@ -6,20 +6,8 @@ import itertools
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    overload,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterator, Mapping
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -42,7 +30,7 @@ __all__ = [
     "Module",
 ]
 
-_grad_t = Union[Tuple[Tensor, ...], Tensor]
+_grad_t = Union[tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -74,9 +62,9 @@ def _addindent(s_, numSpaces):
 
 r"""This tracks hooks common to all modules that are executed immediately before
 .registering the buffer/module/parameter"""
-_global_buffer_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_module_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_parameter_registration_hooks: Dict[int, Callable] = OrderedDict()
+_global_buffer_registration_hooks: dict[int, Callable] = OrderedDict()
+_global_module_registration_hooks: dict[int, Callable] = OrderedDict()
+_global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
@@ -98,14 +86,14 @@ class _WrappedHook:
             return self.hook(module, *args, **kwargs)
         return self.hook(*args, **kwargs)
 
-    def __getstate__(self) -> Dict:
+    def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
             result["module"] = self.module()
 
         return result
 
-    def __setstate__(self, state: Dict):
+    def __setstate__(self, state: dict):
         self.hook = state["hook"]
         self.with_module = state["with_module"]
 
@@ -120,13 +108,13 @@ class _WrappedHook:
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
-_global_backward_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_backward_hooks: Dict[int, Callable] = OrderedDict()
+_global_backward_pre_hooks: dict[int, Callable] = OrderedDict()
+_global_backward_hooks: dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
-_global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_forward_hooks: Dict[int, Callable] = OrderedDict()
-_global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
-_global_forward_hooks_with_kwargs: Dict[int, bool] = OrderedDict()
+_global_forward_pre_hooks: dict[int, Callable] = OrderedDict()
+_global_forward_hooks: dict[int, Callable] = OrderedDict()
+_global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
+_global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -447,29 +435,29 @@ class Module:
     the change."""
 
     training: bool
-    _parameters: Dict[str, Optional[Parameter]]
-    _buffers: Dict[str, Optional[Tensor]]
-    _non_persistent_buffers_set: Set[str]
-    _backward_pre_hooks: Dict[int, Callable]
-    _backward_hooks: Dict[int, Callable]
+    _parameters: dict[str, Optional[Parameter]]
+    _buffers: dict[str, Optional[Tensor]]
+    _non_persistent_buffers_set: set[str]
+    _backward_pre_hooks: dict[int, Callable]
+    _backward_hooks: dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: Dict[int, Callable]
+    _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_hooks_with_kwargs: Dict[int, bool]
+    _forward_hooks_with_kwargs: dict[int, bool]
     # forward hooks that should always be called even if an exception is raised
-    _forward_hooks_always_called: Dict[int, bool]
-    _forward_pre_hooks: Dict[int, Callable]
+    _forward_hooks_always_called: dict[int, bool]
+    _forward_pre_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_pre_hooks_with_kwargs: Dict[int, bool]
-    _state_dict_hooks: Dict[int, Callable]
-    _load_state_dict_pre_hooks: Dict[int, Callable]
-    _state_dict_pre_hooks: Dict[int, Callable]
-    _load_state_dict_post_hooks: Dict[int, Callable]
-    _modules: Dict[str, Optional["Module"]]
+    _forward_pre_hooks_with_kwargs: dict[int, bool]
+    _state_dict_hooks: dict[int, Callable]
+    _load_state_dict_pre_hooks: dict[int, Callable]
+    _state_dict_pre_hooks: dict[int, Callable]
+    _load_state_dict_post_hooks: dict[int, Callable]
+    _modules: dict[str, Optional["Module"]]
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
@@ -712,7 +700,7 @@ class Module:
         if target == "":
             return self
 
-        atoms: List[str] = target.split(".")
+        atoms: list[str] = target.split(".")
         mod: torch.nn.Module = self
 
         for item in atoms:
@@ -769,7 +757,7 @@ class Module:
         if target == "":
             raise ValueError("Cannot set the submodule without a target name!")
 
-        atoms: List[str] = target.split(".")
+        atoms: list[str] = target.split(".")
         name = atoms.pop(-1)
         mod: torch.nn.Module = self
 
@@ -1485,13 +1473,13 @@ class Module:
         It returns two lists, one with the full backward hooks and one with the non-full
         backward hooks.
         """
-        full_backward_hooks: List[Callable] = []
+        full_backward_hooks: list[Callable] = []
         if _global_is_full_backward_hook is True:
             full_backward_hooks += _global_backward_hooks.values()
         if self._is_full_backward_hook is True:
             full_backward_hooks += self._backward_hooks.values()
 
-        non_full_backward_hooks: List[Callable] = []
+        non_full_backward_hooks: list[Callable] = []
         if _global_is_full_backward_hook is False:
             non_full_backward_hooks += _global_backward_hooks.values()
         if self._is_full_backward_hook is False:
@@ -1500,7 +1488,7 @@ class Module:
         return full_backward_hooks, non_full_backward_hooks
 
     def _get_backward_pre_hooks(self):
-        backward_pre_hooks: List[Callable] = []
+        backward_pre_hooks: list[Callable] = []
         backward_pre_hooks += _global_backward_pre_hooks.values()
         backward_pre_hooks += self._backward_pre_hooks.values()
 
@@ -1580,10 +1568,10 @@ class Module:
     def register_forward_pre_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, tuple[Any, ...]], Optional[Any]],
             Callable[
-                [T, Tuple[Any, ...], Dict[str, Any]],
-                Optional[Tuple[Any, Dict[str, Any]]],
+                [T, tuple[Any, ...], dict[str, Any]],
+                Optional[tuple[Any, dict[str, Any]]],
             ],
         ],
         *,
@@ -1646,8 +1634,8 @@ class Module:
     def register_forward_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         ],
         *,
         prepend: bool = False,
@@ -2125,7 +2113,7 @@ class Module:
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrderedDict` is created and returned.
-    T_destination = TypeVar("T_destination", bound=Dict[str, Any])
+    T_destination = TypeVar("T_destination", bound=dict[str, Any])
 
     @overload
     def state_dict(
@@ -2134,7 +2122,7 @@ class Module:
         ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> dict[str, Any]:
         ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
@@ -2514,9 +2502,9 @@ class Module:
                 f"Expected state_dict to be dict-like, got {type(state_dict)}."
             )
 
-        missing_keys: List[str] = []
-        unexpected_keys: List[str] = []
-        error_msgs: List[str] = []
+        missing_keys: list[str] = []
+        unexpected_keys: list[str] = []
+        error_msgs: list[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, "_metadata", None)
@@ -2632,7 +2620,7 @@ class Module:
 
     def named_parameters(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Parameter]]:
+    ) -> Iterator[tuple[str, Parameter]]:
         r"""Return an iterator over module parameters, yielding both the name of the parameter as well as the parameter itself.
 
         Args:
@@ -2687,7 +2675,7 @@ class Module:
 
     def named_buffers(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[tuple[str, Tensor]]:
         r"""Return an iterator over module buffers, yielding both the name of the buffer as well as the buffer itself.
 
         Args:
@@ -2725,7 +2713,7 @@ class Module:
         for _name, module in self.named_children():
             yield module
 
-    def named_children(self) -> Iterator[Tuple[str, "Module"]]:
+    def named_children(self) -> Iterator[tuple[str, "Module"]]:
         r"""Return an iterator over immediate children modules, yielding both the name of the module as well as the module itself.
 
         Yields:
@@ -2774,7 +2762,7 @@ class Module:
 
     def named_modules(
         self,
-        memo: Optional[Set["Module"]] = None,
+        memo: Optional[set["Module"]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):
