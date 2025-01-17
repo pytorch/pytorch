@@ -320,6 +320,10 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return True
+
+    @staticmethod
     def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
@@ -377,6 +381,10 @@ class MpsInterface(DeviceInterface):
         @staticmethod
         def get_device_properties(device: _device_t = None):
             return {}
+
+        @staticmethod
+        def current_device():
+            return 0
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
