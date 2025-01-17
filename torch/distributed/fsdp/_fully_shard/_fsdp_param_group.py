@@ -372,6 +372,8 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
+        # This method should be idempotent and safe to call even when this
+        # FSDP parameter group was not used in backward (should be a no-op)
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
@@ -390,6 +392,8 @@ class FSDPParamGroup:
             fsdp_params_with_grad: List[FSDPParam] = []
             unsharded_grads: List[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
+                if not hasattr(fsdp_param, "_unsharded_param"):
+                    continue
                 # May have an accumulated gradient of the reduce dtype if the
                 # previous backward did not reduce-scatter
                 if fsdp_param.unsharded_accumulated_grad is not None:
