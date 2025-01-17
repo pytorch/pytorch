@@ -20,7 +20,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  const Generator& getDefaultHPUGenerator(
+  virtual const Generator& getDefaultHPUGenerator (
       [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default HPU generator without HPU backend");
   }
