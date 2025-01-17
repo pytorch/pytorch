@@ -42,6 +42,7 @@ class MPSBasicTests(TestCase):
     test_add_const_int = CommonTemplate.test_add_const_int
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
+    test_arange5 = CommonTemplate.test_arange5
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
     test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
     test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
