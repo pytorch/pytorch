@@ -145,17 +145,17 @@ class ViewOp(SliceRunRepadOp):
 
             return output_shape
 
-        orig_input_shape = args[0].orig_shape
-        input_shape = args[0].shape
+        input_shape = args[0].orig_shape
+        padded_input_shape = args[0].shape
         output_shape = list(args[1])
 
         # If the shapes are compatible, we can just return the orig output shape.
-        if math.prod(orig_input_shape) == math.prod(output_shape):
+        if math.prod(input_shape) == math.prod(output_shape):
             return [torch.Size(output_shape)]
 
         # Does the output shape contain -1? If so, we need to infer the value of -1
         if -1 in output_shape:
-            input_shape_prod = math.prod(input_shape)
+            input_shape_prod = math.prod(padded_input_shape)
             output_shape_prod = math.prod(output_shape) * -1
 
             for idx, output_dim in enumerate(output_shape):
@@ -167,8 +167,8 @@ class ViewOp(SliceRunRepadOp):
         # Then apply this mapping to the orig input shape, to find the orig output shape.
         # E.g. input_shape = [32, 32, 32], output_shape = [1024, 32]
         # The mapping is: [[0, 1], [2]]
-        mapping = find_mapping(input_shape, output_shape)
-        orig_output_shape = apply_mapping(orig_input_shape, mapping)
+        mapping = find_mapping(padded_input_shape, output_shape)
+        orig_output_shape = apply_mapping(input_shape, mapping)
 
         return [torch.Size(orig_output_shape)]
 
