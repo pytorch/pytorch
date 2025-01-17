@@ -25,7 +25,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -67,6 +66,8 @@ from .utils import (
     IndentedBuffer,
     is_collective,
     is_gpu,
+    is_multi_outputs_template,
+    is_output_of_multi_outputs_template,
     is_wait,
     sympy_product,
 )
@@ -150,7 +151,9 @@ class SchedulerBuffer:
     def can_free(self) -> bool:
         # There's no real allocated buffer, no need to free it
         assert self.node is not None
-        if isinstance(self.node.layout, ir.NoneLayout):
+        if isinstance(self.node.layout, ir.NoneLayout) or is_multi_outputs_template(
+            self.node
+        ):
             return False
         for use in self.users:
             if isinstance(use.node, OutputNode):
@@ -182,7 +185,7 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
+    group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
@@ -815,7 +818,7 @@ class BaseSchedulerNode:
     @staticmethod
     def get_prologue_template_epilogue(
         nodes: List[BaseSchedulerNode],
-    ) -> Tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
+    ) -> tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
         """
         For the list of nodes, get the prologue, template, and epilogue
         """
@@ -832,7 +835,7 @@ class WhyNoFuse:
     # @dataclass(slots=True) instead of manually specifying __slots__.
     __slots__ = ["node1", "node2", "reason", "args"]
     reason: str
-    args: Tuple[Any, ...]
+    args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         self.node1 = node1
@@ -950,7 +953,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
-    _sizes: Tuple[Sequence[sympy.Expr], ...]
+    _sizes: tuple[Sequence[sympy.Expr], ...]
     _body: LoopBody
 
     def __init__(
@@ -964,7 +967,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
@@ -996,7 +999,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         self._compute_attrs(
@@ -1257,7 +1260,31 @@ class FusedSchedulerNode(BaseSchedulerNode):
     ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+        if node1.is_template() and isinstance(node2, ExternKernelSchedulerNode):
+            # Fuse multi outputs template and its outputs
+            #   * Node1 has memorydep of MultiOutput in reads
+            #   * Node2 has StarDep of MultiOutput in writes
+            # Rewrite the Node2' StarDep to MemoryDep, because calculate score_fusion_memory
+            # of the template node and its epilogue requires the same type of dependencies
+            assert isinstance(node2.node, MultiOutput)
+            assert len(node2.read_writes.writes) == 1
+            assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
+            name = next(iter(node2.read_writes.writes)).name
+            template_nodes = [node for node in node1.get_nodes() if node.is_template()]
+            assert len(template_nodes) == 1
+            template_node = template_nodes[0]
+            assert len(template_node.read_writes.writes) == 1
+            write = next(iter(template_node.read_writes.writes))
+            assert isinstance(write, MemoryDep)
+            node2.read_writes.writes = OrderedSet(
+                [
+                    MemoryDep(
+                        name, write.index, write.var_names, write.size, write.mode
+                    ),
+                ]
+            )
+        else:
+            assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
@@ -1814,7 +1841,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: List[List[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: Tuple[int, ...] = (),
+    priority_idx: tuple[int, ...] = (),
 ) -> List[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -1969,7 +1996,7 @@ class Scheduler:
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
-        self.logged_slow_fusion = OrderedSet[Tuple[str, str]]()
+        self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
@@ -2506,7 +2533,7 @@ class Scheduler:
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -2538,7 +2565,7 @@ class Scheduler:
 
     def benchmark_codegened_module(
         self, module: ModuleType, device: torch.device
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -2707,7 +2734,7 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-        ) -> Tuple[Optional[TritonFuture], ModuleType]:
+        ) -> tuple[Optional[TritonFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -2739,7 +2766,7 @@ class Scheduler:
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
             # Start compiling choices in parallel
-            future_choices: List[Tuple[Any, Optional[TritonFuture], ModuleType]] = []
+            future_choices: List[tuple[Any, Optional[TritonFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -2889,7 +2916,7 @@ class Scheduler:
         # and which we will benchmark profitability of.
         pending_fusions: Dict[
             BaseSchedulerNode,
-            Tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
+            tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
         ] = {}
 
         def fuse_two_nodes(
@@ -3023,12 +3050,12 @@ class Scheduler:
 
     def get_possible_fusions(
         self, nodes: List[BaseSchedulerNode]
-    ) -> List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+    ) -> List[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
-        seen = OrderedSet[Tuple[BaseSchedulerNode, BaseSchedulerNode]]()
+        seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
 
         def check_all_pairs(nodes: List[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
@@ -3205,7 +3232,7 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        common_buf_names: Tuple[str, ...],
+        common_buf_names: tuple[str, ...],
     ) -> str:
         """
         Try to decide reasons why fusion fail due to no shared memory even though
@@ -3339,6 +3366,7 @@ class Scheduler:
         return (
             isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node.is_template()
+            and not is_output_of_multi_outputs_template(node.node)
         )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
@@ -3351,6 +3379,11 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+
+        if node1.is_template() and self.get_backend(
+            node1.get_device()
+        ).can_fuse_multi_outputs_template(node1, node2):
+            return True
 
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
@@ -3683,14 +3716,14 @@ class Scheduler:
         return sum(self.dep_size_hint(dep) for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
-        self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
-    ) -> List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+        self, possible_fusions: List[tuple[BaseSchedulerNode, BaseSchedulerNode]]
+    ) -> List[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         # Group the possible fusions based on their priority from the backend.
         # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: Dict[
-            int, List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
+            int, List[tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 
         for node1, node2 in possible_fusions:
@@ -3715,7 +3748,7 @@ class Scheduler:
         return possible_fusions_with_highest_priority
 
     def score_fusion_key(
-        self, nodes: Tuple[BaseSchedulerNode, BaseSchedulerNode]
+        self, nodes: tuple[BaseSchedulerNode, BaseSchedulerNode]
     ) -> Any:
         """
         Shim for list.sort(key=...)
@@ -3937,7 +3970,7 @@ class Scheduler:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, float, str]:
+    ) -> tuple[float, float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -4065,6 +4098,18 @@ class BaseScheduling:
         """
         raise NotImplementedError
 
+    def can_fuse_multi_outputs_template(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
+        A Multi-Output Template (referenced in #144012) is a template node
+        with MultiOutputLayout, and its output buffers are instances of MultiOutput.
+        In this context, we verify whether node1 represents the Multi-Output Template
+        and node2 corresponds to one of its outputs. If so, we further check if
+        backend supports this fusion.
+        """
+        return False
+
     def fuse(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusedSchedulerNode:
@@ -4078,7 +4123,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
+    ) -> tuple[tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
@@ -4133,14 +4178,14 @@ class BaseScheduling:
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
 
-    def benchmark_codegened_module(self, module: ModuleType) -> Tuple[float, str]:
+    def benchmark_codegened_module(self, module: ModuleType) -> tuple[float, str]:
         """
         Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
@@ -4158,7 +4203,7 @@ class BaseScheduling:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, float, str]:
+    ) -> tuple[float, float, str]:
         """
         Benchmark the list of nodes to combine and return the execution time
         and memory copy time in milliseconds on randomly generated inputs.

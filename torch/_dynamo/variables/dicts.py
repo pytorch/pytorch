@@ -435,6 +435,9 @@ class ConstDictVariable(VariableTracker):
                 tx.output.side_effects.mutation(self)
                 if has_arg:
                     if isinstance(args[0], ConstDictVariable):
+                        # NB - Guard on all the keys of the other dict to ensure
+                        # correctness.
+                        args[0].install_dict_keys_match_guard()
                         dict_vt = args[0]
                     else:
                         dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
