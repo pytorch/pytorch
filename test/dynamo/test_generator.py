@@ -702,7 +702,7 @@ class TestGeneratorSend(GeneratorTestsBase):
             return a + b
 
         t = torch.randn(2)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(Unsupported, "Observed exception"):
             fn(t)
 
 
