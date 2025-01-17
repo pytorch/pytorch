@@ -39,12 +39,7 @@ function write_sccache_stub() {
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
   cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
-
-if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache $(which $1) "\$@"
-else
-  exec $(which $1) "\$@"
-fi
+exec sccache $(which $1) "\$@"
 EOF
   chmod a+x "/opt/cache/bin/$1"
 }
