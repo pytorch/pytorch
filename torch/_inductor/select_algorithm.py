@@ -2190,7 +2190,16 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             node.layout.offset,
-        ).as_strided(node.get_size(), node.get_stride())
+        ).as_strided(
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+        )
 
     @staticmethod
     def generate_example_value(size, stride, device, dtype, extra_size):
