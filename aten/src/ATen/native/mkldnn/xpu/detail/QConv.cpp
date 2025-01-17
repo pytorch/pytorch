@@ -110,8 +110,6 @@ at::Tensor quantized_convolution(
       {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, output_md, bias_md;
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
   dnnl::memory::dims weight_dims = weight.sizes().vec();
@@ -138,7 +136,8 @@ at::Tensor quantized_convolution(
   bool src_need_zp = (act_scale != 0);
   bool dst_need_zp = (output_zero_point != 0);
 
-  std::tie(src_md, weight_md, bias_md, output_md) =
+  // create usr_md for tensors, and md for conv primitive
+  auto [src_md, weight_md, bias, output_md] =
       qconv_get_md(act, weight, bias, output, groups);
 
   // get tensor md
