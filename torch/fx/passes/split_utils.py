@@ -234,6 +234,7 @@ def split_by_tags(
 
         n = comp.graph.node_copy(node, remap_func)
         n.tag = node.tag  # type: ignore[attr-defined]
+        _copy_stack_trace(node, n)
         node_remapping[node] = n
         node_to_component[n] = comp
 
@@ -294,6 +295,9 @@ def split_by_tags(
     main_root = HolderModule({comp.name: comp.gm for comp in all_components})
     main_g._codegen = gm.graph._codegen
 
+    for n, m in zip(main_g.nodes, gm.graph.nodes):
+        _copy_stack_trace(m, n)
+
     # If the output nodes consumes get_attr directly in the original graph,
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
@@ -305,3 +309,11 @@ def split_by_tags(
         return result_gm, orig_to_split_fqn_mapping
 
     return result_gm
+
+
+def _copy_stack_trace(original_node: torch.fx.Node, new_node: torch.fx.Node) -> None:
+    """
+    Copy the stack trace from original node to new node.
+    """
+    if "stack_trace" in original_node.meta:
+        new_node.meta["stack_trace"] = original_node.meta["stack_trace"]
