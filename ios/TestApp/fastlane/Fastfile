@@ -1,7 +1,0 @@
-default_platform(:ios)
-
-platform :ios do
-  before_all do
-    setup_ci(provider: "circleci", timeout: 0)
-  end
-end

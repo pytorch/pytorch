@@ -37,6 +37,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     NoReturn,
     Optional,
     Sequence,
@@ -837,7 +838,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
     # TODO: Apparently, returning an OrderedSet here breaks
-    # python test/distributed/_tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
+    # python test/distributed/tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
 
 
@@ -933,7 +934,7 @@ class InnerTensorKey:
 
 @dataclass(frozen=True)
 class DivideByKey:
-    divisor: int
+    divisor: Union[int, SymInt]
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"
@@ -1049,16 +1050,39 @@ def compute_unbacked_bindings(
             isinstance(a, torch.SymInt)
             and isinstance(s := a.node._expr, sympy.Mul)
             and len(s.args) == 2
-            and isinstance(lhs := s.args[0], sympy.Integer)
+            and isinstance(lhs := s.args[0], (sympy.Integer, sympy.Symbol))
             and isinstance(rhs := s.args[1], sympy.Symbol)
-            and rhs in pending
+            # support exactly one unbacked for now
+            and ((rhs in pending) ^ (lhs in pending))
+            # support constant coefficient or backed symbolic coefficient
+            and (
+                isinstance(coeff := lhs if lhs not in pending else rhs, sympy.Integer)
+                or coeff in a.node.shape_env.var_to_val
+            )
         ):
+
+            def _symint_wrap(s: sympy.Symbol) -> SymInt:
+                return a.node.shape_env.create_symintnode(
+                    s,
+                    hint=int(a.node.shape_env.var_to_val[s]),
+                    source=a.node.shape_env.var_to_sources.get(s, [None])[0],
+                )
+
+            unbacked = lhs if lhs in pending else rhs
+            divisor: Union[int, SymInt] = (
+                int(coeff) if isinstance(coeff, sympy.Integer) else _symint_wrap(coeff)
+            )
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[rhs] = path + (DivideByKey(int(lhs)),)
+            r[unbacked] = path + (DivideByKey(divisor),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
-            pending.remove(rhs)
+                val = (
+                    real // int(coeff)
+                    if isinstance(coeff, sympy.Integer)
+                    else CleanDiv(real, coeff)
+                )
+                shape_env.set_unbacked_var_to_val(unbacked, val)
+            pending.remove(unbacked)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
         # to one.  So you have a complicated binding site logic for this.
@@ -1269,6 +1293,17 @@ def _advise_is_size(a: SymInt) -> None:
         and a.node.shape_env.is_unbacked_symint(a.node.expr)
     ):
         _constrain_range_for_size(a)
+
+
+def _advise_is_bounded(a: SymInt, upper_bound: Union[int, SymInt]) -> None:
+    if (
+        isinstance(a, SymInt)
+        and isinstance(a.node, SymNode)
+        and isinstance(a.node.expr, sympy.Symbol)
+        and a.node.shape_env.is_unbacked_symint(a.node.expr)
+        and isinstance(upper_bound, int)  # TODO: relax
+    ):
+        a.node.shape_env._constrain_is_bounded(a.node.expr, upper_bound)
 
 
 def _constrain_range_for_size(
@@ -1914,10 +1949,19 @@ def safe_expand(r: _SympyT) -> _SympyT:
         return r
 
 
+class _SymbolInfo(NamedTuple):
+    k: sympy.Symbol
+    vr: Optional[ValueRanges]
+    val: Optional[sympy.Integer]
+    is_size_like: bool
+    oblivious_upper_bound_exclusive: sympy.Integer
+
+
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: _SympyT,
-    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
+    # NB: this is a tuple to ensure it can be LRU cached
+    symbol_info: Tuple[_SymbolInfo, ...],
     unbacked_only: bool,
     size_oblivious: bool,
 ) -> Optional[_SympyT]:
@@ -1932,11 +1976,12 @@ def _maybe_evaluate_static_worker(
     new_shape_env = {}
     new_range_env = {}
     for idx, sinfo in enumerate(symbol_info):
-        k, vr, val, is_size_like = sinfo
+        k, vr, val, is_size_like, oblivious_upper_bound_exclusive = sinfo
         if isinstance(val, SingletonInt):
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
+        assert vr is not None
         if size_oblivious and is_size_like:
             lower = max(2, vr.lower)
             # Clamping size-oblivious to some quantity below sys.maxsize
@@ -1946,6 +1991,8 @@ def _maybe_evaluate_static_worker(
             # This is similar to the flavor where size oblivious omits
             # 0/1, it changes semantics but in a benign way.
             upper = min(2**48, vr.upper)
+            if oblivious_upper_bound_exclusive is not None:
+                upper = min(upper, oblivious_upper_bound_exclusive - 1)
             # This is a bit dodgy: what this means is that there was a
             # size-like unbacked symbol whose upper bound < 2.  This
             # causes... problems.
@@ -2877,7 +2924,7 @@ class DimConstraints:
                 assert op == "==", t
                 try:
                     results[left]["eq"] = sympy.sympify(right)
-                except TypeError as e:  # rhs source is not linked to Dim name
+                except TypeError:  # rhs source is not linked to Dim name
                     pass
 
         # order forced specializations based on name
@@ -3136,6 +3183,13 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_range_sloc: Dict[sympy.Symbol, ValueRangesSLoc] = {}
+        # When doing a size-oblivious test, exclude this integer and
+        # everything higher than it from the acceptable range.  This solves
+        # https://github.com/pytorch/pytorch/issues/120288 for constant range
+        # case
+        # TODO: generalize this to work with expressions (in that case, we
+        # need to maintain a SET and we need extra symbolic reasoning on top)
+        self.oblivious_upper_bound_exclusive: Dict[sympy.Symbol, sympy.Integer] = {}
         self.source_name_to_debug_name: Dict[str, str] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
@@ -3441,6 +3495,13 @@ class ShapeEnv:
         self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
             self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+
+    @record_shapeenv_event()
+    def _constrain_is_bounded(self, a: sympy.Symbol, upper_bound: int) -> None:
+        self.oblivious_upper_bound_exclusive[a] = min(
+            self.oblivious_upper_bound_exclusive.get(a, int_oo),
+            sympy.Integer(upper_bound),
+        )
 
     @record_shapeenv_event()
     def _constrain_range_for_size(
@@ -3967,12 +4028,20 @@ class ShapeEnv:
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
 
-        # iterate over unbound strides in sorted order
-        val_list = [(val, i) for i, val in enumerate(ex_stride)]
+        # iterate over unbound strides in val ascending order with
+        # index descending as a tie breaker since for cases like
+        # [(1, 1), (1, 0)], we want to fill in the right most
+        # stride first.
+        val_list = [(val, -i) for i, val in enumerate(ex_stride)]
         val_list.sort(key=_nested_int_aware_sort)
 
-        for val, i in val_list:
-            if val in (0, 1):
+        for val, neg_i in val_list:
+            i = -neg_i
+            contiguous_stride = (
+                i != len(ex_stride) - 1
+                and ex_stride[i] == ex_size[i + 1] * ex_stride[i + 1]
+            )
+            if val in (0, 1) and not contiguous_stride:
                 out_stride = sympy.Integer(val)
             else:
                 dynamic_stride = dynamic_strides[i]
@@ -5561,8 +5630,14 @@ class ShapeEnv:
             var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
-            for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
+            _SymbolInfo(
+                s,
+                var_ranges.get(s),
+                self.var_to_val.get(s),
+                s in self.size_like,
+                self.oblivious_upper_bound_exclusive.get(s),
+            )
+            for s in sorted(fs, key=str)  # TODO: speed up sort?
         )
 
         r = _maybe_evaluate_static_worker(

@@ -3,9 +3,15 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/macros/Macros.h>
+
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 // Determine if the architecture supports rowwise scaled mm
-// Currenlty failing on windows with: https://github.com/NVIDIA/cutlass/issues/1571
+// Currently failing on windows with:
+// https://github.com/NVIDIA/cutlass/issues/1571
 #if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 
 #define BUILD_ROWWISE_FP8_KERNEL
@@ -13,36 +19,7 @@
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
-// We are going to override the cuTensorMapEncodeTiled driver api with our lazy loader
-static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
-    CUtensorMap* tensorMap,
-    CUtensorMapDataType tensorDataType,
-    cuuint32_t tensorRank,
-    void* globalAddress,
-    const cuuint64_t* globalDim,
-    const cuuint64_t* globalStrides,
-    const cuuint32_t* boxDim,
-    const cuuint32_t* elementStrides,
-    CUtensorMapInterleave interleave,
-    CUtensorMapSwizzle swizzle,
-    CUtensorMapL2promotion l2Promotion,
-    CUtensorMapFloatOOBfill oobFill) {
-  return at::globalContext().getNVRTC().cuTensorMapEncodeTiled(
-      tensorMap,
-      tensorDataType,
-      tensorRank,
-      globalAddress,
-      globalDim,
-      globalStrides,
-      boxDim,
-      elementStrides,
-      interleave,
-      swizzle,
-      l2Promotion,
-      oobFill);
-}
-
-
+#include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -50,12 +27,7 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/numeric_types.h>
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
-
-// Rename the global function symbol
-#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
-#include <cute/tensor.hpp>
-#undef cuTensorMapEncodeTiled
-// Set everything back to normal
+#include <cutlass/version.h>
 
 #include <cutlass/gemm/collective/collective_builder.hpp>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
@@ -66,6 +38,8 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 namespace {
 
@@ -94,27 +68,34 @@ using Cast = cutlass::epilogue::fusion::Sm90Compute<
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
-template <bool PingPong, bool FastAccum>
+template <bool LargeTile, bool FastAccum>
 struct Schedule;
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/false> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/false> {
   using type = cutlass::gemm::KernelTmaWarpSpecialized;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/false> {
-  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/false> {
+  // For a 128x128x128 tile with fastAccum = false, using
+  // pingpong schedule will lead to spilling, and WarpSpecialized w/o pingpong
+  // is slow
+  using type = cutlass::gemm::KernelTmaWarpSpecializedCooperative;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecializedCooperative;
 };
 
 template <>
-struct Schedule</*PingPong=*/false, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/false, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 template <>
-struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
+struct Schedule</*LargeTile=*/true, /*FastAccum=*/true> {
   using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
+  using epilogue_type = cutlass::epilogue::TmaWarpSpecialized;
 };
 
 int ceildiv(int a, int b) {
@@ -129,7 +110,6 @@ int round_up_to_nearest_multiple(int a, int b) {
 template <
     typename TileShape,
     typename ClusterShape,
-    typename PingPong,
     typename Transposed,
     typename FastAccum,
     typename DtypeA,
@@ -174,7 +154,7 @@ void f8f8bf16_rowwise_impl(
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
-  constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
+  constexpr int RowBroadcastStages = 0;
 
   using XScale = cutlass::epilogue::fusion::
       Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
@@ -190,16 +170,19 @@ void f8f8bf16_rowwise_impl(
           Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
+  using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
+      Multiply,
+      WScale,
+      cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
 
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
           Add,
           Bias,
-          cutlass::epilogue::fusion::Sm90EVT<
-              Multiply,
-              XScale,
-              cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>>>;
+          AccumScale>>;
+
+  constexpr bool large_tile = std::is_same_v<TileShape, cute::Shape<cute::_128, cute::_128, cute::_128>>;
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -216,7 +199,7 @@ void f8f8bf16_rowwise_impl(
           DtypeOutput,
           LayoutOutput,
           AlignmentOutput,
-          cutlass::epilogue::TmaWarpSpecialized,
+          typename Schedule<large_tile, FastAccum::value>::epilogue_type,
           EpilogueEVT>::CollectiveOp;
 
   using CollectiveMainloop =
@@ -234,7 +217,7 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          typename Schedule<PingPong::value, FastAccum::value>::type>::
+          typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
@@ -264,8 +247,8 @@ void f8f8bf16_rowwise_impl(
        stride_b},
       {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
                            : nullptr},
-         {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}}}}},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
@@ -327,13 +310,11 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::false_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
-        /*PingPong=*/std::true_type,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }

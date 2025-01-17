@@ -410,7 +410,7 @@ convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
-    std::string device_str = "";
+    std::string device_str;
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {

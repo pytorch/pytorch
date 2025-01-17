@@ -207,7 +207,12 @@ if RUN_CPU:
         *[
             BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
+            if func.startswith(
+                (
+                    "test_linear_with_pointwise",
+                    "test_grouped_linear",
+                )
+            )
         ],
         BaseTest("test_polar"),
         BaseTest(

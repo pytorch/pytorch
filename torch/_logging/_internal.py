@@ -844,7 +844,7 @@ class TorchLogsFormatter(logging.Formatter):
         filepath = make_module_path_relative(record.pathname)
 
         prefix = (
-            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.process} "
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
             f"{filepath}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
@@ -1172,7 +1172,13 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert "name" not in [
+        "rank",
+        "compiled_autograd_id",
+        "frame_id",
+        "frame_compile_id",
+        "attempt",
+    ]
     assert callable(
         metadata_fn
     ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
@@ -1191,22 +1197,26 @@ def trace_structured(
             # never changes and we assume no interleaving
             if dist.is_available() and dist.is_initialized():
                 record["rank"] = dist.get_rank()
-            if (
-                trace_id := torch._guards.CompileContext.current_trace_id()
-            ) is not None:
-                record["frame_id"] = trace_id.compile_id.frame_id
-                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
-                record["attempt"] = trace_id.attempt
-            elif compile_id is not None:
-                record["frame_id"] = compile_id.frame_id
-                record["frame_compile_id"] = compile_id.frame_compile_id
+
+            trace_id = torch._guards.CompileContext.current_trace_id()
+            if expect_trace_id and trace_id is None and compile_id is None:
+                # Record the stack of the log call to better diagnose why we
+                # don't have a frame id for it
+                record["stack"] = torch._logging.structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                )
             else:
-                if expect_trace_id:
-                    # Record the stack of the log call to better diagnose why we
-                    # don't have a frame id for it
-                    record["stack"] = torch._logging.structured.from_traceback(
-                        CapturedTraceback.extract(skip=1).summary()
-                    )
+                cid = trace_id.compile_id if trace_id else compile_id
+                if cid is not None:
+                    if cid.compiled_autograd_id is not None:
+                        record["compiled_autograd_id"] = cid.compiled_autograd_id
+                    if cid.frame_id is not None:
+                        record["frame_id"] = cid.frame_id
+                    if cid.frame_compile_id is not None:
+                        record["frame_compile_id"] = cid.frame_compile_id
+                if trace_id:
+                    record["attempt"] = trace_id.attempt
+
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
@@ -1214,8 +1224,17 @@ def trace_structured(
                     # special case to look better
                     payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
                 else:
+
+                    def json_default(obj):
+                        # Sets aren't json serializable
+                        if isinstance(obj, set):
+                            return list(obj)
+                        raise TypeError(
+                            f"Object of type {type(obj)} is not JSON serializable"
+                        )
+
                     # force newlines so we are unlikely to overflow line limit
-                    payload = json.dumps(payload, indent=0)
+                    payload = json.dumps(payload, default=json_default, indent=0)
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()

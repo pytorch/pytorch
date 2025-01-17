@@ -575,7 +575,11 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device=self.device, dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
@@ -932,7 +936,6 @@ class TestFlexAttention(InductorTestCase):
             test_inference_only = True
         else:
             test_inference_only = False
-        MAX_S = S
         block_mask1 = create_block_mask(noop_mask, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
         # The first eager batch, shape (B, H, S, D)
@@ -3252,6 +3255,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ), f"Expected 1 graph, but got {counter.frame_count} graphs"
 
     @supported_platform
+    def test_dynamic_shapes_with_custom_kernel_options(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 1024, 64),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        kernel_options = {"BLOCK_M": 64, "BLOCK_N": 64}
+        out_eager = flex_attention(query, key, value, kernel_options=kernel_options)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
@@ -3357,7 +3377,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Run forward pass
             x = torch.randn(batch_shape, sequence_len, 512).cuda()
-            y = model(x, block_mask=block_mask)
+            model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
@@ -3526,7 +3546,7 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         attention = torch.compile(flex_attention)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._inductor.exc.InductorError,
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
@@ -3543,7 +3563,7 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         attention = torch.compile(flex_attention)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._inductor.exc.InductorError,
             r"`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. Found input tensors are `torch.float16`.",
         ):
             attention(query, key, value)
@@ -3925,8 +3945,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("compile", [False, True])
     def test_no_q_info(self, compile: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -4001,7 +4019,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         device = "cuda"
         max_seq_len, doc_count = 128, 4
-        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
+        SEQ_LEN = max_seq_len
 
         lengths = generate_random_lengths(max_seq_len, doc_count)
         offsets = length_to_offsets(lengths, device)
@@ -4031,7 +4049,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             lengths = generate_random_lengths(1024 + i, 5)
             offsets = length_to_offsets(lengths, "cuda")
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
-            total_seq_len = 1024 + i
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
                 return (
@@ -4350,7 +4367,11 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
             device="cuda",
@@ -4500,7 +4521,11 @@ class TestPagedAttention(InductorTestCase):
         )
 
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
