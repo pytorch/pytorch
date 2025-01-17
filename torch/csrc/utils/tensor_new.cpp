@@ -1458,8 +1458,8 @@ Tensor tensor_ctor(
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(
           PyExc_UserWarning,
-          "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-          "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).",
+          "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
+          "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).",
           1);
       if (ret != 0)
         throw python_error();
@@ -1524,8 +1524,8 @@ Tensor new_tensor(
     if (THPVariable_Check(data)) {
       auto ret = PyErr_WarnEx(
           PyExc_UserWarning,
-          "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-          "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).",
+          "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
+          "or sourceTensor.detach().clone().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).",
           1);
       if (ret != 0)
         throw python_error();

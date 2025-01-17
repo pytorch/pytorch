@@ -51,6 +51,7 @@ on all devices, etc.
 .. autoclass:: DTensor
     :members: from_local, to_local, full_tensor, redistribute, device_mesh, placements
     :member-order: groupwise
+    :special-members: __create_chunk_list__
 
 
 DeviceMesh as the distributed communicator

@@ -439,6 +439,41 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    def test_no_special_handlers_for_torch_non_c_bindings(self):
+        handlers = TorchInGraphFunctionVariable._get_handlers()
+        # These handlers are manually audited to be safe
+        safe_handlers = (
+            "handle_tracing_state_functions",  # No global state (constant)
+            "handle_radians",  # No global state (constant)
+            "handle_is_tensor",  # No global state
+            "handle_torch_compile",  # No global state, constant
+            "handle_ntuple",  # No global state
+            "handle_is_grad_enabled",  # Safely implemented
+            "handle_use_deterministic_algorithms",  # Guarded variable
+            "handle_are_deterministic_algorithms_enabled",  # Guarded constant
+            "handle_device_interface_stream",  # No global state
+            "handle_cudnn_is_acceptable",  # No global state
+            "handle_assert",  # No global state (constant)
+            "handle_nested_tensor",  # No global state
+        )
+        for fn in handlers:
+            if isinstance(fn, staticmethod) or inspect.ismethod(fn):
+                fn_name = f"{fn.__module__}#{fn.__name__}"
+            else:
+                fn_name = f"{fn.__module__}.{fn.__name__}"
+            if handlers[fn].__name__ in safe_handlers:
+                continue
+            self.assertFalse(
+                fn_name in torch_non_c_binding_in_graph_functions,
+                (
+                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
+                    "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
+                    "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
+                    "Otherwise, add it to `manual_torch_name_rule_map` instead."
+                ),
+            )
+
 
 class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(

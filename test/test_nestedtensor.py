@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -3545,7 +3545,7 @@ def get_tolerances(
     true_value: torch.Tensor,
     computed_value: torch.Tensor,
     fudge_factor: Optional[float] = None,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Returns the absolute and relative tolerances for comparing two tensors."""
     fudge_factor = fudge_factor if fudge_factor is not None else 1.0
     atol = get_atol(true_value, computed_value)
@@ -5262,7 +5262,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
             self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
+            pinned = nt.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(nt, pinned)
             self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
