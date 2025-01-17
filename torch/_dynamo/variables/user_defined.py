@@ -217,6 +217,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
+            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
@@ -321,6 +322,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif name == "__new__" and self.value is collections.OrderedDict:
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return variables.ConstDictVariable(
+                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -332,7 +339,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
-        from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -352,8 +358,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.construct_dict),
+                [self, *args],
+                kwargs,
             )
         elif (
             self.value is collections.defaultdict
@@ -936,10 +944,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def _check_for_getattribute(self):
-        if object_has_getattribute(self.value):
-            unimplemented("UserDefinedObjectVariable with custom __getattribute__")
-
     def _check_for_getattr(self):
         return get_custom_getattr(self.value)
 
@@ -961,7 +965,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-        if (
+        if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or isinstance(
                 subobj, _collections._tuplegetter
@@ -970,15 +974,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
             or self._is_c_defined_property(subobj)
+            or inspect.isgetsetdescriptor(
+                subobj
+            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = self.value.__getattribute__(name)
+        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+            # If the object has an overridden getattribute method, Dynamo has
+            # already tried tracing it, and encountered an AttributeError. We
+            # call getattr_static only when the __getattribute__ tracing fails
+            # (check var_getattr impl). So, it is safe here to raise the
+            # AttributeError.
+            raise AttributeError
 
         return subobj
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
-        self._check_for_getattribute()
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
@@ -993,6 +1006,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 mro_source = AttrSource(self.cls_source, "__mro__")
                 klass_source = GetItemSource(mro_source, idx)
                 dict_source = AttrSource(klass_source, "__dict__")
+                # TODO(anijain2305) - This is a mapping proxy object. Ideally we
+                # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
         unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
@@ -1410,6 +1425,14 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         if method in self._dict_methods:
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if type(self.value).__iter__ in (
+            dict.__iter__,
+            collections.OrderedDict.__iter__,
+        ):
+            return self._dict_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

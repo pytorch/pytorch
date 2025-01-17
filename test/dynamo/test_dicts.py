@@ -4,8 +4,9 @@
 # flake8: noqa
 
 import dataclasses
+import itertools
 import unittest
-from collections import OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
 
@@ -61,6 +62,31 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_contains(self):
+        sd = dict()
+        sd[2] = 5
+        sd[4] = 10
+
+        def fn(x):
+            if 1 in sd:
+                x = x * 2
+            else:
+                x = x * 3
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure a recompilation
+        sd[1] = 15
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure not recompilation because the traced program remains same here.
+        sd[2] = 10
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(fn(x), opt_fn(x))
 
     def test_dict_subclass_methods_fallback_readonly(self):
         sd = SimpleDict()
@@ -318,584 +344,387 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, d), fn(x, d))
 
-
-def is_tensor(x):
-    import torch
-
-    return isinstance(x, torch.Tensor)
-
-
-class ModelOutput(OrderedDict):
-    """
-    Copied from transformers.
-    """
-
-    def __init_subclass__(cls) -> None:
-        """Register subclasses as pytree nodes.
-
-        This is necessary to synchronize gradients when using `torch.nn.parallel.DistributedDataParallel` with
-        `static_graph=True` with modules that output `ModelOutput` subclasses.
-        """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # Subclasses of ModelOutput must use the @dataclass decorator
-        # This check is done in __init__ because the @dataclass decorator operates after __init_subclass__
-        # issubclass() would return True for issubclass(ModelOutput, ModelOutput) when False is needed
-        # Just need to check that the current class is not ModelOutput
-        is_modeloutput_subclass = self.__class__ != ModelOutput
-
-        if is_modeloutput_subclass and not is_dataclass(self):
-            raise TypeError(
-                f"{self.__module__}.{self.__class__.__name__} is not a dataclasss."
-                " This is a subclass of ModelOutput and so must use the @dataclass decorator."
-            )
-
-    def __post_init__(self):
-        """Check the ModelOutput dataclass.
-
-        Only occurs if @dataclass decorator has been used.
-        """
-        class_fields = fields(self)
-
-        # Safety and consistency checks
-        if not len(class_fields):
-            raise ValueError(f"{self.__class__.__name__} has no fields.")
-        if not all(field.default is None for field in class_fields[1:]):
-            raise ValueError(
-                f"{self.__class__.__name__} should not have more than one required field."
-            )
-
-        first_field = getattr(self, class_fields[0].name)
-        other_fields_are_none = all(
-            getattr(self, field.name) is None for field in class_fields[1:]
-        )
-
-        if other_fields_are_none and not is_tensor(first_field):
-            if isinstance(first_field, dict):
-                iterator = first_field.items()
-                first_field_iterator = True
-            else:
-                try:
-                    iterator = iter(first_field)
-                    first_field_iterator = True
-                except TypeError:
-                    first_field_iterator = False
-
-            # if we provided an iterator as first field and the iterator is a (key, value) iterator
-            # set the associated fields
-            if first_field_iterator:
-                for idx, element in enumerate(iterator):
-                    if (
-                        not isinstance(element, (list, tuple))
-                        or not len(element) == 2
-                        or not isinstance(element[0], str)
-                    ):
-                        if idx == 0:
-                            # If we do not have an iterator of key/values, set it as attribute
-                            self[class_fields[0].name] = first_field
-                        else:
-                            # If we have a mixed iterator, raise an error
-                            raise ValueError(
-                                f"Cannot set key/value for {element}. It needs to be a tuple (key, value)."
-                            )
-                        break
-                    setattr(self, element[0], element[1])
-                    if element[1] is not None:
-                        self[element[0]] = element[1]
-            elif first_field is not None:
-                self[class_fields[0].name] = first_field
-        else:
-            for field in class_fields:
-                v = getattr(self, field.name)
-                if v is not None:
-                    self[field.name] = v
-
-    def __delitem__(self, *args, **kwargs):
-        raise Exception(
-            f"You cannot use ``__delitem__`` on a {self.__class__.__name__} instance."
-        )
-
-    def setdefault(self, *args, **kwargs):
-        raise Exception(
-            f"You cannot use ``setdefault`` on a {self.__class__.__name__} instance."
-        )
-
-    def pop(self, *args, **kwargs):
-        raise Exception(
-            f"You cannot use ``pop`` on a {self.__class__.__name__} instance."
-        )
-
-    def update(self, *args, **kwargs):
-        raise Exception(
-            f"You cannot use ``update`` on a {self.__class__.__name__} instance."
-        )
-
-    def __getitem__(self, k):
-        if isinstance(k, str):
-            inner_dict = dict(self.items())
-            return inner_dict[k]
-        else:
-            return self.to_tuple()[k]
-
-    def __setattr__(self, name, value):
-        if name in self.keys() and value is not None:
-            # Don't call self.__setitem__ to avoid recursion errors
-            super().__setitem__(name, value)
-        super().__setattr__(name, value)
-
-    def __setitem__(self, key, value):
-        # Will raise a KeyException if needed
-        super().__setitem__(key, value)
-        # Don't call self.__setattr__ to avoid recursion errors
-        super().__setattr__(key, value)
-
-    def __reduce__(self):
-        if not is_dataclass(self):
-            return super().__reduce__()
-        callable, _args, *remaining = super().__reduce__()
-        args = tuple(getattr(self, field.name) for field in fields(self))
-        return callable, args, *remaining
-
-    def to_tuple(self) -> Tuple[Any]:
-        """
-        Convert self to a tuple containing all the attributes/keys that are not `None`.
-        """
-        return tuple(self[k] for k in self.keys())
-
-
-@dataclass
-class BaseModelOutput(ModelOutput):
-    """
-    Copied from transformers
-    """
-
-    last_hidden_state: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-
-
-@dataclass
-class CausalLMOutputWithPast(ModelOutput):
-    """
-    Copied from transformers
-    Base class for causal language model (or autoregressive) outputs.
-
-    Args:
-        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
-            Language modeling loss (for next-token prediction).
-        logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
-            `(batch_size, num_heads, sequence_length, embed_size_per_head)`)
-
-            Contains pre-computed hidden-states (key and values in the self-attention blocks) that can be used (see
-            `past_key_values` input) to speed up sequential decoding.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-
-
-@dataclass
-class BaseModelOutputWithPastAndCrossAttentions(ModelOutput):
-    """
-    Base class for model's outputs that may also contain a past key/values (to speed up sequential decoding).
-
-    Args:
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-
-            If `past_key_values` is used only the last hidden-state of the sequences of shape `(batch_size, 1,
-            hidden_size)` is output.
-        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
-            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
-            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
-            encoder_sequence_length, embed_size_per_head)`.
-
-            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
-            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
-            input) to speed up sequential decoding.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` and `config.add_cross_attention=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
-            weighted average in the cross-attention heads.
-    """
-
-    last_hidden_state: torch.FloatTensor = None
-    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-    cross_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-
-
-@dataclass
-class BaseModelOutputWithPoolingAndCrossAttentions(ModelOutput):
-    """
-    Base class for model's outputs that also contains a pooling of the last hidden states.
-
-    Args:
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-        pooler_output (`torch.FloatTensor` of shape `(batch_size, hidden_size)`):
-            Last layer hidden-state of the first token of the sequence (classification token) after further processing
-            through the layers used for the auxiliary pretraining task. E.g. for BERT-family of models, this returns
-            the classification token after processing through a linear layer and a tanh activation function. The linear
-            layer weights are trained from the next sentence prediction (classification) objective during pretraining.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` and `config.add_cross_attention=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
-            weighted average in the cross-attention heads.
-        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
-            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
-            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
-            encoder_sequence_length, embed_size_per_head)`.
-
-            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
-            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
-            input) to speed up sequential decoding.
-    """
-
-    last_hidden_state: torch.FloatTensor = None
-    pooler_output: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-    cross_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-
-
-class TestModelOutput(torch._dynamo.test_case.TestCase):
-    def test_mo_create(self):
-        def fn(a, b):
-            tmp = BaseModelOutput(a + 1, attentions=b + 3)
-            return tmp
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=2)
-
-    def test_mo_assign(self):
-        def fn(a, b):
-            tmp = BaseModelOutput(last_hidden_state=b + 3)
-            tmp.hidden_states = a + 7
-            tmp["attentions"] = a + b + 6
-            return tmp
-
-        args = [torch.randn(10), torch.randn(10)]
-        obj1 = fn(*args)
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
-        obj2 = opt_fn(*args)
-        self.assertTrue(same(obj1.last_hidden_state, obj2.last_hidden_state))
-        self.assertTrue(same(obj1.hidden_states, obj2.hidden_states))
-        self.assertTrue(same(obj1.attentions, obj2.attentions))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
-
-    def _common(self, fn, op_count):
-        args = [
-            BaseModelOutput(
-                last_hidden_state=torch.randn(10), attentions=torch.randn(10)
-            )
-        ]
-        obj1 = fn(*args)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
-        obj2 = opt_fn(*args)
-        self.assertTrue(same(obj1, obj2))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, op_count)
-
-    def test_mo_getattr(self):
-        def fn(obj: BaseModelOutput):
-            x = obj.last_hidden_state * 10
-            if obj.hidden_states is not None:
-                x += obj.hidden_states
-            if obj.attentions is not None:
-                x += obj.attentions
-            return x
-
-        self._common(fn, 2)
-
-    def test_mo_getattr_missing(self):
-        def fn(obj: BaseModelOutput):
-            if getattr(obj, "asdf", None) is not None:
-                obj.asdf += 1
-            return obj.attentions + 1
-
-        self._common(fn, 1)
-
-    def test_mo_getitem(self):
-        def fn(obj: BaseModelOutput):
-            x = obj["last_hidden_state"] * 10
-            if "hidden_stats" in obj:
-                x += obj["hidden_states"]
-            if "attentions" in obj:
-                x += obj["attentions"]
-            return x
-
-        self._common(fn, 2)
-
-    def test_mo_tuple(self):
-        def fn(obj: BaseModelOutput):
-            a, b = obj.to_tuple()
-            return a + b * 10
-
-        self._common(fn, 2)
-
-    def test_mo_index(self):
-        def fn(obj: BaseModelOutput):
-            return obj[0] * 10 + obj[1]
-
-        self._common(fn, 2)
-
-    def test_mo_init(self):
-        @dataclasses.dataclass
-        class MyDataClass(ModelOutput):
-            a: torch.Tensor
-            b: torch.Tensor = None
-            c: torch.Tensor = None
-            d: torch.Tensor = None
-            e: torch.Tensor = None
-
-        def fn(obj):
-            class_fields = dataclasses.fields(obj)
-            assert len(class_fields)
-            assert all(field.default is None for field in class_fields[1:])
-            other_fields_are_none = all(
-                getattr(obj, field.name) is None for field in class_fields[1:]
-            )
-            assert not other_fields_are_none
-
-            total = getattr(obj, class_fields[0].name)
-            for field in class_fields[1:]:
-                v = getattr(obj, field.name)
-                if v is not None:
-                    total += v
-
-            return total
-
-        tensors = [torch.randn(10), torch.randn(10), torch.randn(10)]
-        obj1 = MyDataClass(*tensors)
-        correct1 = fn(obj1)
-
-        obj2 = MyDataClass(*tensors)
+    def test_lazy_key_guarding(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x):
+            return x * d["a"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop("c")
+        d["d"] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_lazy_key_non_const_guarding(self):
+        d = {
+            list: 2,
+            dict: 3,
+            OrderedDict: 5,
+            namedtuple: 7,
+        }
+
+        def fn(x):
+            return x * d[list]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop(dict)
+        d[defaultdict] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_dict_mutation_side_effect(self):
+        def fn(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        args1 = {"a": torch.randn(10), "b": torch.randn(10)}
+        args2 = dict(args1)
+        assert fn(args1) is args1
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
-        self.assertTrue(same(opt_fn(obj2), correct1))
+        self.assertIs(opt_fn(args2), args2)
+        self.assertTrue(same(args1, args2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_copy_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, d0):
+            d1 = d0.copy()
+            d1[0] = 1
+            return x + 1, d1
+
+        d0 = {}
+        res, d1 = run(torch.zeros(1), d0)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(d0, {})
+        self.assertEqual(d1, {0: 1})
+
+    def test_dict_subclass_get_method(self):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        config = dotdict({"a": 1, "b": 2})
+
+        def fn(x):
+            x2 = x * 2
+            x3 = x * config.get("a", 3)
+            return x3
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_order_keys(self):
+        def fn(d):
+            c = 0
+            for v in d.values():
+                c += v
+            return c
+
+        args1 = {}
+        args1["a"] = torch.rand(10)
+        args1["b"] = torch.rand(10)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    def test_mo_init2(self):
-        # this ModelOutput subclass runs a different __post_init__ codepath
-        @dataclasses.dataclass
-        class MyDataClass(ModelOutput):
-            x: torch.FloatTensor = None
+        # A different order of keys recompiles
+        args2 = {}
+        args2["b"] = args1["b"]
+        args2["a"] = args1["a"]
+        self.assertEqual(fn(args2), opt_fn(args2))
+        self.assertEqual(cnts.frame_count, 2)
+        # Extra calls don't recompile
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_namedtuple(self):
+        def fn(d):
+            if namedtuple in d:
+                return d[3] * 2
+            else:
+                return d[3] * 3
+
+        args1 = {namedtuple: None, 3: torch.randn(3)}
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1), opt_fn(args1))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test a failing namedtuple guard
+        args2 = {2: None, 3: torch.randn(3)}
+        self.assertEqual(fn(args2), opt_fn(args2))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_order_keys_tensors(self):
+        def fn(d, x):
+            return d[x] + 3
+
+        args1 = {}
+        x = torch.randn(10)
+        y = torch.randn(10)
+        z = torch.randn(10)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_order_keys_modules(self):
+        def fn(d, x):
+            return d[x](torch.ones(2, 2))
+
+        args1 = {}
+        x = torch.nn.Linear(2, 2)
+        y = torch.nn.Linear(2, 2)
+        z = torch.nn.Linear(2, 2)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_contains_dunder_dict(self):
+        class UserDefined:
+            def __init__(self) -> None:
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                if "a" in self.__dict__:
+                    x = x * self.a
+                if "b" in self.__dict__:
+                    x = x * self.b
+                self.c = 7
+                if "c" in self.__dict__:
+                    x = x * self.c
+                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
+
+        obj = UserDefined()
 
         def fn(x):
-            obj = MyDataClass(x=x * 5)
-            return obj
+            return obj.run(x)
 
-        inp = torch.randn(3, 3)
+        x = torch.randn(4)
+        ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(inp).x, opt_fn(inp).x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
-    def test_mo_init_with_disable(self):
-        # Can result in "non-function or method super: <slot wrapper '__setattr__' of 'object' objects>"
-        # graph breaks (although it may not be the first)
-        # Minimal repro for https://github.com/pytorch/pytorch/issues/126028
-        @dataclasses.dataclass
-        class MyDataClass(ModelOutput):
-            x: torch.FloatTensor = None
+    def test_contains_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.foo = 1
+                self.bar = 2
+                self.baz = 3
 
-        @torch._dynamo.disable(recursive=False)
-        def fn(x):
-            return MyDataClass(x=x)
-
-        inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp).x, opt_fn(inp).x)
-
-    def test_mo_newkey(self):
-        obj = BaseModelOutput()
-
-        def fn(obj):
-            return obj["wwww"] + 1
-
-        inp = torch.randn(3, 3)
-        obj["wwww"] = inp
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(obj), opt_fn(obj))
-
-    def test_mo_from_outside(self):
-        def fn(obj):
-            return obj.attentions + 1
-
-        obj = BaseModelOutput(attentions=torch.randn(3, 3))
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(obj), opt_fn(obj))
-
-    def test_mo_reconstruct_bytecode(self):
-        def fn(inp):
-            return BaseModelOutput(attentions=inp + 1)
-
-        inp = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp).attentions, opt_fn(inp).attentions)
-
-    def test_none(self):
-        class Model(torch.nn.Module):
             def forward(self, x):
-                x = x + 1
-                return CausalLMOutputWithPast(loss=None, logits=x)[0]
+                if "foo" in self.__dict__:
+                    return x * self.bar
+                return x * self.baz
 
-        model = Model()
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
+
+    def test_update_dunder_dict(self):
+        class UserDefined:
+            def run(self, x):
+                self.__dict__["a"] = 10
+                return x * self.a + self.__dict__["a"]
+
+        obj1 = UserDefined()
+        obj2 = UserDefined()
+
+        def fn(x, obj):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, obj1)
+        res = opt_fn(x, obj2)
+        self.assertEqual(ref, res)
+        # Make sure only `a` is updated.
+        self.assertEqual(obj1.__dict__, obj2.__dict__)
+
+    def test_update_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                self.__dict__["a"] = 10
+                return x * self.a + self.__dict__["a"]
+
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
+
+    def test_dict_reconstruct_keeps_original_order(self):
+        def fn():
+            modules = OrderedDict([("act", torch.nn.ReLU())])
+            module_dict = torch.nn.ModuleDict(modules)
+
+            next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
+            modules.update(next_modules.items())
+            module_dict.update(next_modules)
+            return modules, module_dict
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        modules, module_dict = opt_fn()
+
+        self.assertEqual(len(module_dict), len(modules))
+        for k1, m2 in zip(modules, module_dict.children()):
+            self.assertTrue(modules[k1] is m2)
+
+    def test_dict_subclass_initialization_in_graph(self):
+        for super_class in (
+            OrderedDict,
+            dict,
+        ):
+
+            class CustomDict(super_class):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+
+            def fn(x):
+                c = CustomDict()
+                c["key"] = x
+                assert "key" in c
+                return c["key"] + 1
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+            x = torch.rand(4)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_list_values(self):
+        def inner_fn(args):
+            return [x[1].shape for x in args]
+
+        @torch.compile(backend="eager")
+        def fn(tensors):
+            return inner_fn(zip(itertools.count(), tensors["args"]))
+
+        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
+        fn({"args": [torch.ones(5, 5)]})
+
+    def test_dict_iter(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = {"my": 1, "const": 2, "dict": 3, "variable": 4}
+                tot = 0
+                for key in z:
+                    tot += z[key]
+
+                return tot
+
+        x = torch.tensor([0])
+        model = MyMod()
         opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        x = torch.randn(1, 1, 1, 1)
+        y = opt_model(x)
 
-        self.assertTrue(same(model(x), opt_model(x)))
+        self.assertEqual(y, 10)
 
-    def test_reconstruction(self):
-        torch._export.utils.register_dataclass_as_pytree_node(
-            CausalLMOutputWithPast,
-            serialized_type_name="test_reconstruction_CausalLMOutputWithPast",
-        )
+    def test_dict_subclass_contains(self):
+        # pattern from huggingface
+        class ClassInstantier(OrderedDict):
+            pass
 
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                x = x + 1
-                return CausalLMOutputWithPast(loss=x, logits=None)
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x, d):
+            if "key1" in d:
+                x = x + 2
+            if "key2" in d:
+                x = x + 4
+            x = x + 8
+            return x
 
-        model = Model()
-        x = torch.randn(1, 1, 1, 1)
-        eo = torch._dynamo.export(Model(), aten_graph=True)(x)
-        self.assertTrue(same(model(x), eo.graph_module(x)))
+        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 11.0)))
 
+        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
+        self.assertTrue(same(result, torch.full([8], 13.0)))
 
-class TestModelOutputBert(TestCase):
-    def test_HF_bert_model_output(self, device):
-        class BertPooler(torch.nn.Module):
+    def test_dict_tag_guard(self):
+        class Foo:
             def __init__(self) -> None:
-                super().__init__()
-                self.dense = torch.nn.Linear(768, 768).to(device)
-                self.activation = torch.nn.Tanh()
+                self.scalar = 10
 
-            def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-                # We "pool" the model by simply taking the hidden state corresponding
-                # to the first token.
-                first_token_tensor = hidden_states[:, 0]
-                pooled_output = self.dense(first_token_tensor)
-                pooled_output = self.activation(pooled_output)
-                return pooled_output
+        def fn(d, x):
+            return d["a"] * d["b"] * d["c"].scalar * x
 
-        class BertEncoder(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+        foo = Foo()
 
-            def forward(
-                self,
-                hidden_states: torch.Tensor,
-            ) -> BaseModelOutputWithPastAndCrossAttentions:
-                return BaseModelOutputWithPastAndCrossAttentions(
-                    last_hidden_state=hidden_states,
-                    past_key_values=None,
-                    hidden_states=None,
-                    attentions=None,
-                    cross_attentions=None,
-                )
+        d = {"a": 2, "b": 3, "c": foo}
 
-        class BertModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.encoder = BertEncoder()
-                self.pooler = BertPooler()
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
-            def forward(
-                self,
-                sequence_output: torch.Tensor,
-            ) -> BaseModelOutputWithPoolingAndCrossAttentions:
-                encoder_outputs = self.encoder(sequence_output)
-                # test __getitem__ and to_tuple
-                sequence_output = encoder_outputs[0]
-                pooled_output = (
-                    self.pooler(sequence_output) if self.pooler is not None else None
-                )
-                # test CustomDictVariable.create
-                result = BaseModelOutputWithPoolingAndCrossAttentions(
-                    last_hidden_state=sequence_output,
-                    pooler_output=pooled_output,
-                    past_key_values=encoder_outputs.past_key_values,
-                    hidden_states=encoder_outputs.hidden_states,
-                    attentions=encoder_outputs.attentions,
-                    cross_attentions=encoder_outputs.cross_attentions,
-                )
-                # test __setattr__
-                result.pooler_output = pooled_output
-                # test __setitem__
-                result["pooler_output"] = pooled_output
-                return result
+        d["a"] = 4
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
-        sequence_output = torch.rand(1, 12, 768).to(device)
-        model = BertModel()
-        orig_result = model(sequence_output)
-        compiled_model = torch.compile(model, backend="eager")
-        compiled_result = compiled_model(sequence_output)
-        self.assertTrue(
-            torch.allclose(
-                orig_result.last_hidden_state, compiled_result.last_hidden_state
-            )
-        )
-        self.assertTrue(
-            torch.allclose(orig_result.pooler_output, compiled_result.pooler_output)
-        )
+        # Check that recompilation happens
+        foo.scalar = 12
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
-
-devices = ["cpu"]
-
-instantiate_device_type_tests(TestModelOutputBert, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

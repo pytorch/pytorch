@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
+from typing import Dict, Callable, List, Sequence, Union, Any
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
@@ -3209,7 +3209,7 @@ class NNTestCase(TestCase):
         raise NotImplementedError
 
     @abstractmethod
-    def _get_parameters(self, module: nn.Module) -> Tuple[List[nn.Parameter], List[nn.Parameter]]:
+    def _get_parameters(self, module: nn.Module) -> tuple[List[nn.Parameter], List[nn.Parameter]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -3283,7 +3283,7 @@ class NNTestCase(TestCase):
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
-        res: Tuple[torch.Tensor, ...] = ()
+        res: tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += jacobian_inp,
         if jacobian_parameters:
@@ -3295,7 +3295,7 @@ class NNTestCase(TestCase):
         def fw(*input):
             return self._forward(module, input).detach()
 
-        res: Tuple[torch.Tensor, ...] = ()
+        res: tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:

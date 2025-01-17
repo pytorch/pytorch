@@ -54,7 +54,6 @@ from typing import (
     Optional,
     overload,
     Set,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -78,6 +77,7 @@ from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
+    justknobs_check,
     log_chromium_event_internal,
     log_compilation_event,
     record_chromium_event_internal,
@@ -105,7 +105,7 @@ try:
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
-        NP_SUPPORTED_MODULES: Tuple[types.ModuleType, ...] = (
+        NP_SUPPORTED_MODULES: tuple[types.ModuleType, ...] = (
             np,
             np.fft,
             np.linalg,
@@ -201,8 +201,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: Union[List[Tuple[str, object]], List[List[object]]],
-    headers: Union[Tuple[str, ...], List[str]],
+    rows: Union[List[tuple[str, object]], List[List[object]]],
+    headers: Union[tuple[str, ...], List[str]],
 ) -> str:
     try:
         import tabulate
@@ -298,6 +298,276 @@ def get_metrics_context() -> MetricsContext:
 
 def get_runtime_metrics_context() -> RuntimeMetricsContext:
     return _RUNTIME_METRICS_CONTEXT
+
+
+class CompileEventLogLevel(enum.Enum):
+    """
+    Enum that loosely corresponds with a "log level" of a given event.
+
+    CHROMIUM_EVENT: Logs only to tlparse.
+    COMPILE_EVENT: Logs to tlparse + PT2 Compile Events
+    COMPILATION_METRIC: Logs to tlparse, PT2 Compile Events, and dynamo_compile
+    """
+
+    CHROMIUM = 1
+    PT2_COMPILE = 2
+    COMPILATION_METRIC = 3
+
+
+class CompileEventLogger:
+    """
+    Helper class for representing adding metadata(i.e. columns) to various compile events.
+    Use CompileEventLogger to add event data to:
+    - Chromium events
+    - PT2 Compile Events
+    - CompilationMetrics
+
+    This should be used in conjunction with dynamo_timed() and metrics contexts, which create
+    timed spans and events. CompileEventLogger uses three log levels (described in CompileEventLogLevel),
+    where each log level logs to all sources below it in the hierarchy.
+
+    Example usages:
+    - I want to log to an existing chromium event within dynamo timed:
+    with dynamo_timed("my_event"):
+        CompileEventLogger.chromium("my_event", foo=bar)
+
+    - I want to log my event to both chromium + pt2_compile_events:
+    with dynamo_timed("my_event", log_pt2_compile_event=True):
+        CompileEventLogger.pt2_compile("my_event", foo=bar)
+
+    - I want to add information to dynamo events and dynamo_compile
+        CompileEventLogger.compilation_metric(foo=bar)
+    """
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str,
+        metadata: Dict[str, Any],
+        time_ns: Optional[int] = None,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
+    ):
+        if time_ns is None:
+            time_ns = time.time_ns()
+        chromium_log = get_chromium_event_logger()
+        if log_level == CompileEventLogLevel.CHROMIUM:
+            log_pt2_compile_event = False
+        elif log_level == CompileEventLogLevel.PT2_COMPILE:
+            log_pt2_compile_event = True
+        else:
+            raise RuntimeError(
+                "Cannot log instant event at COMPILATION_METRIC level. Please choose one of CHROMIUM_EVENT or COMPILE_EVENT"
+            )
+        chromium_log.log_instant_event(
+            event_name, time_ns, metadata, log_pt2_compile_event
+        )
+
+    @staticmethod
+    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+        """
+        Centralized API for adding data to various events
+        Log an event to a toplevel "dynamo" event or metrics context
+        depending on log level.
+        """
+        chromium_log = get_chromium_event_logger()
+        pt2_compile_substack = chromium_log.get_pt2_compile_substack()
+
+        if log_level == CompileEventLogLevel.CHROMIUM:
+            chromium_log.add_event_data(event_name, **metadata)
+        elif log_level == CompileEventLogLevel.PT2_COMPILE:
+            pt2_compile_substack = chromium_log.get_pt2_compile_substack()
+            if event_name not in pt2_compile_substack:
+                raise RuntimeError(
+                    "Error: specified log level PT2_COMPILE, but the event %s"
+                    " is not logged to pt2_compile_events. Make sure the event is active and you passed "
+                    "log_pt2_compile_event=True to dynamo_timed",
+                    event_name,
+                )
+            chromium_log.add_event_data(event_name, **metadata)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `log_toplevel_event_data` directly."
+                )
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context."
+                )
+
+            # TODO: should we assert that the keys of metadata are in CompilationMetrics?
+            metrics_context.update(metadata)
+            chromium_log.add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def add_toplevel(log_level: CompileEventLogLevel, **metadata: object):
+        """
+        Syntactic sugar for logging to the toplevel event
+        """
+        top_event = get_chromium_event_logger().get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a dynamo_timed context."
+            )
+        CompileEventLogger.add_data(top_event, log_level, **metadata)
+
+    @staticmethod
+    def increment(
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: int
+    ):
+        """
+        Increments an existing field, or adds it
+        """
+        chromium_log = get_chromium_event_logger()
+        if (
+            log_level == CompileEventLogLevel.CHROMIUM
+            or log_level == CompileEventLogLevel.PT2_COMPILE
+        ):
+            chromium_log.increment(event_name, key, value)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `increment_toplevel` directly."
+                )
+
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context/dynamo_timed."
+                )
+
+            metrics_context.increment(key, value)
+            chromium_log.increment(event_name, key, value)
+
+    @staticmethod
+    def increment_toplevel(
+        key: str,
+        value: int,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
+    ):
+        """
+        Increments a value on the toplevel metric. By default, logs to metric.
+        """
+        chromium_log = get_chromium_event_logger()
+        top_event = chromium_log.get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
+            )
+        CompileEventLogger.increment(top_event, log_level, key, value)
+
+    @staticmethod
+    def add_to_set(
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+    ):
+        """
+        Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
+        """
+        chromium_log = get_chromium_event_logger()
+        if (
+            log_level == CompileEventLogLevel.CHROMIUM
+            or log_level == CompileEventLogLevel.PT2_COMPILE
+        ):
+            chromium_log.add_to_set(event_name, key, value)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `add_to_set_metric` directly."
+                )
+
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context/dynamo_timed."
+                )
+
+            metrics_context.add_to_set(key, value)
+            chromium_log.add_to_set(event_name, key, value)
+
+    @staticmethod
+    def add_to_set_toplevel(
+        key: str,
+        value: Any,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
+    ):
+        """
+        Same as add to set, just does it automatically to the toplevel event instead of having to explicitly name it.
+        Defaults to COMPILATION_METRIC log level.
+        """
+        chromium_log = get_chromium_event_logger()
+        top_event = chromium_log.get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
+            )
+        CompileEventLogger.add_to_set(top_event, log_level, key, value)
+
+    # Helper functions that are syntactic sugar
+
+    @staticmethod
+    def chromium(event_name: str, **metadata: object):
+        """
+        Add <metadata> to <event_name> in chromium. Each key/value of metadata will appear in the chromium trace.
+        <event_name> should be the name of a timed event span passed to `dynamo_timed`.
+        """
+        CompileEventLogger.add_data(
+            event_name, CompileEventLogLevel.CHROMIUM, **metadata
+        )
+
+    @staticmethod
+    def pt2_compile(event_name: str, **metadata: object):
+        """
+        Add <metadata> to <event_name> in chromium and PT2 Compile Events.
+        Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
+        a column in PT2 Compile Events, with the corresponding kwarg value.
+        <event_name> should be the name of a timed event span passed to `dynamo_timed`,
+        with log_to_pt2_compile_events=True.
+        """
+        CompileEventLogger.add_data(
+            event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
+        )
+
+    @staticmethod
+    def compilation_metric(**metadata: object):
+        """
+        Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
+        and chromium.
+        Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
+        a column in PT2 Compile Events and Dynamo Compile, with the corresponding kwarg value.
+        """
+        CompileEventLogger.add_toplevel(
+            CompileEventLogLevel.COMPILATION_METRIC, **metadata
+        )
+
+    @staticmethod
+    def instant(
+        event_name: str, metadata: Dict[str, Any], time_ns: Optional[int] = None
+    ):
+        """
+        Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
+        Perfetto will point to metadata. <time_ns> should be a value obtained from time.time_ns().
+        """
+        CompileEventLogger.log_instant_event(
+            event_name, metadata, time_ns, CompileEventLogLevel.CHROMIUM
+        )
+
+    @staticmethod
+    def try_add_pt2_compile(event_name: str, **metadata: object):
+        """
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        This function is syntactic sugar for chromium_event_logger().try_add_event_data.
+        """
+        chromium_log = get_chromium_event_logger()
+        chromium_log.try_add_event_data(event_name, **metadata)
 
 
 @contextmanager
@@ -435,7 +705,7 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> Tuple[List[str], List[object]]:
+) -> tuple[List[str], List[object]]:
     ...
 
 
@@ -503,7 +773,7 @@ class DuplicateWarningChecker:
     def reset(self):
         self.set = OrderedDict()
 
-    def add(self, key: Union[str, Tuple[object, object]]) -> bool:
+    def add(self, key: Union[str, tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -642,7 +912,7 @@ def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
 
 @overload
 def istype(
-    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+    obj: object, allowed_types: tuple[Type[List[T]], Type[tuple[T, ...]]]
 ) -> TypeIs[T]:
     ...
 
@@ -785,7 +1055,7 @@ def is_numpy_ndarray(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    tensor_list: Tuple[type, ...] = (
+    tensor_list: tuple[type, ...] = (
         torch.Tensor,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
@@ -1006,6 +1276,16 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 
 
 def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
+    """
+    These are the common fields in CompilationMetrics that existed before
+    metrics_context, and aren't set by MetricsContext.set(). We add the subset
+    of them that make sense in `dynamo`/toplevel events in PT2 Compile Events
+    directly.
+
+    If you're tempted to add to this list, consider using CompileEventLogger.compilation_metric()
+    instead, which will automatically also add it to tlparse and PT2 Compile Events.
+    TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
+    """
     event_logger = get_chromium_event_logger()
     event_name = event_logger.get_top()
     if not event_name:
@@ -1076,7 +1356,10 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
                 del inductor_config_copy[key]
             # Stringify Inductor config
             inductor_conf_str = json.dumps(
-                inductor_config_copy, cls=TypeSafeSerializer, skipkeys=True
+                inductor_config_copy,
+                cls=TypeSafeSerializer,
+                skipkeys=True,
+                sort_keys=True,
             )
         except Exception:
             # Don't crash because of runtime logging errors
@@ -1264,6 +1547,46 @@ class ChromiumEventLogger:
         if event_name not in event_data:
             event_data[event_name] = {}
         event_data[event_name].update(kwargs)
+
+    def increment(self, event_name: str, key: str, value: int):
+        """
+        Increment an integer event data field by the given amount
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
+                "Please make sure the event has started and hasn't ended."
+            )
+
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        if key not in event_data[event_name]:
+            event_data[event_name][key] = 0
+        event_data[event_name][key] += value
+
+    def add_to_set(
+        self,
+        event_name: str,
+        key: str,
+        value: Any,
+    ):
+        """
+        Add a value to a set within a event_name's metadata if it exists
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
+                "Please make sure the event has started and hasn't ended."
+            )
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        if key not in event_data[event_name]:
+            event_data[event_name][key] = set()
+        event_data[event_name][key].add(value)
 
     def log_event_start(
         self,
@@ -1732,7 +2055,7 @@ def is_namedtuple_cls(cls):
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls) -> Tuple[str, ...]:
+def namedtuple_fields(cls) -> tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
         return ("start", "stop", "step")
@@ -1854,13 +2177,71 @@ def is_safe_constant(v):
     )
 
 
+@functools.lru_cache(None)
+def common_constants():
+    return {
+        # We zero-one specialize shapes, so specialize these constants
+        # too
+        0,
+        1,
+    }
+
+
+def is_torch_sym(value):
+    return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
+        value.node, torch.nested._internal.nested_int.NestedIntNode
+    )
+
+
+def is_int_specialization_case(value, source):
+    from .source import is_from_defaults
+
+    return not TracingContext.get().force_unspec_int_unbacked_size_like and (
+        # Assume integers from global variables want to be specialized
+        not source.guard_source().is_local()
+        # Assume that integers that came from NN modules want to be
+        # specialized (as we don't expect users to be changing the
+        # NN modules on the fly), unless explicitly disabled
+        or (
+            source.guard_source().is_specialized_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or is_from_defaults(source)
+        # TODO: Delete this condition when rollout is done.  NB: this
+        # condition never evaluates True in open source
+        or (
+            not justknobs_check("pytorch/dynamo:enable_unspecialize_zero_one_plain_int")
+            and value in common_constants()
+        )
+    )
+
+
 def specialize_symnode(arg):
-    from .variables import ConstantVariable, SymNodeVariable
+    from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
+
+        source = arg.original_source()
+        value = arg.original_value()
+
+        is_symnode_vt = is_torch_sym(value) or (
+            not config.specialize_int
+            and type(value) is int
+            and not is_int_specialization_case(value, source)
+        )
+
+        if not is_symnode_vt:
+            return arg
+
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
-
     return arg
 
 
@@ -1962,7 +2343,7 @@ def tuple_iterator_getitem(it, index):
 iter_next = next
 
 
-def normalize_range_iter(range_iter) -> Tuple[int, int, int]:
+def normalize_range_iter(range_iter) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
     # already incremented by the current index.
@@ -2269,7 +2650,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning("Similarity score=%s", score.cpu().detach().item())
+                log.warning("Similarity score=%s", score.detach().cpu().item())
             return score >= 0.99
         else:
             if not exact_dtype:
@@ -2844,7 +3225,7 @@ def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
     tensor_source: Source,
-) -> Tuple[bool, Optional[TensorStaticReason]]:
+) -> tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 

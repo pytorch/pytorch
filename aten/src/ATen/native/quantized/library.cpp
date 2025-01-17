@@ -1,5 +1,5 @@
 #include <torch/library.h>
-#include <aten/src/ATen/native/quantized/library.h>
+#include <ATen/native/quantized/library.h>
 
 TORCH_LIBRARY(quantized, m) {
   m.set_python_module("caffe2.torch.fb.model_transform.splitting.split_dispatcher");
