@@ -384,8 +384,14 @@ class ResultType:
 
     _vals: Dict[ComboType, Status]
 
+    def __repr__(self) -> str:
+        return f"ResultType[{self._vals}]"
+
     def __init__(self) -> None:
         self._vals = {}
+
+    def __len__(self) -> int:
+        return len(self._vals)
 
     def num_ran(self) -> int:
         """
@@ -401,9 +407,6 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def __len__(self) -> int:
-        return len(self._vals)
-
     def lookup(self, combo: ComboType) -> Optional[Status]:
         combo = tuple(sorted(combo))
         return self._vals.get(combo, None)
@@ -414,7 +417,7 @@ class ResultType:
 
 # Type that maps config strings to their default value
 ConfigType = Dict[str, Any]
-# Callable that returns a tupl
+# Callable that returns a bool
 FactoryOutputType = Callable[[], bool]
 # input function factory
 FactoryType = Callable[[], FactoryOutputType]
@@ -431,9 +434,9 @@ class ConfigFuzzer:
       every other config.
 
     The main interface is a function factory that will return Callables to be torch.compiled. This function factory
-      should return a test function when it's called. If said test function returns a boolean, then a False or True
-      determines whether the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the
-      function will be considered a failure as well.
+      should return a test function when it's called. Said test function returns a boolean, which determines whether
+      the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the function will be
+      considered a failure as well.
 
     # Example usage:
 
@@ -528,7 +531,7 @@ class ConfigFuzzer:
                     "cpp.cxx": DEFAULT,  # Out of Scope
                     "TYPE_CHECKING": DEFAULT,  # Not a config
                     "max_autotune_pointwise": DEFAULT,  # Timing
-                    "max_autotune_gemm": DEFAULT,  # Timing
+                    "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
                     "max_autotune_gemm_backends": DEFAULT,  # Timing
                     "max_autotune_conv_backends": DEFAULT,  # Timing
                     "max_autotune_gemm_search_space": DEFAULT,  # Timing
@@ -554,6 +557,7 @@ class ConfigFuzzer:
                     "profile_bandwidth_regex": DEFAULT,  # Known Failure
                     "disable_cpp_codegen": DEFAULT,  # Known Failure
                     "trace.save_real_tensors": DEFAULT,  # Known Failure
+                    "pre_grad_fusion_options": DEFAULT,  # Typing
                 }
             else:
                 raise ValueError("No default passed to ConfigFuzzer.")
@@ -711,7 +715,8 @@ class ConfigFuzzer:
 
         # try compilation
         try:
-            comp = torch.compile()(self.test_model_fn_factory())
+            test_model_fn2 = self.test_model_fn_factory()
+            comp = torch.compile(test_model_fn2, backend="inductor")
         except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
@@ -729,17 +734,12 @@ class ConfigFuzzer:
             )
 
         # bool return value means don't compare with eager
-        if type(compile_result) is bool:
-            if not compile_result:
-                return handle_return(
-                    "Function returned False", Status.FAILED_RUN_RETURN, False, None
-                )
-            else:
-                return handle_return("Function succeeded", Status.PASSED, False, None)
-        else:
-            raise ValueError(
-                f"Unable to process return type of test function: {type(compile_result)}"
+        if not compile_result:
+            return handle_return(
+                "Function returned False", Status.FAILED_RUN_RETURN, False, None
             )
+        else:
+            return handle_return("Function succeeded", Status.PASSED, False, None)
 
     def bisect(self, num_attempts: int = 100, p: float = 0.5) -> List[ConfigType]:
         """
@@ -942,88 +942,3 @@ def visualize_results(
 
     with open(filename, "w") as file:
         file.write(html_content)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Config Fuzzer CLI")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument(
-        "--num_attempts", type=int, default=100, help="Number of attempts for fuzzing"
-    )
-    parser.add_argument(
-        "--n", type=int, default=2, help="Number of configurations to combine"
-    )
-    parser.add_argument(
-        "--method",
-        choices=["n_tuple", "bisect"],
-        default="bisect",
-        help="Fuzzing method",
-    )
-    parser.add_argument(
-        "--timeout", type=int, default=60, help="Test timeout in seconds"
-    )
-    parser.add_argument(
-        "--sampling_method",
-        choices=["toggle", "random"],
-        default="toggle",
-        help="Method of sampling config values",
-    )
-    parser.add_argument("--save_state", type=str, help="Save state to file")
-    parser.add_argument("--load_state", type=str, help="Load state from file")
-    parser.add_argument(
-        "--gpu", type=bool, default=True, help="Whether to test the GPU or not"
-    )
-
-    def create_simple_test_model_cpu() -> FactoryOutputType:
-        def test_fn() -> bool:
-            model = torch.nn.Sequential(
-                torch.nn.Linear(10, 10), torch.nn.ReLU(), torch.nn.Linear(10, 1)
-            )
-
-            x = torch.randn(32, 10)
-            model(x)
-            return True
-
-        return test_fn
-
-    def create_simple_test_model_gpu() -> FactoryOutputType:
-        batch_size = 32
-        seq_length = 50
-        hidden_size = 768
-
-        def test_fn() -> bool:
-            inp = torch.randn(batch_size, seq_length, hidden_size, device="cuda")
-            weight = torch.randn(hidden_size, hidden_size, device="cuda")
-            matmul_output = inp @ weight
-            torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
-            return True
-
-        return test_fn
-
-    args = parser.parse_args()
-    if args.sampling_method == "toggle":
-        sm = SamplingMethod.TOGGLE
-    else:
-        sm = SamplingMethod.RANDOM
-
-    fuzzer = ConfigFuzzer(
-        config_module=torch._inductor.config,  # type: ignore[arg-type]
-        test_model_fn_factory=create_simple_test_model_gpu
-        if args.gpu
-        else create_simple_test_model_cpu,
-        seed=args.seed,
-        test_timeout=args.timeout,
-        sm=sm,
-    )
-
-    if args.load_state:
-        fuzzer.load_state(args.load_state)
-
-    if args.method == "n_tuple":
-        results = fuzzer.fuzz_n_tuple(n=args.n, max_combinations=args.num_attempts)
-        if args.save_state:
-            fuzzer.save_state(args.save_state)
-    else:
-        print(fuzzer.bisect(num_attempts=args.num_attempts, p=1.0))
