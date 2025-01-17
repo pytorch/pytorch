@@ -3882,8 +3882,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_upcast_appropriately(self):
-        flex_attention = torch.compile(flex_attention, dynamic=False)
-
         q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
         k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
         v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
@@ -3892,7 +3890,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def score_mod(score, b, h, q_idx, kv_idx):
             return score + torch.log(mass[0])
 
-        out = flex_attention(q, k, v, score_mod=score_mod) 
+        out = torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
 
     @supported_platform
     def test_init_mismatched_full_kv(self):
@@ -4089,7 +4087,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             f"Expected output shape {expected_shape}, but got {result.shape}",
         )
 
-
     @supported_platform
     def test_create_is_cuda_graphable(self):
         def mask_mod(b, h, q, kv):
@@ -4101,7 +4098,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             create_block_mask(mask_mod, None, None, 256, 256)
 
         g.replay()
-
 
     @common_utils.parametrize("compile", [False, True])
     @supported_platform

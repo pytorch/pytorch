@@ -756,9 +756,9 @@ def maybe_upcast_float32(convert_output: bool = True):
     """
 
     def needs_upcast(var) -> bool:
-        return (
-            isinstance(var, CSEVariable)
-            and var.dtype in (torch.float16, torch.bfloat16)
+        return isinstance(var, CSEVariable) and var.dtype in (
+            torch.float16,
+            torch.bfloat16,
         )
 
     def maybe_upcast_arg(var) -> str:
