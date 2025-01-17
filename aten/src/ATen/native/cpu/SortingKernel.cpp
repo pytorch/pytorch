@@ -172,19 +172,15 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
 #else
   if (descending) {
     if (stable) {
-      std::stable_sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
+      std::stable_sort(composite_accessor, composite_accessor + dim_size, KeyValueCompDesc<scalar_t>());
     } else {
-      std::sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
-            KeyValueCompDesc<scalar_t>());
+      std::sort(composite_accessor, composite_accessor + dim_size, KeyValueCompDesc<scalar_t>());
     }
   } else {
     if (stable) {
-      std::stable_sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
+      std::stable_sort(composite_accessor, composite_accessor + dim_size, KeyValueCompAsc<scalar_t>());
     } else {
-      std::sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
-            KeyValueCompAsc<scalar_t>());
+      std::sort(composite_accessor, composite_accessor + dim_size, KeyValueCompAsc<scalar_t>());
     }
   }
 #endif

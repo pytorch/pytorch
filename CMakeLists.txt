@@ -542,7 +542,8 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed -ltbb")
+      "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
+
   set(ENV_LDFLAGS "$ENV{LDFLAGS}")
   string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
   # Do not append linker flags passed via env var if they already there

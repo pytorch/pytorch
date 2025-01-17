@@ -28,8 +28,6 @@ RUN yum install -y \
   openssl-devel \
   patch \
   perl \
-  tbb \
-  tbb-devel \
   unzip \
   util-linux \
   wget \
