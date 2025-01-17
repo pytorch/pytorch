@@ -764,7 +764,7 @@ class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
     def __init__(self, name: str) -> None:
         self.file_stream = None
-        self.name = str(name)
+        self.name = name
         try:
             self.name.encode("ascii")
         except UnicodeEncodeError:
