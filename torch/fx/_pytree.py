@@ -22,6 +22,13 @@ def register_pytree_flatten_spec(
     SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec
 
 
+def _deregister_pytree_flatten_spec(
+    cls: Type[Any],
+) -> None:
+    del SUPPORTED_NODES[cls]
+    del SUPPORTED_NODES_EXACT_MATCH[cls]
+
+
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,

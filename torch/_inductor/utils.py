@@ -29,6 +29,7 @@ from typing import (
     Collection,
     Generic,
     Iterator,
+    Literal,
     MutableSet,
     NamedTuple,
     Optional,
@@ -67,7 +68,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -288,11 +289,13 @@ def ceildiv(numer: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Exp
     return runtime_ceildiv(numer, denom)
 
 
-def _type_of(key: torch.dtype) -> str:
+def _type_of(key: torch.dtype | None) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
     # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
+    if key is None:
+        return "*i8"
     dtype_str = str(key).split(".")[-1]
     tys = {
         "bool": "i1",
@@ -362,7 +365,7 @@ def is_view(op: torch._ops.OpOverload) -> bool:
 
 def is_pointwise_use(
     use: Node,
-    is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda o: False,
+    is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
 ) -> bool:
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
@@ -479,7 +482,11 @@ def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
     def sort_func(elem: _T) -> str:
         if isinstance(elem, str):
             return elem
-        return elem.get_name()  # type: ignore[attr-defined]
+
+        from .scheduler import BaseSchedulerNode
+
+        assert isinstance(elem, BaseSchedulerNode)
+        return elem.get_name()
 
     return sorted(x, key=sort_func)
 
@@ -548,8 +555,10 @@ def _aggregate_origins(
 
 
 def get_fused_kernel_name(
-    node_schedule: Sequence[BaseSchedulerNode], descriptive_names: str | bool
+    node_schedule: Sequence[BaseSchedulerNode],
+    descriptive_names: bool | Literal["torch", "original_aten", "inductor_node"],
 ) -> str:
+    assert descriptive_names is not True
     if not descriptive_names:
         return ""
 
@@ -662,17 +671,19 @@ def dominated_nodes(
     return dominated_set
 
 
-def gather_origins(args: Sequence[Any], kwargs: dict[str, Any]) -> OrderedSet[Any]:
+def gather_origins(
+    args: Sequence[IRNode], kwargs: dict[str, IRNode]
+) -> OrderedSet[IRNode]:
     import itertools
 
     from . import ir
 
     def is_unrealized_node(n: Any) -> bool:
-        if isinstance(n, ir.TensorBox):
-            return is_unrealized_node(n.data)
-        if isinstance(n, ir.StorageBox):
-            return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
+        return (
+            (isinstance(n, ir.TensorBox) and is_unrealized_node(n.data))
+            or (isinstance(n, ir.StorageBox) and is_unrealized_node(n.data))
+            or isinstance(n, ir.Pointwise)
+        )
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -727,7 +738,7 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
 
 
-def generate_assert(check: Any) -> bool:
+def generate_assert(check: bool) -> bool:
     return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
@@ -1416,10 +1427,16 @@ def _use_template_for_cpu(layout: Layout) -> bool:
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_bmm_template(layout: Layout, mat1: IRNode, mat2: IRNode) -> bool:
+def use_cpp_bmm_template(
+    layout: Layout, mat1: ReinterpretView | Buffer, mat2: IRNode
+) -> bool:
+    from .ir import Layout
+
+    assert isinstance(mat1.layout, Layout)
+
     return (
         use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
-        and mat1.layout.is_contiguous()  # type: ignore[attr-defined]
+        and mat1.layout.is_contiguous()
     )
 
 

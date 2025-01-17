@@ -721,8 +721,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
-            use_array_ref=config.aot_inductor.allow_stack_allocation,
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
