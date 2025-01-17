@@ -16,7 +16,6 @@ from typing import (
     Optional,
     overload,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -141,7 +140,7 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
+    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
 ) -> float:
     ...
 
@@ -254,6 +253,11 @@ class CompileCounterWithBackend:
                 self.op_count += 1
         self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
+
+    def clear(self) -> None:
+        self.frame_count = 0
+        self.op_count = 0
+        self.graphs = []
 
 
 # Equivalent to backend="eager", but also records graphs that
