@@ -12,9 +12,9 @@ export TERM=vt100
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Do not change workspace permissions for ROCm CI jobs
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -86,6 +86,13 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export VALGRIND=OFF
 fi
 
+
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # There are additional warnings on s390x, maybe due to newer gcc.
+  # Skip this check for now
+  export VALGRIND=OFF
+fi
+
 if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH_ERROR}" == "1" ]]; then
   # When rerunning disable tests, do not generate core dumps as it could consume
   # the runner disk space when crashed tests are run multiple times. Running out
@@ -129,7 +136,7 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1
+  export HIP_VISIBLE_DEVICES=0,1,2,3
 fi
 
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
@@ -329,7 +336,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
-  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
@@ -382,15 +389,29 @@ test_inductor_aoti() {
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
-test_inductor_cpp_wrapper() {
+test_inductor_cpp_wrapper_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
-  # unit tests with cpp wrapper.
-  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+  if [[ "$1" -eq "2" ]]; then
+    # For now, manually put the opinfo tests in shard 2, and all other tests in
+    # shard 1.  Test specific things triggering past bugs, for now.
+    python test/run_test.py \
+      --include inductor/test_torchinductor_opinfo \
+      -k 'linalg or to_sparse' \
+      --verbose
+    exit
+  fi
 
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we
+  # should be able to run all the inductor unit tests with cpp_wrapper.
+  python test/run_test.py --include inductor/test_torchinductor --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -520,7 +541,7 @@ test_perf_for_dashboard() {
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -636,7 +657,7 @@ test_inductor_halide() {
 }
 
 test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
 }
 
@@ -896,10 +917,20 @@ test_libtorch_api() {
   else
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+
+    # On s390x, pytorch is built without llvm.
+    # Even if it would be built with llvm, llvm currently doesn't support used features on s390x and
+    # test fails with errors like:
+    # JIT session error: Unsupported target machine architecture in ELF object pytorch-jitted-objectbuffer
+    # unknown file: Failure
+    # C++ exception with description "valOrErr INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/torch/csrc/jit/tensorexpr/llvm_jit.h":34, please report a bug to PyTorch. Unexpected failure in LLVM JIT: Failed to materialize symbols: { (main, { func }) }
+    if [[ "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
+      python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+    fi
   fi
 
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+  # quantization is not fully supported on s390x yet
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* && "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
     # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
     export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
     python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
@@ -1500,7 +1531,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchaudio cuda
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
+  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
