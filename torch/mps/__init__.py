@@ -159,7 +159,9 @@ def _compile_shader(source: str):
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
     source = _embed_headers(
-        source.split("\n"), [Path(__file__).parent.parent / "include"], set()
+        [l + "\n" for l in source.split("\n")],
+        [Path(__file__).parent.parent / "include"],
+        set(),
     )
     return torch._C._mps_compileShader(source)
 
