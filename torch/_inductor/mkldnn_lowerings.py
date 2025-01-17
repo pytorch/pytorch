@@ -827,6 +827,17 @@ def register_onednn_fusion_ops():
                 5: lambda x: V.graph.constants[x.get_name()],  # weight zp
                 6: lambda x: V.graph.constants[x.get_name()],  # bias
             }
+            if isinstance(
+                ir.InputsKernel.unwrap_storage_for_input(x_scale),
+                ir.ConstantBuffer,
+            ):
+                # x is statically quantized
+                input_gen_fns[1] = lambda x: V.graph.constants[x.get_name()]
+            if isinstance(
+                ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                ir.ConstantBuffer,
+            ):
+                input_gen_fns[2] = lambda x: V.graph.constants[x.get_name()]
 
             result = autotune_select_algorithm(
                 "qlinear_unary",
