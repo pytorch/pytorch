@@ -733,9 +733,13 @@ class SweepInputs2:
         "broadcast1",
         "broadcast2",
         "broadcast3",
-        "double",
         "int",
     ]
+
+    # MPS doesn't support 64-bits floating point
+    if GPU_TYPE != "mps":
+        input_gen_types1.append("double")
+
     input_gen_types2 = input_gen_types1
     gen = None
 
