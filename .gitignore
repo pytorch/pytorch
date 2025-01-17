@@ -79,6 +79,7 @@ torch/return_types.pyi
 torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
+torch/csrc/functionalization/generated/*
 torch/csrc/lazy/generated/*.[!m]*
 torch_compile_debug/
 # Listed manually because some files in this directory are not generated

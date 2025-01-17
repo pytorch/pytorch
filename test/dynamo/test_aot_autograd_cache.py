@@ -250,11 +250,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
     )
-    def test_view_replay_bypass(self):
-        """
-        Shoud bypass when view replay is turned on
-        """
-
+    def test_view_replay(self):
         def fn(a):
             tmp = a.detach()
             a.mul_(2)
@@ -262,10 +258,25 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         with torch.autograd._force_original_view_tracking(True):
             compiled_fn = torch.compile(fn)
-            compiled_fn(torch.rand(2, 3))
 
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        def run_and_check(miss, hit, bypass):
+            self._clear_dynamo_and_codecache()
+
+            inp = torch.rand(2, 3)
+            compiled_inp = inp.clone().detach()
+
+            with torch.autograd._force_original_view_tracking(True):
+                out = fn(inp)
+                compiled_out = compiled_fn(compiled_inp)
+
+            self.assertEqual(out, compiled_out)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], miss)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hit)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], bypass)
+
+        run_and_check(miss=1, hit=0, bypass=0)
+        run_and_check(miss=1, hit=1, bypass=0)
+        run_and_check(miss=1, hit=2, bypass=0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
