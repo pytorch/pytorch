@@ -1,4 +1,4 @@
-#include <c10/util/metal_math.h>
+#include <c10/util/metal_special_math.h>
 
 template <typename T, typename Tout = T>
 void kernel

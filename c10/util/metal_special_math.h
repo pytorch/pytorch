@@ -1,4 +1,4 @@
-// Common math primitives for metal shaders
+// Implementation of specal math functions for Metal
 #include <metal_stdlib>
 
 namespace c10 {
