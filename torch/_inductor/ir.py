@@ -6619,9 +6619,7 @@ class FallbackKernel(ExternKernelAlloc):
             # For non-aten OpOverload, i.e. custom ops
             self.use_runtime_dispatch = True
 
-        if self.use_runtime_dispatch:
-            self.codegen_comment(wrapper)
-
+        def do_runtime_dispatch():
             exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
@@ -6636,12 +6634,33 @@ class FallbackKernel(ExternKernelAlloc):
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            do_runtime_dispatch()
         else:
-            self.codegen_comment(wrapper)
             args = [*self.codegen_args(), *self.codegen_kwargs()]
-            V.graph.wrapper_code.generate_fallback_kernel(self, args)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
+            if V.graph.cpp_wrapper and isinstance(kernel, torch._ops.OpOverload):
+
+                def is_number(t: torch.JitType) -> bool:
+                    return isinstance(t, torch.NumberType) or (
+                        isinstance(t, torch.OptionalType)
+                        and isinstance(t.getElementType(), torch.NumberType)
+                    )
+
+                # Handle the special case where a complex number is input to a
+                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
+                # the torchgen-created shim API will use type "double", which cannot be
+                # converted to from a c10::complex.  In these cases, fallback to runtime
+                # dispatch.
+                for arg_str, op_arg in zip(args, kernel._schema.arguments):
+                    if "complex" in arg_str and is_number(op_arg.real_type):
+                        do_runtime_dispatch()
+                        break
+                else:
+                    V.graph.wrapper_code.generate_fallback_kernel(self, args)
+                    if isinstance(self.layout, Layout):
+                        self.codegen_size_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 

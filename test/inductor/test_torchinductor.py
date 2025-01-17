@@ -779,6 +779,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -803,6 +813,10 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_mps_backend(device):
+    return getattr(device, "type", device) == "mps"
 
 
 def is_triton_backend(device):
@@ -1316,16 +1330,10 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            # cpp_wrapper falls back to Python function calls with complex inputs, so
-            # there are still two calls to aten.view when it's enabled.
             code = " ".join(code)
-            if config.cpp_wrapper:
-                self.assertEqual(code.count("view_dtype"), 1)
-                # The additional 2 counts here come from error messages containing this
-                # string.
-                self.assertEqual(code.count("aten.view"), 4)
-            else:
-                self.assertEqual(code.count("aten.view"), 3)
+            self.assertEqual(
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
