@@ -62,18 +62,18 @@ build_docs () {
     sphinx-build -b html \
       ${SPHINXOPTS} \
       --ignore-modified-after \
-      -d docs/build/doctrees \
-      docs/source \
-      docs/build/html \
+      -d build/doctrees \
+      source \
+      build/html \
       $changed_files 2>&1 | tee /tmp/docs_build.txt
   else
     echo "No RST files changed, doing full build"
     SPHINXOPTS="-j auto -W --keep-going -n"
     sphinx-build -b html \
       ${SPHINXOPTS} \
-      -d docs/build/doctrees \
-      docs/source \
-      docs/build/html 2>&1 | tee /tmp/docs_build.txt
+      -d build/doctrees \
+      source \
+      build/html 2>&1 | tee /tmp/docs_build.txt
   fi
   
   code=$?
