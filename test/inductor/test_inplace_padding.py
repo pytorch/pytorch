@@ -7,6 +7,8 @@ import torch
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -39,7 +41,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 @inductor_config.patch(inplace_padding=enable_inplace_padding)
 class InplacePaddingTest(TestCase):
-    def test_pad_nonzero_fusible(self):
+    def test_skip_pad_due_to_fusion(self):
         """
         If the padding can be fused with downstream op, there would
         be little benefit to do inplace padding.
@@ -55,7 +57,13 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    def test_pad_nonzero_non_fusible(self):
+    def test_skip_pad_input(self):
+        """
+        Don't apply the padding to graph input since Inductor does not
+        allocatae the input and can not guarantee enough trailing space
+        for padding.
+        """
+
         def f(x, y):
             x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
             return x @ y
@@ -65,6 +73,37 @@ class InplacePaddingTest(TestCase):
         y = torch.randn(N + 8, M, device=GPU_TYPE)
         check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
+        self.assertEqual(num_inplace_padding(), 0)
+
+    def test_pad_non_zero(self):
+        def f(x):
+            x = x + 1
+            x = aten.constant_pad_nd(x, (0, 1, 0, 0), 12345.0)
+
+            return x @ x
+
+        # 'odd' shape on purpose to pad intermediate buffer's strides
+        x = torch.randn(2048, 2047, device=GPU_TYPE)
+
+        ref = f(x)
+        act, (code,) = run_and_get_code(torch.compile(f), x)
+
+        # When we allocate the 2048x2047 tensor for the output of 'x + 1'
+        # Instead of doing
+        #   empty_strided_cuda((2048, 2047), (2048, 1), torch.float32)
+        # (note the stride is already padded)
+        # We do
+        #   empty_strided_cuda((2048, 2048), (2048, 1), torch.float32).
+        #     as_strided((2048, 2047), (2048, 1))
+        # . This will allocate an extra item for the last row so that
+        # inplace padding would be safe without accessing out of bound
+        # memory.
+        FileCheck().check(
+            "empty_strided_cuda((2048, 2048), (2048, 1), torch.float32)."
+            + "as_strided((2048, 2047), (2048, 1))"
+        ).run(code)
+
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
         self.assertEqual(num_inplace_padding(), 1)
 
     def test_pad_too_large(self):
@@ -79,6 +118,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @inductor_config.patch(can_inplace_pad_graph_input=True)
     def test_mutating_padding_input(self):
         """
         Even if `aten.constant_pad_nd` input get inplace updated,
@@ -91,7 +131,9 @@ class InplacePaddingTest(TestCase):
             return x2 @ y
 
         M, N = 2048, 2048
-        x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
+        x = rand_strided((M, N + 10), (N + 10, 1), device=GPU_TYPE).as_strided(
+            (M, N), (N + 10, 1)
+        )
         y = torch.randn(N + 8, M, device=GPU_TYPE)
         check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
 
@@ -118,8 +160,8 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 0)
 
     @unittest.skipIf(
-        torch.cuda.is_available()
-        and torch.cuda.get_device_properties().total_memory < 2e10,
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties().total_memory < 2e10,
         "Only if the GPU has at least 20GB memory to be safe",
     )
     @inductor_config.patch(force_shape_pad=True)
@@ -161,6 +203,12 @@ class InplacePaddingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x, y))
             print(f"{inductor_config.inplace_padding=} {ms=:.3f}")
+
+    # Enable Max-Autotune to repro this test failure:
+    #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @inductor_config.patch(max_autotune=True)
+    def test_linear_and_cel_max_autotune(self):
+        self.test_linear_and_cel()
 
 
 if __name__ == "__main__":

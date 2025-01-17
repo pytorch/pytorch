@@ -6,8 +6,22 @@ import re
 import sys
 import traceback
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-from typing_extensions import deprecated
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    overload,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._library as _library
@@ -37,6 +51,9 @@ __all__ = [
     "wrap_triton",
     "infer_schema",
 ]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -529,14 +546,53 @@ def _(lib: Library, schema, alias_analysis=""):
     return wrap
 
 
+@overload
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Literal[None] = None,
+    *,
+    lib: Optional[Library] = None,
+) -> Callable[[Callable[..., object]], None]: ...
+
+
+@overload
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Callable[..., object],
+    *,
+    lib: Optional[Library] = None,
+) -> None: ...
+
+
+# Deprecated BC API
+@overload
+def impl(
+    lib: Library,
+    name: str,
+    dispatch_key: str = "",
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
+
+
 @functools.singledispatch
-def impl(qualname, types, func=None, *, lib=None):
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Optional[Callable[_P, _T]] = None,
+    *,
+    lib: Optional[Library] = None,
+) -> object:
     """Register an implementation for a device type for this operator.
 
     You may pass "default" for ``types`` to register this implementation as the
     default implementation for ALL device types.
     Please only use this if the implementation truly supports all device types;
     for example, this is true if it is a composition of built-in PyTorch operators.
+
+    This API may be used as a decorator. You can use nested decorators
+    with this API provided they return a function and are placed inside
+    this API (see Example 2).
 
     Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
@@ -549,7 +605,7 @@ def impl(qualname, types, func=None, *, lib=None):
     Examples:
         >>> import torch
         >>> import numpy as np
-        >>>
+        >>> # Example 1: Register function.
         >>> # Define the operator
         >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
@@ -561,11 +617,78 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
+        >>>
+        >>> # Example 2: Register function with decorator.
+        >>> def custom_decorator(func):
+        >>>     def wrapper(*args, **kwargs):
+        >>>         return func(*args, **kwargs) + 1
+        >>>     return wrapper
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::sin_plus_one", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylib::sin_plus_one", "cpu")
+        >>> @custom_decorator
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Call the new operator from torch.ops.
+        >>> x = torch.randn(3)
+        >>>
+        >>> y1 = torch.ops.mylib.sin_plus_one(x)
+        >>> y2 = torch.sin(x) + 1
+        >>> assert torch.allclose(y1, y2)
     """
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
-def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
+if not TYPE_CHECKING:
+
+    @impl.register
+    def _(
+        lib: Library, name: str, dispatch_key: str = ""
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        """Legacy torch.library.impl API. Kept around for BC"""
+
+        def wrap(f: Callable[_P, _T]) -> Callable[_P, _T]:
+            lib.impl(name, f, dispatch_key)
+            return f
+
+        return wrap
+
+
+@overload
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Literal[None] = None,
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> Callable[[Callable[..., object]], None]: ...
+
+
+@overload
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Callable[..., object],
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> None: ...
+
+
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Optional[Callable[..., object]] = None,
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> Optional[Callable[[Callable[..., object]], None]]:
+    # See impl()
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -582,7 +705,7 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
         else:
             keys.add(_device_type_to_key(typ))
 
-    def register(func):
+    def register_(func: Callable[..., object]) -> None:
         namespace, _ = torch._library.utils.parse_namespace(qualname)
 
         if lib is None:
@@ -603,9 +726,10 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
                 use_lib.impl(qualname, func, key)
 
     if func is None:
-        return register
+        return register_
     else:
-        register(func)
+        register_(func)
+        return None
 
 
 def _device_type_to_key(device_type: str) -> str:
@@ -616,17 +740,6 @@ def _device_type_to_key(device_type: str) -> str:
         # device_type. I don't really care that much about the difference.
         return "CompositeExplicitAutograd"
     return torch._C._dispatch_key_for_device(device_type)
-
-
-@impl.register
-def _(lib: Library, name, dispatch_key=""):
-    """Legacy torch.library.impl API. Kept around for BC"""
-
-    def wrap(f):
-        lib.impl(name, f, dispatch_key)
-        return f
-
-    return wrap
 
 
 @deprecated(

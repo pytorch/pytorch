@@ -21,7 +21,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -75,19 +74,52 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = Tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
+    storage_size = V.graph.get_allocation_storage_size(node)
     return (
         node.get_device_or_error(),
         node.get_dtype(),
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.get_layout().storage_size())),
+        sympy_str(V.graph.sizevars.simplify(storage_size)),
     )
+
+
+def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
+    # Return True if input_buf can be re-inplaced for output_buf.
+    # This differs from `buffer_reuse_key` for general buffer reuse.
+    if input_buf.get_device_or_error() != output_buf.get_device_or_error():
+        return False
+
+    if input_buf.get_dtype() != output_buf.get_dtype():
+        return False
+
+    input_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(input_buf)
+    )
+    output_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(output_buf)
+    )
+
+    if (
+        # NB: this is symbolic so that we don't try to reuse a buffer
+        # for s0 for s1, just because they happen to share the same
+        # size hint
+        sympy_str(input_size)
+        == sympy_str(output_size)
+    ) or (
+        # statically known that 0.95 * input_size <= output_size <= input_size
+        V.graph.sizevars.statically_known_geq(output_size, 0.95 * input_size)
+        and V.graph.sizevars.statically_known_leq(output_size, input_size)
+    ):
+        return True
+
+    return False
 
 
 def convert_arg_type(arg: torch.Argument) -> str:
@@ -159,7 +191,7 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 # TODO: Move to a well known place
 TritonMetaParams = Dict[str, int]
 TritonGrid = Union[
-    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+    tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], tuple[int, ...]]
 ]
 
 
@@ -168,7 +200,7 @@ def user_defined_kernel_grid_fn_code(
     configs: List[triton.Config],  # type: ignore[name-defined]
     grids: List[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     output = IndentedBuffer()
 
     def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
@@ -635,7 +667,7 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: OrderedSet[Tuple[str, GraphLowering]] = OrderedSet()
+        self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -646,7 +678,7 @@ class PythonWrapperCodegen(CodeGen):
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
+        self.user_defined_kernel_cache: Dict[tuple[Any, ...], tuple[str, Any]] = {}
         self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
@@ -694,7 +726,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
-            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
+            debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
+            use_array_ref=config.aot_inductor.allow_stack_allocation,
         )
 
         # Additional files that are dependent to the wrapper (ex. cubin files)
@@ -732,6 +765,7 @@ class PythonWrapperCodegen(CodeGen):
                 import os
                 import tempfile
                 from math import inf, nan
+                from cmath import nanj
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
@@ -1270,7 +1304,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
-        total_allocated_buffer_size = sum(
+        # FIXME(rec): not used
+        _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
@@ -2092,25 +2127,43 @@ class PythonWrapperCodegen(CodeGen):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
+        allocation_shape = tuple(V.graph.get_allocation_size(buffer))
         stride = tuple(buffer.get_stride())
-        return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
+        return self.make_allocation(
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape
+        )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, allocation_shape=None
+    ):
+        if allocation_shape is None:
+            allocation_shape = shape
+
+        codegen_shape_tuple = self.codegen_python_shape_tuple(shape)
+        codegen_allocation_shape_tuple = self.codegen_python_shape_tuple(
+            allocation_shape
+        )
+        codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
         if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            return (
+            out = (
                 f"{name} = empty_strided_{device.type}("
-                f"{self.codegen_python_shape_tuple(shape)}, "
-                f"{self.codegen_python_shape_tuple(stride)}, "
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
         # all other devices:
-        return (
-            f"{name} = empty_strided("
-            f"{self.codegen_python_shape_tuple(shape)}, "
-            f"{self.codegen_python_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
-        )
+        else:
+            out = (
+                f"{name} = empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+        if codegen_shape_tuple != codegen_allocation_shape_tuple:
+            # need an extra as_strided call
+            out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
+        return out
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
@@ -2164,9 +2217,12 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         self.allocated.add(name)
-        if isinstance(
-            buffer.get_defining_op(),
-            (ir.ExternKernelAlloc, ir.MultiOutput),
+        if (
+            isinstance(
+                buffer.get_defining_op(),
+                (ir.ExternKernelAlloc, ir.MultiOutput),
+            )
+            and not buffer.should_allocate()
         ):
             return
 
@@ -2236,7 +2292,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
-        assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
+        assert can_match_buffer_size(input_buffer, output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
@@ -2337,6 +2393,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.push_codegened_graph(subgraph.graph)
+        self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 

@@ -414,8 +414,7 @@ is guaranteed to support two methods:
   returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the
   default stream without further synchronization.
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
-  of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
-  output can be utilized on the default stream without further synchronization.
+  of CUDA collectives, will block the currently active CUDA stream until the operation is completed (but will not block the CPU).
 * ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
   and MPI, except for peer to peer operations.
   Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.

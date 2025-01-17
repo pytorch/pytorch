@@ -195,12 +195,12 @@ class FlatParamShardMetadata(NamedTuple):
             original parameter.
     """
 
-    param_names: Tuple[str, ...]
-    param_shapes: Tuple[torch.Size, ...]
-    param_strides: Tuple[Tuple[int, ...], ...]
-    param_contiguities: Tuple[bool, ...]
-    param_numels: Tuple[int, ...]
-    param_offsets: Tuple[Tuple[int, int], ...]
+    param_names: tuple[str, ...]
+    param_shapes: tuple[torch.Size, ...]
+    param_strides: tuple[tuple[int, ...], ...]
+    param_contiguities: tuple[bool, ...]
+    param_numels: tuple[int, ...]
+    param_offsets: tuple[tuple[int, int], ...]
 
 
 class _FlatParameterMeta(_ParameterMeta):
@@ -344,23 +344,23 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     _padded_unsharded_size: torch.Size
     _sharded_size: torch.Size
     _num_params: int
-    _param_infos: Tuple[ParamInfo, ...]
-    _shapes: Tuple[torch.Size, ...]
-    _strides: Tuple[Tuple[int, ...], ...]
-    _contiguities: Tuple[bool, ...]
-    _fqns: Tuple[str, ...]
-    _param_extensions: Tuple[Optional[Any], ...]
-    _numels_with_padding: Tuple[int, ...]
-    _numels: Tuple[int, ...]
-    _shard_param_infos: Tuple[_ShardParamInfo, ...]
-    _shared_param_infos: Tuple[SharedParamInfo, ...]
+    _param_infos: tuple[ParamInfo, ...]
+    _shapes: tuple[torch.Size, ...]
+    _strides: tuple[tuple[int, ...], ...]
+    _contiguities: tuple[bool, ...]
+    _fqns: tuple[str, ...]
+    _param_extensions: tuple[Optional[Any], ...]
+    _numels_with_padding: tuple[int, ...]
+    _numels: tuple[int, ...]
+    _shard_param_infos: tuple[_ShardParamInfo, ...]
+    _shared_param_infos: tuple[SharedParamInfo, ...]
     _modules: Set[nn.Module]
     _shard_numel_padded: int
     _local_shard: Tensor
     _full_param_padded: Tensor
     _full_prec_full_param_padded: Tensor
     # Eager only
-    _post_backward_hook_state: Tuple[Any, Any]
+    _post_backward_hook_state: tuple[Any, Any]
     # Compile only
     _post_backward_hook_handle: Any
     _mp_shard: Tensor
@@ -389,7 +389,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         param_infos: List[ParamInfo],
         numels: List[int],
         shapes: List[torch.Size],
-        strides: List[Tuple[int, ...]],
+        strides: List[tuple[int, ...]],
         contiguities: List[bool],
         fqns: List[str],
         shared_param_infos: List[SharedParamInfo],
@@ -656,12 +656,12 @@ class FlatParamHandle:
         param_infos: List[ParamInfo] = []
         numels: List[int] = []
         shapes: List[torch.Size] = []
-        strides: List[Tuple[int, ...]] = []
+        strides: List[tuple[int, ...]] = []
         contiguities: List[bool] = []
         fqns: List[str] = []
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[
-            Union[Tensor, nn.Parameter], Tuple[nn.Module, str, str]
+            Union[Tensor, nn.Parameter], tuple[nn.Module, str, str]
         ] = {}
         params_to_flatten: List[Union[Tensor, nn.Parameter]] = []
         shared_params: List[Union[Tensor, nn.Parameter]] = []
@@ -1002,7 +1002,7 @@ class FlatParamHandle:
         self,
         unsharded_start_idx: int,
         unsharded_end_idx: int,
-    ) -> Tuple[_ShardParamInfo, ...]:
+    ) -> tuple[_ShardParamInfo, ...]:
         """
         Compute the shard metadata based on ``unsharded_start_idx`` and ``unsharded_end_idx`` (inclusive).
 
@@ -1066,7 +1066,7 @@ class FlatParamHandle:
         tensor: Tensor,
         rank: int,
         world_size: int,
-    ) -> Tuple[Tensor, int]:
+    ) -> tuple[Tensor, int]:
         """
         Return the unpadded shard of ``tensor`` for the given ``rank`` and ``world_size``.
 
@@ -1099,7 +1099,7 @@ class FlatParamHandle:
         tensor: Tensor,
         rank: int,
         world_size: int,
-    ) -> Tuple[Tensor, int]:
+    ) -> tuple[Tensor, int]:
         """
         Return the shard of ``tensor`` with padding for the given ``rank`` and ``world_size`` and the numel padded for that shard.
 
@@ -1130,7 +1130,7 @@ class FlatParamHandle:
         assert len(unpadded_sharded_size) == 1, f"{unpadded_sharded_size}"
         return torch.Size([unpadded_sharded_size[0] + numel_to_pad])
 
-    def _get_flat_param_offsets(self) -> List[Tuple[int, int]]:
+    def _get_flat_param_offsets(self) -> List[tuple[int, int]]:
         """
         Return [start, end] offsets of each original parameter's flattened data in the unsharded flat parameter (without padding).
 
@@ -1229,14 +1229,12 @@ class FlatParamHandle:
         flat_param._local_shard = flat_param.data
         if self._offload_params:
             # Pin the memory for faster H2D transfer
-            flat_param._local_shard = flat_param._local_shard.pin_memory(
-                device=self.device
-            )
+            flat_param._local_shard = flat_param._local_shard.pin_memory()
             # Pre-allocate the sharded gradient on CPU to enable non-blocking
             # D2H transfer during the backward pass
             flat_param._cpu_grad = torch.zeros_like(
                 flat_param._local_shard, device=cpu_device
-            ).pin_memory(device=self.device)
+            ).pin_memory()
         if self._uses_param_mixed_precision:
             # For parameter mixed precision, we maintain a low precision
             # sharded tensor on the compute device to be all-gathered (for
@@ -2485,7 +2483,7 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
-    def param_module_names(self) -> Iterator[Tuple[str, str]]:
+    def param_module_names(self) -> Iterator[tuple[str, str]]:
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -2501,7 +2499,7 @@ class FlatParamHandle:
             param_name, _, module_name = param_info  # type: ignore[misc]
             yield (param_name, module_name)
 
-    def shared_param_module_names(self) -> Iterator[Tuple[str, str]]:
+    def shared_param_module_names(self) -> Iterator[tuple[str, str]]:
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (

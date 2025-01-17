@@ -44,7 +44,7 @@ class FileSystem(FileSystemBase):
             try:
                 yield stream
             except:  # noqa: B001,E722
-                if "w" or "+" or "a" in mode:  # cleanup file if not read-only
+                if any(ch in mode for ch in "w+a"):  # cleanup file if not read-only
                     try:
                         self.rm_file(path)
                     except:  # noqa: B001,E722
