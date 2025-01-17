@@ -10,6 +10,7 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import UnsupportedOperation
@@ -28,10 +29,17 @@ from typing import (
     Union,
 )
 
+# introduced as collections.abc.Buffer in Python 3.12
+from typing_extensions import Buffer
+
 import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint._extension import (
+    ExtensionRegistry,
+    StreamTransformExtension,
+)
 from torch.distributed.checkpoint.metadata import (
     Metadata,
     MetadataIndex,
@@ -70,6 +78,10 @@ class _StorageInfo:
     relative_path: str
     offset: int
     length: int
+    transform_descriptors: Optional[Sequence[str]] = None
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
 @dataclass
@@ -211,6 +223,57 @@ class _OverlappingCpuLoader(_TensorLoader):
         yield from self._finish()
 
 
+class _StorageWriterTransforms:
+    """
+    This is experimental, and will likely move elsewhere in the
+    future.  It lives here to minimize changes while we are still
+    learning and gathering feedback.
+    """
+
+    def __init__(
+        self, extensions: Optional[Sequence[StreamTransformExtension]] = None
+    ) -> None:
+        """
+        If the extensions arg is None, this means the implementation
+        should provide whatever defaults it chooses.  An empty
+        sequence indicates no extensions should be used.  At this
+        time, the default extensions sequence is empty.
+        """
+        self.extensions = () if extensions is None else extensions
+
+    def transform_save_stream(
+        self, write_item: WriteItem, raw_stream: io.IOBase
+    ) -> tuple[IO[bytes], List[str]]:
+        # In order to avoid leaking fds, transformers' close must
+        # cascade to wrapped streams, but since this function can
+        # append to the raw stream, we can't close the actual stream.
+        # So, we use this to put a wrapper around the raw stream's
+        # close() to make it a noop, and it gets closed once all files
+        # are appended.
+
+        class NoCloseWriter(io.IOBase):
+            def __init__(self, raw: io.IOBase):
+                self.raw = raw
+
+            def writeable(self) -> bool:
+                return True
+
+            def write(self, b: Buffer) -> int:
+                return self.raw.write(b)
+
+            def close(self):
+                self.flush()
+                self.raw.flush()
+                # but not close.
+
+        transform_to = cast(IO[bytes], NoCloseWriter(raw_stream))
+
+        for ex in self.extensions:
+            transform_to = ex.transform_to(transform_to)
+
+        return (transform_to, [ex.get_descriptor() for ex in reversed(self.extensions)])
+
+
 def _item_size(item: WriteItem) -> int:
     size = 1
     assert item.tensor_data is not None
@@ -247,6 +310,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
 
 def _write_item(
+    transforms: _StorageWriterTransforms,
     stream: io.IOBase,
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
@@ -254,19 +318,36 @@ def _write_item(
 ) -> WriteResult:
     offset = stream.tell()
 
+    (transform_to, transform_descriptors) = transforms.transform_save_stream(
+        write_item, stream
+    )
+
     if write_item.type == WriteItemType.BYTE_IO:
         assert isinstance(data, io.BytesIO)
-        stream.write(data.getbuffer())
+        transform_to.write(data.getbuffer())
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, cast(IO[bytes], stream))
+        torch.save(data, transform_to)
+    transform_to.close()
+
     length = stream.tell() - offset
+
+    # For consistency with earlier versions, leave this field out of the
+    # metadata if there are no extensions.
+    info_transform_descriptors = (
+        None if len(transform_descriptors) == 0 else transform_descriptors
+    )
 
     return WriteResult(
         index=write_item.index,
         size_in_bytes=length,
-        storage_data=_StorageInfo(storage_key, offset, length),
+        storage_data=_StorageInfo(
+            storage_key,
+            offset,
+            length,
+            transform_descriptors=info_transform_descriptors,
+        ),
     )
 
 
@@ -275,6 +356,7 @@ def _write_files_from_queue(
     file_queue: queue.Queue,
     result_queue: queue.Queue,
     planner: SavePlanner,
+    transforms: _StorageWriterTransforms,
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
@@ -319,13 +401,13 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
+                        _write_item(transforms, stream, data, write_item, storage_key)
                     )
 
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
+                        _write_item(transforms, stream, tensor, write_item, storage_key)
                     )
 
                 if use_fsync:
@@ -333,6 +415,7 @@ def _write_files_from_queue(
                         os.fsync(stream.fileno())
                     except (AttributeError, UnsupportedOperation):
                         os.sync()
+                stream.close()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -428,6 +511,7 @@ class FileSystem(FileSystemBase):
 
 
 class _FileSystemWriter(StorageWriter):
+
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -449,6 +533,7 @@ class _FileSystemWriter(StorageWriter):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -462,6 +547,7 @@ class _FileSystemWriter(StorageWriter):
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -474,6 +560,7 @@ class _FileSystemWriter(StorageWriter):
         self.per_thread_copy_ahead = per_thread_copy_ahead
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
+        self.transforms = _StorageWriterTransforms(_extensions)
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
@@ -541,6 +628,7 @@ class _FileSystemWriter(StorageWriter):
                     file_queue,
                     result_queue,
                     planner,
+                    self.transforms,
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
@@ -554,6 +642,7 @@ class _FileSystemWriter(StorageWriter):
             file_queue=file_queue,
             result_queue=result_queue,
             planner=planner,
+            transforms=self.transforms,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
@@ -613,16 +702,47 @@ class _FileSystemWriter(StorageWriter):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
+class _StorageReaderTransforms:
+    """
+    This is experimental, and will likely move elsewhere in the
+    future.  It lives here to minimize changes while we are still
+    learning and gathering feedback.
+    """
+
+    def __init__(self, extension_registry: Optional[ExtensionRegistry] = None) -> None:
+        self.extension_registry = (
+            ExtensionRegistry() if extension_registry is None else extension_registry
+        )
+
+    def transform_load_stream(
+        self,
+        read_item: ReadItem,
+        transform_descriptors: Sequence[str],
+        raw_stream: IO[bytes],
+    ) -> IO[bytes]:
+        extensions = self.extension_registry.from_descriptor_list(transform_descriptors)
+        transform_from = raw_stream
+        for ex in extensions:
+            if isinstance(ex, StreamTransformExtension):
+                transform_from = ex.transform_from(transform_from)
+        return transform_from
+
+
 class FileSystemReader(StorageReader):
-    def __init__(self, path: Union[str, os.PathLike]) -> None:
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
+        _extension_registry: Optional[ExtensionRegistry] = None,  # EXPERIMENTAL
+    ) -> None:
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
+        self.transforms = _StorageReaderTransforms(_extension_registry)
 
-    def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
-        return _create_file_view(file, sinfo.offset, sinfo.length)
+    def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
+        return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         self.storage_data = {}
@@ -645,15 +765,31 @@ class FileSystemReader(StorageReader):
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
+                    transform_from = self.transforms.transform_load_stream(
+                        req,
+                        # This field wasn't present in older
+                        # implementations so provide a fallback.
+                        item_md.transform_descriptors or (),
+                        file_slice,
+                    )
+
                     if req.type == LoadItemType.BYTE_IO:
-                        read_bytes = io.BytesIO(file_slice.read(item_md.length))
+                        read_bytes = io.BytesIO(transform_from.read(-1))
                         read_bytes.seek(0)
                         planner.load_bytes(req, read_bytes)
                     else:
+                        if transform_from.seekable():
+                            seekable = transform_from
+                        else:
+                            # torch.load requires a seekable input, so read the transform
+                            # stream now and store the output if needed
+                            seekable = io.BytesIO(transform_from.read(-1))
+                            seekable.seek(0)
+
                         tensor = cast(
                             Tensor,
                             torch.load(
-                                cast(IO[bytes], file_slice),
+                                seekable,
                                 map_location="cpu",
                                 weights_only=True,
                             ),
@@ -730,6 +866,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -744,6 +881,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -755,6 +893,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             thread_count=thread_count,
             per_thread_copy_ahead=per_thread_copy_ahead,
             overwrite=overwrite,
+            _extensions=_extensions,
         )
         BlockingAsyncStager.__init__(
             self,
