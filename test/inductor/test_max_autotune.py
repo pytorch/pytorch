@@ -22,7 +22,7 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1213,7 +1213,10 @@ class TestPrologueFusion(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
-    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+    )
     def test_low_precision(self):
         M = K = N = 128
 
