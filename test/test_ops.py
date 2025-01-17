@@ -79,11 +79,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
-# test_out
-# test_out_warning
-# test_variant_consistency_eager
-
-
 assert torch.get_default_dtype() == torch.float32
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
