@@ -51,7 +51,11 @@ echo "install_path: $install_path  version: $version"
 build_docs () {
   set +e
   set -o pipefail
-  make "$1" 2>&1 | tee /tmp/docs_build.txt
+  # Get number of CPU cores and subtract 1 to leave headroom
+  CORES=$(( $(nproc) - 1 ))
+  # Ensure at least 1 core is used
+  CORES=$(( CORES > 0 ? CORES : 1 ))
+  make -j${CORES} "$1" 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
     set +x
@@ -87,7 +91,7 @@ pushd docs
 if [ "$is_main_doc" = true ]; then
   build_docs html || exit $?
 
-  make coverage
+  make -j${CORES} coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
   # $lines. The `cut -f1 ...` is to only parse the number, not the filename
