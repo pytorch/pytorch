@@ -27,10 +27,7 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 # Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
 # The test will be skipped if any of the following conditions are met:
 @unittest.skipIf(
-    # Skip this UT since we disable the MTIA backend in getAccelerator temporarily,
-    # see https://github.com/pytorch/pytorch/pull/144368.
-    True
-    or IS_ARM64
+    IS_ARM64
     or not IS_LINUX
     or TEST_CUDA
     or TEST_XPU

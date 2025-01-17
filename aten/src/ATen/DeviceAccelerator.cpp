@@ -6,7 +6,7 @@ namespace at::accelerator {
 
 std::optional<c10::DeviceType> getAccelerator(bool checked) {
 #define DETECT_AND_ASSIGN_ACCELERATOR(device_name) \
-  if (at::globalContext().has##device_name()) {    \
+  if (at::has##device_name()) {                    \
     device_type = k##device_name;                  \
     TORCH_CHECK(                                   \
         !is_accelerator_detected,                  \
@@ -25,8 +25,7 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   std::optional<c10::DeviceType> device_type = std::nullopt;
   bool is_accelerator_detected = false;
   DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
-  // Comment out MTIA to avoid blocking the internal build.
-  // DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
+  DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
   DETECT_AND_ASSIGN_ACCELERATOR(XPU)
   DETECT_AND_ASSIGN_ACCELERATOR(HIP)
   DETECT_AND_ASSIGN_ACCELERATOR(MPS)
