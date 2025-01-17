@@ -2278,6 +2278,9 @@ class GuardManager {
     return true;
   }
 
+  // TODO doc
+  void update_dict_getitem_accessors_cache();
+
   template <typename T>
   bool check_accessors_nopybind(T* value) {
     bool matches_dict_tag = false;
@@ -2328,11 +2331,13 @@ class GuardManager {
           });
     }
 
-    if (_is_dict && result) {
-      // If result is true, reset the _dict_tag. This is useful if there is a
-      // mutation on the dict but it does not change the attr values (like
-      // swapping).
+    // TODO document
+    if (_is_dict && result && !matches_dict_tag) {
+      // If result is true yet dict tag failed to match, reset the _dict_tag.
+      // This is useful if there is a mutation on the dict but it does not
+      // change the attr values (like swapping).
       _dict_tag = new_tag;
+      update_dict_getitem_accessors_cache();
     }
 
     return result;
@@ -3603,6 +3608,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
             example_value,
             guard_manager_enum),
         _key(key.ptr()),
+        _cached_original_item(example_value.ptr()),
         _is_immutable_object(is_immutable_object(example_value)) {}
 
   // NB: Intentional duplication between check_nopybind and
@@ -3613,7 +3619,17 @@ class DictGetItemGuardAccessor : public GuardAccessor {
       return true;
     }
 
-    PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
+    PyObject* x = nullptr;
+    // TODO, we only need to check matches_dict_tag! Because that means `obj`
+    // matches the original example value dict, so whatever object
+    // `_guard_manager` aims to access would be the same as its original
+    // example value!
+    if (matches_dict_tag) {
+      x = _cached_original_item;
+    } else {
+      x = PyDict_GetItem(obj, _key); // borrowed ref
+      _latest_original_item = x;
+    }
     if (x == nullptr) {
       PyErr_Clear();
       return false;
@@ -3639,6 +3655,11 @@ class DictGetItemGuardAccessor : public GuardAccessor {
         ")";
   }
 
+  // TODO doc
+  void swap_cached_item() {
+    _cached_original_item = _latest_original_item;
+  }
+
  public: // cloning functions
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DictGetItemGuardAccessor(
@@ -3661,11 +3682,23 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 
  private:
   PyObject* _key;
+  // Borrowed ref, but access is protected by `matches_dict_tag`
+  PyObject* _cached_original_item;
+  PyObject* _latest_original_item;
 
   // If immutable object and dict tag matches, we can skip the guard subtree and
   // return true.
   bool _is_immutable_object;
 };
+
+void GuardManager::update_dict_getitem_accessors_cache() {
+  for (auto& accessor : _accessors) {
+    if (auto* get_item_accessor =
+            dynamic_cast<DictGetItemGuardAccessor*>(accessor.get())) {
+      get_item_accessor->swap_cached_item();
+    }
+  }
+}
 
 /**
  * Represents list[index] accessor. It is faster than generic
