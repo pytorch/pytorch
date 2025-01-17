@@ -1234,6 +1234,7 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
         if is_nested_int(num_channels):
             continue
 
+        # 1D weight
         weight = torch.randn(
             num_channels,
             device=device,
@@ -1246,7 +1247,16 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
             kwargs={
                 "weight": _clone(weight),
             },
-            name=f"{_describe_njt(njt)}",
+            name=f"{_describe_njt(njt)}: 1D weight",
+        )
+
+        # scalar tensor weight
+        yield SampleInput(
+            _clone(njt),
+            kwargs={
+                "weight": torch.tensor(4.2, device=device, dtype=dtype),
+            },
+            name=f"{_describe_njt(njt)}: scalar tensor weight",
         )
 
 

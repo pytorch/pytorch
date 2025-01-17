@@ -410,6 +410,11 @@
   self: cholesky_backward(grad, upper, L)
   L: cholesky_jvp(self_t, L, upper)
 
+# temporarily here before linalg_cholesky dispatches to linalg_cholesky_ex on MPS device
+- name: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
+  self: cholesky_backward(grad, upper, result)
+  result: cholesky_jvp(self_t, result, upper)
+
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper, grad_input_mask)
   result: cholesky_solve_jvp(result, input2_p, input2_t, self_t, upper)
