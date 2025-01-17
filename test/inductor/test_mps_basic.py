@@ -35,12 +35,14 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 
 
 class MPSBasicTests(TestCase):
+    is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
 
     test_add_const_int = CommonTemplate.test_add_const_int
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
+    test_arange5 = CommonTemplate.test_arange5
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
     test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
     test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
@@ -65,6 +67,7 @@ class MPSBasicTests(TestCase):
     test_remove_no_ops = CommonTemplate.test_remove_no_ops
     test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
     test_rsqrt = CommonTemplate.test_rsqrt
+    test_scalar_cpu_tensor_arg = CommonTemplate.test_scalar_cpu_tensor_arg
     test_scalar_output = CommonTemplate.test_scalar_output
     test_setitem_with_int_parameter = CommonTemplate.test_setitem_with_int_parameter
     test_signbit = CommonTemplate.test_signbit
