@@ -443,7 +443,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # exception is raised again.
             tracer.exception_handler(e)
 
-    def _is_generator_new(self):
+    def _is_generator_just_started(self):
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
 
     def _is_generator_exhausted(self):
@@ -465,8 +465,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator
             # exits without yielding another value
-            if self._is_generator_new() and len(args):
+            if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
+                # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
                 if not all(
                     isinstance(arg, ConstantVariable) and arg.value is None
                     for arg in args
@@ -489,7 +490,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            if self._is_generator_new() or self._is_generator_exhausted():
+            if self._is_generator_just_started() or self._is_generator_exhausted():
                 return variables.ConstantVariable(None)
 
             tracer = self._get_inline_tracer(tx)
