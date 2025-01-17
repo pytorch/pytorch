@@ -367,7 +367,7 @@ class _V:
 
     @property
     def aot_compilation(self):
-        return _aot_compilation._get_handler()
+        return _aot_compilation._get_handler() is True
 
     @property
     def current_node(self):
