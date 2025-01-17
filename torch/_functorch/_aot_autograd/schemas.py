@@ -5,6 +5,7 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
+import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,7 +20,10 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
+from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    FunctionalTensorMetadataEq,
+)
 from .utils import strict_zip
 
 
@@ -88,14 +92,15 @@ class OutputAliasInfo:
     dynamic_dims: Optional[Set[int]]
     # requires_grad
     requires_grad: bool
-    # Sequence of ViewMeta objects.
+    # FunctionalTensorWrapper that represents this output.
     #
-    # Provides us the means to re-run view functions on other tensors.
+    # Provides us the means to replay views from it.
     #
-    # We need to wrap the actual list of ViewMeta with this class so that
-    # we compare the ViewMeta elements appropriately, i.e. their type and
-    # the elements returned by the `as_tuple()` call.
-    view_meta_sequence: Optional[ViewMetaSequence] = None
+    # We need to wrap the actual FunctionalTensorWrapper with this class so that
+    # we only compare the tensor's metadata. That's because with the transformations
+    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
+    # tensor might change.
+    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
 
 
 class MutationType(Enum):
@@ -577,6 +582,17 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
+        new_output_info = []
+        for out in self.output_info:
+            if config.view_replay_for_aliased_outputs:
+                new_out = out
+            else:
+                # If we're not using view_replay, remove the functional tensor.
+                # Functional tensors are unfortunately not serializable,
+                # so doing this is required for AOTAutograd caching.
+                new_out = dataclasses.replace(out, functional_tensor=None)
+            new_output_info.append(new_out)
+        self.output_info = new_output_info
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
