@@ -237,17 +237,17 @@ def get_bounded_indices(indices, max_len=None):
 """
 
 
-make_boundary_check_func = r"""
+load_checked = r"""
 @triton.jit
-def make_boundary_check(is_divisible: tl.constexpr, safe_head_dim: tl.constexpr):
-    if not is_divisible and not safe_head_dim:
-        return (0, 1)
-    elif not is_divisible:
-        return (0,)
-    elif not safe_head_dim:
-        return (1,)
-    else:
-        return ()
+def load_checked(block_ptr, IS_DIVISIBLE: tl.constexpr, SAFE_HEAD_DIM: tl.constexpr):
+  if IS_DIVISIBLE and SAFE_HEAD_DIM:
+    return tl.load(block_ptr)
+  elif IS_DIVISIBLE and not SAFE_HEAD_DIM:
+    return tl.load(block_ptr, boundary_check=(1,), padding_option="zero")
+  elif not IS_DIVISIBLE and SAFE_HEAD_DIM:
+      return tl.load(block_ptr, boundary_check=(0,), padding_option="zero")
+  else:
+      return tl.load(block_ptr, boundary_check=(0, 1), padding_option="zero")
 """
 
 compute_flex_attention = r"""
@@ -332,7 +332,6 @@ compute_flex_attention = r"""
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    # acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
     offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -347,18 +346,10 @@ compute_flex_attention = r"""
         shape=(Q_LEN, QK_HEAD_DIM),
         strides=(stride_qm, stride_qk),
         offsets=(q_start * BLOCK_M, 0),
-        # block_shape=(BLOCK_M, QK_HEAD_DIM),
         block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
-
-    # boundary = make_boundary_check(IS_DIVISIBLE, SAFE_HEAD_DIM)
-    if False:
-        q = tl.load(Q_block_ptr)
-    else:
-        # boundary check is not free, so we only do it when necessary.
-        q = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_option = "zero")
-
+    q = load_checked(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
@@ -372,7 +363,6 @@ compute_flex_attention = r"""
         shape=(QK_HEAD_DIM, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, kv_start),
-        # block_shape=(QK_HEAD_DIM, BLOCK_N),
         block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
         order=(0, 1)
     )
@@ -381,7 +371,6 @@ compute_flex_attention = r"""
         shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(kv_start, 0),
-        # block_shape=(BLOCK_N, V_HEAD_DIM),
         block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
@@ -413,7 +402,6 @@ compute_flex_attention = r"""
             shape=(QK_HEAD_DIM, KV_LEN),
             strides=(stride_kk, stride_kn),
             offsets=(0, kv_start),
-            # block_shape=(QK_HEAD_DIM, BLOCK_N),
             block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
             order=(0, 1)
         )
@@ -422,7 +410,6 @@ compute_flex_attention = r"""
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(kv_start, 0),
-            # block_shape=(BLOCK_N, V_HEAD_DIM),
             block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
             order=(1, 0)
         )
@@ -449,10 +436,8 @@ compute_flex_attention = r"""
     idx_zq = tl.program_id(1) // HQ
     idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
-    # idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
-    # mask = idx_m < Q_LEN
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
 
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
@@ -496,7 +481,7 @@ def forward_inner(
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
-        if IS_DIVISIBLE and SAFE_HEAD_DIM:
+        if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
@@ -556,24 +541,17 @@ def forward_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    if IS_DIVISIBLE and not CHECK_BLOCK_BOUNDARY:
-        k = tl.load(K_block_ptr)
-    else:
-        k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option = "zero")
+    k = load_checked(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if CHECK_BLOCK_BOUNDARY:
-        # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
-        # which is larger than the actual number of elements. To avoid access memory out of bound,
-        # we need to mask out the elements that are out of Q_LEN & KV_LEN.
-        m = offs_m % Q_LEN
-        n = offs_n % KV_LEN
-    else:
-        m = offs_m
-        n = offs_n
+    # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
+    # which is larger than the actual number of elements. To avoid access memory out of bound,
+    # we need to mask out the elements that are out of Q_LEN & KV_LEN.
+    m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
 
     {{ modification(
         subgraph_number=0,
@@ -606,7 +584,6 @@ def forward_block_mn(
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
-    # TODO: In the case that score_mod is linear, this can be LICMed
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -628,11 +605,7 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
-
-    if IS_DIVISIBLE and not CHECK_BLOCK_BOUNDARY:
-        v = tl.load(V_block_ptr)
-    else:
-        v = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option = "zero")
+    v = load_checked(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
@@ -650,7 +623,8 @@ flex_attention_template = TritonTemplate(
     + compute_forward_inner
     + compute_next_offset_func
     + compute_forward_block_mn
-    + make_boundary_check_func,
+    + get_bounded_indices_func
+    + load_checked,
 )
 
 
@@ -2093,7 +2067,7 @@ def bwd_dkdv_block_mn(
  """
     + compute_next_offset_func
     + get_bounded_indices_func
-    + make_boundary_check_func,
+    + load_checked,
 )
 
 
