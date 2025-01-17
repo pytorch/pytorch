@@ -367,18 +367,22 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen):
-        from torch._dynamo.symbolic_convert import InstructionTranslator
+        raise unimplemented(
+            "NYI: Returning a generator object from a torch.compile function"
+        )
 
-        tx = InstructionTranslator.current_tx()
-        tracer = self._get_inline_tracer(tx)
-        try:
-            prev = tx.output.should_exit
-            tx.output.should_exit = False
-            if not tracer.generator_exhausted:
-                self.remaining_items = self.force_unpack_var_sequence(tx)
-            variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
-        finally:
-            tx.output.should_exit = prev
+    #     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    #     tx = InstructionTranslator.current_tx()
+    #     tracer = self._get_inline_tracer(tx)
+    #     try:
+    #         prev = tx.output.should_exit
+    #         tx.output.should_exit = False
+    #         if not tracer.generator_exhausted:
+    #             self.remaining_items = self.force_unpack_var_sequence(tx)
+    #         variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
+    #     finally:
+    #         tx.output.should_exit = prev
 
     def bind_args(self, tx, args, kwargs):
         return self.fn.bind_args(tx, args, kwargs)
