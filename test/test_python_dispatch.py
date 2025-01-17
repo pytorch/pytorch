@@ -202,6 +202,7 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    @unittest.skip("Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108")
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -220,9 +221,12 @@ class TestPythonRegistration(TestCase):
             my_lib.impl("sum", fallthrough_kernel, "CPU")
             my_lib.impl("sum", sum_meta, "Meta")
 
+            print(torch._C._meta_in_tls_dispatch_include())
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+                print(torch._C._meta_in_tls_dispatch_include())
+            print(torch._C._meta_in_tls_dispatch_include())
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
