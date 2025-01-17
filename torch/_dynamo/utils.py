@@ -3068,10 +3068,16 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         def make_error_message(e):
             return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
 
+        from .exc import Unsupported
+
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)
             elif op == "call_method":
+                if not hasattr(args[0], node.target):
+                    from .exc import unimplemented
+
+                    unimplemented(make_error_message("attribute not defined"))
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":
                 assert nnmodule is not None
@@ -3087,6 +3093,8 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             from .exc import unimplemented
 
             unimplemented(make_error_message(e), from_exc=e)
+        except Unsupported:
+            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
