@@ -46,6 +46,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
+from torch._dynamo.utils import CompileEventLogger
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -2328,6 +2329,7 @@ class CheckFunctionManager:
                 latency = profile_guard_manager(
                     self.guard_manager.root, output_graph.local_scope
                 )
+                CompileEventLogger.compilation_metric(guard_latency=int(latency))
                 guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
