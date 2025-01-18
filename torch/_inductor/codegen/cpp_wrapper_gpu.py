@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -39,7 +39,7 @@ class DeferredGpuKernelLine(DeferredLineBase):
         kernel_name: str,
         line_template: str,
         keys: tuple[str, ...],
-        additional_files: List[str],
+        additional_files: list[str],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
@@ -94,7 +94,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[list[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -304,8 +304,8 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -459,7 +459,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid_args: List[Any],
+        grid_args: list[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
         **grid_extra_kwargs,
