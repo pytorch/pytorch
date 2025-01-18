@@ -153,6 +153,95 @@ WelfordDataLN cuWelfordCombine(
 }
 
 template<typename T>
+__device__ WelfordDataLN unaligned_compute_stats(
+  const T*  __restrict__ X,
+  const int N,
+  float * buf
+  ) {
+    //X points to the row to read
+    using vec_t = aligned_vector<T, vec_size>;
+    using acc_t = acc_type<T, true>;
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+
+    WelfordDataLN wd(0.f, 0.f, 0.f);
+
+    const int previous_count = N * blockIdx.x;
+    const int previous_left = previous_count % vec_size;
+    const int prologue_size = previous_left ? vec_size - (previous_count % vec_size) : 0;
+    const int n_vec_to_read = (N - prologue_size) / vec_size;
+    const int epilogue_start = n_vec_to_read * vec_size + prologue_size;
+
+    // Prologue
+    if(thrx == 0) {
+      for(int head_i = 0; head_i < prologue_size; head_i ++){
+        T head_data = X[head_i];
+        wd = cuWelfordOnlineSum(static_cast<acc_t>(head_data), wd);
+      }
+    }
+
+    const vec_t * X_vec = reinterpret_cast<const vec_t*>(X + prologue_size);
+
+    // Vectorized load
+    int i = thrx;
+    for (; i < n_vec_to_read; i += numx) {
+      vec_t data = X_vec[i];
+      #pragma unroll
+      for (int ii=0; ii < vec_size; ii++){
+        wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
+      }
+    }
+
+    // Epilogue
+    if(thrx == 0) {
+      for(int tail_i = epilogue_start; tail_i < N; tail_i ++){
+        T tail_data = X[tail_i];
+        wd = cuWelfordOnlineSum(static_cast<acc_t>(tail_data), wd);
+      }
+    }
+
+    // intra-warp reduction
+    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
+        WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+        wd = cuWelfordCombine(wd, wdB);
+    }
+    // threadIdx.x == 0 has correct values for each warp
+    // inter-warp reductions
+    if (blockDim.y > 1) {
+      float * meansigmabuf = buf;
+      float * countbuf = buf + blockDim.y;
+      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+        // upper half of warps write to shared
+        if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int wrt_y = threadIdx.y - offset;
+          meansigmabuf[2*wrt_y] = wd.mean;
+          meansigmabuf[2*wrt_y+1] = wd.sigma2;
+          countbuf[wrt_y] = wd.count;
+        }
+        __syncthreads();
+        // lower half merges
+        if (threadIdx.x == 0 && threadIdx.y < offset) {
+          WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
+                          meansigmabuf[2*threadIdx.y+1],
+                          countbuf[threadIdx.y]};
+          wd = cuWelfordCombine(wd, wdB);
+        }
+        __syncthreads();
+      }
+      if (threadIdx.x == 0 && threadIdx.y ==0) {
+        meansigmabuf[0] = wd.mean;
+        meansigmabuf[1] = wd.sigma2/float(N);
+      }
+      __syncthreads();
+      return WelfordDataLN{meansigmabuf[0], meansigmabuf[1],0.f};
+
+    } else {
+      return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
+    }
+}
+
+template<typename T>
 __device__ WelfordDataLN compute_stats(
   const T*  __restrict__ X,
   const int N,
@@ -214,6 +303,127 @@ __device__ WelfordDataLN compute_stats(
       return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
     }
 }
+
+template <typename T, typename T_ACC,
+typename std::enable_if_t<!std::is_same_v<T, double>, int> = 0>
+__device__ __inline__ void unaligned_vectorized_layer_norm_kernel_impl(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    extern __shared__ float s_data[];
+    auto i1 = blockIdx.x;
+    const T * block_row = X + i1 * N;
+    T * output_row = Y + i1 * N;
+    WelfordDataLN wd = unaligned_compute_stats(block_row, N, s_data);
+
+    using vec_t = aligned_vector<T, vec_size>;
+
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    const int previous_count = N * blockIdx.x;
+    const int prologue_size = previous_count % vec_size ? vec_size - (previous_count % vec_size) : 0;
+    const int n_vec_to_read = (N - prologue_size) / vec_size;
+    const int epilogue_start = n_vec_to_read * vec_size + prologue_size;
+
+    T_ACC rstd_val = c10::cuda::compat::rsqrt(wd.sigma2 + eps);
+
+    // Prologue
+    if(thrx == 0) {
+      for(int head_i = 0; head_i < prologue_size; head_i ++){
+        T head_data = block_row[head_i];
+        // T head_data = 0;
+        if (gamma != nullptr && beta != nullptr) {
+          output_row[head_i] = static_cast<T_ACC>(gamma[head_i]) * (rstd_val * (static_cast<T_ACC>(head_data) - wd.mean))
+            + static_cast<T_ACC>(beta[head_i]);
+        } else if (gamma != nullptr) {
+          output_row[head_i] = static_cast<T_ACC>(gamma[head_i]) * (rstd_val * (static_cast<T_ACC>(head_data) - wd.mean));
+        } else if (beta != nullptr) {
+          output_row[head_i] = (rstd_val * (static_cast<T_ACC>(head_data) - wd.mean)) + static_cast<T_ACC>(beta[head_i]);
+        } else {
+          output_row[head_i] = rstd_val * (static_cast<T_ACC>(head_data) - wd.mean);
+        }
+      }
+    }
+
+    const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row + prologue_size);
+    vec_t * Y_vec = reinterpret_cast<vec_t*>(output_row + prologue_size);
+    const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma + prologue_size) : nullptr;
+    const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta + prologue_size) : nullptr;
+
+    // Vectorized load
+    int i =  thrx;
+    for (; i < n_vec_to_read; i += numx) {
+      vec_t data = X_vec[i];
+      vec_t out;
+
+      // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
+      if (gamma_vec != nullptr && beta_vec != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+            + static_cast<T_ACC>(beta_vec[i].val[ii]);
+        }
+      } else if (gamma_vec != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+        }
+      } else if (beta_vec != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_vec[i].val[ii]);
+        }
+      } else {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean);
+        }
+      }
+      Y_vec[i] = out;
+    }
+
+    // Epilogue
+    if(thrx == 0) {
+      for(int tail_i = epilogue_start; tail_i < N; tail_i ++){
+        T tail_data = block_row[tail_i];
+        if (gamma != nullptr && beta != nullptr) {
+          output_row[tail_i] = static_cast<T_ACC>(gamma[tail_i]) * (rstd_val * (static_cast<T_ACC>(tail_data) - wd.mean))
+            + static_cast<T_ACC>(beta[tail_i]);
+
+        } else if (gamma != nullptr) {
+          output_row[tail_i] = static_cast<T_ACC>(gamma[tail_i]) * (rstd_val * (static_cast<T_ACC>(tail_data) - wd.mean));
+        } else if (beta != nullptr) {
+          output_row[tail_i] = (rstd_val * (static_cast<T_ACC>(tail_data) - wd.mean)) + static_cast<T_ACC>(beta[tail_i]);
+        } else {
+          output_row[tail_i] = rstd_val * (static_cast<T_ACC>(tail_data) - wd.mean);
+        }
+      }
+    }
+
+    if (thrx == 0) {
+      mean[i1] = wd.mean;
+      rstd[i1] = rstd_val;
+    }
+}
+
+template <typename T, typename T_ACC,
+typename std::enable_if_t<std::is_same_v<T, double>, int> = 0>
+__device__ __inline__ void unaligned_vectorized_layer_norm_kernel_impl(
+  const int /*N*/,
+  T_ACC /*eps*/,
+  const  T* __restrict__ /*X*/,
+  const  T* /*gamma*/,
+  const  T* /*beta*/,
+  T_ACC* /*mean*/,
+  T_ACC* /*rstd*/,
+  T* /*Y*/){
+    CUDA_KERNEL_ASSERT(false && "doesn't work with double");
+  }
 
 
 template <typename T, typename T_ACC,
@@ -293,6 +503,20 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   T_ACC* /*rstd*/,
   T* /*Y*/){
     CUDA_KERNEL_ASSERT(false && "doesn't work with double");
+  }
+
+//to avoid windows SFINAE errors
+template <typename T, typename T_ACC>
+__global__ void unaligned_vectorized_layer_norm_kernel(
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  const  T* beta,
+  T_ACC* mean,
+  T_ACC* rstd,
+  T* Y){
+    unaligned_vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
   }
 
 //to avoid windows SFINAE errors
@@ -730,6 +954,32 @@ __global__ void GammaBetaBackwardCUDAKernel(
 }
 
 template <typename T, typename T_ACC>
+void launch_unaligned_vectorized_layer_norm_kernel(
+  int N,
+  int64_t M,
+  T_ACC eps,
+  const T* X_data,
+  const T* gamma_data,
+  const T* beta_data,
+  T* Y_data,
+  T_ACC* mean_data,
+  T_ACC* rstd_data
+) {
+    // This kernel should keep the N > 2 * vec_size, if N is too small (like N = 5), we should take care more about the
+    // prologue_size and epilogue_start, it will complex the logic.
+    TORCH_INTERNAL_ASSERT(N > 2 * vec_size);
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    const int warp_size = at::cuda::warp_size();
+    const dim3 threads(warp_size, num_threads() / warp_size, 1);
+    const dim3 blocks(M);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
+    int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
+    unaligned_vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    gamma_data, beta_data, mean_data, rstd_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename T, typename T_ACC>
 void launch_vectorized_layer_norm_kernel(
   int N,
   int64_t M,
@@ -785,9 +1035,14 @@ void LayerNormKernelImplInternal(
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
   if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
-  N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
-  can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
-    launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
+  N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && can_vec_X && can_vec_Y &&
+  can_vec_gamma && can_vec_beta && N > 2 * vec_size) {
+    // unaligned_vectorized_layer_norm_kernel request N > 2 * vec_size, please see comments in this kernel.
+    if (N % vec_size != 0) {
+      launch_unaligned_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
+    } else {
+      launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
+    }
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   RowwiseMomentsCUDAKernel<T, T_ACC>
