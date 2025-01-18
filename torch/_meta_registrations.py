@@ -2345,6 +2345,11 @@ def meta_conv(
     if input_tensor.size(input_channels_dim) == 0:
         shape_out[output_channels_dim] = 0
 
+    torch._check(
+        input_tensor.dtype not in [torch.uint8, torch.uint16, torch.uint32, torch.uint64],
+        lambda: f""""conv" not implemented for '{input_tensor.dtype.__str__()}'""",
+    )
+
     out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out

@@ -6281,6 +6281,21 @@ class CommonTemplate:
                 ):
                     c_op(x, kernel_size=2, stride=2)
 
+    @torch._dynamo.config.patch(recompile_limit=12)
+    def test_conv_errors_with_uint(self):
+        for dim in (1, 2, 3):
+            for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+                input_shape = [1, 8] + [64] * dim
+                x = torch.randn(input_shape).to(dtype).cuda()
+                conv_weight = (torch.ones(8, 1, *([4] * dim)) / (4 ** dim)).cuda()
+                op = eval(f"torch.nn.functional.conv{dim}d")
+                c_op = torch.compile(op)
+                with self.assertRaisesRegex(
+                    RuntimeError, r".*(not implemented|aoti_torch_).*"
+                ):
+                    c_op(x, weight=conv_weight, stride=4, padding=2, groups=8)
+
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
