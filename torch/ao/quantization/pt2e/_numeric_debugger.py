@@ -95,7 +95,7 @@ def _tensor_shape_equals(x: object, y: object) -> bool:
             all_equal = all_equal and k in y and (_tensor_shape_equals(x[k], y[k]))
         return all_equal
     else:
-        print(f"Comparing non Tensors: {x} and {y}, they must be equal")
+        log.debug("Comparing non Tensors: %s and %s, they must be equal", x, y)
         return type(x) == type(y) and x == y
 
 

@@ -5262,7 +5262,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
             self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
+            pinned = nt.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(nt, pinned)
             self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
@@ -7909,6 +7909,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             # unary
             # needs log_sigmoid_forward, which returns a tuple
             "nn.functional.logsigmoid",
+            "nn.functional.prelu",
             # needs rrelu_with_noise
             "nn.functional.rrelu",
             # binary
@@ -7971,13 +7972,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             "masked.var",
         },
         name="no_masked_jagged_support",
-    ),
-    # Need to adjust sample input func to pass the right thing
-    XFailRule(
-        error_type=TypeError,
-        error_msg="missing 1 required positional arguments",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.prelu"),
-        name="invalid_prelu_sample_input_func",
     ),
     # Op doesn't support lengths being present
     XFailRule(
@@ -8323,15 +8317,16 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         name="broken_narrow_backward",
     ),
-    # min / max: need to examine backwards formula for non-full reduction
+    # min / max: need factory function support for ragged dim reductions
+    # where the output is dense but sizes still contain a nested int
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
-        name="broken_min_max_reduction_with_dim_backward",
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
+        name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
     # matmul(): unimplemented backward
     XFailRule(
@@ -8502,7 +8497,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
     ),
     # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;

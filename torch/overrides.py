@@ -1065,9 +1065,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.rad2deg: lambda input, out=None: -1,
-        torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch.rand_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
+        torch.randint_like: (
+            lambda input, high, dtype=None, layout=torch.strided, device=None, generator=None, requires_grad=False: -1
+        ),
+        torch.randn_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,

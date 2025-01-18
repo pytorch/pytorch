@@ -3,7 +3,7 @@
 import contextlib
 import importlib
 import unittest
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +15,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -90,12 +91,14 @@ def run_and_compare(
 
 class BlockPointerTestBase(InductorTestCase):
     def _discontiguous_tensor(
-        self, view_size: Tuple[int, ...], device=torch.device(GPU_TYPE)
+        self, view_size: Tuple[int, ...], device: Union[torch.device, str]
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
         The strides correspond to a tensor that is twice as large in each dimension.
         """
+        if isinstance(device, str):
+            device = torch.device(device)
         full_size = tuple(2 * dim for dim in view_size)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
@@ -166,13 +169,18 @@ class CommonTemplate:
                 False,
             ),  # Non-power-of-2 inner dims: non-block ptr
             ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar: non-block ptr
-            (
-                (2, 4 * max_block),
-                (2, 3 * max_block),
-                None,
-                None,
-                True,
-            ),  # Inner dim multiple of max_block
+            subtest(
+                arg_values=(
+                    (2, 4 * max_block),
+                    (2, 3 * max_block),
+                    None,
+                    None,
+                    True,
+                ),  # Inner dim multiple of max_block
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
         ],
     )
     def test_pointwise(
@@ -242,7 +250,9 @@ class CommonTemplate:
             b = y * 2
             return a + b
 
-        x, y = (self._discontiguous_tensor(size) for size in (x_size, y_size))
+        x, y = (
+            self._discontiguous_tensor(size, self.device) for size in (x_size, y_size)
+        )
 
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
@@ -367,7 +377,13 @@ class CommonTemplate:
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
             ((15, 15), None, 1),  # Non-power of 2
-            ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
+            # Multiple of max block. Uses loops.
+            subtest(
+                arg_values=((3 * max_block, 2), 3, 2),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
             (
                 (2, 3 * max_block),
                 2,
@@ -401,7 +417,7 @@ class CommonTemplate:
 
         device = torch.device(self.device)
 
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         if num_triton_kernels == 2 and config.triton.cooperative_reductions:
             # fewer kernels with cooperative reductions
@@ -440,7 +456,9 @@ class CommonTemplate:
         def foo(x, y):
             return torch.sum(x + y)
 
-        inputs = [self._discontiguous_tensor(view_size) for input_idx in range(2)]
+        inputs = [
+            self._discontiguous_tensor(view_size, self.device) for input_idx in range(2)
+        ]
 
         # Expect 2 block pointers: inputs
         result, (code,) = run_and_compare(
@@ -525,18 +543,24 @@ class CommonTemplate:
             ),  # Contiguous 2D tensor. Does not require tiling.
             ((5, 9), (3, 7), 3, 2),  # 2D tensor with 1 discontiguous dim.
             ((11, 13, 7), (9, 13, 5), 3, 2),  # 3D tensor with 1 discontiguous dim (2).
-            (
-                (3, 11, 13, 7),
-                (2, 9, 13, 7),
-                3,
-                2,
+            subtest(
+                arg_values=(
+                    (3, 11, 13, 7),
+                    (2, 9, 13, 7),
+                    3,
+                    2,
+                ),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
             ),  # 4D tensor with 1 discontiguous dim (1).
             (
                 (3, 11, 13, 7),
                 (2, 11, 9, 7),
                 3,
                 2,
-            ),  # 4D tensor with 1 discontiguous dim (2).
+            ),
+            # 4D tensor with 1 discontiguous dim (2).
             (
                 (5, 5, 5, 5, 5),
                 (3, 3, 5, 3, 5),
@@ -606,7 +630,7 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -627,7 +651,7 @@ class CommonTemplate:
         Tests a 2D reduction without an "x" dimension.
         """
         # We need a size to get no x dim.
-        view = self._discontiguous_tensor((2, 346))
+        view = self._discontiguous_tensor((2, 346), self.device)
 
         # Expect 1 block pointer for the input.
         result, (code,) = run_and_compare(
@@ -670,7 +694,7 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        view = self._discontiguous_tensor(size)
+        view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
@@ -688,6 +712,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
     def test_welford_non_block_pointer(
         self,
     ):
@@ -697,7 +722,7 @@ class CommonTemplate:
         """
         # Use a "bad" size that's not evenly divisible by the launch grid.
         # This won't decompose into a block pointer.
-        view = self._discontiguous_tensor((259, 311))
+        view = self._discontiguous_tensor((259, 311), self.device)
 
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
@@ -721,7 +746,7 @@ class CommonTemplate:
         won't generate a block pointer, since we don'allow enough tiling dimensions.
         """
         # Use odd shapes to frustrate block pointer analysis.
-        view = self._discontiguous_tensor((3, 7, 11))
+        view = self._discontiguous_tensor((3, 7, 11), self.device)
 
         result, (code,) = run_and_compare(
             self,
@@ -735,11 +760,12 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
         Test a 2D reduction in multi kernel mode.
         """
-        view = self._discontiguous_tensor((2, 4, 1024))
+        view = self._discontiguous_tensor((2, 4, 1024), self.device)
 
         def foo(x):
             """
@@ -777,7 +803,7 @@ class CommonTemplate:
             return torch.sum(x) + torch.argmax(x)
 
         view_size = (5, 7)
-        view = self._discontiguous_tensor(view_size)
+        view = self._discontiguous_tensor(view_size, self.device)
 
         # Expect at least 1 block pointer for the input.
         result, (code,) = run_and_compare(
@@ -806,7 +832,7 @@ class CommonTemplate:
             return sum(reduction_op(arg) for arg in args)
 
         view_size = (5, 7)
-        arg0 = self._discontiguous_tensor(view_size)
+        arg0 = self._discontiguous_tensor(view_size, self.device)
         arg1 = torch.empty(view_size)
 
         # No guarantees on the number of kernels or pointers.
@@ -829,7 +855,7 @@ class CommonTemplate:
         """
         Tests enabling and disabling tiled reductions.
         """
-        view = self._discontiguous_tensor((9, 11))
+        view = self._discontiguous_tensor((9, 11), self.device)
 
         # If tiled, we expect 1 block pointer for the input.
         result, (code,) = run_and_compare(

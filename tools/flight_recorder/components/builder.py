@@ -358,8 +358,8 @@ def build_collectives(
                 candidate_idx.update(found_idx)
                 found_idx.clear()
                 found_ranks.clear()
-                mismatch[pg_name] += 1
                 if expected_ranks - dumps_ranks:
+                    mismatch[pg_name] += 1
                     logger.info(
                         "We cannot decide what's wrong with this collective entry "
                         "because we missed FR dumps from ranks (%s) so we don't have enough "
