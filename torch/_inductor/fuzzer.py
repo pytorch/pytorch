@@ -300,9 +300,11 @@ class SamplingMethod(Enum):
                 if random_sample:
                     return random.choice(type_hint.__args__)
                 else:
-                    return random.choice(
-                        [t for t in type_hint.__args__ if t != default]
-                    )
+                    choices = [t for t in type_hint.__args__ if t != default]
+                    if choices:
+                        return random.choice(choices)
+                    else:
+                        return default
             except AttributeError as err:
                 raise ValueError("Literal type with no args") from err
         elif is_optional_type(type_hint):
