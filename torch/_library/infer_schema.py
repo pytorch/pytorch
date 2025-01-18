@@ -56,7 +56,6 @@ def infer_schema(
     sig = inspect.signature(prototype_function)
 
     def error_fn(what):
-        breakpoint()
         raise ValueError(
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
@@ -91,7 +90,7 @@ def infer_schema(
         if type(annotation_type) == str:
             annotation_type = convert_type_string(annotation_type)
 
-        if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
+        if annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
@@ -175,12 +174,10 @@ def derived_types(
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(
-        typ: Union[type, typing._SpecialForm]
-    ) -> tuple[GenericAlias, ...]:
+    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
         return (
-            GenericAlias(typing.Sequence, (typ,)),
-            GenericAlias(typing.List, (typ,)),
+            typing.Sequence[typ],  # type: ignore[valid-type]
+            typing.List[typ],  # type: ignore[valid-type]
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),
         )
