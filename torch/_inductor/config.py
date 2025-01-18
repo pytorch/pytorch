@@ -15,7 +15,7 @@ from typing import (
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -315,6 +315,16 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
+
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker: bool = Config(
+    default=True,
+    env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER",
+    justknob="pytorch/inductor:use_experimental_benchmarker",
+)
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -1107,6 +1117,12 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
+    # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
+    # to skip cpp compiler optimizations for faster compilation.
+    compile_wrapper_with_O0 = (
+        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
+    )
+
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
@@ -1243,7 +1259,7 @@ class cuda:
     # Set this to "pingpong" to avoid numerical issues
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
-    cutlass_op_denylist_regex: Optional[str] = "pingpong"
+    cutlass_op_denylist_regex: Optional[str] = None
 
 
 class rocm:
