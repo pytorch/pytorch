@@ -639,20 +639,17 @@ def register_onednn_fusion_ops():
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
 
-                def _is_sym_quantized_wgt():
-                    # We don't support the GEMM template with asymmetrically quantized weights.
-                    nonlocal w_zp
-                    return isinstance(
+                if (
+                    # symmetrically quantized weights
+                    isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
-                    ) and torch.equal(
+                    )
+                    and torch.equal(
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
-                    )  # symmetrically quantized weights
-
-                if _is_sym_quantized_wgt() and use_cpp_gemm_template(
-                    layout, x, packed_weight
-                ):
+                    )
+                ) and use_cpp_gemm_template(layout, x, packed_weight):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
                     weight_compens = V.graph.add_tensor_constant(
