@@ -46,6 +46,7 @@ class MPSBasicTests(TestCase):
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
     test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
     test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
+    test_builtins_round_float_ndigits_neg = CommonTemplate.test_builtins_round_float_ndigits_neg
     test_div1 = CommonTemplate.test_div1
     test_div3 = CommonTemplate.test_div3
     test_cat_empty = CommonTemplate.test_cat_empty

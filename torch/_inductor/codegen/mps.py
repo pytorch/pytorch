@@ -6,6 +6,7 @@ import sympy
 
 import torch
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
+from sympy.printing.precedence import PRECEDENCE
 
 from ..ops_handler import StoreMode
 from ..scheduler import Scheduler, SchedulerNode
@@ -76,6 +77,23 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return f"metal::abs({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        number_str = self.parenthesize(number, PRECEDENCE["Mul"])
+        return f"static_cast<float>(metal::round(1e{ndigits} * {number_str}) * 1e{-ndigits})"
+
+    def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
+        lhs, rhs = expr.args
+        # TODO: This is only accurate up to 2**23
+        return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
 
 class MetalOverrides(OpOverrides):
