@@ -816,6 +816,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
+                    assert load_code is not None
                     self.body.writeline(load_code)
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
@@ -1747,11 +1748,8 @@ class AlgorithmSelectorCache(PersistentCache):
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            initial_stdout = sys.stdout
-            initial_stderr = sys.stderr
-
             def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                with restore_stdout_stderr():
                     choice.precompile()
 
             def on_complete(future):
@@ -1784,7 +1782,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     futures[future] = c
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr(initial_stdout, initial_stderr)
+            @restore_stdout_stderr()
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 for future in as_completed(
