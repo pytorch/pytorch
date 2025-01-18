@@ -174,7 +174,7 @@ def associative_scan(
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
-    sliced_leaves = [first_slice_copy(leaf, dim) for leaf in leaves]
+    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
 
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),

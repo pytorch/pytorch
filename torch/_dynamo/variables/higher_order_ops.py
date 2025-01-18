@@ -1277,7 +1277,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         xs_proxy = xs.as_proxy()
         check_meta_consistency_vt(
-            [_make_inlined(tx, first_slice_copy)(t, dim) for t in xs.items],
+            [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
             "initial_xs",
             "combine_fn_output",
