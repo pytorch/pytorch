@@ -219,7 +219,7 @@ def get_supported_param_types():
 
 SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
-    list[Tensor]: "Tensor[]",
+    typing.List[Tensor]: "Tensor[]",
     list[Tensor]: "Tensor[]",
     int: "SymInt",
     float: "float",
