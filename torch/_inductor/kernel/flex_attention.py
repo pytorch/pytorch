@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import sympy
 
@@ -248,6 +248,34 @@ def load_checked_block(block_ptr, IS_DIVISIBLE: tl.constexpr, SAFE_HEAD_DIM: tl.
       return tl.load(block_ptr, boundary_check=(0,), padding_option="zero")
   else:
       return tl.load(block_ptr, boundary_check=(0, 1), padding_option="zero")
+"""
+
+load_checked_2d = r"""
+@triton.jit
+def load_checked_2d(
+    ptr,
+    offs_m,
+    offs_n,
+    stride_m,
+    stride_n,
+    IS_DIVISIBLE_M: tl.constexpr,
+    IS_DIVISIBLE_N: tl.constexpr,
+    M_LEN: tl.constexpr,
+    N_DIM: tl.constexpr,
+):
+    # Calculate final pointer if strides are provided
+    if stride_m is not None and stride_n is not None:
+        ptr = ptr + offs_m[:, None] * stride_m + offs_n[None, :] * stride_n
+
+    # Handle all masking cases
+    if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN) & (offs_n[None, :] < N_DIM), other=0.0)
+    elif IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_n[None, :] < N_DIM), other=0.0)
+    elif not IS_DIVISIBLE_M and IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN), other=0.0)
+    else:  # Both divisible
+        return tl.load(ptr)
 """
 
 compute_flex_attention = r"""
@@ -623,8 +651,8 @@ flex_attention_template = TritonTemplate(
     + compute_forward_inner
     + compute_next_offset_func
     + compute_forward_block_mn
-    + get_bounded_indices_func
-    + load_checked_block,
+    + load_checked_block
+    + get_bounded_indices_func,
 )
 
 
@@ -1040,6 +1068,40 @@ def next_power_of_two(n):
     return 2 ** math.ceil(math.log2(n))
 
 
+def set_head_dim_values(
+    kernel_options: Dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
+):
+    """
+    Mutates kernel options, adding head dimension calculations.
+
+    Args:
+        kernel_options: Dictionary to populate with options
+        qk_head_dim: Query/Key head dimension
+        v_head_dim: Value head dimension
+        graph_sizevars: Graph size variables object with evaluate_static_shape method
+
+    """
+    # QK dimensions
+    qk_head_dim_static = graph_sizevars.evaluate_static_shape(qk_head_dim)
+    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
+    )
+
+    # V dimensions
+    v_head_dim_static = graph_sizevars.evaluate_static_shape(v_head_dim)
+    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
+    kernel_options.setdefault(
+        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
+    )
+
+    # Safety flag
+    kernel_options.setdefault(
+        "SAFE_HEAD_DIM",
+        is_power_of_2(qk_head_dim_static) and is_power_of_2(v_head_dim_static),
+    )
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(
@@ -1208,24 +1270,7 @@ def flex_attention(
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    # QK dimensions and power of 2 variants
-    qk_head_dim_static = V.graph.sizevars.evaluate_static_shape(qk_head_dim)
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
-    kernel_options.setdefault(
-        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
-    )
-
-    # V dimensions and power of 2 variants
-    v_head_dim_static = V.graph.sizevars.evaluate_static_shape(v_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
-    kernel_options.setdefault(
-        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
-    )
-
-    kernel_options.setdefault(
-        "SAFE_HEAD_DIM",
-        is_power_of_2(qk_head_dim_static) and is_power_of_2(v_head_dim_static),
-    )
+    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     choices: List[Any] = []
     configs: List[tuple[int, int, int, int]] = []
@@ -1355,34 +1400,6 @@ def flex_attention_backward_grid(
         batch_size * kv_heads,
     )
 
-
-load_checked_2d = r"""
-@triton.jit
-def load_checked_2d(
-    ptr,
-    offs_m,
-    offs_n,
-    stride_m,
-    stride_n,
-    IS_DIVISIBLE_M: tl.constexpr,
-    IS_DIVISIBLE_N: tl.constexpr,
-    M_LEN: tl.constexpr,
-    N_DIM: tl.constexpr,
-):
-    # Calculate final pointer if strides are provided
-    if stride_m is not None and stride_n is not None:
-        ptr = ptr + offs_m[:, None] * stride_m + offs_n[None, :] * stride_n
-
-    # Handle all masking cases
-    if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
-        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN) & (offs_n[None, :] < N_DIM), other=0.0)
-    elif IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
-        return tl.load(ptr, mask=(offs_n[None, :] < N_DIM), other=0.0)
-    elif not IS_DIVISIBLE_M and IS_DIVISIBLE_N:
-        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN), other=0.0)
-    else:  # Both divisible
-        return tl.load(ptr)
-"""
 
 flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
@@ -2326,24 +2343,8 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    # QK dimensions and power of 2 variants
-    qk_head_dim_static = V.graph.sizevars.evaluate_static_shape(qk_head_dim)
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
-    kernel_options.setdefault(
-        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
-    )
 
-    # V dimensions and power of 2 variants
-    v_head_dim_static = V.graph.sizevars.evaluate_static_shape(v_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
-    kernel_options.setdefault(
-        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
-    )
-
-    kernel_options.setdefault(
-        "SAFE_HEAD_DIM",
-        is_power_of_2(qk_head_dim_static) and is_power_of_2(v_head_dim_static),
-    )
+    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)

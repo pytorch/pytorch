@@ -18,6 +18,9 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    get_bounded_indices_func,
+    load_checked_2d,
+    load_checked_block,
     maybe_realize,
 )
 
@@ -292,6 +295,9 @@ flex_decoding_template = TritonTemplate(
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
     + compute_forward_inner
+    + get_bounded_indices_func
+    + load_checked_block
+    + load_checked_2d
     + compute_next_offset_func
     + compute_forward_block_mn,
 )
@@ -325,6 +331,8 @@ def _get_decoding_default_config(key) -> tuple[int, int, int]:
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
+    from .flex_attention import set_head_dim_values
+
     (
         query,
         key,
@@ -452,8 +460,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     kernel_options.setdefault(
         "BLOCK_M",
