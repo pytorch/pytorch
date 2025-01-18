@@ -2366,7 +2366,7 @@
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
 
-- name: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
+- name: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size, int[2] stride=[], int[2] padding=0) -> Tensor
   self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
