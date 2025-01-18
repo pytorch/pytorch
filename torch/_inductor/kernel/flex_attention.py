@@ -237,9 +237,9 @@ def get_bounded_indices(indices, max_len=None):
 """
 
 
-load_checked = r"""
+load_checked_block = r"""
 @triton.jit
-def load_checked(block_ptr, IS_DIVISIBLE: tl.constexpr, SAFE_HEAD_DIM: tl.constexpr):
+def load_checked_block(block_ptr, IS_DIVISIBLE: tl.constexpr, SAFE_HEAD_DIM: tl.constexpr):
   if IS_DIVISIBLE and SAFE_HEAD_DIM:
     return tl.load(block_ptr)
   elif IS_DIVISIBLE and not SAFE_HEAD_DIM:
@@ -349,7 +349,7 @@ compute_flex_attention = r"""
         block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
-    q = load_checked(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
@@ -541,7 +541,7 @@ def forward_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    k = load_checked(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    k = load_checked_block(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -605,7 +605,7 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
-    v = load_checked(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
@@ -624,7 +624,7 @@ flex_attention_template = TritonTemplate(
     + compute_next_offset_func
     + compute_forward_block_mn
     + get_bounded_indices_func
-    + load_checked,
+    + load_checked_block,
 )
 
 
@@ -1356,6 +1356,34 @@ def flex_attention_backward_grid(
     )
 
 
+load_checked_2d = r"""
+@triton.jit
+def load_checked_2d(
+    ptr,
+    offs_m,
+    offs_n,
+    stride_m,
+    stride_n,
+    IS_DIVISIBLE_M: tl.constexpr,
+    IS_DIVISIBLE_N: tl.constexpr,
+    M_LEN: tl.constexpr,
+    N_DIM: tl.constexpr,
+):
+    # Calculate final pointer if strides are provided
+    if stride_m is not None and stride_n is not None:
+        ptr = ptr + offs_m[:, None] * stride_m + offs_n[None, :] * stride_n
+
+    # Handle all masking cases
+    if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN) & (offs_n[None, :] < N_DIM), other=0.0)
+    elif IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_n[None, :] < N_DIM), other=0.0)
+    elif not IS_DIVISIBLE_M and IS_DIVISIBLE_N:
+        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN), other=0.0)
+    else:  # Both divisible
+        return tl.load(ptr)
+"""
+
 flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
@@ -1481,14 +1509,8 @@ flex_attention_backward_template = TritonTemplate(
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
         # load Q and do: they stay in SRAM throughout the inner loop.
-        if IS_DIVISIBLE and SAFE_HEAD_DIM:
-            q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
-            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod)
-        else:
-            # q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=offs_m2[:, None] < Q_LEN)
-            # do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=offs_m2[:, None] < Q_LEN)
-            q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=(offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM), other=0.0)
-            do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_v[None, :] * stride_dod, mask=(offs_m2[:, None] < Q_LEN) & (offs_v[None, :] < V_HEAD_DIM), other=0.0)
+        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
+        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
 
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -1557,8 +1579,6 @@ flex_attention_backward_template = TritonTemplate(
         stride_q_idx_h = {{stride("Q_IDX", 1)}}
         stride_q_idx_n = {{stride("Q_IDX", 2)}}
 
-        # dv = tl.zeros([BLOCK_N1, V_HEAD_DIM], dtype=tl.float32)
-        # dk = tl.zeros([BLOCK_N1, QK_HEAD_DIM], dtype=tl.float32)
 
         dv = tl.zeros([BLOCK_N1, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
         dk = tl.zeros([BLOCK_N1, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
@@ -1567,14 +1587,9 @@ flex_attention_backward_template = TritonTemplate(
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         # load K and V: they stay in SRAM throughout the inner loop.
-        if IS_DIVISIBLE:
-            k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_v[None, :] * stride_vd)
-        else:
-            # k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=offs_n1[:, None] < KV_LEN)
-            # v = tl.load(V + offs_n1[:, None] * stride_vn + offs_v[None, :] * stride_vd, mask=offs_n1[:, None] < KV_LEN)
-            k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=(offs_n1[:, None] < KV_LEN) & (offs_k[None, :] < QK_HEAD_DIM), other=0.0)
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd, mask=(offs_n1[:, None] < KV_LEN) & (offs_v[None, :] < V_HEAD_DIM), other=0.0)
+        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
+        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
+
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
@@ -1758,11 +1773,8 @@ def bwd_dq_block_mn(
 ):
     {{gen_defines() | indent_except_first(1)}}
 
-    if IS_DIVISIBLE and SAFE_HEAD_DIM:
-        kT = tl.load(kT_ptrs)
-    else:
-        kT = tl.load(kT_ptrs, mask=(offs_n2[None, :] < KV_LEN) & (offs_k[:, None] < QK_HEAD_DIM))
-
+    # NB reversed order to since K is transposed
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
@@ -1808,10 +1820,8 @@ def bwd_dq_block_mn(
         post_mod_scores *= RCP_LN2
     p = tl.math.exp2(post_mod_scores - lse)
     # Compute dP and dS.
-    if IS_DIVISIBLE and SAFE_HEAD_DIM:
-        vT = tl.load(vT_ptrs)
-    else:
-        vT = tl.load(vT_ptrs, mask=(offs_n2[None, :] < KV_LEN) & (offs_v[:, None] < V_HEAD_DIM))
+    # NB reversed order to since V is transposed
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
 
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
@@ -1954,12 +1964,12 @@ def bwd_dkdv_block_mn(
 ):
     {{gen_defines() | indent_except_first(1) }}
 
+    # NB reversed order since Q is transposed
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
     # Load LSE before computing qk to reduce pipeline stall.
-    if IS_DIVISIBLE and SAFE_HEAD_DIM:
-        qT = tl.load(qT_ptrs)
+    if IS_DIVISIBLE:
         lse = tl.load(LSE + offs_m1)
     else:
-        qT = tl.load(qT_ptrs, mask=(offs_m1[None, :] < Q_LEN) & (offs_k[:, None] < QK_HEAD_DIM), other=0.0)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
@@ -2005,10 +2015,7 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     pT = tl.math.exp2(post_mod_scores - lse[None, :])
-    if IS_DIVISIBLE and SAFE_HEAD_DIM:
-        do = tl.load(do_ptrs)
-    else:
-        do = tl.load(do_ptrs, mask=(offs_m1[:, None] < Q_LEN) & (offs_v[None, :] < V_HEAD_DIM))
+    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
     # Compute dV.
     ppT = pT
     dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
@@ -2067,7 +2074,7 @@ def bwd_dkdv_block_mn(
  """
     + compute_next_offset_func
     + get_bounded_indices_func
-    + load_checked,
+    + load_checked_2d,
 )
 
 
