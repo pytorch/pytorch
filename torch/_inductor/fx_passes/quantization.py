@@ -873,14 +873,8 @@ def _register_quantized_maxpool2d_lowering(
         dilation = kwargs["dilation"] if ("dilation" in kwargs) else 1
         ceil_mode = kwargs["ceil_mode"] if ("ceil_mode" in kwargs) else False
 
-        if padding == 0:
-            padding = [0, 0]
-        if dilation == 1:
-            dilation = [1, 1]
-        if not stride:
-            stride = kernel_size
         kernel_size = pad_listlike(kernel_size, 2)
-        stride = pad_listlike(stride, 2)
+        stride = pad_listlike(stride or kernel_size, 2)
         padding = pad_listlike(padding, 2)
         dilation = pad_listlike(dilation, 2)
 
