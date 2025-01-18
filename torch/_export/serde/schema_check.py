@@ -3,7 +3,6 @@ import dataclasses
 import hashlib
 import inspect
 import re
-import types
 import typing
 from enum import IntEnum
 from typing import Annotated, Any, ForwardRef, Optional, Union
@@ -19,6 +18,7 @@ class SchemaUpdateError(Exception):
 def _check(x, msg):
     if not x:
         raise SchemaUpdateError(msg)
+
 
 _CPP_TYPE_MAP = {
     str: "std::string",
