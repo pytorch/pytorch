@@ -15,6 +15,8 @@
 // This file is included by TensorBody.h, which defines the Tensor class.
 #include <ATen/core/ATen_fwd.h>
 
+#include <string_view>
+
 ${MethodOperators_includes}
 
 namespace at {
