@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Sequence
+from collections.abc import Sequence
+from typing import cast
 
 from ...._dynamo.utils import counters
 from ... import config
