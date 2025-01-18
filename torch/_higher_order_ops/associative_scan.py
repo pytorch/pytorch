@@ -167,10 +167,6 @@ def associative_scan(
     ndim = leaves[0].ndim
     orig_scan_dim = utils.canonicalize_dim(ndim, dim)
     leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
-    shape = leaves[0].shape
-
-    # for x in leaves[1:]:
-    #     assert x.shape == shape, "All xs tensors must have the same shape"
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
