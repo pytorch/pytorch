@@ -1,7 +1,12 @@
-import torch
 import operator
 import random
 import textwrap
+
+from triton.runtime.jit import JITFunction
+
+import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._dynamo._higher_order_ops.triton_kernel_wrap import triton_wrapper_mutation
 
 from .. import config, ir
 from .wrapper import (
@@ -16,6 +21,7 @@ from .wrapper import (
     CommBufferFreeLine,
 )
 
+
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
     Generate Wrapper FX IR, for use in other backends.
@@ -25,7 +31,18 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.graph = torch.fx.Graph() # Wrapper FX IR.
         self.buffer_to_node: Dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
 
-    def _record_allocation(buffer: BufferLike, node: torch.fx.Node):
+    def _fake_tensor(self, size, stride, dtype) -> torch.Tensor:
+        with V.fake_mode:
+            return torch.empty_strided(
+                size,
+                stride,
+                dtype=tensor_meta.dtype,
+            )
+
+    def _create_meta_from_buffer(self, node: torch.fx.Node, buffer: BufferLike) -> None:
+        node.meta["val"] = self._fake_tensor(tuple(buffer.get_size()), tuple(buffer.get_stride()), dtype=buffer.get_dtype(), device=buffer.get_device())
+
+    def _record_allocation(buffer: BufferLike, node: torch.fx.Node) -> None:
         """
         Updates the symbol table to record that an Inductor buffer maps to the result of
         an FX node.
@@ -33,7 +50,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert node not in self.buffer_to_node
         self.buffer_to_node[buffer] = node
 
-    def _free(buffer: BufferLike):
+    def _free(buffer: BufferLike) -> None:
         """
         Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
@@ -45,6 +62,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def _generate(self, is_inference):
 
         # We disable planning during training because it presently increases peak memory consumption.
+        #TODO don't duplicate this code. Refactor into a helper in the base class.
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
@@ -55,13 +73,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
             line_type = type(line)
             conversion_func = {
-                AllocateLine: _generate_allocate,
-                FreeIfNotReusedLine: _generate_free_if_not_reused,
-                ReuseLine: _generate_reuse,
-                NullLine: _generate_null,
-                CommBufferLine: _generate_comm_buffer,
-                CommBufferAllocateLine: _generate_comm_buffer_allocate,
-                CommBufferFreeLine: _generate_comm_buffer_free,
+                AllocateLine: self._generate_allocate,
+                FreeIfNotReusedLine: self._generate_free_if_not_reused,
+                ReuseLine: self._generate_reuse,
+                NullLine: self._generate_null,
+                CommBufferLine: self._generate_comm_buffer,
+                CommBufferAllocateLine: self._generate_comm_buffer_allocate,
+                CommBufferFreeLine: self._generate_comm_buffer_free,
             }.get(line_type)
 
             # FX conversion only supports Wrapper IR, not Python/C++ lines.
@@ -75,30 +93,32 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                     """
                 ))
 
-            conversion_func(self, line)
+            conversion_func(line)
 
-    def _generate_allocate(self, line: Line):
+    def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
-        name = self.node.get_name()
+        buffer = self.node
+        name = buffer.get_name()
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
+
         node = self.graph.call_function(torch.empty_strided, args=(shape, stride, dtype, device))
         node.name = name
-
+        self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
 
-    def _generate_free_if_not_reused(self, line: Line):
+    def _generate_free_if_not_reused(self, line: Line) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
         if not buf.is_reused:
             buf._free(self.node)
 
-    def _generate_reuse(self, line: Line):
+    def _generate_reuse(self, line: Line) -> None:
         assert isinstance(line, ReuseLine)
         old = line.node
         new = line.reused_as
@@ -120,18 +140,19 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 torch.as_strided,
                 args=(size, stride, offset)
             )
+            self._create_meta_from_buffer(result_node, new)
 
         self._record_allocation(new, result_node)
 
-    def _generate_null(self, line: Line):
+    def _generate_null(self, line: Line) -> None:
         assert isintstance(line, NullLine)
         # Does nothing.
 
-    def _generate_comm_buffer(self, line: Line):
+    def _generate_comm_buffer(self, line: Line) -> None:
         assert isinstance(line, CommBufferLine)
         # Does nothing. Comm buffers are handled by the respective allocate/free lines.
 
-    def _generate_comm_buffer_allocate(self, line: Line):
+    def _generate_comm_buffer_allocate(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
@@ -149,10 +170,23 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Distributed is not always avaliable. Only import it if used.
         from torch._C._distributed_c10d import _SymmetricMemory import empty_strided_p2p
         alloc_id = random.randint(0, 2**64 - 1)
-        node = self.graph.call_function(empty_strided_p2p, shape, stride, dtype, device, self.group_name, alloc_id)
+        node = self.graph.call_function(
+                empty_strided_p2p,
+                args=(shape, stride, dtype, device, self.group_name, alloc_id),
+        )
+        self._create_meta_from_buffer(result_node, buf)
         self._record_allocation(buf, node)
 
-    def _generate_comm_buffer_free(self, line: Line):
+    def _generate_comm_buffer_free(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
         self.graph.free(line.node)
+
+    def _generate_triton_call(self, line: Line) -> None:
+        assert isinstance(line, TritonKernelLine) #TODO create this in Wrapper IR
+        grid = [] #TODO get a valid config from Line. Might have to import the Triton source.
+        kwargs = {} #TODO
+        triton_kernel = () #TODO figure out how Dynamo initializes this
+
+        node = self.graph.call_function(triton_wrapper_mutation, args=(triton_kernel, grid, kwargs))
+        # TODO add autotuning metadata?
 
