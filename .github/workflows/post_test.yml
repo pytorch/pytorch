@@ -3,7 +3,7 @@ on:
   pull_request:
 jobs:
   post-process:
-    name: Post process for workflow run id
+    name: Post process for workflow run id ${workflow_run_id}, attempt ${attempt} and job id ${job_id}
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     permissions:
