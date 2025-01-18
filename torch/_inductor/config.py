@@ -1107,6 +1107,12 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
+    # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
+    # to skip cpp compiler optimizations for faster compilation.
+    compile_wrapper_with_O0 = (
+        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
+    )
+
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
