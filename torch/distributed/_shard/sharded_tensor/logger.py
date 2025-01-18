@@ -7,12 +7,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import List
 
 from torch.distributed._shard.sharded_tensor.logging_handlers import _log_handlers
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _get_or_create_logger() -> logging.Logger:
