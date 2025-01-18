@@ -335,6 +335,8 @@ class InputGen:
         return torch.randn((1,), device=self.device)
 
     def double(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("MPS does not support torch.float64")
         return torch.randn((self.n, self.n), device=self.device, dtype=torch.double)
 
     def int(self):
@@ -733,13 +735,9 @@ class SweepInputs2:
         "broadcast1",
         "broadcast2",
         "broadcast3",
+        "double",
         "int",
     ]
-
-    # MPS doesn't support 64-bits floating point
-    if GPU_TYPE != "mps":
-        input_gen_types1.append("double")
-
     input_gen_types2 = input_gen_types1
     gen = None
 
