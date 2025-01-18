@@ -20,6 +20,21 @@ def _check(x, msg):
         raise SchemaUpdateError(msg)
 
 
+_CPP_TYPE_MAP = {
+    str: "std::string",
+    int: "int64_t",
+    float: "double",
+    bool: "bool",
+}
+
+_THRIFT_TYPE_MAP = {
+    str: "string",
+    int: "i64",
+    float: "double",
+    bool: "bool",
+}
+
+
 def _staged_schema():
     yaml_ret: Dict[str, Any] = {}
     defs = {}
@@ -32,27 +47,10 @@ def _staged_schema():
 
     def _handle_aggregate(ty) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         def dump_type(t, level: int) -> tuple[str, str, str]:
-            CPP_TYPE_MAP = {
-                str: "std::string",
-                int: "int64_t",
-                float: "double",
-                bool: "bool",
-            }
-            THRIFT_TYPE_MAP = {
-                str: "string",
-                int: "i64",
-                float: "double",
-                bool: "bool",
-            }
-            if isinstance(t, type):
-                if t.__name__ in cpp_enum_defs:
-                    return t.__name__, "int64_t", t.__name__
-                else:
-                    return (
-                        t.__name__,
-                        CPP_TYPE_MAP.get(t, t.__name__),
-                        THRIFT_TYPE_MAP.get(t, t.__name__),
-                    )
+            if getattr(t, "__name__", None) in cpp_enum_defs:
+                return t.__name__, "int64_t", t.__name__
+            elif t in _CPP_TYPE_MAP:
+                return (t.__name__, _CPP_TYPE_MAP[t], _THRIFT_TYPE_MAP[t])
             elif isinstance(t, str):
                 assert t in defs
                 assert t not in cpp_enum_defs
@@ -102,6 +100,8 @@ def _staged_schema():
                     (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
                     f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
+            elif isinstance(t, type):
+                return (t.__name__, t.__name__, t.__name__)
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
