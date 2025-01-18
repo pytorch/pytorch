@@ -51,8 +51,10 @@ class CUDACPPScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            fused_name = get_fused_kernel_name(
-                node_schedule, config.triton.descriptive_names
+            fused_name = (
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
+                if config.triton.descriptive_names
+                else ""
             )
             kernel_name = "_".join(["cuda", fused_name, wrapper.next_kernel_suffix()])
             # use the original src_code as the key

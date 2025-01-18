@@ -79,7 +79,7 @@ T = TypeVar("T")
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
-@functools.cache
+@functools.lru_cache(None)
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
@@ -237,7 +237,7 @@ def do_bench_using_profiling(
     return res
 
 
-@functools.cache
+@functools.lru_cache(None)
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -373,10 +373,10 @@ def is_pointwise_use(
     Uses in views ops will follow the views uses
     """
 
+    if not use.op == "call_function":
+        return False
     if not (
-        use.op == "call_function"
-        and isinstance(use.target, torch._ops.OpOverload)
-        or use.target is operator.getitem
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
     ):
         return False
 
@@ -533,7 +533,7 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def _aggregate_origins(
+def aggregate_origins(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
 ) -> OrderedSet[Node]:
     from . import ir
@@ -556,13 +556,9 @@ def _aggregate_origins(
 
 def get_fused_kernel_name(
     node_schedule: Sequence[BaseSchedulerNode],
-    descriptive_names: bool | Literal["torch", "original_aten", "inductor_node"],
+    descriptive_names: Literal[True, "torch", "original_aten", "inductor_node"],
 ) -> str:
-    assert descriptive_names is not True
-    if not descriptive_names:
-        return ""
-
-    all_origins = _aggregate_origins(node_schedule)
+    all_origins = aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
@@ -598,7 +594,7 @@ def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
-    all_origins = _aggregate_origins(node_schedule)
+    all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
     from_node_dict = collections.defaultdict(list)
@@ -613,12 +609,14 @@ def get_kernel_metadata(
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
-            attr = "_inductor_kernel_metadata_node_to_idx_map"
-            node_to_idx_map = getattr(single_graph, attr, None)
-            if node_to_idx_map is None:
-                node_to_idx_map = {n: i for i, n in enumerate(single_graph.nodes)}
-                setattr(single_graph, attr, node_to_idx_map)
-            inductor_nodes.sort(key=lambda n: node_to_idx_map[n])
+            if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
+                node_to_idx_map = {}
+                for idx, n in enumerate(single_graph.nodes):
+                    node_to_idx_map[n] = idx
+                single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
+            inductor_nodes.sort(
+                key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
+            )
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
@@ -678,12 +676,12 @@ def gather_origins(
 
     from . import ir
 
-    def is_unrealized_node(n: Any) -> bool:
-        return (
-            (isinstance(n, ir.TensorBox) and is_unrealized_node(n.data))
-            or (isinstance(n, ir.StorageBox) and is_unrealized_node(n.data))
-            or isinstance(n, ir.Pointwise)
-        )
+    def is_unrealized_node(n: IRNode) -> bool:
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -984,14 +982,20 @@ class IndentedBuffer:
         buf = StringIO()
         p = 1
         linemap = []
-        for line in self._lines:
-            if (s := _line_to_str(line)) is not None:
-                buf.write(s)
-                buf.write("\n")
-                p += 1 + s.count("\n")
-            elif isinstance(line, LineContext):
-                linemap.append((p, line.context))
-
+        for li in self._lines:
+            if isinstance(li, DeferredLineBase):
+                line = li()
+                if line is None:
+                    continue
+            elif isinstance(li, LineContext):
+                linemap.append((p, li.context))
+                continue
+            else:
+                line = li
+            assert isinstance(line, str)
+            buf.write(line)
+            buf.write("\n")
+            p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
     def getvalue(self) -> str:
@@ -1000,14 +1004,22 @@ class IndentedBuffer:
 
     def getrawvalue(self) -> str:
         buf = StringIO()
-        for line in self._lines:
-            if (s := _line_to_str(line)) is not None:
-                # backslash implies line continuation
-                if s.endswith("\\"):
-                    buf.write(s[:-1])
-                else:
-                    buf.write(s)
-                    buf.write("\n")
+        for li in self._lines:
+            if isinstance(li, DeferredLineBase):
+                line = li()
+                if line is None:
+                    continue
+            elif isinstance(li, LineContext):
+                continue
+            else:
+                line = li
+            assert isinstance(line, str)
+            # backslash implies line continuation
+            if line.endswith("\\"):
+                buf.write(line[:-1])
+            else:
+                buf.write(line)
+                buf.write("\n")
         return buf.getvalue()
 
     def clear(self) -> None:
@@ -1164,7 +1176,7 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
+@functools.lru_cache(None)
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
@@ -1328,12 +1340,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-@functools.cache
+@functools.lru_cache(None)
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-@functools.cache
+@functools.lru_cache(None)
 def try_import_ck_lib() -> (
     tuple[str | None, Callable[[], list[Any]], Callable[[], list[Any]], Type[Any]]
 ):
@@ -1627,7 +1639,9 @@ def run_and_get_graph_lowering(
         graph_lowerings.append(graph)
 
     with mock.patch.object(CompiledFxGraph, "__init__", fake_init):
-        return fn(*args, **kwargs), graph_lowerings
+        result = fn(*args, **kwargs)
+
+    return result, graph_lowerings
 
 
 @contextlib.contextmanager
@@ -1646,6 +1660,27 @@ def override_lowering(
         yield
     finally:
         lowering.lowerings[aten_op] = orig_fn
+
+
+def add_scheduler_init_hook(
+    pre_fn: Callable[..., Any], post_fn: Callable[..., Any] | None = None
+) -> Any:
+    """
+    Add hook functions to be called at the beginning and end of Scheduler.__init__.
+    Used for unit tests.
+    """
+    from torch._inductor.scheduler import Scheduler
+
+    orig_fn = Scheduler.__init__
+
+    def wrapper(scheduler: Any, nodes: Any) -> Any:
+        pre_fn(scheduler, nodes)
+        out = orig_fn(scheduler, nodes)
+        if post_fn:
+            post_fn(scheduler, nodes)
+        return out
+
+    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
 
 
 def developer_warning(msg: str) -> None:
@@ -1735,7 +1770,7 @@ def parallel_num_threads() -> int:
     return threads
 
 
-@functools.cache
+@functools.lru_cache(None)
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
 
@@ -1743,7 +1778,7 @@ def get_backend_num_stages() -> int:
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
 
-@functools.cache
+@functools.lru_cache(None)
 def get_device_tflops(dtype: torch.dtype) -> int:
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1771,7 +1806,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
             return get_max_simd_tflops(torch.float32)
 
 
-@functools.cache
+@functools.lru_cache(None)
 def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
@@ -1835,7 +1870,7 @@ class Placeholder(enum.Enum):
 
 
 def pass_execution_and_save(
-    func: Callable[..., Any], gm: GraphModule, example_inputs: Sequence[Any], msg: str
+    func: Callable[..., Any], gm: GraphModule, inp: Sequence[Any], msg: str
 ) -> None:
     from .pattern_matcher import stable_topological_sort
 
@@ -1846,8 +1881,7 @@ def pass_execution_and_save(
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
-        sp = ShapeProp(gm=gm, fake_mode=detect_fake_mode(example_inputs))
-        sp.propagate(*example_inputs)
+        ShapeProp(gm=gm, fake_mode=detect_fake_mode(inp)).propagate(*inp)
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
@@ -2455,7 +2489,7 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     )
 
 
-@functools.cache
+@functools.lru_cache(None)
 def boolean_ops() -> tuple[str, ...]:
     return (
         "isinf",

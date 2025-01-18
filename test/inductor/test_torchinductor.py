@@ -51,9 +51,9 @@ from torch._inductor.aoti_eager import (
 from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
-from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -779,6 +779,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -803,6 +813,10 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_mps_backend(device):
+    return getattr(device, "type", device) == "mps"
 
 
 def is_triton_backend(device):
@@ -11609,9 +11623,8 @@ class CommonTemplate:
                     or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
                 )
 
-        with _add_scheduler_init_hook(hook_fn):
+        with add_scheduler_init_hook(hook_fn):
             actual = torch.compile(f, fullgraph=True)(x)
-
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
@@ -13693,23 +13706,6 @@ if HAS_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
-
-
-def _add_scheduler_init_hook(pre_fn, post_fn=None):
-    """
-    Add hook functions to be called at the beginning and end of Scheduler.__init__.
-    Used for unit tests.
-    """
-    orig_fn = Scheduler.__init__
-
-    def wrapper(scheduler, nodes):
-        pre_fn(scheduler, nodes)
-        out = orig_fn(scheduler, nodes)
-        if post_fn:
-            post_fn(scheduler, nodes)
-        return out
-
-    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
 
 
 if __name__ == "__main__":
