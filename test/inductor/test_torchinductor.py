@@ -9248,7 +9248,12 @@ class CommonTemplate:
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            # the load_seed_offset arg can be 1 or non-1; depending on whether
+            # the triton signature specializes on 1 vs non-1, you might get 1
+            # or 2 kernels. In newer versions of triton, there's no specialization
+            # so we get only 1 kernel.
+            expected_kernels = 2 if triton_version_uses_attrs_dict() else 1
+            self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
@@ -9266,7 +9271,13 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
         self.assertEqual(len(source_codes), 1)
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+
+        # the load_seed_offset arg can be 1 or non-1; depending on whether
+        # the triton signature specializes on 1 vs non-1, you might get 1
+        # or 2 kernels. In newer versions of triton, there's no specialization
+        # so we get only 1 kernel.
+        expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
+        self.assertEqual(source_codes[0].count("async_compile.triton"), expected_kernels)
 
     def test_roll(self):
         def fn(a):
