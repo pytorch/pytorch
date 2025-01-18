@@ -83,11 +83,6 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 
 #endif
 
-std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
-  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
-  return instance;
-}
-
 void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
@@ -108,6 +103,11 @@ void destroyCublasHandle(cublasHandle_t handle) {
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
 } // namespace
+
+std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+  return instance;
+}
 
 void clearCublasWorkspaces() {
   cublas_handle_stream_to_workspace().clear();
