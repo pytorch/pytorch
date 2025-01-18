@@ -575,7 +575,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )

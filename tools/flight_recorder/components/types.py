@@ -378,9 +378,9 @@ class Op:
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
         self.pg_name, self.pg_desc = event["process_group"]
-        assert type in COLLECTIVES | P2P | {
-            "coalesced"
-        }, f"{type} is not a supported operation"
+        assert type in COLLECTIVES | P2P | {"coalesced"}, (
+            f"{type} is not a supported operation"
+        )
         self.type = type
         if type == "send":
             assert isinstance(meta, str)

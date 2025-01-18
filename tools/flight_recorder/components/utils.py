@@ -263,16 +263,16 @@ def check_no_missing_dump_files(
     for membership in memberships:
         all_ranks.add(int(membership.global_rank))
     dumps_ranks = {int(key) for key in entries.keys()}
-    assert (
-        dumps_ranks == all_ranks
-    ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    assert dumps_ranks == all_ranks, (
+        f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    )
 
 
 def check_version(version_by_ranks: dict[str, str], version: str) -> None:
     for rank, v in version_by_ranks.items():
-        assert (
-            v == version
-        ), f"Rank {rank} has different version {v} from the given version {version}"
+        assert v == version, (
+            f"Rank {rank} has different version {v} from the given version {version}"
+        )
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
