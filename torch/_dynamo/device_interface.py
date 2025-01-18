@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 
@@ -15,8 +16,8 @@ else:
 _device_t = Union[torch.device, str, int, None]
 
 # Recording the device properties in the main process but used in worker process.
-caching_worker_device_properties: Dict[str, Any] = {}
-caching_worker_current_devices: Dict[str, int] = {}
+caching_worker_device_properties: dict[str, Any] = {}
+caching_worker_current_devices: dict[str, int] = {}
 
 
 class DeviceInterface:
@@ -143,7 +144,7 @@ class DeviceGuard:
     """
 
     def __init__(
-        self, device_interface: Type[DeviceInterface], index: Optional[int]
+        self, device_interface: type[DeviceInterface], index: Optional[int]
     ) -> None:
         self.device_interface = device_interface
         self.idx = index
@@ -387,19 +388,19 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
-device_interfaces: Dict[str, Type[DeviceInterface]] = {}
+device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
 def register_interface_for_device(
-    device: Union[str, torch.device], device_interface: Type[DeviceInterface]
+    device: Union[str, torch.device], device_interface: type[DeviceInterface]
 ):
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
+def get_interface_for_device(device: Union[str, torch.device]) -> type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_initialized:
@@ -409,7 +410,7 @@ def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInt
     raise NotImplementedError(f"No interface for device {device}")
 
 
-def get_registered_device_interfaces() -> Iterable[tuple[str, Type[DeviceInterface]]]:
+def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterface]]]:
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()

@@ -2,6 +2,7 @@
 import inspect
 import warnings
 from functools import wraps
+from types import GenericAlias
 from typing import (
     Callable,
     List,
@@ -11,7 +12,6 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
-    GenericAlias
 )
 from typing_extensions import ParamSpec
 
@@ -263,7 +263,9 @@ def out_wrapper(
         out_type = (
             TensorLikeType
             if is_tensor
-            else GenericAlias(tuple, tuple(TensorLikeType for _ in range(len(out_names))))
+            else GenericAlias(
+                tuple, tuple(TensorLikeType for _ in range(len(out_names)))
+            )
         )
         # For backward compatibility - should be able to remove once PEP585
         # conversion is complete.
