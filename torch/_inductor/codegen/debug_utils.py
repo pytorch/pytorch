@@ -56,7 +56,7 @@ class DebugPrinterManager:
         args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
-        arg_signatures: Optional[List[type]] = None,
+        arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
