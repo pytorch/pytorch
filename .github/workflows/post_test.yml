@@ -10,4 +10,4 @@ jobs:
     steps:
       - name: Testing
         run: |
-          echo "Current workflow path: $GITHUB_WORKFLOW"
+          echo "Workflow: ${GITHUB_WORKFLOW}"
