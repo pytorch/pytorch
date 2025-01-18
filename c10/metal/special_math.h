@@ -2,6 +2,7 @@
 #include <metal_stdlib>
 
 namespace c10 {
+namespace metal {
 
 /*
  * For licensing information and documentation, please refer to the cpu
@@ -29,7 +30,7 @@ T chbevl(T x, const float array[], const int len) {
 
 template <typename T>
 T i0(T _x) {
-  auto x = metal::fabs(_x);
+  auto x = ::metal::fabs(_x);
 
   if (x <= 8.0) {
     /* Chebyshev coefficients for exp(-x) I0(x)
@@ -54,7 +55,7 @@ T i0(T _x) {
                        -3.04682672343198398683E-1,  6.76795274409476084995E-1};
 
     auto y = (x / 2.0) - 2.0;
-    return static_cast<T>(metal::exp(x) * chbevl(y, A, 30));
+    return static_cast<T>(::metal::exp(x) * chbevl(y, A, 30));
   }
 
   // Handles x > 8 case
@@ -78,7 +79,7 @@ T i0(T _x) {
                      8.04490411014108831608E-1};
 
   return static_cast<T>(
-      (metal::exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / metal::sqrt(x));
+      (::metal::exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / ::metal::sqrt(x));
 }
 
 // Copied from
@@ -86,7 +87,7 @@ T i0(T _x) {
 
 template <typename T>
 T i1(T _x) {
-  const auto x = metal::fabs(_x);
+  const auto x = ::metal::fabs(_x);
 
   if (x <= 8.0) {
     // Chebyshev coefficients for exp(-x) i1(x) in the internal [0, 8]
@@ -108,7 +109,7 @@ T i1(T _x) {
         1.02643658689847095384E-1,  -1.76416518357834055153E-1,
         2.52587186443633654823E-1};
     const auto y = x / 2.0 - 2.0;
-    const auto out = metal::exp(x) * x * chbevl(y, coefficients, 29);
+    const auto out = ::metal::exp(x) * x * chbevl(y, coefficients, 29);
     return static_cast<T>(_x < T(0.) ? -out : out);
   }
 
@@ -129,9 +130,10 @@ T i1(T _x) {
       -2.51223623787020892529E-7,  -3.88256480887769039346E-6,
       -1.10588938762623716291E-4,  -9.76109749136146840777E-3,
       7.78576235018280120474E-1};
-  const auto out =
-      (metal::exp(x) * chbevl(32. / x - 2., coefficients, 25)) / metal::sqrt(x);
+  const auto out = (::metal::exp(x) * chbevl(32. / x - 2., coefficients, 25)) /
+      ::metal::sqrt(x);
   return static_cast<T>(_x < T(0.) ? -out : out);
 }
 
+} // namespace metal
 } // namespace c10
