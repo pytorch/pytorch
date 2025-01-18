@@ -177,6 +177,8 @@ def get_plain_tensors(
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -186,6 +188,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
         return all_fake
+    elif isinstance(x, FunctionalTensor):
+        return is_fake(x.elem)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
@@ -197,6 +201,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
 
 def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
@@ -207,6 +213,8 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, FunctionalTensor):
+        return maybe_get_fake_mode(t.elem)
     elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
@@ -713,10 +721,10 @@ class FakeTensor(Tensor):
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
+            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            if getattr(torch, device.type).is_initialized():
+            if device.type != "mps" and getattr(torch, device.type).is_initialized():
                 device = torch.device(
                     f"{device.type}:{getattr(torch, device.type).current_device()}"
                 )
@@ -975,15 +983,14 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or is_sparse_any(t)
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
+    if t._has_symbolic_sizes_strides or is_sparse_any(t):
         memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 

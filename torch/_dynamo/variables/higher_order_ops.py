@@ -18,6 +18,7 @@ from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
@@ -32,8 +33,8 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..source import AttrSource
-from ..utils import proxy_args_kwargs
+from ..source import AttrSource, DictGetItemSource
+from ..utils import proxy_args_kwargs, set_example_value
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -2190,6 +2191,48 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
+    def proxy_submod(self, tx, arg):
+        assert isinstance(arg.source, DictGetItemSource)
+        submod_name = tx.output.install_subgraph(arg.source.index, arg.value)
+        p_submod = make_attr(tx, submod_name)
+        set_example_value(p_submod.node, arg.value)
+        return p_submod
+
+    def to_proxy(self, tx, arg):
+        if isinstance(arg, UnspecializedNNModuleVariable):
+            return self.proxy_submod(tx, arg)
+        elif isinstance(arg, (ListVariable, TupleVariable)):
+            return arg.python_type()(
+                self.to_proxy(tx, nested_arg) for nested_arg in arg.items
+            )
+        else:
+            return arg.as_proxy()
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        try:
+            p_args = tuple(self.to_proxy(tx, arg) for arg in args)
+            p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
+        except (NotImplementedError, Unsupported) as err:
+            raise Unsupported(
+                "Missing Dynamo support for FlexAttentionBackward HOP argument. Please file an issue."
+            ) from err
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
     Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
@@ -2574,12 +2617,22 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     if isinstance(
                         getattr(context, "__context__", None),
                         GuardOnDataDependentSymNode,
+                    ) and any(
+                        x in str(context.__context__.cond)
+                        for x in stride_unbacked_symbols
                     ):
-                        cond = context.__context__.cond
-                        if any(x in str(cond) for x in stride_unbacked_symbols):
-                            unimplemented(
-                                "Can't infer the stride of the backward inputs during Dynamo tracing."
-                            )
+                        unimplemented(
+                            "Can't infer the stride of the backward inputs during Dynamo tracing, "
+                            + "fall back the whole autograd.Function to eager-mode."
+                        )
+                    else:
+                        raise e
+                except torch._dynamo.exc.Unsupported as e:
+                    if e.msg.startswith("should_compile_partial_graph=False"):
+                        unimplemented(
+                            "Data-dependent jumps in backward graph, "
+                            + "fall back the whole autograd.Function to eager-mode."
+                        )
                     else:
                         raise e
                 # Need to save the lifted freevars from the `discard_graph_changes` tracer,

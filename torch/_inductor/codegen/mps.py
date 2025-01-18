@@ -63,6 +63,20 @@ class MetalExprPrinter(ExprPrinter_):
         mod = self.doprint(mod)
         return f"({x}) % ({mod})"
 
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            raise RuntimeError("metal::min only supported for 2 args")
+        return f"metal::min({', '.join(map(self._print, expr.args))})"
+
+    def _print_Max(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            raise RuntimeError("metal::max only supported for 2 args")
+        return f"metal::max({', '.join(map(self._print, expr.args))})"
+
+    def _print_Abs(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"metal::abs({self._print(expr.args[0])})"
+
 
 class MetalOverrides(OpOverrides):
     @staticmethod
@@ -235,6 +249,20 @@ class MetalOverrides(OpOverrides):
         float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
         return f"metal::trunc({float_a}/{float_b})"
 
+    @staticmethod
+    def ceil(x: CSEVariable) -> str:
+        return f"metal::ceil({x})"
+
+    @staticmethod
+    def round(x: CSEVariable) -> str:
+        return f"metal::round({x})"
+
+    @staticmethod
+    def pow(a: CSEVariable, b: CSEVariable) -> str:
+        cast_a = f"static_cast<decltype({a}+{b})>({a})"
+        cast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::pow({cast_a}, {cast_b})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -260,7 +288,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
-        line = f"{var}[{self.sexpr(index)}]"
+        line = f"{var}[{self.index_to_str(index)}]"
         return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
@@ -269,7 +297,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        line = f"{var}[{index}] = static_cast<{dtype_str}>({value});"
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
         self.body.writeline(DeferredLine(name, line))
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
@@ -354,8 +382,9 @@ class MetalKernel(SIMDKernel):
             return
         # TODO(malfet): support asserts
         # See https://github.com/pytorch/pytorch/issues/144634
-        lower_expr = f"{self.sexpr(expr)} < 0" if lower else ""
-        upper_expr = f"{self.sexpr(expr)} >= {self.sexpr(size)}" if upper else ""
+        expr_str = self.index_to_str(expr)
+        lower_expr = f"{expr_str} < 0" if lower else ""
+        upper_expr = f"{expr_str} >= {self.index_to_str(size)}" if upper else ""
         if lower and upper:
             line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:
@@ -369,9 +398,10 @@ class MetalScheduling(SIMDScheduling):
     def __init__(self, scheduler: Scheduler) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
-        wrapper.header.splice(
-            "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-        )
+        if wrapper is not None:
+            wrapper.header.splice(
+                "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+            )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel

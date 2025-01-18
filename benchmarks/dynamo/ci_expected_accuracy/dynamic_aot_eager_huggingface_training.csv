@@ -46,11 +46,11 @@ CamemBert,pass,5
 
 
 
-DebertaForMaskedLM,pass,13
+DebertaForMaskedLM,pass,5
 
 
 
-DebertaForQuestionAnswering,pass,13
+DebertaForQuestionAnswering,pass,5
 
 
 
