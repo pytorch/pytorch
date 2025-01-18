@@ -12699,7 +12699,7 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_include(self):
         # Checks that includes embedding works
-        lib = torch.mps._compile_shader("#include <c10/util/metal_special_math.h>")
+        lib = torch.mps._compile_shader("#include <c10/metal/special_math.h>")
         self.assertIsNotNone(lib)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")

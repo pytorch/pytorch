@@ -1,11 +1,11 @@
-#include <c10/util/metal_special_math.h>
+#include <c10/metal/special_math.h>
 
 template <typename T, typename Tout = T>
 void kernel
 i0(constant T* input,
    device Tout* output,
    uint index [[thread_position_in_grid]]) {
-  output[index] = c10::i0(static_cast<Tout>(input[index]));
+  output[index] = c10::metal::i0(static_cast<Tout>(input[index]));
 }
 
 template <typename T, typename Tout = T>
@@ -13,7 +13,7 @@ void kernel
 i1(constant T* input,
    device Tout* output,
    uint index [[thread_position_in_grid]]) {
-  output[index] = c10::i1(static_cast<Tout>(input[index]));
+  output[index] = c10::metal::i1(static_cast<Tout>(input[index]));
 }
 
 #define REGISTER_I0_I1(DTI, DTO)                                        \
