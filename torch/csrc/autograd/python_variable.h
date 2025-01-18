@@ -15,7 +15,7 @@ namespace py = pybind11;
 
 // Python object that backs torch.autograd.Variable
 struct THPVariable {
-  PyObject_HEAD;
+  PyObject_HEAD
   // Payload
   c10::MaybeOwned<at::Tensor> cdata;
   // Hooks to be run on backwards pass (corresponds to Python attr

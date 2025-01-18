@@ -36,6 +36,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
+    libkineto::ActivityType::OVERHEAD,
 };
 const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
@@ -213,7 +214,7 @@ class ExperimentalConfigWrapper {
 } // namespace
 
 bool collectivesProfilerExists() {
-#ifdef KINETO_HAS_NCCL_PROFILER
+#if defined(KINETO_HAS_NCCL_PROFILER) || defined(KINETO_HAS_HCCL_PROFILER)
   return true;
 #else
   return false;
@@ -407,6 +408,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_DRIVER:
     case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
     case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
+    case libkineto::ActivityType::OVERHEAD:
       return c10::DeviceType::CPU;
     default: {
       TORCH_WARN(

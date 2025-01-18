@@ -531,7 +531,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
 }
 std::optional<Tensor> to_functional_tensor(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
-    return std::make_optional<Tensor>(to_functional_tensor(*tensor));
+    return to_functional_tensor(*tensor);
   }
   return std::nullopt;
 }
@@ -569,7 +569,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
 }
 std::optional<Tensor> from_functional_tensor(const std::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return std::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
+    return from_functional_tensor(*t, assert_functional);
   }
   return std::nullopt;
 }
@@ -727,8 +727,9 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
+    auto const & e= t_list[i];
+    if (!e.has_value() || !e->defined()) continue;
+    if (isFunctionalTensor(e)) {
       ++functional_count;
     }
   }

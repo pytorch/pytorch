@@ -3,13 +3,14 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_load_const,
     Instruction,
     overwrite_instruction,
     transform_code_object,
@@ -88,7 +89,7 @@ def _try_except_tf_mode_template(dummy, stack_var_name):
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: Optional[Tuple[Any, ...]] = None
+    target_values: Optional[tuple[Any, ...]] = None
 
     def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
         """
@@ -125,10 +126,7 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
@@ -168,10 +166,7 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
 
         create_ctx: List[Instruction] = []
         _initial_push_null(create_ctx)
@@ -252,8 +247,7 @@ def _filter_iter(l1, l2, cond):
 def _load_tuple_and_call(tup):
     insts: List[Instruction] = []
     _initial_push_null(insts)
-    for val in tup:
-        insts.append(create_instruction("LOAD_CONST", argval=val))
+    insts.extend(create_load_const(val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
     return insts
 
@@ -277,14 +271,14 @@ class ContinueExecutionCache:
         code,
         lineno,
         offset: int,
-        setup_fn_target_offsets: Tuple[int, ...],  # only used in Python 3.11+
+        setup_fn_target_offsets: tuple[int, ...],  # only used in Python 3.11+
         nstack: int,
-        argnames: Tuple[str, ...],
-        argnames_null: Tuple[str, ...],
-        setup_fns: Tuple[ReenterWith, ...],
-        stack_ctx_vars: Tuple[Tuple[int, Tuple[Any]], ...],
-        argnames_ctx_vars: Tuple[Tuple[str, Tuple[Any]], ...],
-        null_idxes: Tuple[int, ...],
+        argnames: tuple[str, ...],
+        argnames_null: tuple[str, ...],
+        setup_fns: tuple[ReenterWith, ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[Any]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[Any]], ...],
+        null_idxes: tuple[int, ...],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -341,7 +335,11 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [
+                    v
+                    for v in code_options["co_varnames"]
+                    if v not in args and v not in freevars
+                ]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -457,13 +455,13 @@ class ContinueExecutionCache:
     def unreachable_codes(code_options) -> List[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
-            create_instruction("LOAD_CONST", argval=None),
+            create_load_const(None),
             create_instruction("RAISE_VARARGS", arg=1),
         ]
 
     @classmethod
     def generate_based_on_original_code_object(
-        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int, ...], *args
+        cls, code, lineno, offset: int, setup_fn_target_offsets: tuple[int, ...], *args
     ):
         """
         This handles the case of generating a resume into code generated

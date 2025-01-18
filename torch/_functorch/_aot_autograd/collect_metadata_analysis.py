@@ -218,16 +218,6 @@ def run_functionalized_fw_and_collect_metadata(
             # tensors. This is a problem as the inner tensor stride change may not be reflected
             # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
-            if (
-                mutates_data
-                and not arg.is_contiguous()
-                and is_traceable_wrapper_subclass(arg)
-            ):
-                raise RuntimeError(
-                    "Mutations on non-contiguous inputs are currently not allowed on "
-                    "tensor subclasses"
-                )
-
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -671,8 +661,53 @@ from a multi-output view call"
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
+        def _plain_fake_tensor_like_subclass(x):
+            with detect_fake_mode():
+                return torch.empty(
+                    x.shape, dtype=x.dtype, device=x.device, layout=x.layout
+                )
+
+        def _is_subclass_mutated_input_tangent_always_subclass(inp):
+            return (
+                isinstance(inp, torch.nested._internal.nested_tensor.NestedTensor)
+                or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
+            )
+
         f_input_tangents = [
-            inp
+            # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
+            # Generally when creating tangents to trace with, we assume that tangents will have
+            # the same subclass-ness as their forward outs
+            # however: for tangents that correspond to input mutations, in practice it is more likely
+            # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
+            # to assume that these tangents should always be plaint tensors.
+            # Example:
+            #  def f(x):
+            #      x.mul_(2)
+            #      return x + 1
+            #  out = f(x)
+            #  out.sum().backward()
+            # In the above code, we will have a tangent "x_updated_tangent",
+            # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
+            #
+            # However, there are exceptions to this logic. If a view is created from mutated input and is used in backward,
+            # The tangent for this subclass input will be a subclass tensor.
+            # Example:
+            #  def f(a, b):
+            #      a.mul_(2)
+            #      b.mul_(3)
+            #      return b.view(b.shape), a + b
+            # a_out, b_out = f(..., Subclass)
+            # (a * b).sum().backward()
+            #
+            # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
+            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+            (
+                _plain_fake_tensor_like_subclass(inp)
+                if is_traceable_wrapper_subclass(inp)
+                and not _is_subclass_mutated_input_tangent_always_subclass(inp)
+                else inp
+            )
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
@@ -697,8 +732,6 @@ from a multi-output view call"
             view_avoid_dupes_with_primals, traced_tangents
         )
 
-        output_tangents_start_idx = len(f_input_tangents)
-        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
         traced_tangents = [
             coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)

@@ -162,7 +162,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 If you are installing from source, you will need:
 - Python 3.9 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
-- Visual Studio or Visual Studio Build Tool on Windows
+- Visual Studio or Visual Studio Build Tool (Windows only)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
@@ -236,8 +236,6 @@ git submodule update --init --recursive
 
 ```bash
 conda install cmake ninja
-# Run this command on native Windows
-conda install rust
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
@@ -417,9 +415,11 @@ readthedocs theme.
 ```bash
 cd docs/
 pip install -r requirements.txt
+make html
+make serve
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+
+Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
