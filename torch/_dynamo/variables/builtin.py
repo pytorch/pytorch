@@ -10,7 +10,7 @@ import operator
 import types
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, MutableMapping
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -706,7 +706,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     @staticmethod
-    def _make_handler(fn, arg_types: List[type], has_kwargs: bool):
+    def _make_handler(fn, arg_types: list[type], has_kwargs: bool):
         from .lazy import LazyVariableTracker
 
         obj = BuiltinVariable(fn)
@@ -986,8 +986,8 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
@@ -1006,8 +1006,8 @@ class BuiltinVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if self.fn is object and name == "__setattr__":
             assert len(args) == 3
