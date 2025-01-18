@@ -2,7 +2,8 @@
 import collections
 import inspect
 import typing
-from typing import List, Optional, Sequence, Union  # noqa: F401
+from types import GenericAlias
+from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
@@ -163,20 +164,26 @@ def infer_schema(
 
 
 def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+    base_type: Union[type, typing._SpecialForm],
+    cpp_type: str,
+    list_base: bool,
+    optional_base_list: bool,
+    optional_list_base: bool,
 ):
-    result = [
+    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(typ):
-        return [
-            typing.Sequence[typ],  # type: ignore[valid-type]
-            typing.List[typ],  # type: ignore[valid-type]
-            collections.abc.Sequence[typ],
-            list[typ],
-        ]
+    def derived_seq_types(
+        typ: Union[type, typing._SpecialForm]
+    ) -> tuple[GenericAlias, ...]:
+        return (
+            GenericAlias(typing.Sequence, (typ,)),
+            GenericAlias(typing.List, (typ,)),
+            GenericAlias(collections.abc.Sequence, (typ,)),
+            GenericAlias(list, (typ,)),
+        )
 
     if list_base:
         result.extend(
@@ -196,7 +203,7 @@ def derived_types(
 
 
 def get_supported_param_types():
-    data = [
+    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
