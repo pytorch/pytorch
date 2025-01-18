@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, List, Type, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -42,11 +42,11 @@ class InductorChoices:
 
     def triton_kernel_kwargs(
         self,
-        kernel_cls: Type[TritonKernel],
+        kernel_cls: type[TritonKernel],
         features: SIMDKernelFeatures,
-        groups: List[sympy.Expr],
-        kernel_kwargs: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        groups: list[sympy.Expr],
+        kernel_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
