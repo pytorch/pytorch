@@ -185,6 +185,14 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::cos({x})"
 
     @staticmethod
+    def i0(x: CSEVariable) -> str:
+        return f"c10::metal::i0({x})"
+
+    @staticmethod
+    def i1(x: CSEVariable) -> str:
+        return f"c10::metal::i1({x})"
+
+    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
@@ -313,6 +321,7 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
+            #include <c10/metal/special_math.h>
             template<typename T> inline bool isnan(T) { return false; }
             template<> inline bool isnan(float x) { return metal::isnan(x); }
             template<> inline bool isnan(half x) { return metal::isnan(x); }
