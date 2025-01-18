@@ -1,0 +1,12 @@
+name: Post Test Process
+on:
+  pull_request:
+jobs:
+  post-process:
+    name: Post process for workflow run id
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write
+    run: |
+      echo "Current workflow path: $GITHUB_WORKFLOW"
