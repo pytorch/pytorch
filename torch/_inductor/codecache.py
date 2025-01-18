@@ -130,13 +130,13 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
     from concurrent.futures import Future
 
-    from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import ChoiceCaller
-    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
-
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .graph import GraphLowering
+    from .ir import ChoiceCaller
     from .output_code import CompiledFxGraphConstants, OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
+    from .runtime.hints import HalideInputSpec, HalideMeta
+    from .runtime.triton_heuristics import CachingAutotuner
     from .utils import InputType
 
     T = TypeVar("T")
@@ -3226,12 +3226,12 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self) -> None:
+    def result(self) -> Callable[..., Any]:
         raise NotImplementedError
 
 
 class TritonFuture(CodeCacheFuture):
-    kernel: ModuleType
+    kernel: CachingAutotuner
 
     def __init__(
         self,
@@ -3241,7 +3241,7 @@ class TritonFuture(CodeCacheFuture):
         self.kernel = kernel
         self.future = future
 
-    def result(self) -> ModuleType:  # type: ignore[override]
+    def result(self) -> Callable[..., Any]:
         if self.future is not None:
             # If the worker failed this will throw an exception.
             result = self.future.result()

@@ -2344,7 +2344,7 @@ class _TorchCompileInductorWrapper:
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
-                self.config[attr_name] = val
+            self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
