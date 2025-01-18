@@ -87,8 +87,7 @@ def _add_op_to_registry(registry, op, fn):
         overloads.append(op)
     else:
         assert isinstance(op, OpOverloadPacket)
-        for ol in op.overloads():
-            overloads.append(getattr(op, ol))
+        overloads.extend(getattr(op, ol) for ol in op.overloads())
 
     for op_overload in overloads:
         if op_overload in registry:

@@ -70,9 +70,11 @@ def get_params_to_average(
                 filtered_params.append(param_data)
         elif isinstance(param, dict):
             # optimizer.param_groups input
-            for param_data in param["params"]:
-                if param_data.grad is not None:
-                    filtered_params.append(param_data)
+            filtered_params.extend(
+                param_data
+                for param_data in param["params"]
+                if param_data.grad is not None
+            )
         else:
             raise NotImplementedError(
                 f"Parameter input of type {type(param)} is not supported"

@@ -2266,10 +2266,7 @@ def native_batch_norm_backward(
     broadcast_mask: list[int] = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
 
-    reduction_axes: list[int] = []
-    for i in range(input_rank):
-        if i != axis:
-            reduction_axes.append(i)
+    reduction_axes: List[int] = [i for i in range(input_rank) if i != axis]
 
     mean = _broadcast_batch_norm_backward(mean, broadcast_mask)  # type: ignore[arg-type]
     norm = 1.0 / num_features
@@ -4455,10 +4452,8 @@ def matmul(tensor1, tensor2, *, is_out=False):
         m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
         p = tensor2.size(-1) if dim_tensor2 > 1 else 1
 
-        batch_tensor2: list[int] = []
         # TODO: handling of slice
-        for i in range(dim_tensor2 - 2):
-            batch_tensor2.append(tensor2.size(i))
+        batch_tensor2: List[int] = [tensor2.size(i) for i in range(dim_tensor2 - 2)]
 
         # Same optimization for the gradients as that in should_fold
         # If we're going to broadcast, we force it to go through the should_fold branch

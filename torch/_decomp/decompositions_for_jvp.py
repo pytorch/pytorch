@@ -251,10 +251,7 @@ def native_batch_norm_backward(
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
 
-    reduction_axes: list[int] = []
-    for i in range(input_rank):
-        if i != axis:
-            reduction_axes.append(i)
+    reduction_axes: List[int] = [i for i in range(input_rank) if i != axis]
 
     mean = torch.reshape(mean, broadcast_mask)
     norm = 1.0 / num_features

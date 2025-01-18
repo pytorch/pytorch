@@ -7380,17 +7380,14 @@ class DistributedTest:
                     )
                 )
 
-            throw_on_early_term_tests = []
-            for test_input in models_to_test:
-                throw_on_early_term_tests.append(
-                    DDPUnevenTestInput(
-                        name=test_input.name,
-                        model=test_input.model,
-                        inp=test_input.inp,
-                        sync_interval=test_input.sync_interval,
-                        throw_on_early_termination=True,
-                    )
-                )
+            throw_on_early_term_tests = [
+                DDPUnevenTestInput(
+                    name=test_input.name,
+                    model=test_input.model,
+                    inp=test_input.inp,
+                    sync_interval=test_input.sync_interval,
+                    throw_on_early_termination=True,
+                ) for test_input in models_to_test]
 
             models_to_test.extend(models_with_sync)
             models_to_test.extend(throw_on_early_term_tests)

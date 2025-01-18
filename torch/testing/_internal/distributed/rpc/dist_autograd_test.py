@@ -2765,9 +2765,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
                 dist_autograd.backward(context_id, [x.sum()])
 
-                futs = []
-                for remote_layer in remote_layers:
-                    futs.append(remote_layer.rpc_async().gradients(context_id))
+                futs = [remote_layer.rpc_async().gradients(context_id) for remote_layer in remote_layers]
 
                 for i in range(len(futs)):
                     local_gradients = [p.grad for p in local_layers[i].parameters()]

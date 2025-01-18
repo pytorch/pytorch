@@ -1602,10 +1602,7 @@ def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
                     new_insts.append(inst)
             insts = new_insts
 
-        returns = []
-        for inst in insts:
-            if inst.opname == "RETURN_VALUE":
-                returns.append(inst)
+        returns = [inst for inst in insts if inst.opname == "RETURN_VALUE"]
 
         if len(returns) == 1 and returns[0] is insts[-1]:
             # only 1 return at the end - just pop it

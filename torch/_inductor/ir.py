@@ -5732,8 +5732,9 @@ class UserDefinedTritonKernel(ExternKernel):
                 restore_value_args.extend(kernel.restore_value)
 
             if hasattr(kernel, "reset_idx"):
-                for i in kernel.reset_idx:
-                    reset_to_zero_args.append(kernel.fn.arg_names[i])
+                reset_to_zero_args.extend(
+                    kernel.fn.arg_names[i] for i in kernel.reset_idx
+                )
             else:
                 assert hasattr(kernel, "reset_to_zero")
                 reset_to_zero_args.extend(kernel.reset_to_zero)

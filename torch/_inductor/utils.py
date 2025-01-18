@@ -606,10 +606,11 @@ def get_kernel_metadata(node_schedule, wrapper):
     # print the aot_autograd graph fragment
     if single_graph is not None:
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-        for n in inductor_nodes:
-            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
-            # generate python code for graph fragments
-            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+        # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
+        # generate python code for graph fragments
+        detailed_metadata.extend(
+            f"{wrapper.comment}   {n.format_node()}" for n in inductor_nodes
+        )
 
     return metadata, "\n".join(detailed_metadata)
 
