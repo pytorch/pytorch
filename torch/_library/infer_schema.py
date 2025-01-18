@@ -223,6 +223,7 @@ def get_supported_param_types():
 SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
     typing.List[Tensor]: "Tensor[]",
+    list[Tensor]: "Tensor[]",
     int: "SymInt",
     float: "float",
     bool: "bool",
@@ -267,20 +268,25 @@ def supported_param(param: inspect.Parameter) -> bool:
     )
 
 
-def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.List]:
+def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
     type_args = getattr(tuple_type, "__args__", None)
     # Account for different python versions, e.g. python 3.8 would give ()
     # but python 3.12 would give None.
-    if tuple_type is typing.Tuple or type_args == () or type_args is None:
+    if (
+        tuple_type is typing.Tuple
+        or tuple_type is tuple
+        or type_args == ()
+        or type_args is None
+    ):
         # Handle the case of an empty tuple type
-        return typing.List
+        return list
     elif len(type_args) == 1:
         # General case: create a List with the same type arguments
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
+        return list[type_args[0]]  # type: ignore[valid-type]
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
+        return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
