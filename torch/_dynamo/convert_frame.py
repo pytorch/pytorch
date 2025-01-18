@@ -703,6 +703,7 @@ def _compile(
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType,
         one_graph: bool,
@@ -726,7 +727,6 @@ def _compile(
 
         return None  # dead, but see https://github.com/python/mypy/issues/7577
 
-    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def _compile_inner(
         code: CodeType,
