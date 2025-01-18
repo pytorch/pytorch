@@ -169,24 +169,42 @@ function install_torchrec_and_fbgemm() {
   torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    pip_install tabulate  # needed for newer fbgemm
+    fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
+  fi
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
-  # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
-  # seems to be an sccache-related issue
-  if [[ "$IS_A100_RUNNER" == "1" ]]; then
-    unset CMAKE_CUDA_COMPILER_LAUNCHER
-    sudo mv /opt/cache/bin /opt/cache/bin-backup
-  fi
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout ${fbgemm_commit}
+    python setup.py install \
+      --package_variant=rocm \
+      -DHIP_ROOT_DIR="${ROCM_PATH}" \
+      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
+      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+    popd
+    rm -rf fbgemm
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+  else
+    # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
+    # seems to be an sccache-related issue
+    if [[ "$IS_A100_RUNNER" == "1" ]]; then
+      unset CMAKE_CUDA_COMPILER_LAUNCHER
+      sudo mv /opt/cache/bin /opt/cache/bin-backup
+    fi
 
-  # See https://github.com/pytorch/pytorch/issues/106971
-  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    # See https://github.com/pytorch/pytorch/issues/106971
+    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 
-  if [[ "$IS_A100_RUNNER" == "1" ]]; then
-    export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
-    sudo mv /opt/cache/bin-backup /opt/cache/bin
+    if [[ "$IS_A100_RUNNER" == "1" ]]; then
+      export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
+      sudo mv /opt/cache/bin-backup /opt/cache/bin
+    fi
   fi
 }
 

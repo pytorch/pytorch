@@ -268,7 +268,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -283,7 +283,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
