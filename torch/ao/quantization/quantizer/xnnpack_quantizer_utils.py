@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
+import typing
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
 
@@ -53,7 +54,8 @@ class QuantizationConfig:
     is_qat: bool = False
 
 
-OperatorPatternType = list[Callable]
+# Use Annotated because list[Callable].__module__ is read-only.
+OperatorPatternType = typing.Annotated[list[Callable], None]
 OperatorPatternType.__module__ = (
     "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
 )
