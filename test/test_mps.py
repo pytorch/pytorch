@@ -345,6 +345,7 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -12686,7 +12687,7 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_error_checking(self):
         # Syntax error asserts
-        self.assertRaises(RuntimeError, lambda: torch.mps._compile_shader("Syntax error"))
+        self.assertRaises(SyntaxError, lambda: torch.mps._compile_shader("Syntax error"))
         cpu_tensor = torch.rand(3)
         mps_tensor = torch.rand(3, device="mps")
         lib = torch.mps._compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
