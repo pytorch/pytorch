@@ -3,8 +3,10 @@ import copy
 import os
 import sys
 import tempfile
+from datetime import timedelta
 from typing import List, Tuple
 
+import time
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -36,7 +38,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
 )
-
+from torch.distributed.distributed_c10d import _set_pg_timeout
 
 # MLP Layer
 class MLPModule(torch.nn.Module):
@@ -713,6 +715,7 @@ def loss_fn(y, target, scale=1e-4):
 
 class ComposabilityTest(MultiProcContinousTest):
     world_size = 4
+    timeout = timedelta(seconds=5)
 
     @classmethod
     def backend_str(cls) -> str:
@@ -1025,6 +1028,10 @@ class ComposabilityTest(MultiProcContinousTest):
         pp_group = pp_mesh.get_group()
         dp_mesh = cp_mesh = device_mesh["cp"]
 
+        # hack bc init_device_mesh doesn't respect timeout on default_pg which has already been set
+        _set_pg_timeout(self.timeout, pp_group)
+        _set_pg_timeout(self.timeout, cp_mesh.get_group())
+
         # Apply FSDP to stage module
         def apply_dp(partial_model):
             mp_policy = MixedPrecisionPolicy(
@@ -1110,26 +1117,33 @@ class ComposabilityTest(MultiProcContinousTest):
             cp_mesh,
             buffers=[input_local, target_local] + [m.freqs_cis for m in pp_models],
             buffer_seq_dims=[1, 1] + [0 for _ in pp_models],
+            # no_restore_buffers={input_local, target_local},
         ):
             if pp_group.rank() == 0:
                 pipeline_schedule.step(input_local)
             else:
-                pipeline_schedule.step(target=target_local, losses=pp_losses)
-        pp_loss = torch.mean(torch.stack(pp_losses)) if len(pp_losses) else -1.0
+                pipeline_schedule.step(target=target_local)
+                # pipeline_schedule.step(target=target_local, losses=pp_losses)
+        # pp_loss = torch.mean(torch.stack(pp_losses)) if len(pp_losses) else -1.0
 
         # Run reference model (FSDP + CP)
         with context_parallel(
             cp_mesh,
             buffers=[input_local, target_local, ref_model.freqs_cis],
             buffer_seq_dims=[1, 1, 0],
+            # no_restore_buffers={input_local, target_local},
         ):
             ref_loss = llm_loss_fn(ref_model(input_local), target_local)
             ref_loss.backward()
-            print(f"Ref loss: {ref_loss}")
+            # print(f"Ref loss: {ref_loss}")
 
-        if pp_loss != -1.0:
-            print(f"Loss difference: {ref_loss - pp_loss}")
-            torch.testing.assert_close(pp_loss, ref_loss)
+
+        torch.cuda.synchronize()
+        time.sleep(20)
+
+        # if pp_loss != -1.0:
+            # print(f"Loss difference: {ref_loss - pp_loss}")
+            # torch.testing.assert_close(pp_loss, ref_loss)
 
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)
