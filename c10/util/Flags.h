@@ -144,6 +144,13 @@ namespace gflags = google;
 #define C10_DECLARE_string(name) \
   C10_GFLAGS_DECLARE_WRAPPER(string, ::fLS::clstring, name)
 
+#define TORCH_DECLARE_int(name) C10_DECLARE_int(name)
+#define TORCH_DECLARE_int32(name) C10_DECLARE_int32(name)
+#define TORCH_DECLARE_int64(name) C10_DECLARE_int64(name)
+#define TORCH_DECLARE_double(name) C10_DECLARE_double(name)
+#define TORCH_DECLARE_bool(name) C10_DECLARE_bool(name)
+#define TORCH_DECLARE_string(name) C10_DECLARE_string(name)
+
 ////////////////////////////////////////////////////////////////////////////////
 // End gflags section.
 ////////////////////////////////////////////////////////////////////////////////
@@ -186,12 +193,12 @@ C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);
       success_ = C10FlagParser::Parse<type>(content, &FLAGS_##name);    \
     }                                                                   \
   };                                                                    \
-  }                                                                     \
   RegistererC10FlagsRegistry g_C10FlagsRegistry_##name(                 \
       #name,                                                            \
       C10FlagsRegistry(),                                               \
       RegistererC10FlagsRegistry::DefaultCreator<C10FlagParser_##name>, \
       "(" #type ", default " #default_value ") " help_str);             \
+  }                                                                     \
   }
 
 #define C10_DEFINE_int(name, default_value, help_str) \
@@ -216,6 +223,15 @@ C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);
 #define C10_DECLARE_double(name) C10_DECLARE_typed_var(double, name)
 #define C10_DECLARE_bool(name) C10_DECLARE_typed_var(bool, name)
 #define C10_DECLARE_string(name) C10_DECLARE_typed_var(std::string, name)
+
+#define TORCH_DECLARE_typed_var(type, name) TORCH_API extern type FLAGS_##name
+
+#define TORCH_DECLARE_int(name) TORCH_DECLARE_typed_var(int, name)
+#define TORCH_DECLARE_int32(name) TORCH_DECLARE_int(name)
+#define TORCH_DECLARE_int64(name) TORCH_DECLARE_typed_var(int64_t, name)
+#define TORCH_DECLARE_double(name) TORCH_DECLARE_typed_var(double, name)
+#define TORCH_DECLARE_bool(name) TORCH_DECLARE_typed_var(bool, name)
+#define TORCH_DECLARE_string(name) TORCH_DECLARE_typed_var(std::string, name)
 
 ////////////////////////////////////////////////////////////////////////////////
 // End non-gflags section.

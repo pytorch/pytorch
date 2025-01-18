@@ -57,7 +57,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
       message.tensors.push_back(std::move(tensor));
 
-      return std::make_optional(std::move(storageData));
+      return storageData;
     } else {
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = static_cast<char*>(storage.mutable_data());
@@ -91,7 +91,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
-C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter);
+C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter)
 
 c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
   if (tpDeviceType == tensorpipe::kCpuDeviceType) {

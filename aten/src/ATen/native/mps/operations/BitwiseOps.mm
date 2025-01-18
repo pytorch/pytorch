@@ -138,28 +138,16 @@ kernel void bitwise_not(constant uint& length [[buffer(0)]],
 )METAL",
                               3);
 
-static const std::string& getMetalType(const c10::ScalarType& t) {
-  // Mapping from c10::ScalarType to integral type that can be used for bitwise ops
-  // As bitwise ops sign-agnostic map signed/unsigned char and boolean to the same type
-  static std::unordered_map<c10::ScalarType, std::string> scalar_to_metal_type = {
-      {c10::ScalarType::Long, "long"},
-      {c10::ScalarType::Int, "int"},
-      {c10::ScalarType::Short, "short"},
-      {c10::ScalarType::Byte, "char"},
-      {c10::ScalarType::Char, "char"},
-      {c10::ScalarType::Bool, "char"},
-  };
-
-  auto it = scalar_to_metal_type.find(t);
-  TORCH_CHECK(it != scalar_to_metal_type.end(), "Unsupported type ", t);
-  return it->second;
+static inline std::string getMetalType(const c10::ScalarType scalar_type) {
+  TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true), "Unsupported type");
+  return scalarToMetalTypeString(scalar_type);
 }
 
-static const std::string& getMetalType(const Tensor& t) {
+static inline std::string getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-static const std::string& getMetalType(const c10::Scalar& s) {
+static inline std::string getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
 
@@ -191,10 +179,7 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
-    mtl_setBuffer(commandEncoder, other, 3);
+    mtl_setArgs(commandEncoder, length, output, self, other);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -221,10 +206,7 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
-    mtl_setBytes(commandEncoder, sval, 3);
+    mtl_setArgs(commandEncoder, length, output, self, sval);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -316,9 +298,7 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
 
     [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
+    mtl_setArgs(commandEncoder, length, output, self);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);

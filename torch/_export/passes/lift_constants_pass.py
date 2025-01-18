@@ -149,10 +149,18 @@ def lift_constants_pass(
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and node.name in graph_signature.user_inputs:
+        if node.op == "placeholder":
+            if node.name in graph_signature.user_inputs:
+                first_user_input = node
+                break
+            first_user_input_loc += 1
+        # If we ever hit here, it means that
+        # there was no user input so the constants
+        # should be inserted right before the first
+        # non-placeholder node.
+        if node.op != "placeholder":
             first_user_input = node
             break
-        first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
     renamed_targets = {}
@@ -191,7 +199,7 @@ def lift_constants_pass(
                 # Remove the parameterness of constant_val
                 if isinstance(constant_val, torch.nn.Parameter):
                     warnings.warn(
-                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"{node.target} created when tracing {node.meta.get('stack_trace', '<unknown stack>')} is a parameter. But"
                         f"it's not registered with register_parameter(). export will treat it as a constant tensor"
                     )
                     # We get the real data out of the parameter by disabling the surrounding fake mode.

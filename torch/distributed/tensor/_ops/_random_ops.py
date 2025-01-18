@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 from torch.distributed.device_mesh import DeviceMesh

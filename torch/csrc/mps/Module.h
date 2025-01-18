@@ -5,5 +5,6 @@
 namespace torch::mps {
 
 PyMethodDef* python_functions();
+void initModule(PyObject* module);
 
 } // namespace torch::mps

@@ -2,9 +2,10 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional, Set
+from typing import Any, cast, Optional
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims
 from ..pattern_matcher import (
@@ -36,12 +37,12 @@ def _compute_mm_arithmetic_intensity(M: int, N: int, K: int) -> float:
     return M * N * K / (M * K + N * K + M * N)
 
 
-def _filter_nodes_by_target(nodes: List[torch.fx.Node], target) -> List[torch.fx.Node]:
+def _filter_nodes_by_target(nodes: list[torch.fx.Node], target) -> list[torch.fx.Node]:
     return [x for x in nodes if x.target == target]
 
 
-def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
-    ancestors = set()
+def _find_ancestors(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
+    ancestors = OrderedSet[torch.fx.Node]()
     ancestors.add(node)
     cur_nodes = [node]
     while len(cur_nodes) > 0:
@@ -52,7 +53,7 @@ def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
                     ancestors.add(inp)
                     new_nodes.append(inp)
         cur_nodes = new_nodes
-    return {node for node in ancestors if node.op != "placeholder"}
+    return OrderedSet(node for node in ancestors if node.op != "placeholder")
 
 
 def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
@@ -165,7 +166,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
     # Match in reverse to ensure longer patterns is prioritized
     all_gathers = []
-    visited_ag_nodes = set()
+    visited_ag_nodes = OrderedSet[torch.fx.Node]()
     for node in reversed(graph.nodes):
         for target, patterns in res_node_target_to_patterns.items():
             if node.target != target:
@@ -287,8 +288,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 
 @dataclass
 class _Matmul:
-    nodes: List[torch.fx.Node]
-    arg_ancestor_nodes: Set[torch.fx.Node] = field(init=False)
+    nodes: list[torch.fx.Node]
+    arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
 
@@ -343,7 +344,7 @@ class _Matmul:
                 node.graph.erase_node(node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_Matmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_Matmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten.mm.default,
@@ -372,7 +373,7 @@ class _ScaledMatmul(_Matmul):
         self.arg_ancestor_nodes |= _find_ancestors(self.B_scale_node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_ScaledMatmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_ScaledMatmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten._scaled_mm.default,
@@ -398,7 +399,7 @@ class _ScaledMatmul(_Matmul):
         )
 
 
-def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
+def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     if node.target != aten.reshape.default:
         return []
 
@@ -446,7 +447,7 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
     return matmuls
 
 
-def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
+def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     """
     Find the matmuls that use `node` as the lhs argument.
     """
@@ -467,12 +468,12 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
 
 def _insert_fused_all_gather_matmul(
     graph: torch.fx.Graph,
-    matmuls: List[_Matmul],
+    matmuls: list[_Matmul],
     shard_node: torch.fx.Node,
     gather_dim: int,
     group_name: str,
 ) -> torch.fx.Node:
-    mm_types = set(map(type, matmuls))
+    mm_types = OrderedSet(map(type, matmuls))
     assert len(mm_types) == 1
     mm_type = next(iter(mm_types))
     if mm_type == _Matmul:
@@ -480,9 +481,10 @@ def _insert_fused_all_gather_matmul(
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_matmul.default,
             args=(shard_node, B_nodes, gather_dim, group_name),
+            kwargs={"return_A": True},
         )
     elif mm_type == _ScaledMatmul:
-        scaled_matmuls = cast(List[_ScaledMatmul], matmuls)
+        scaled_matmuls = cast(list[_ScaledMatmul], matmuls)
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
@@ -524,7 +526,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     ):
         return
 
-    c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
@@ -556,7 +557,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
 
-    if len(matmuls) == 0 or len(set(map(type, matmuls))) != 1:
+    if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
     # Fuse the all_gather_tensor with the eligible matmuls
@@ -593,11 +594,20 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         all_gather.replace_with(new_ag_node)
         all_gather.erase()
 
+        # If the new_ag_node has no users, we tell the fused op to not return
+        # it. This creates more optimization opportunities.
+        if len(new_ag_node.users) == 0:
+            graph.erase_node(new_ag_node)
+            kwargs = dict(fused_node.kwargs)
+            if "return_A" in kwargs:
+                kwargs["return_A"] = False
+                fused_node.kwargs = kwargs
+
     # Raise ancestors of non-A args that are topologically ordered between
     # ag_res_node and the matmul above fused_node.
     order = {node: idx for idx, node in enumerate(graph.nodes)}
     nodes_to_raise = sorted(
-        {x for matmul in matmuls for x in matmul.arg_ancestor_nodes},
+        OrderedSet(x for matmul in matmuls for x in matmul.arg_ancestor_nodes),
         key=lambda x: order[x],
     )
     for node in nodes_to_raise:
@@ -683,13 +693,12 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     ):
         return
 
-    c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    input_node, rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
+    input_node, _rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
         reduce_scatter.input_node,
         reduce_scatter.rs_node,
         reduce_scatter.res_node,
@@ -750,13 +759,15 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
     Compute the ancestors for all nodes in a graph.
     """
-    node_to_ancestors = defaultdict(set)
+    node_to_ancestors = defaultdict(
+        OrderedSet[torch.fx.Node]
+    )  # type: ignore[var-annotated]
     for node in graph.nodes:
-        node_to_ancestors[node] = set(node.all_input_nodes)
+        node_to_ancestors[node] = OrderedSet(node.all_input_nodes)
         for dep in node.all_input_nodes:
             node_to_ancestors[node] |= node_to_ancestors[dep]
 
@@ -765,7 +776,7 @@ def _get_node_to_ancestors(
 
 def _get_collective_to_overlappable_nodes(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+) -> dict[torch.fx.Node, list[torch.fx.Node]]:
     """
     For each collective in the graph, find nodes that are neither ancestors nor
     descendants of the collective.
@@ -795,7 +806,7 @@ def _get_collective_to_overlappable_nodes(
     return collective_to_overlappable_nodes
 
 
-def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
     Find all unexposed collectives in the graph.
 
@@ -810,12 +821,12 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
         return node.target in [torch.ops.aten.mm.default]
 
     collective_to_overlapping_candidates = defaultdict(list)
-    available_nodes = set()
+    available_nodes = OrderedSet[torch.fx.Node]()
     collective_to_overlappable_nodes = _get_collective_to_overlappable_nodes(graph)
     for collective, overlappable_nodes in collective_to_overlappable_nodes.items():
         candidates = [x for x in overlappable_nodes if _is_compute_intensive(x)]
         collective_to_overlapping_candidates[collective] = candidates
-        available_nodes |= set(candidates)
+        available_nodes.update(candidates)
 
     unexposed_collectives = []
     for (

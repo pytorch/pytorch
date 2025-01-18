@@ -611,6 +611,7 @@ void set_output_{name}(
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
+            DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]:
             maybe_set_guard = """
@@ -719,6 +720,8 @@ resize_out(out, sizes, strides, options);
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
+            guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.XPU:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -876,13 +879,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     self.g.out.precomputed.add,
                 ]
                 for precomputed_elems in precomputed_values:
-                    for arg in precomputed_elems:
-                        context.append(
-                            Expr(
-                                expr=f"precompute.{arg.name}",
-                                type=structured.argument_type(arg, binds=arg.name),
-                            )
+                    context.extend(
+                        Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
                         )
+                        for arg in precomputed_elems
+                    )
 
                 # Add a use of the precompute struct so FB internal compilers don't
                 # complain that there is an unused variable.

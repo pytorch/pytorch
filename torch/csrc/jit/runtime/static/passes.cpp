@@ -9,13 +9,13 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
+// clang-format off
 C10_DEFINE_bool(
     enable_clip_ranges_gather_fusions,
     true,
-    "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.");
+    "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.")
 
 namespace torch::jit {
-
 bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
@@ -715,8 +715,8 @@ static void ReplaceWithCopyImpl(
     // b and c are aliases of a, sigmoid_ changes b, c, as well as a. e should
     // equal to d in this case. If we replace reshape with the copy version, b
     // and c are no longer aliases of a, the value of e would change as a
-    // result. To keep static runtime consistent with the jit interpreter, here
-    // we choose not to replace reshape with the copy version
+    // result. To keep static runtime consistent with the jit interpreter,
+    // here we choose not to replace reshape with the copy version
     if (db.hasInputWriters(n)) {
       continue;
     }
@@ -1086,8 +1086,8 @@ void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
     }
 
     if (needs_output) {
-      // Loop sub-blocks should always return at least one output (the new loop
-      // condition)
+      // Loop sub-blocks should always return at least one output (the new
+      // loop condition)
       DCHECK(node->kind() == prim::If);
       auto* output = node->addOutput();
       output->setType(c10::NoneType::get());
@@ -1340,8 +1340,8 @@ bool isNoOpSlice(Node* node) {
     return false;
   }
   auto end = toIValue(node->input(2));
-  // Could also look at list length, but most models that have this pattern are
-  // just doing list[0:], so it's not needed for now.
+  // Could also look at list length, but most models that have this pattern
+  // are just doing list[0:], so it's not needed for now.
   return end.has_value() && end->isNone();
 }
 } // namespace

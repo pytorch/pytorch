@@ -1,11 +1,13 @@
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field  # noqa: F811
-from typing import Callable, List
+from typing import Any, Callable
 
 
 @dataclass
 class CompilationCallbackHandler:
-    start_callbacks: List[Callable[[], None]] = field(default_factory=list)
-    end_callbacks: List[Callable[[], None]] = field(default_factory=list)
+    start_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    end_callbacks: list[Callable[[], None]] = field(default_factory=list)
 
     def register_start_callback(
         self, callback: Callable[[], None]
@@ -60,6 +62,17 @@ class CompilationCallbackHandler:
         """
         for callback in self.end_callbacks:
             callback()
+
+    @contextmanager
+    def install_callbacks(self) -> Generator[None, Any, Any]:
+        """
+        Context manager to install the callbacks and run them when the context is exited.
+        """
+        try:
+            self.run_start_callbacks()
+            yield
+        finally:
+            self.run_end_callbacks()
 
     def clear(self) -> None:
         """

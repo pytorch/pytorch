@@ -55,10 +55,12 @@ jobs:
           pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9,
           pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
           pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
           pytorch-linux-focal-py3.12-clang10,
+          pytorch-linux-focal-py3.13-clang10,
           pytorch-linux-focal-rocm-n-1-py3,
           pytorch-linux-focal-rocm-n-py3,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
@@ -66,13 +68,15 @@ jobs:
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-xpu-2024.0-py3,
+          pytorch-linux-jammy-xpu-2025.0-py3,
           pytorch-linux-jammy-py3-clang15-asan,
           pytorch-linux-jammy-py3-clang18-asan,
           pytorch-linux-focal-py3-clang10-onnx,
           pytorch-linux-focal-linter,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
-          pytorch-linux-jammy-py3-clang12-executorch
-          ]
+          pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3.12-triton-cpu
+        ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge

@@ -1,4 +1,5 @@
 # Owner(s): ["module: custom-operators"]
+# ruff: noqa: F841
 
 import collections
 import itertools
@@ -189,6 +190,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             "Argument x is not defined to alias output but was aliasing",
         ):
             torch.library.opcheck(op, (x,), {})
+
+    # https://github.com/pytorch/pytorch/issues/142410
+    def test_opcheck_unbacked_stride(self, device):
+        @torch.library.custom_op("test::f", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.new_zeros((x.size(0), 18))
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            s = ctx.new_dynamic_size()
+            return torch.empty(x.shape[0], s, device=x.device, dtype=x.dtype)
+
+        example = torch.zeros([10, 20], device=device)
+        torch.library.opcheck(f, args=[example])
 
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
@@ -987,7 +1003,7 @@ def _(x):
 
             del foo
 
-        with self.assertRaisesRegex(ValueError, r"For example, typing.List\[int\]"):
+        with self.assertRaisesRegex(ValueError, r"For example, list\[int\]"):
             # test that we propose a correct and supported type.
             @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
@@ -2143,7 +2159,7 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         )
 
         x = torch.ones(2, 2, requires_grad=True)
-        temp = x.clone().detach()
+        temp = x.detach().clone()
         out = (
             torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
                 x
@@ -3974,33 +3990,33 @@ class TestTypeConversion(TestCase):
         ]
 
     def test_simple_tuple(self):
-        self.assertEqual(List, tuple_to_list(Tuple))
+        self.assertEqual(list, tuple_to_list(Tuple))
 
     def test_supported_types(self):
         for t in self.supported_base_types:
             result_type = tuple_to_list(Tuple[t, t, t])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
             result_type = tuple_to_list(Tuple[t])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
     def test_optional(self):
         for t in self.supported_base_types:
             result_type = tuple_to_list(Tuple[t, Optional[t]])
-            self.assertEqual(result_type, List[Optional[t]])
+            self.assertEqual(result_type, list[Optional[t]])
 
             result_type = tuple_to_list(Tuple[t, t, Optional[t]])
-            self.assertEqual(result_type, List[Optional[t]])
+            self.assertEqual(result_type, list[Optional[t]])
 
             result_type = tuple_to_list(Tuple[t, ...])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
     def test_mixed_types(self):
         result_type = tuple_to_list(Tuple[int, float])
-        self.assertEqual(result_type, List[typing.Union[int, float]])
+        self.assertEqual(result_type, list[typing.Union[int, float]])
 
         result_type = tuple_to_list(Tuple[int, float, str])
-        self.assertEqual(result_type, List[typing.Union[int, float, str]])
+        self.assertEqual(result_type, list[typing.Union[int, float, str]])
 
 
 only_for = ("cpu", "cuda")

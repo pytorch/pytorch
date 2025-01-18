@@ -6,11 +6,17 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils._pytree as pytree
+from torch._export.non_strict_utils import (
+    _enter_enable_graph_inputs_of_type_nn_module,
+    _exit_enable_graph_inputs_of_type_nn_module,
+    _get_graph_inputs_of_type_nn_module,
+)
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
+from ._tree_utils import reorder_kwargs
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -19,20 +25,31 @@ from .exported_program import (
 )
 
 
+def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> List:
+    reordered_kwargs = reorder_kwargs(kwargs, in_spec)
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, reordered_kwargs)
+    )
+
+    if received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}.\n"
+            "Please check that the inputs have the same number of args "
+            "and kwargs as the ones you used when tracing."
+        )
+
+    return flat_args_with_path
+
+
 @torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
+def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
         return
 
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
-
-    if received_spec != self._in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
+    flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
 
     _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
@@ -118,9 +135,10 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
-        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
+        new_output.name = output_node.name
+        new_output.meta.update(output_node.meta)
 
 
 def _get_codegen(
@@ -263,22 +281,30 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
-    # TODO(suo) this should not be optional, but is since we still ahve
-    # capture_pre_autograd_graph grr
-    ep: Optional[ExportedProgram] = None,
-):
+    ep: ExportedProgram,
+) -> _StatefulGraphModule:
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
         plain_graph_module.graph,
         range_constraints=range_constraints,
     )
 
+    module_types = _get_graph_inputs_of_type_nn_module(ep.example_inputs)
+    stateful_gm.register_forward_pre_hook(
+        lambda *args, **kwargs: _enter_enable_graph_inputs_of_type_nn_module(
+            module_types
+        )
+    )
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
-    if ep is None:
-        return stateful_gm
+    stateful_gm.register_forward_hook(
+        lambda *args, **kwargs: _exit_enable_graph_inputs_of_type_nn_module(
+            module_types
+        ),
+        always_call=True,
+    )
 
     # When we have a constant that has requires_grad=True, we need to detach it
     # when we unlift as the tensors that require gradients should be registered

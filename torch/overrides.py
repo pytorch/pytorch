@@ -230,6 +230,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sparse_bsc_tensor,
         torch.sym_constrain_range,
         torch.sym_constrain_range_for_size,
+        torch.sym_fresh_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -1064,9 +1065,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.rad2deg: lambda input, out=None: -1,
-        torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch.rand_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
+        torch.randint_like: (
+            lambda input, high, dtype=None, layout=torch.strided, device=None, generator=None, requires_grad=False: -1
+        ),
+        torch.randn_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
@@ -1416,7 +1419,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
         Tensor.dim: lambda self: -1,
-        Tensor.dim_order: lambda self: -1,
+        Tensor.dim_order: lambda self, ambiguity_check=False: -1,
         Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cdouble: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.element_size: lambda self: -1,

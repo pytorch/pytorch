@@ -20,6 +20,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Set,
@@ -290,8 +291,8 @@ class _InsertPoint:
 
 
 class _node_list:
-    def __init__(self, graph: "Graph", direction: str = "_next"):
-        assert direction in ["_next", "_prev"]
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
+        assert direction in ("_next", "_prev")
         self.graph = graph
         self.direction = direction
 
@@ -299,8 +300,7 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        assert self.direction == "_prev" or self.direction == "_next"
-        yield from _NodeIter(self.graph._root, self.direction == "_prev")
+        return _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
@@ -1027,6 +1027,12 @@ class Graph:
         return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
+    def output_node(self) -> Node:
+        output_node = next(iter(reversed(self.nodes)))
+        assert output_node.op == "output"
+        return output_node
+
+    @compatibility(is_backward_compatible=False)
     def find_nodes(
         self, *, op: str, target: Optional["Target"] = None, sort: bool = True
     ):
@@ -1093,12 +1099,13 @@ class Graph:
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
-        assert isinstance(output_vals, tuple)
-        output_val, old_output_node = output_vals
-        new_output_node = g.output(
-            output_val, type_expr=getattr(old_output_node, "type", None)
-        )
-        new_output_node.meta = copy.copy(old_output_node.meta)
+        if output_vals is not None:
+            assert isinstance(output_vals, tuple)
+            output_val, old_output_node = output_vals
+            new_output_node = g.output(
+                output_val, type_expr=getattr(old_output_node, "type", None)
+            )
+            new_output_node.meta = copy.copy(old_output_node.meta)
         return g
 
     @compatibility(is_backward_compatible=True)
@@ -1808,7 +1815,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
         self, is_impure_node: Optional[Callable[[Node], bool]] = None
-    ):
+    ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
@@ -1976,20 +1983,18 @@ reflectable_magic_methods = {
     "matmul": "{} @ {}",
 }
 
-magic_methods = dict(
-    {
-        "eq": "{} == {}",
-        "ne": "{} != {}",
-        "lt": "{} < {}",
-        "gt": "{} > {}",
-        "le": "{} <= {}",
-        "ge": "{} >= {}",
-        "pos": "+{}",
-        "neg": "-{}",
-        "invert": "~{}",
-    },
+magic_methods = {
+    "eq": "{} == {}",
+    "ne": "{} != {}",
+    "lt": "{} < {}",
+    "gt": "{} > {}",
+    "le": "{} <= {}",
+    "ge": "{} >= {}",
+    "pos": "+{}",
+    "neg": "-{}",
+    "invert": "~{}",
     **reflectable_magic_methods,
-)
+}
 
 inplace_methods = {
     "iadd": "{} += {}",

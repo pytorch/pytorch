@@ -2,7 +2,8 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -417,7 +418,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def is_fusion_enabled(self):
             return self.fusion_enabled
 
-    conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
+    conv_bn_to_fuse: dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
         conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:
@@ -606,7 +607,7 @@ def check_permute(node: torch.fx.Node) -> bool:
         and node.kwargs["permutation"] is not None
         and len(node.kwargs["permutation"]) > 2  # type: ignore[arg-type]
     ):
-        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[union-attr]
+        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[operator, union-attr]
     else:
         return False
     allowed_permutation = list(range(ranks))
@@ -621,12 +622,12 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         return users[0] if len(users) == 1 else None
 
     def is_view(node):
-        view = {"view"}
-        return node.op == "call_method" and node.target in view
+        return node.op == "call_method" and node.target == "view"
 
     def is_pointwise_unary(node):
-        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
-        return node.op in {"call_function", "call_method"} and node.target in pointwise
+        ops = "call_function", "call_method"
+        pointwise = torch.relu, torch.tanh, "relu", "tanh"
+        return node.op in ops and node.target in pointwise
 
     g = module.graph
     for node in g.nodes:

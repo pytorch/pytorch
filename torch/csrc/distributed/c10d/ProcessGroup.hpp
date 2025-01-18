@@ -77,7 +77,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     NCCL = 2,
     UCC = 3,
     MPI = 4,
-    CUSTOM = 5,
+    XCCL = 5,
+    CUSTOM = 6,
   };
 
   static std::string backendTypeToString(const BackendType& type) {
@@ -86,6 +87,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         return "gloo";
       case BackendType::NCCL:
         return "nccl";
+      case BackendType::XCCL:
+        return "xccl";
       case BackendType::UCC:
         return "ucc";
       case BackendType::MPI:
@@ -106,6 +109,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       return BackendType::GLOO;
     } else if (backend == "nccl") {
       return BackendType::NCCL;
+    } else if (backend == "xccl") {
+      return BackendType::XCCL;
     } else if (backend == "ucc") {
       return BackendType::UCC;
     } else if (backend == "mpi") {
@@ -125,11 +130,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int size);
   ~ProcessGroup() override;
 
-  int getRank() const {
+  virtual int getRank() const {
     return rank_;
   }
 
-  int getSize() const {
+  virtual int getSize() const {
     return size_;
   }
 
@@ -150,6 +155,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   BackendType getBackendType() const {
     return backendType_;
+  }
+
+  inline bool backendSupportsSequenceNumbers(BackendType backendType) {
+    if (backendType == BackendType::GLOO || backendType == BackendType::NCCL ||
+        backendType == BackendType::XCCL || backendType == BackendType::UCC)
+      return true;
+    return false;
   }
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
@@ -634,9 +646,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void setSequenceNumberForGroup() {
     auto backendType = getBackendType();
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
+    if (backendSupportsSequenceNumbers(backendType)) {
       getDefaultBackend()->setSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -655,9 +665,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto backendType = getBackendType();
 
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
+    if (backendSupportsSequenceNumbers(backendType)) {
       return getDefaultBackend()->getSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -752,6 +760,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       tensor = at::empty(
           {1},
           at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte));
+    } else if (backendType_ == c10d::ProcessGroup::BackendType::XCCL) {
+      // set xpu tensor for override cpu dispatch
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(at::DeviceType::XPU).dtype(at::kByte));
     } else {
       // Default to using cpu implementation
       tensor = at::empty(
@@ -863,10 +876,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
-  const std::string& getGroupName() const;
-  void setGroupName(const std::string& name);
-  const std::string& getGroupDesc() const;
-  void setGroupDesc(const std::string& name);
+  virtual const std::string& getGroupName() const;
+  virtual void setGroupName(const std::string& name);
+  virtual const std::string& getGroupDesc() const;
+  virtual void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
 
   void release_resources() override;

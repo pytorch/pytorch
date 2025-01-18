@@ -196,7 +196,7 @@ def associative_scan(
         raise ValueError("xs leaves must be a Tensor")
     if any(x.is_sparse for x in leaves):
         raise ValueError("xs leaves must dense Tensors, consider using `to_dense()`")
-    if any(x.ndim < dim for x in leaves):
+    if any(x.ndim <= dim for x in leaves):
         raise ValueError(
             "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
         )
@@ -209,17 +209,11 @@ def associative_scan(
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     ndim = leaves[0].ndim
-    orig_scan_dim = utils.canonicalize_dim(ndim, dim)
-    leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
-    shape = leaves[0].shape
-
-    for x in leaves[1:]:
-        assert x.shape == shape, "All xs tensors must have the same shape"
+    dim = utils.canonicalize_dim(ndim, dim)
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
     sliced_leaves = [first_slice_copy(leaf, dim) for leaf in leaves]
-    sliced_shape = sliced_leaves[0].shape
 
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -231,7 +225,7 @@ def associative_scan(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
         )
     if any(
-        x.shape != sliced_shape
+        x.shape != x_sliced.shape
         or x.dtype != x_sliced.dtype
         or x.device != x_sliced.device
         or x.stride() != x_sliced.stride()
@@ -791,7 +785,7 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs):
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )

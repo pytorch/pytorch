@@ -1,5 +1,5 @@
 import functools
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List
 
 import torch
 
@@ -64,7 +64,7 @@ class AHContext:
         self.features.append(AHFeature(name, value, is_categorical=is_categorical))
         self.context_dict[name] = value
 
-    def get_numerical_and_categorical_features(self) -> Tuple[List[str], List[str]]:
+    def get_numerical_and_categorical_features(self) -> tuple[List[str], List[str]]:
         numerical_features = []
         categorical_features = []
         for feature in self.features:
@@ -93,7 +93,7 @@ class AHMetadata:
     def __init__(
         self,
         shared_memory: Any,
-        device_capa: Tuple[int, int],
+        device_capa: tuple[int, int],
         choices: List[Choice],
         name: str,
     ) -> None:
@@ -327,7 +327,7 @@ def get_is_contig_ops() -> List[AHOperation]:
     return [mat1_is_contig_op, mat2_is_contig_op]
 
 
-def context_add_strides(context: AHContext, name: str, stride: Tuple[int, ...]) -> None:
+def context_add_strides(context: AHContext, name: str, stride: tuple[int, ...]) -> None:
     for i, s in enumerate(stride):
         context.add_feature(f"{name}_stride_{i}", s)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
@@ -22,6 +22,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 base_type_to_c_type = {
@@ -114,14 +118,14 @@ def convert_arg_type_and_name(  # type: ignore[return]
                 new_aten_types.append(f"::std::optional<{aten_type}>")
                 base_type = aten_type[len("c10::ArrayRef<") : -1]
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j + 1]})"
                 )
                 j += 2
             elif aten_type == "c10::Device":
                 # Device is passed as device_type + device_index
                 new_aten_types.append("::std::optional<c10::Device>")
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_device({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_device({names[j]}, {names[j + 1]})"
                 )
                 j += 2
             else:
@@ -319,6 +323,7 @@ def get_backend_index_for_aoti(
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
+    extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(func) or (
@@ -329,18 +334,24 @@ def get_backend_index_for_aoti(
         )
     ):
         backend_index = backend_indices[dispatch_key]
-    elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
-        # We need to create C shim wrappers for CompositeExplicitAutograd kernels
-        backend_index = backend_indices[DispatchKey.CompositeExplicitAutograd]
-    elif backend_indices[DispatchKey.CompositeExplicitAutogradNonFunctional].has_kernel(
-        func
-    ):
-        # We need to create C shim wrappers for CompositeExplicitAutogradNonFunctional kernels
-        backend_index = backend_indices[
+    else:
+        # for the extend out-of-tree kernels, we don't need to
+        # duplicatly create C shim wrappers for other dispatch keys
+        if extend_aoti_c_shim:
+            return backend_index
+
+        elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
+            # We need to create C shim wrappers for CompositeExplicitAutograd kernels
+            backend_index = backend_indices[DispatchKey.CompositeExplicitAutograd]
+        elif backend_indices[
             DispatchKey.CompositeExplicitAutogradNonFunctional
-        ]
-    elif backend_indices[DispatchKey.CompositeImplicitAutograd].has_kernel(func):
-        backend_index = backend_indices[DispatchKey.CompositeImplicitAutograd]
+        ].has_kernel(func):
+            # We need to create C shim wrappers for CompositeExplicitAutogradNonFunctional kernels
+            backend_index = backend_indices[
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+            ]
+        elif backend_indices[DispatchKey.CompositeImplicitAutograd].has_kernel(func):
+            backend_index = backend_indices[DispatchKey.CompositeImplicitAutograd]
 
     return backend_index
 
@@ -350,9 +361,10 @@ def get_header_for_aoti(
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
+    extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices
+        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
     return (
         None
@@ -375,9 +387,10 @@ def gen_c_shim(
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
+    extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices
+        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
     if backend_index is None:
         return None
@@ -409,6 +422,7 @@ class ShimGenerator:
     dispatch_key: DispatchKey
     backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
+    extend_aoti_c_shim: bool
 
     @method_with_native_function
     def __call__(
@@ -421,6 +435,7 @@ class ShimGenerator:
             self.dispatch_key,
             self.backend_indices,
             self.header,
+            self.extend_aoti_c_shim,
         )
         return result
 
@@ -431,20 +446,24 @@ def gen_aoti_c_shim(
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
+    extend_aoti_c_shim: bool,
     includes: str = "",
 ) -> str:
     body = "\n".join(
         list(
             mapMaybe(
                 ShimGenerator(
-                    func_group_mapping, dispatch_key, backend_indices, header
+                    func_group_mapping,
+                    dispatch_key,
+                    backend_indices,
+                    header,
+                    extend_aoti_c_shim,
                 ),
                 native_functions,
             )
         )
     )
     device = dispatch_key.lower()
-
     warning = """
 // WARNING: THIS FILE IS AUTOGENERATED BY torchgen. DO NOT MODIFY BY HAND.
 // See https://github.com/pytorch/pytorch/blob/7e86a7c0155295539996e0cf422883571126073e/torchgen/gen.py#L2424-L2436 for details"""
@@ -472,7 +491,7 @@ extern "C" {{
         return f"""
 {warning}
 
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{device}.h>
+#include <torch/csrc/inductor/aoti_torch/generated/{"extend/" if extend_aoti_c_shim else ""}c_shim_{device}.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

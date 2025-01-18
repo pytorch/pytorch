@@ -320,6 +320,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return operands_[num_outputs_ + arg].current_dtype;
   }
   Device device(int64_t arg = 0) const {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return operands_[arg].device.value();
   }
   c10::DeviceType device_type(int64_t arg = 0) const {
@@ -995,6 +996,7 @@ class TORCH_API TensorIteratorConfig final {
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
+  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct TORCH_API iterator {
     iterator() = default;
     iterator(const TensorIteratorBase& iter);

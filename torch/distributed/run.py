@@ -393,13 +393,12 @@ utility
       main()
 
 """
-import logging
 import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
 from importlib import metadata
-from typing import Callable, List, Optional, Set, Tuple, Type, Union
+from typing import Callable, List, Optional, Set, Type, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -673,7 +672,7 @@ def parse_min_max_nnodes(nnodes: str):
 
 def determine_local_world_size(nproc_per_node: str):
     try:
-        logging.info("Using nproc_per_node=%s.", nproc_per_node)
+        logger.info("Using nproc_per_node=%s.", nproc_per_node)
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
@@ -762,7 +761,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
                 f"Could not find entrypoint under 'torchrun.logs_specs[{logs_specs_name}]' key"
             )
 
-        logging.info(
+        logger.info(
             "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
         )
     else:
@@ -771,7 +770,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], List[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     assert 0 < min_nodes <= max_nodes

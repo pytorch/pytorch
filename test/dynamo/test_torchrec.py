@@ -179,7 +179,7 @@ class TorchRecTests(TestCase):
 
         counter = CompileCounter()
 
-        @torch._dynamo.optimize(counter, nopython=True)
+        @torch.compile(backend=counter, fullgraph=True)
         def f(jag_tensor):
             # The indexing here requires more symbolic reasoning
             # and doesn't work right now
