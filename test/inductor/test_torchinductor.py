@@ -779,6 +779,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -803,6 +813,10 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_mps_backend(device):
+    return getattr(device, "type", device) == "mps"
 
 
 def is_triton_backend(device):
@@ -9252,6 +9266,8 @@ class CommonTemplate:
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
+            from torch._inductor.utils import triton_version_uses_attrs_dict
+
             expected_kernels = 2 if triton_version_uses_attrs_dict() else 1
             self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
             self.assertEqual(bw_code.count("tl.rand"), 0)
@@ -9260,6 +9276,8 @@ class CommonTemplate:
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
+
+        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -9277,7 +9295,9 @@ class CommonTemplate:
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
         expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
-        self.assertEqual(source_codes[0].count("async_compile.triton"), expected_kernels)
+        self.assertEqual(
+            source_codes[0].count("async_compile.triton"), expected_kernels
+        )
 
     def test_roll(self):
         def fn(a):
