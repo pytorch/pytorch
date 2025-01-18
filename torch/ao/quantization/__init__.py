@@ -203,9 +203,9 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def __init__(
         self,
         dtype: torch.dtype,
-        obs_or_fqs: List[ObserverOrFakeQuantize],
+        obs_or_fqs: list[ObserverOrFakeQuantize],
         derive_qparams_fn: Callable[
-            [List[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
+            [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
         quant_min: Optional[int] = None,
         quant_max: Optional[int] = None,
