@@ -545,7 +545,7 @@ class KLDivLoss(_Loss):
         )
 
 
-class MSELoss(_Loss):
+class MSELoss(_WeightedLoss):
     r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
     each element in the input :math:`x` and target :math:`y`.
 
@@ -573,6 +573,8 @@ class MSELoss(_Loss):
     The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Args:
+        weight (Tensor, optional): a manual rescaling weight given to each class.
+            If given, has to be a Tensor of size `C` and floating point dtype
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -603,11 +605,11 @@ class MSELoss(_Loss):
     """
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
+    def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = "mean") -> None:
+        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.mse_loss(input, target, reduction=self.reduction)
+        return F.mse_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
 class BCELoss(_WeightedLoss):
@@ -1991,5 +1993,4 @@ class CTCLoss(_Loss):
 
 
 # TODO: L1HingeEmbeddingCriterion
-# TODO: MSECriterion weight
 # TODO: ClassSimplexCriterion
