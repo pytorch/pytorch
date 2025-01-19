@@ -37,8 +37,8 @@ aten = torch._ops.ops.aten
 # say we have a tensor of shape [3, 4, 5, 6]
 # shift_source_dim_to_target_dim(t, 0, 3) -> [4, 5, 6, 3]
 def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
-    assert to_dim >= 0 and to_dim < t.ndim
-    assert from_dim >= 0 and from_dim < t.ndim
+    assert 0 <= to_dim < t.ndim
+    assert 0 <= from_dim < t.ndim
     return torch.movedim(t, from_dim, to_dim)
 
 
