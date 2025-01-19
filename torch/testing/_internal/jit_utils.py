@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 from contextlib import contextmanager
 from functools import reduce
 from io import StringIO
-from collections import defaultdict
+from collections import defaultdict, UserList
 
 import importlib.util
 import inspect
@@ -102,7 +102,7 @@ class JitTestCase(JitCommonTestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
-    class capture_stdout(list):
+    class capture_stdout(UserList):
         """
         Replace sys.stdout with a temporary StringIO
         """
@@ -117,7 +117,7 @@ class JitTestCase(JitCommonTestCase):
             del self.stringio
             sys.stdout = self.sys_stdout
 
-    class capture_stderr(list):
+    class capture_stderr(UserList):
         """
         Replace sys.stderr with a temporary StringIO
         """
