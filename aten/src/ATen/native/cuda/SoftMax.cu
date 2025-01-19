@@ -933,20 +933,20 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             if(potential_reg_cnt < 10){
               TORCH_INTERNAL_ASSERT(potential_reg_cnt > 0, "potential_reg_cnt for softmax with register should be greater than 0.");
               switch (potential_reg_cnt) {
-              #define SOFTMAX_REG_N(N) case N: \
-                                        cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, N> \
-                                                              <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size); \
-                                        break
+                #define SOFTMAX_REG_N(N) case N: \
+                cunn_SoftMaxForwardReg<scalar_t, accscalar_t, scalar_t, Epilogue, int64_t, N> \
+                  <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size); \
+                break;
 
-                  SOFTMAX_REG_N(1);
-                  SOFTMAX_REG_N(2);
-                  SOFTMAX_REG_N(3);
-                  SOFTMAX_REG_N(4);
-                  SOFTMAX_REG_N(5);
-                  SOFTMAX_REG_N(6);
-                  SOFTMAX_REG_N(7);
-                  SOFTMAX_REG_N(8);
-                  SOFTMAX_REG_N(9);
+                SOFTMAX_REG_N(1);
+                SOFTMAX_REG_N(2);
+                SOFTMAX_REG_N(3);
+                SOFTMAX_REG_N(4);
+                SOFTMAX_REG_N(5);
+                SOFTMAX_REG_N(6);
+                SOFTMAX_REG_N(7);
+                SOFTMAX_REG_N(8);
+                SOFTMAX_REG_N(9);
               }
             } else if (can_use_smem) {
               size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
