@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from typing import List, Optional
@@ -9,6 +8,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
+from .codegen.cpp_grouped_gemm_template import CppGroupedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -27,6 +27,73 @@ from .select_algorithm import (
 )
 from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import ops, V
+
+
+def grouped_gemm_lowering(
+    x: TensorBox,
+    w: List[TensorBox],
+    b: List[TensorBox],
+    attr=None,
+    scalars=None,
+    algorithm=None,
+    layout=None,
+):
+    x_size = x.get_size()
+    if len(x_size) > 2:
+        # GEMM template needs 2D input, normalize input shape here
+        x = view(x, [-1, x_size[-1]])
+    num_gemm = len(w)
+
+    assert use_max_autotune()
+    b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
+
+    choices: List[ChoiceCaller] = []
+    *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
+
+    kwargs = dict(
+        has_bias=[bias is not None for bias in b],
+        trans_w=True,
+        epilogue_creator=None,
+        act_mapping={num: x for num in range(num_gemm)},
+    )
+
+    input_nodes = [x, *w]
+    input_nodes.extend([bias for bias in b if bias is not None])
+
+    CppGroupedGemmTemplate.add_choices(
+        choices,
+        layout,
+        input_nodes,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+    assert len(choices) != 0
+    result = autotune_select_algorithm(
+        "grouped_gemm",
+        choices,
+        input_nodes,
+        layout,
+    )
+    template_buf = result.data.data
+    return_bufs = [
+        ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
+        for gemm_idx in range(num_gemm)
+    ]
+    template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
+    template_buf.outputs = return_bufs
+    return_tensors = [
+        ir.TensorBox.create(return_bufs[gemm_idx]) for gemm_idx in range(num_gemm)
+    ]
+    if len(x_size) > 2:
+        for gemm_idx in range(num_gemm):
+            return_tensors[gemm_idx] = view(
+                return_tensors[gemm_idx],
+                (*x_size[:-1], return_tensors[gemm_idx].get_size()[-1]),
+            )
+    return return_tensors
+
+
+grouped_gemm_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
 
 
 def register_onednn_fusion_ops():

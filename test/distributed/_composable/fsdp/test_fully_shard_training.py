@@ -6,7 +6,8 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -30,13 +31,13 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
+    compiled_fsdp_test,
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
     patch_all_gather,
     patch_reduce_scatter,
-    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -316,7 +317,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -361,7 +362,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -649,7 +650,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation
