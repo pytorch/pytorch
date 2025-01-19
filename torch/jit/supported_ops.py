@@ -72,11 +72,9 @@ def _get_tensor_ops():
     for elem in dir(torch.Tensor):
         if not _hidden(elem):
             schemas = torch._C._jit_get_schemas_for_operator("aten::" + elem)
-            methods.extend(
-                _emit_schema("Tensor", elem, schema, arg_start=1)
-                for schema in schemas
-                if is_tensor_method(schema)
-            )
+            for schema in schemas:
+                if is_tensor_method(schema):
+                    methods.append(_emit_schema("Tensor", elem, schema, arg_start=1))
 
     return "Supported Tensor Methods", methods
 
@@ -117,12 +115,10 @@ def _get_nn_functional_ops():
             builtin = _find_builtin(getattr(mod, elem))
             if builtin is not None:
                 schemas = torch._C._jit_get_schemas_for_operator(builtin)
-                # remove _tan but not __and__
-                functions.extend(
-                    _emit_schema(name, elem, schema)
-                    for schema in schemas
-                    if not _hidden(elem)
-                )
+                for schema in schemas:
+                    # remove _tan but not __and__
+                    if not _hidden(elem):
+                        functions.append(_emit_schema(name, elem, schema))
     return "Supported PyTorch Functions", functions
 
 
@@ -168,9 +164,8 @@ def _get_torchscript_builtins():
         builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
-            functions.extend(
-                _emit_schema(mod.__name__, fn.__name__, schema) for schema in schemas
-            )
+            for schema in schemas:
+                functions.append(_emit_schema(mod.__name__, fn.__name__, schema))
 
     return "TorchScript Builtin Functions", functions
 
@@ -276,7 +271,8 @@ def _get_global_builtins():
         if fn in op_renames:
             op_name = op_renames[fn]
         schemas = torch._C._jit_get_schemas_for_operator(op_name)
-        schematized_ops.extend(_emit_schema(None, fn, s, padding=0) for s in schemas)
+        for s in schemas:
+            schematized_ops.append(_emit_schema(None, fn, s, padding=0))
         if len(schemas) > 0:
             schematized_ops.append("")
         else:

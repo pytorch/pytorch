@@ -630,10 +630,8 @@ class TritonTemplateKernel(TritonKernel):
                 ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
                 # Handle scatter stores
                 if isinstance(subgraph, list):
-                    scatters.extend(
-                        self._handle_scatter_graph(scatter_graph)
-                        for scatter_graph in subgraph
-                    )
+                    for scatter_graph in subgraph:
+                        scatters.append(self._handle_scatter_graph(scatter_graph))
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
