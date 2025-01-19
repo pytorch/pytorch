@@ -1,6 +1,7 @@
 import functools
 import weakref
-from typing import Any, List, MutableMapping, Type
+from collections.abc import MutableMapping
+from typing import Any
 
 import torch.nn
 from torch.nn import Module
@@ -17,7 +18,7 @@ class MutationTracker:
 
     def __init__(self) -> None:
         self.mutation_count: int = 0
-        self.watchers: List[weakref.ReferenceType[Any]] = []
+        self.watchers: list[weakref.ReferenceType[Any]] = []
 
     def on_mutation(self, name: str) -> None:
         self.mutation_count += 1
@@ -68,7 +69,7 @@ class GenerationTracker:
         cls.generation_values[obj] = cls.generation
 
     @staticmethod
-    def mark_class_dynamic(cls: Type[torch.nn.Module]) -> None:
+    def mark_class_dynamic(cls: type[torch.nn.Module]) -> None:
         assert issubclass(cls, torch.nn.Module)
         GenerationTracker.dynamic_classes[cls] = True
 
