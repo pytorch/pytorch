@@ -674,7 +674,7 @@ class _FileSystemWriter(StorageWriter):
             if self.sync_files:
                 try:
                     os.fsync(metadata_file.fileno())
-                except AttributeError:
+                except (AttributeError, UnsupportedOperation):
                     os.sync()
 
         # delete in-case other checkpoints were present.
