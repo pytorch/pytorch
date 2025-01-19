@@ -6,7 +6,7 @@ import functools
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -532,7 +532,7 @@ def _get_path_of_module(
     return None
 
 
-def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
+def _get_signature_locals(f: Callable, loc: dict[str, Any]) -> dict[str, Any]:
     """Get local keyword arguments
 
     Example::
@@ -567,7 +567,7 @@ def _get_default_kwargs(f: Callable) -> "OrderedDict[str, Any]":
     return OrderedDict(kwargs)
 
 
-def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, Any]":
+def _normalize_kwargs(func: Callable, loc: dict[str, Any]) -> "OrderedDict[str, Any]":
     """Given a function and local function arguments, normalize the keyword
     arguments by filling in default arguments from function signature
 
@@ -710,7 +710,7 @@ def _get_num_pos_args(f: Callable) -> int:
 
 def get_fqn_to_example_inputs(
     model: torch.nn.Module, example_inputs: tuple[Any, ...]
-) -> Dict[str, tuple[Any, ...]]:
+) -> dict[str, tuple[Any, ...]]:
     """Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
