@@ -281,6 +281,10 @@ def create_type_hint(x):
     return x
 
 
+_LIST_TYPES = (list, typing.List)  # noqa: UP006
+_TUPLE_TYPES = (tuple, typing.Tuple)  # noqa: UP006
+
+
 @compatibility(is_backward_compatible=False)
 def type_matches(signature_type: Any, argument_type: Any):
     sig_origin_type = getattr(signature_type, "__origin__", signature_type)
@@ -294,22 +298,24 @@ def type_matches(signature_type: Any, argument_type: Any):
         sig_contained = signature_type.__args__
         return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if signature_type is list[int] and argument_type is int:
+    if signature_type is typing.List[int] and argument_type is int:  # noqa: UP006
         # int can be promoted to List[int]
         return True
 
-    if getattr(signature_type, "__origin__", None) in {list, list}:
+    if getattr(signature_type, "__origin__", None) in _LIST_TYPES:
         sig_el_type = signature_type.__args__[0]
+        if sig_el_type is argument_type:
+            return True
         if not inspect.isclass(sig_el_type):
             warnings.warn(
                 f"Does not support nested parametric types, got {signature_type}. Please file a bug."
             )
             return False
-        if getattr(argument_type, "__origin__", None) in {list, list}:
+        if getattr(argument_type, "__origin__", None) in _LIST_TYPES:
             return issubclass(argument_type.__args__[0], sig_el_type)
 
         def is_homogeneous_tuple(t):
-            if getattr(t, "__origin__", None) not in {tuple, tuple}:
+            if getattr(t, "__origin__", None) not in _TUPLE_TYPES:
                 return False
             contained = t.__args__
             if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason
