@@ -659,9 +659,9 @@ def get_strides(shape: torch.Size) -> List[int]:
     return strides[::-1]
 
 
-def get_padded_shape(shape: torch.Size, multipliers: Dict[int, int]) -> torch.Size:
+def get_padded_shape(shape: torch.Size, multipliers: List[int]) -> torch.Size:
     padded_shape = list(shape)
-    for dim, multiplier in multipliers.items():
+    for dim, multiplier in enumerate(multipliers):
         if dim >= len(padded_shape):
             continue
         padded_shape[dim] = (
@@ -670,9 +670,9 @@ def get_padded_shape(shape: torch.Size, multipliers: Dict[int, int]) -> torch.Si
     return torch.Size(padded_shape)
 
 
-def get_pad(shape: torch.Size, multipliers: Dict[int, int]) -> Tuple[int, ...]:
+def get_pad(shape: torch.Size, multipliers: List[int]) -> Tuple[int, ...]:
     pad = [0] * (len(shape) * 2)
-    for dim, multiplier in multipliers.items():
+    for dim, multiplier in enumerate(multipliers):
         if dim >= len(shape):
             continue
         pad[2 * dim] = (shape[dim] + multiplier - 1) // multiplier * multiplier - shape[
@@ -686,7 +686,7 @@ def get_multipliers(args):
     for arg in pytree.tree_leaves(args):
         if type(arg) is PaddedTensor:
             return arg.multipliers
-    return {n: 1 for n in range(10)}
+    return [1] * 10
 
 
 def strip_common_suffix(list1: List[int], list2: List[int]) -> List[int]:
@@ -717,15 +717,15 @@ class PaddedTensor(torch.Tensor):
     def __new__(
         cls,
         tensor: torch.Tensor,
-        multipliers: Optional[Dict[int, int]],
+        multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
         view_shape_stack: Optional[list] = None,
     ):
-        assert type(multipliers) is dict
+        assert type(multipliers) is list
 
         # TODO: change ori_shape as torch.Tensor
         if multipliers is None:
-            multipliers = {}
+            multipliers = []
 
         padded_shape = get_padded_shape(tensor.shape, multipliers)
         kwargs = {}
@@ -742,7 +742,7 @@ class PaddedTensor(torch.Tensor):
             "Creating padded tensor with shape",
             list(out.shape),
             "orig_shape",
-            list(orig_shape) if orig_shape is not None else None,
+            list(orig_shape) if orig_shape is not None else list(tensor.shape),
             "multipliers",
             multipliers,
         )
@@ -752,12 +752,12 @@ class PaddedTensor(torch.Tensor):
     def __init__(
         self,
         tensor: torch.Tensor,
-        multipliers: Optional[Dict[int, int]],
+        multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
         view_shape_stack: Optional[list] = None,
     ):
         if multipliers is None:
-            multipliers = {}
+            multipliers = []
         self.multipliers = multipliers
         self.orig_shape = tensor.shape if orig_shape is None else orig_shape
         self.view_shape_stack = view_shape_stack if view_shape_stack is not None else []
