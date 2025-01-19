@@ -2,7 +2,7 @@
 
 import sys
 import tempfile
-from typing import Any, Dict, IO
+from typing import Any, IO
 
 import torch
 import torch.distributed as dist
@@ -57,8 +57,8 @@ _THREAD_COUNTS = {1, 2}
 
 def assert_state_dict_equal(
     self: TestCase,
-    state_dict_1: Dict[str, torch.Tensor],
-    state_dict_2: Dict[str, torch.Tensor],
+    state_dict_1: dict[str, torch.Tensor],
+    state_dict_2: dict[str, torch.Tensor],
 ) -> bool:
     self.assertEqual(
         len(state_dict_1), len(state_dict_2), "state_dict must be the same size"
@@ -114,10 +114,10 @@ class BlobState:
     def __init__(self, value: IO[bytes]) -> Any:
         self.state = {"blob": value}
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return self.state
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.state = state_dict
 
     def __eq__(self, other: object) -> bool:
