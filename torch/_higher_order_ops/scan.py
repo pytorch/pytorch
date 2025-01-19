@@ -32,6 +32,8 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 aten = torch._ops.ops.aten
 
 
+# TODO: This can be combined with the same method in associative_scan once
+# https://github.com/pytorch/pytorch/pull/139864 is merged
 # say we have a tensor of shape [3, 4, 5, 6]
 # shift_source_dim_to_target_dim(t, 0, 3) -> [4, 5, 6, 3]
 def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
