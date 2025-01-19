@@ -511,6 +511,14 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
+# say we have a tensor of shape [3, 4, 5, 6]
+# shift_source_dim_to_target_dim(t, 0, 3) -> [4, 5, 6, 3]
+def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
+    assert to_dim >= 0 and to_dim < t.ndim
+    assert from_dim >= 0 and from_dim < t.ndim
+    return torch.movedim(t, from_dim, to_dim)
+
+
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
     meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True

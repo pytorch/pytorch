@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     first_slice_copy,
     reenter_make_fx,
+    shift_source_dim_to_target_dim,
     unique_graph_id,
 )
 from torch._inductor.utils import is_pointwise_use
@@ -166,7 +167,8 @@ def associative_scan(
 
     ndim = leaves[0].ndim
     orig_scan_dim = utils.canonicalize_dim(ndim, dim)
-    leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
+    # leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
+    leaves = [shift_source_dim_to_target_dim(elem, dim, 0) for elem in leaves]
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
@@ -236,7 +238,10 @@ def associative_scan(
     if reverse:
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
 
-    result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
+    # result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
+    result_flat = [
+        shift_source_dim_to_target_dim(elem, 0, orig_scan_dim) for elem in result_flat
+    ]
 
     return pytree.tree_unflatten(result_flat, spec)
 
