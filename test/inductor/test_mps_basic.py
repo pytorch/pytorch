@@ -46,7 +46,6 @@ class MPSBasicTests(TestCase):
     test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
     test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
     test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
-    test_builtins_round_float_ndigits_neg = CommonTemplate.test_builtins_round_float_ndigits_neg
     test_div1 = CommonTemplate.test_div1
     test_div3 = CommonTemplate.test_div3
     test_cat_empty = CommonTemplate.test_cat_empty
@@ -132,6 +131,9 @@ class MPSBasicTests(TestCase):
     def test_pointwise_i1(self):
         self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_erf(self):
+        self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -142,6 +144,10 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+
+# Copy tests
+for test_name in ["test_builtins_round", "test_builtins_round_float_ndigits_neg"]:
+    setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
 instantiate_parametrized_tests(MPSBasicTests)
 
