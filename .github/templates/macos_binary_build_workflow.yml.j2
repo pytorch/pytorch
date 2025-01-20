@@ -102,7 +102,7 @@ jobs:
 {%- if config["package_type"] == "wheel" %}
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1091,SC2086
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
