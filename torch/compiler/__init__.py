@@ -194,7 +194,7 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
