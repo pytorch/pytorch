@@ -1388,6 +1388,7 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
+                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
                 # Grouped quantized convolution is not supported at XPU backend
@@ -2754,13 +2755,19 @@ def _register_qconv_post_op_fusion_pass(
             else:
                 accum = (
                     kwargs["accum"]
-                    if output_dtype == torch.uint8
+                    if output_dtype in OrderedSet([torch.uint8, torch.int8])
                     else kwargs["accum_after_dequant"]
                 )
                 accum_scale = (
-                    kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
+                    kwargs["accum_scale"]
+                    if output_dtype in OrderedSet([torch.uint8, torch.int8])
+                    else 1.0
                 )
-                accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
+                accum_zp = (
+                    kwargs["accum_zp"]
+                    if output_dtype in OrderedSet([torch.uint8, torch.int8])
+                    else 0
+                )
                 computation_args = (
                     x,
                     x_scale,
