@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
@@ -9,7 +9,7 @@ from torch.distributed.optim._deprecation_warning import (
 )
 
 
-__all__: list[str] = []
+__all__: List[str] = []
 
 
 # Define a TorchScript compatible Functional Adam Optimizer
@@ -25,7 +25,7 @@ __all__: list[str] = []
 class _FunctionalAdam:
     def __init__(
         self,
-        params: list[Tensor],
+        params: List[Tensor],
         lr: float = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
@@ -59,7 +59,7 @@ class _FunctionalAdam:
         self.maximize = maximize
         self.foreach = foreach
         self.fused = fused
-        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -78,7 +78,7 @@ class _FunctionalAdam:
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: list[Tensor] = []
+        state_steps: List[Tensor] = []
         has_complex = torch.is_complex(param)
         if grad is not None:
             params_with_grad.append(param)
@@ -128,14 +128,14 @@ class _FunctionalAdam:
                 found_inf=None,
             )
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: list[Tensor] = []
+        state_steps: List[Tensor] = []
         has_complex = False
 
         if len(params) != len(gradients):
