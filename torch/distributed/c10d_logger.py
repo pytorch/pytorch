@@ -9,7 +9,7 @@
 
 import functools
 import logging
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -18,7 +18,7 @@ from torch.distributed.logging_handlers import _log_handlers
 from torch.monitor import _WaitCounter
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _DEFAULT_DESTINATION = "default"
 
@@ -48,7 +48,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
+def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
     if dist.is_initialized():
         group = kwargs.get("group") or kwargs.get("process_group")
         msg_dict = {

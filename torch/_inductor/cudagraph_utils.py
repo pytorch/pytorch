@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -17,8 +21,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[List[InputType]], OutputType]
+OutputType = list[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,7 +42,7 @@ class PlaceholderInfo:
     name: str
     stack_trace: Optional[str]
     # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
+    users: list[PlaceholderInfo]
     mutating_use_stack_trace: Optional[str]
 
 
@@ -92,7 +96,7 @@ def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
     return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
 
 
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
+def get_placeholder_info(graph: torch.fx.Graph) -> list[PlaceholderInfo]:
     return [
         to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
     ]
@@ -123,7 +127,7 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[InputType],
+    inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -160,7 +164,7 @@ def _get_use_stack_trace(node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
@@ -180,7 +184,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
@@ -262,7 +266,7 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
-    inputs: List[InputType],
+    inputs: list[InputType],
     recorded_data_ptr: Sequence[Optional[int]],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
@@ -292,7 +296,7 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[tuple[int, ...], Callable[..., Any]],
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
@@ -327,5 +331,5 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: List[Optional[str]]
-    cudagraph_fail_reasons: List[str]
+    stack_traces: list[Optional[str]]
+    cudagraph_fail_reasons: list[str]
