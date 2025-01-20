@@ -8995,6 +8995,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
                 """Attempting to copy from device meta to device cpu, but cross-device copies are not allowed!"""
             )
+            
+    # For testing in64 support in upsample_nearest3d
+    @onlyCUDA
+    def test_int64_upsample3d(self, device):
+        x = torch.ones((1, 256, 16, 720, 1280), dtype=torch.bfloat16).cuda()
+        try:
+            torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        except Exception as e:
+            self.fail(f"Unexpected exception raised: {e}")
 
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
