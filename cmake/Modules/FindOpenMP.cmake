@@ -254,6 +254,16 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
     endif()
 
+    if ((NOT OpenMP_libomp_LIBRARY) AND MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+      # On MSVC ARM64, OpenMP is provided by vcomp, which is a part of the Visual Studio installation.
+      find_library(OpenMP_libomp_LIBRARY
+      NAMES vcomp
+      HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+      DOC "vcomp location for OpenMP on MSVC ARM64"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
     if (NOT OpenMP_libomp_LIBRARY)
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
