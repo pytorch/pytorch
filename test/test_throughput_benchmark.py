@@ -80,8 +80,11 @@ class TestThroughputBenchmark(TestCase):
             self.linear_test(TwoLayerNetModule, profiler_output_path=fname)
 
     def linear_with_compile_test(self, Module, dtype):
-        from torch._inductor import config as inductor_config
+        from contextlib import nullcontext
+
         from torch._dynamo import config
+        from torch._inductor import config as inductor_config
+
         config.error_on_recompile = True
         inductor_config.cpp_wrapper = True
         inductor_config.freezing = True
@@ -95,17 +98,16 @@ class TestThroughputBenchmark(TestCase):
 
         input = (torch.randn(B, D_in), torch.randn(B, D_in))
 
-        with torch.no_grad(), torch.amp.autocast('cpu', enabled=autocast, dtype=dtype):
+        with torch.no_grad(), torch.amp.autocast("cpu", enabled=autocast, dtype=dtype):
             torch._dynamo.reset()
             module(*input)
             module = torch.compile(module)
             module(*input)
             module(*input)
 
-        import contextlib
-        ctx = contextlib.nullcontext()
+        ctx = nullcontext()
         if dtype == torch.float16 or dtype == torch.bfloat16:
-            ctx = torch.amp.autocast('cpu', enabled=autocast, dtype=dtype)
+            ctx = torch.amp.autocast("cpu", enabled=autocast, dtype=dtype)
         with torch.no_grad(), ctx:
             bench = ThroughputBenchmark(module)
             bench.add_input(*input)
@@ -115,9 +117,7 @@ class TestThroughputBenchmark(TestCase):
             torch.testing.assert_close(bench_result, module_result)
 
             stats = bench.benchmark(
-                num_calling_threads=4,
-                num_warmup_iters=100,
-                num_iters=1000
+                num_calling_threads=4, num_warmup_iters=100, num_iters=1000
             )
 
             print(stats)
@@ -126,6 +126,7 @@ class TestThroughputBenchmark(TestCase):
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
         for dtype in dtypes:
             self.linear_with_compile_test(TwoLayerNetModule, dtype)
+
 
 if __name__ == "__main__":
     run_tests()
