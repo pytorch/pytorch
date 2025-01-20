@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -29,6 +29,8 @@ from torch.onnx._internal import jit_utils, registration
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -1196,9 +1198,9 @@ def prelu(g: jit_utils.GraphContext, self, weight):
             weight_rank = 0
 
     if self_rank is not None and weight_rank is not None:
-        assert self_rank >= weight_rank, (
-            f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
-        )
+        assert (
+            self_rank >= weight_rank
+        ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
     return g.op("PRelu", self, weight)
 
 
@@ -4089,9 +4091,9 @@ def repeat_interleave(
                 "Unsupported for cases with dynamic repeats",
                 self,
             )
-        assert repeats_sizes[0] == input_sizes[dim], (
-            "repeats must have the same size as input along dim"
-        )
+        assert (
+            repeats_sizes[0] == input_sizes[dim]
+        ), "repeats must have the same size as input along dim"
         reps = repeats_sizes[0]
     else:
         raise errors.SymbolicValueError("repeats must be 0-dim or 1-dim tensor", self)

@@ -12,7 +12,7 @@ import os
 import tempfile
 import textwrap
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
@@ -23,6 +23,8 @@ from torch.utils import _pytree
 # because ONNXProgram is exposed to the public API
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
@@ -78,10 +80,10 @@ class ONNXProgram:
         return f"""\
 ONNXProgram(
     model=
-{textwrap.indent(str(self.model), " " * 8)}
+{textwrap.indent(str(self.model), ' ' * 8)}
     ,
     exported_program=
-{textwrap.indent(str(self.exported_program), " " * 8)}
+{textwrap.indent(str(self.exported_program), ' ' * 8)}
 )
 """
 

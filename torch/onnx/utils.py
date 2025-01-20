@@ -13,7 +13,7 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast, Collection, Mapping, Sequence
+from typing import Any, Callable, cast
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -23,6 +23,10 @@ from torch import _C
 from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
 
 
 __all__ = [

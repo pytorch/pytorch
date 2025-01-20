@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Callable, Mapping, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._ops
@@ -14,6 +14,8 @@ from torch.onnx._internal.fx.passes import _utils
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import torch.fx
 
 
