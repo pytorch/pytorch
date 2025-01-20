@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
@@ -263,6 +264,9 @@ bool Context::userEnabledOverrideableSDP() const {
 
 static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
 static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
+#ifdef USE_ROCM
+static constexpr const auto hipblaslt_allow_tf32 = "HIPBLASLT_ALLOW_TF32";
+#endif
 
 bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
@@ -314,19 +318,33 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
+#ifdef USE_ROCM
+    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    if (allow_tf32 != true) {
+      return false;
+    }
+#endif
   warn_deprecated_fp32_precision_api();
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
-  bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32";
+  bool allow_tf32_new = float32Precision("cuda", "matmul") == "tf32";
   TORCH_CHECK(
-      legacy_allow_tf32 == allow_tf32,
-      "PyTorch is checking whether allow_tf32 is enabled for cuBlas matmul,",
+      legacy_allow_tf32 == allow_tf32_new,
+      "PyTorch is checking whether allow_tf32_new is enabled for cuBlas matmul,",
       "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  return allow_tf32;
+  return allow_tf32_new;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
+#ifdef USE_ROCM
+  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  if (allow_tf32 != true) {
+    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
+    return;
+  }
+#endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
   setFloat32Precision("cuda", "matmul", b ? "tf32" : "ieee");
 }
@@ -477,6 +495,40 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
   blas_preferred_backend = b;
 #endif
 }
+
+at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+  return rocm_fa_preferred_backend;
+}
+
+void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
+
+  // TODO: add plumbing for hasCK for validity checking
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
+      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  if(b == at::ROCmFABackend::Ck) {
+    static const bool ck_unsupported = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a",  "gfx942"
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if(!ck_unsupported) rocm_fa_preferred_backend = b;
+  }
+  else {
+     rocm_fa_preferred_backend = b;
+  }
+#endif
+  rocm_fa_preferred_backend = b;
+}
+
 
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
