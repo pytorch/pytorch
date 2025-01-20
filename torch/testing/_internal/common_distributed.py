@@ -1448,6 +1448,9 @@ class MultiProcContinousTest(TestCase):
     rank: int = -1  # unset state
     # Rendezvous file
     rdvz_file: Optional[str] = None
+    # timeout configured per class
+    timeout: timedelta = timedelta(seconds=120)
+
 
     @classmethod
     @abc.abstractmethod
@@ -1495,6 +1498,7 @@ class MultiProcContinousTest(TestCase):
             rank=cls.rank,
             store=store,
             pg_options=opts,
+            timeout=cls.timeout,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
         print(f"Rank {cls.rank} setup complete")
