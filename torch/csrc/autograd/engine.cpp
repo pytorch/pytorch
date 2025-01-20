@@ -872,8 +872,9 @@ template <typename T>
 const InputMetadata& get_input_metadata(const T& thing);
 
 template <>
-const InputMetadata& get_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return thing.value();
 }
 
@@ -887,8 +888,8 @@ template <typename T>
 bool has_input_metadata(const T& thing);
 
 template <>
-bool has_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+bool has_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
   return thing.has_value();
 }
 
@@ -991,7 +992,7 @@ void validate_outputs(
 }
 
 void validate_outputs(
-    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
   return validate_outputs_impl(input_metadata, grads, format_error);
@@ -1320,6 +1321,7 @@ auto Engine::execute(
     TORCH_CHECK(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
+    GraphTaskGuard guard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
@@ -1357,8 +1359,11 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  c10::call_once(
-      start_device_threads_flag_, &Engine::start_device_threads, this);
+  // Ensures device_ready_queues_ are initialized only once
+  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
+    this->start_device_threads();
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(

@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
+from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log
@@ -982,7 +982,7 @@ def run_subtests(
         test_kwargs: Keyword arguments to pass to ``test_fn``.
     """
     # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+    subtest_config_items: List[tuple[str, List[Any]]] = list(subtest_config.items())
     subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
     subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
@@ -1448,6 +1448,9 @@ class MultiProcContinousTest(TestCase):
     rank: int = -1  # unset state
     # Rendezvous file
     rdvz_file: Optional[str] = None
+    # timeout configured per class
+    timeout: timedelta = timedelta(seconds=120)
+
 
     @classmethod
     @abc.abstractmethod
@@ -1495,6 +1498,7 @@ class MultiProcContinousTest(TestCase):
             rank=cls.rank,
             store=store,
             pg_options=opts,
+            timeout=cls.timeout,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
         print(f"Rank {cls.rank} setup complete")

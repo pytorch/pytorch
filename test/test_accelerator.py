@@ -27,23 +27,23 @@ class TestAccelerator(TestCase):
                 with self.assertRaisesRegex(
                     ValueError, "doesn't match the current accelerator"
                 ):
-                    torch.accelerator.set_device_idx("cpu")
+                    torch.accelerator.set_device_index("cpu")
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
-        orig_device = torch.accelerator.current_device_idx()
+        orig_device = torch.accelerator.current_device_index()
         target_device = (orig_device + 1) % torch.accelerator.device_count()
 
-        torch.accelerator.set_device_idx(target_device)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
-        torch.accelerator.set_device_idx(orig_device)
-        self.assertEqual(orig_device, torch.accelerator.current_device_idx())
+        torch.accelerator.set_device_index(target_device)
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
+        torch.accelerator.set_device_index(orig_device)
+        self.assertEqual(orig_device, torch.accelerator.current_device_index())
 
         s1 = torch.Stream(target_device)
         torch.accelerator.set_stream(s1)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
         torch.accelerator.synchronize(orig_device)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
 
     def test_generic_stream_behavior(self):
         s1 = torch.Stream()
@@ -51,8 +51,8 @@ class TestAccelerator(TestCase):
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream(), s1)
         event = torch.Event()
-        a = torch.randn(100)
-        b = torch.randn(100)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
         c = a + b
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream(), s2)
@@ -67,6 +67,40 @@ class TestAccelerator(TestCase):
         torch.accelerator.synchronize()
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
+
+    def test_current_stream_query(self):
+        s = torch.accelerator.current_stream()
+        self.assertEqual(torch.accelerator.current_stream(s.device), s)
+        self.assertEqual(torch.accelerator.current_stream(s.device.index), s)
+        self.assertEqual(torch.accelerator.current_stream(str(s.device)), s)
+        other_device = torch.device("cpu")
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.current_stream(other_device)
+
+    def test_stream_context_manager(self):
+        prev_stream = torch.accelerator.current_stream()
+        with torch.Stream() as s:
+            self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        src_prev_stream = torch.accelerator.current_stream()
+        dst_prev_stream = torch.accelerator.current_stream(dst_device)
+        with torch.Stream(dst_device) as dst_stream:
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_stream)
+            self.assertEqual(
+                torch.accelerator.current_stream(src_device), src_prev_stream
+            )
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
 
 if __name__ == "__main__":

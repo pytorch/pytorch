@@ -190,13 +190,7 @@ Tensor layer_norm_symint(
     c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
@@ -284,18 +278,27 @@ Tensor rms_norm_symint(
         input.scalar_type(),
         "rms_norm",
         [&] {
-    scalar_t eps_val;
-    if (!eps.has_value()) {
-      eps_val = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon();
-    } else {
-      eps_val = eps.value();
-    }
-
     // upcast is needed for fp16 and bf16
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
+    Tensor rqrst_input;
+
+    // opmath_t would be one of [Double, Float, ComplexFloat, ComplexDouble]
+    if (opmath_t == at::ScalarType::Float || opmath_t == at::ScalarType::ComplexFloat) {
+      float eps_val = std::numeric_limits<float>::epsilon();
+      if (eps.has_value()) {
+        eps_val = eps.value();
+      }
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
+    } else {
+      double eps_val = std::numeric_limits<double>::epsilon();
+      if (eps.has_value()) {
+        eps_val = eps.value();
+      }
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
+    }
+
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {

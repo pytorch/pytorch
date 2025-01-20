@@ -8,6 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import (
@@ -45,7 +46,7 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
-class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
+class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -452,7 +453,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -480,7 +481,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(c3, c3, 3, 3)
@@ -506,7 +507,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         b = torch.randn(3, 3, requires_grad=True)
         z = a
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -542,7 +543,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -570,7 +571,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f([3, 2, 1], [4, 5, 6], c3, c3)
@@ -592,7 +593,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -620,7 +621,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(c3, c3)
@@ -641,7 +642,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
-        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
+        _, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -669,7 +670,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a3, b3, c3, c3)
@@ -1016,7 +1017,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             activities=[torch.profiler.ProfilerActivity.CPU],
             record_shapes=True,
         ) as kineto_prof:
-            res = model_instance(*args)
+            model_instance(*args)
         bwd_set = set()
         prof_str = "SeqNr|Thread|FwdThread|Name\n"
         for event in kineto_prof.events():
@@ -1190,7 +1191,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
-                y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+                torch.compile(f, backend="aot_eager", fullgraph=True)(x)
             self.assertTrue(backward_called)
 
     # We don't know how to catch multiple mutations to the same memory location
@@ -1542,7 +1543,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_input = input.clone().detach()
 
         out = f(*argsfn(input))
-        opt_out = torch._dynamo.optimize(compiler, dynamic=True)(f)(*argsfn(opt_input))
+        opt_out = torch.compile(f, backend=compiler, dynamic=True)(*argsfn(opt_input))
         self.assertEqual(out, opt_out)
 
         self.assertEqual(compiler.counter.frame_count, 1)
@@ -1600,7 +1601,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return self.counter(*args, **kwargs)
 
         compiler = Compiler()
-        opt_f = torch._dynamo.optimize(compiler, dynamic=True)(f)
+        opt_f = torch.compile(f, backend=compiler, dynamic=True)
 
         input = torch.arange(1_000)
         opt_input = input.clone().detach()
