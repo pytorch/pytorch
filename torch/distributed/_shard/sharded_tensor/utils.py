@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import collections.abc
 import copy
-from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import List, Optional, Sequence, TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d, rpc
@@ -110,13 +109,13 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
 
 
 def build_metadata_from_local_shards(
-    local_shards: list[Shard],
+    local_shards: List[Shard],
     global_size: torch.Size,
     current_rank: int,
     pg: c10d.ProcessGroup,
 ) -> ShardedTensorMetadata:
     assert len(local_shards) > 0, "must have local shards!"
-    local_shard_metadatas: list[ShardMetadata] = []
+    local_shard_metadatas: List[ShardMetadata] = []
 
     first_shard_dtype = local_shards[0].tensor.dtype
     first_shard_layout = local_shards[0].tensor.layout
