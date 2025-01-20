@@ -965,14 +965,6 @@ class LineContext(NamedTuple):
     context: Any
 
 
-def _line_to_str(line: DeferredLineBase | LineContext | str) -> str | None:
-    if isinstance(line, str):
-        return line
-    if isinstance(line, DeferredLineBase):
-        return line()
-    return None
-
-
 class IndentedBuffer:
     tabwidth = 4
 
@@ -1091,6 +1083,14 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+def _line_to_str(line: DeferredLineBase | LineContext | str) -> str | None:
+    if isinstance(line, str):
+        return line
+    if isinstance(line, DeferredLineBase):
+        return line()
+    return None
 
 
 class FakeIndentedBuffer(IndentedBuffer):
