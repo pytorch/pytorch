@@ -36,7 +36,7 @@ def _deregister_pytree_flatten_spec(
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
-    exact_structural_match : bool =False,
+    exact_structural_match: bool = False,
 ) -> list[Any]:
     if spec.is_leaf():
         return [pytree]

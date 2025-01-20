@@ -490,13 +490,13 @@ def _dict_unflatten(values: Iterable[T], context: Context) -> Dict[Any, T]:
     return dict(zip(context, values))
 
 
-def _namedtuple_flatten(d: NamedTuple[T]) -> Tuple[List[T], Context]:
+def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
     return list(d), type(d)
 
 
 def _namedtuple_flatten_with_keys(
-    d: NamedTuple[T],
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: NamedTuple,
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
     return (
         [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
@@ -504,7 +504,7 @@ def _namedtuple_flatten_with_keys(
     )
 
 
-def _namedtuple_unflatten(values: Iterable[T], context: Context) -> NamedTuple[T]:
+def _namedtuple_unflatten(values: Iterable[T], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
 
