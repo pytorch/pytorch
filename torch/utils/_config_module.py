@@ -496,12 +496,65 @@ class ConfigModule(ModuleType):
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
         """
+
+        # additional imports required
+        imports = set()
+
+        def get_module_name(func: Callable, add_dot: bool) -> str:
+            module_name = func.__module__
+            if module_name == "builtins":
+                module_name = ""
+            if add_dot and module_name != "":
+                module_name += "."
+            return module_name
+
+        def add_import(func: Callable) -> None:
+            module_name = get_module_name(func, False)
+            if module_name:
+                imports.add(module_name)
+
+        def list_of_callables_to_string(v: Union[List, Set]) -> List[str]:
+            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
+
+        def importable_callable(v: Any) -> bool:
+            # functools.partial has no attributes below but is a callable
+            return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
+
+        def get_config_line(mod, k, v) -> str:  # type: ignore[no-untyped-def]
+            """
+            Return a string version of the config line.
+            Handle v when v is a callable, or a list/dict of callables. Add import statements for callables if necessary.
+            We assume that the value of a single config won't be a mix of callables and non-callables.
+
+            Example output:
+                import logging
+                import _warnings
+                torch._dynamo.config.reorderable_logging_functions = { _warnings.warn, logging.warn, print }
+            """
+            if importable_callable(v):
+                add_import(v)
+                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
+            elif isinstance(v, (list, set)) and all(
+                importable_callable(item) for item in v
+            ):
+                for item in v:
+                    add_import(item)
+                v_list = list_of_callables_to_string(v)
+                if isinstance(v, list):
+                    return f"{mod}.{k} = {v_list}"
+                else:
+                    return f"{mod}.{k} = {{ {', '.join(v_list)} }}"
+            else:
+                return f"{mod}.{k} = {v!r}"
+
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
             ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
         ).items():
-            lines.append(f"{mod}.{k} = {v!r}")
+            lines.append(get_config_line(mod, k, v))
+        for import_name in imports:
+            lines.insert(0, f"import {import_name}")
         return "\n".join(lines)
 
     def get_hash(self) -> bytes:
