@@ -6,7 +6,8 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, TypeVar
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -67,7 +68,7 @@ def wrap_args_kwargs(tx: "InstructionTranslator", result):
             result[k] = wrap_bound_arg(tx, v)
 
 
-def init_cellvars(parent, result: Dict[str, VariableTracker], code):
+def init_cellvars(parent, result: dict[str, VariableTracker], code):
     """
     Update `result` to add mapping from local name to new cells created
     directly by `code`, or update SideEffects in `parent` if the a local cell is
@@ -114,8 +115,8 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
@@ -191,7 +192,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
-    def bind_args(self, parent, args, kwargs) -> Dict[str, VariableTracker]:
+    def bind_args(self, parent, args, kwargs) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
         this function, create new bindings for initial locals.
@@ -295,8 +296,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -342,8 +343,8 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from torch._dynamo.bytecode_transformation import is_generator
 
@@ -395,8 +396,8 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
@@ -451,8 +452,8 @@ class WrappedUserMethodVariable(UserMethodVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         self.context.enter(tx)
         result = super().call_function(tx, args, kwargs)
@@ -471,8 +472,8 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         self.context.enter(tx)
         result = super().call_function(tx, args, kwargs)
@@ -672,8 +673,8 @@ class SkipFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
@@ -770,8 +771,8 @@ class WrapperUserFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
@@ -840,8 +841,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
@@ -909,8 +910,8 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         merged_args = self.args + args
         merged_kwargs = {**self.keywords, **kwargs}
@@ -948,7 +949,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     @classmethod
     @functools.lru_cache(None)
-    def _get_polyfill_handlers(cls) -> Dict[Callable[..., Any], types.FunctionType]:
+    def _get_polyfill_handlers(cls) -> dict[Callable[..., Any], types.FunctionType]:
         return {}
 
     @classmethod
@@ -995,8 +996,8 @@ class PolyfilledFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
@@ -1048,8 +1049,8 @@ class PolyfilledFunctionVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__call__":
             return self.call_function(tx, args, kwargs)
@@ -1235,8 +1236,8 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return dynamo_triton_hopifier_singleton.call_triton_kernel(
             self, args, kwargs, tx
@@ -1246,8 +1247,8 @@ class TritonKernelVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__":
             return dynamo_triton_hopifier_singleton.call_getitem(self, args)
@@ -1271,8 +1272,8 @@ class TMADescriptorVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
-        dims: "List[ConstantVariable]",
-        block_dims: "List[ConstantVariable]",
+        dims: "list[ConstantVariable]",
+        block_dims: "list[ConstantVariable]",
         element_size: "ConstantVariable",
         **kwargs,
     ):
@@ -1316,8 +1317,8 @@ class CreateTMADescriptorVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
 
