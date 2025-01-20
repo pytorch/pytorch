@@ -2429,7 +2429,7 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
         out = out.to(memory_format=torch.channels_last)
         return out
