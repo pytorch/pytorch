@@ -34,7 +34,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -452,7 +451,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x: Tuple[_T, ...]) -> List[_T]:
+def tuple_sorted(x: tuple[_T, ...]) -> List[_T]:
     if len(x) == 0:
         return []
 
@@ -1463,7 +1462,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -1477,7 +1476,7 @@ def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
     return result, source_codes
 
 
-def run_and_get_kernels(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, List[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1821,6 +1820,31 @@ def pass_execution_and_save(func, gm, inp, msg):
             t,
             time_elapsed,
         )
+
+
+def is_multi_outputs_template(input_buf) -> bool:
+    """
+    Check if input buffer is a multi-outputs template buffer
+    """
+    from . import ir
+
+    return isinstance(input_buf, ir.CppTemplateBuffer) and isinstance(
+        input_buf.layout, ir.MultiOutputLayout
+    )
+
+
+def is_output_of_multi_outputs_template(input_buf) -> bool:
+    """
+    Check if input buffer is a output of multi-outputs template buffer
+    """
+    from . import ir
+
+    return (
+        isinstance(input_buf, ir.MultiOutput)
+        and len(input_buf.inputs) == 1
+        and isinstance(input_buf.inputs[0], ir.CppTemplateBuffer)
+        and isinstance(input_buf.inputs[0].layout, ir.MultiOutputLayout)
+    )
 
 
 def is_collective(node, op=None):
