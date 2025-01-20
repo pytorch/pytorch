@@ -411,6 +411,19 @@ void Context::setAllowBF16ReductionCuBLAS(bool b) {
   allow_bf16_reduction_cublas = b;
 }
 
+std::optional<int> Context::_SMCarveout_EXPERIMENTAL() const {
+  return sm_carveout;
+}
+
+void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int> c) {
+  if (c.has_value()) {
+    TORCH_WARN_ONCE(
+      "Setting the SM carveout for matmuls is a temporary experimental mitigation for performance issues, "
+      "while more robust solutions are developed. It may be removed at any moment without notice.");
+  }
+  sm_carveout = c;
+}
+
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
