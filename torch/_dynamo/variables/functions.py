@@ -368,9 +368,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen):
+        from torch._dynamo.side_effects import disallow_side_effects_under_generator
         from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        from ..side_effects import disallow_side_effects_under_generator
 
         tx = InstructionTranslator.current_tx()
         with disallow_side_effects_under_generator(tx):
@@ -654,7 +653,6 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             f_globals,
             inline_tracer,
             source=self.source,
-            mutation_type=ValueMutationNew(),
         )
 
 
