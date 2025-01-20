@@ -3080,13 +3080,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             and (tos := self.stack[-1])
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
-            raise exc.IncorrectUsage(
-                "NYI: Returning a generator object from a torch.compile function"
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
             )
-            # self.stack[-1] = ListIteratorVariable(
-            #     tos.force_unpack_var_sequence(self),
-            #     mutation_type=ValueMutationNew(),
-            # )
 
     def _return(self, inst):
         self.raise_if_return_is_generator()
