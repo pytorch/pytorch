@@ -271,7 +271,9 @@ class TestFP8Types(TestCase):
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
-            raise unittest.SkipTest("FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+            raise unittest.SkipTest(
+                "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+            )
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -340,8 +342,9 @@ class TestFP8Types(TestCase):
         device: torch.device,
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
-            raise unittest.SkipTest("FP8 is only supported on H100+ and sm_89 and MI300+ devices")
-            float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
+            raise unittest.SkipTest(
+                "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
+            )
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
