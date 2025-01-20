@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Mapping
-from typing import Any, Union
+from typing import Any, Dict, List, Mapping, Union
 
 import torch.optim as optim
 from torch import Tensor
@@ -29,7 +28,7 @@ class ShardedOptimizer(optim.Optimizer):
             **optimizer_kwargs: the key-word arguments to initialize the optimizer.
 
         """
-        tensors: list[Tensor] = []
+        tensors: List[Tensor] = []
         for value in named_params.values():
             if isinstance(value, ShardedTensor):
                 tensors.extend(
@@ -73,7 +72,7 @@ class ShardedOptimizer(optim.Optimizer):
         """
         self._optim.step(closure)
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> Dict[str, Any]:
         """
         Returned state and param_groups will contain parameter keys
         instead of parameter indices like torch.optim.Optimizer.
