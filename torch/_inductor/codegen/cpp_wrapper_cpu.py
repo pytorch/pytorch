@@ -3,8 +3,9 @@ import functools
 import math
 import os
 import sys
+from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Optional
 
 import sympy
 from sympy import Expr
@@ -64,7 +65,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
-        self.initialized_kernels: Dict[str, Kernel] = {}
+        self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
@@ -428,7 +429,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = ""
+                if config.aot_inductor.compile_wrapper_with_O0:
+                    run_impl_proto += """
+                    #ifdef __clang__
+                    __attribute__((optnone))
+                    #else
+                    __attribute__((optimize("O0")))
+                    #endif
+                    """
+
+                run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -441,6 +452,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
+
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
@@ -793,7 +805,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
-            const_index_mapping: List[Optional[tuple[int, str]]] = [None] * len(
+            const_index_mapping: list[Optional[tuple[int, str]]] = [None] * len(
                 V.graph.const_output_index
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
@@ -898,9 +910,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def get_output_refs(self):
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
-    def generate_return(self, output_refs: List[str]):
+    def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -1100,7 +1112,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.generate_c_shim_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
     ):
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1254,7 +1266,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_free_by_names(self, names_to_del: List[str]):
+    def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
@@ -1436,7 +1448,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]
@@ -1673,8 +1685,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         op_overload,
         raw_args,
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -1814,7 +1826,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -2027,11 +2039,11 @@ if (custom_op_wrapper.get() == NULL) {
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
         # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
@@ -2104,8 +2116,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,
