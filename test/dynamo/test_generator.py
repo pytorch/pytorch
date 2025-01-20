@@ -296,7 +296,6 @@ class GraphModule(torch.nn.Module):
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, list(y))
 
-    @unittest.expectedFailure
     def test_zip_subgenerator(self):
         def subgen(t):
             yield t + 1
