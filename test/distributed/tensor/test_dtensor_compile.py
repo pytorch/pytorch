@@ -35,11 +35,14 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CUDA,
+    TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -50,6 +53,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
+
+
+dev_type = torch.device(get_devtype())
 
 
 class SimpleModel(nn.Module):
@@ -86,23 +92,40 @@ aot_eager_graph = aot_autograd(
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        super().setUp()
+        super(
+            type(self), self
+        ).setUp()  # use explicit params for compiled autograd test wrapping
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
-        super().tearDown()
+        super(
+            type(self), self
+        ).tearDown()  # use explicit params for compiled autograd test wrapping
         dist.destroy_process_group()
 
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "cpu"
 
     @property
     def world_size(self) -> int:
         return 2
+
+    def test_dtensor_basic(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x * x + 2
+
+        param = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        res = fn(x)
+        res.to_local().sum().backward()
 
     def test_placement_compile(self):
         def fn(x):
@@ -890,7 +913,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         tp_model = parallelize_module(model, twod_mesh["tp"], parallelize_plan)
         eager_2d = FSDP(
             tp_model,
-            device_id=self.rank,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -902,7 +925,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         fsdp_2d = FSDP(
             tp_model2,
-            device_id=self.rank,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
