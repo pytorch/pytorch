@@ -541,13 +541,11 @@ class GraphModule(torch.nn.Module):
                 yield t + j
 
         def fn(t):
-            return zip(range(3), whoo(t))
+            return whoo(t), t.sin()
 
         t = torch.randn(2)
-        y = self._compile_check(fn, args=(t,), fullgraph=False)
-        self.assertEqual(i, 0)
-        self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
-        self.assertEqual(i, 3)
+        with self.assertRaises(Unsupported):
+            fn(t)
 
     @unittest.expectedFailure
     def test_subgenerator_with_side_effects(self):
@@ -571,7 +569,7 @@ class GraphModule(torch.nn.Module):
             yield t + 4
 
         def fn(t):
-            return zip(range(3), whoo(t)), t.sin()
+            return whoo(t), t.sin()
 
         with self.assertRaises(Unsupported):
             self._compile_check(fn)
