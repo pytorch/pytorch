@@ -37,6 +37,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     NoReturn,
     Optional,
     Sequence,
@@ -289,6 +290,7 @@ def lru_cache(
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
+    import torch._compile
     import torch._dynamo.eval_frame
     import torch._inductor.sizevars
     import torch._library.custom_ops
@@ -302,6 +304,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
+        torch._compile,
         torch._dynamo.eval_frame,
         torch._inductor.sizevars,
         torch._library.custom_ops,
@@ -311,9 +314,11 @@ def uninteresting_files() -> Set[str]:
     ]
     import torch._dynamo.guards
 
-    return {
-        inspect.getfile(m) for m in mods
-    } | torch._dynamo.guards.uninteresting_files()
+    return (
+        {inspect.getfile(m) for m in mods}
+        | torch._dynamo.guards.uninteresting_files()
+        | {"<string>"}
+    )
 
 
 class ConstraintViolationError(RuntimeError):
@@ -833,7 +838,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
     # TODO: Apparently, returning an OrderedSet here breaks
-    # python test/distributed/_tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
+    # python test/distributed/tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
 
 
@@ -929,7 +934,7 @@ class InnerTensorKey:
 
 @dataclass(frozen=True)
 class DivideByKey:
-    divisor: int
+    divisor: Union[int, SymInt]
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"
@@ -1016,9 +1021,11 @@ def compute_unbacked_bindings(
                 free_unbacked_symbols_with_path(
                     a.storage_offset(),
                     path + (CallMethodKey("storage_offset"),),
-                    real=a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None,
+                    real=(
+                        a.real_tensor.storage_offset()
+                        if a.real_tensor is not None
+                        else None
+                    ),
                 )
             )
 
@@ -1043,16 +1050,39 @@ def compute_unbacked_bindings(
             isinstance(a, torch.SymInt)
             and isinstance(s := a.node._expr, sympy.Mul)
             and len(s.args) == 2
-            and isinstance(lhs := s.args[0], sympy.Integer)
+            and isinstance(lhs := s.args[0], (sympy.Integer, sympy.Symbol))
             and isinstance(rhs := s.args[1], sympy.Symbol)
-            and rhs in pending
+            # support exactly one unbacked for now
+            and ((rhs in pending) ^ (lhs in pending))
+            # support constant coefficient or backed symbolic coefficient
+            and (
+                isinstance(coeff := lhs if lhs not in pending else rhs, sympy.Integer)
+                or coeff in a.node.shape_env.var_to_val
+            )
         ):
+
+            def _symint_wrap(s: sympy.Symbol) -> SymInt:
+                return a.node.shape_env.create_symintnode(
+                    s,
+                    hint=int(a.node.shape_env.var_to_val[s]),
+                    source=a.node.shape_env.var_to_sources.get(s, [None])[0],
+                )
+
+            unbacked = lhs if lhs in pending else rhs
+            divisor: Union[int, SymInt] = (
+                int(coeff) if isinstance(coeff, sympy.Integer) else _symint_wrap(coeff)
+            )
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[rhs] = path + (DivideByKey(int(lhs)),)
+            r[unbacked] = path + (DivideByKey(divisor),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
-            pending.remove(rhs)
+                val = (
+                    real // int(coeff)
+                    if isinstance(coeff, sympy.Integer)
+                    else CleanDiv(real, coeff)
+                )
+                shape_env.set_unbacked_var_to_val(unbacked, val)
+            pending.remove(unbacked)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
         # to one.  So you have a complicated binding site logic for this.
@@ -1265,6 +1295,17 @@ def _advise_is_size(a: SymInt) -> None:
         _constrain_range_for_size(a)
 
 
+def _advise_is_bounded(a: SymInt, upper_bound: Union[int, SymInt]) -> None:
+    if (
+        isinstance(a, SymInt)
+        and isinstance(a.node, SymNode)
+        and isinstance(a.node.expr, sympy.Symbol)
+        and a.node.shape_env.is_unbacked_symint(a.node.expr)
+        and isinstance(upper_bound, int)  # TODO: relax
+    ):
+        a.node.shape_env._constrain_is_bounded(a.node.expr, upper_bound)
+
+
 def _constrain_range_for_size(
     a: SymInt, min: Optional[int] = None, max: Optional[int] = None
 ) -> None:
@@ -1470,6 +1511,8 @@ class DimDynamic(Enum):
     SIZE_LIKE_UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
+    # Like SIZE_LIKE_UNBACKED, but there's a hint
+    OBLIVIOUS_SIZE = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1906,10 +1949,19 @@ def safe_expand(r: _SympyT) -> _SympyT:
         return r
 
 
+class _SymbolInfo(NamedTuple):
+    k: sympy.Symbol
+    vr: Optional[ValueRanges]
+    val: Optional[sympy.Integer]
+    is_size_like: bool
+    oblivious_upper_bound_exclusive: sympy.Integer
+
+
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: _SympyT,
-    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
+    # NB: this is a tuple to ensure it can be LRU cached
+    symbol_info: Tuple[_SymbolInfo, ...],
     unbacked_only: bool,
     size_oblivious: bool,
 ) -> Optional[_SympyT]:
@@ -1924,11 +1976,12 @@ def _maybe_evaluate_static_worker(
     new_shape_env = {}
     new_range_env = {}
     for idx, sinfo in enumerate(symbol_info):
-        k, vr, val, is_size_like = sinfo
+        k, vr, val, is_size_like, oblivious_upper_bound_exclusive = sinfo
         if isinstance(val, SingletonInt):
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
+        assert vr is not None
         if size_oblivious and is_size_like:
             lower = max(2, vr.lower)
             # Clamping size-oblivious to some quantity below sys.maxsize
@@ -1938,6 +1991,8 @@ def _maybe_evaluate_static_worker(
             # This is similar to the flavor where size oblivious omits
             # 0/1, it changes semantics but in a benign way.
             upper = min(2**48, vr.upper)
+            if oblivious_upper_bound_exclusive is not None:
+                upper = min(upper, oblivious_upper_bound_exclusive - 1)
             # This is a bit dodgy: what this means is that there was a
             # size-like unbacked symbol whose upper bound < 2.  This
             # causes... problems.
@@ -2869,7 +2924,7 @@ class DimConstraints:
                 assert op == "==", t
                 try:
                     results[left]["eq"] = sympy.sympify(right)
-                except TypeError as e:  # rhs source is not linked to Dim name
+                except TypeError:  # rhs source is not linked to Dim name
                     pass
 
         # order forced specializations based on name
@@ -3118,12 +3173,23 @@ class ShapeEnv:
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
         self.unbacked_var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        # Like above, but used exclusively for OBLIVIOUS_SIZE.  These
+        # potentially could be put together but I am not sure, writing out
+        # the logic individually before abstracting.
+        self.oblivious_var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_range_sloc: Dict[sympy.Symbol, ValueRangesSLoc] = {}
+        # When doing a size-oblivious test, exclude this integer and
+        # everything higher than it from the acceptable range.  This solves
+        # https://github.com/pytorch/pytorch/issues/120288 for constant range
+        # case
+        # TODO: generalize this to work with expressions (in that case, we
+        # need to maintain a SET and we need extra symbolic reasoning on top)
+        self.oblivious_upper_bound_exclusive: Dict[sympy.Symbol, sympy.Integer] = {}
         self.source_name_to_debug_name: Dict[str, str] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
@@ -3429,6 +3495,13 @@ class ShapeEnv:
         self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
             self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+
+    @record_shapeenv_event()
+    def _constrain_is_bounded(self, a: sympy.Symbol, upper_bound: int) -> None:
+        self.oblivious_upper_bound_exclusive[a] = min(
+            self.oblivious_upper_bound_exclusive.get(a, int_oo),
+            sympy.Integer(upper_bound),
+        )
 
     @record_shapeenv_event()
     def _constrain_range_for_size(
@@ -3893,56 +3966,16 @@ class ShapeEnv:
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context
         )
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None
-            }
-
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
-                if (
-                    stride[i] is None
-                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
-                    and ex_stride[i] in candidates
-                ):
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [
-                        (ex_stride[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ],
-                    key=_nested_int_aware_sort,
-                )
-                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
-                dyn_stride = dynamic_strides[i]
-                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
-                    dyn_stride = (
-                        DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
-                    )
-                stride[i] = self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dyn_stride,
-                    constraint_dim=constraint_strides[i],
-                    symbolic_context=symbolic_context,
-                )
-        assert all(x is not None for x in stride)
+        stride = self._compute_symbolic_stride(
+            source,
+            size,
+            ex_size,
+            ex_stride,
+            dynamic_strides,
+            constraint_strides,
+            are_sizes_static,
+            symbolic_context,
+        )
 
         sym_sizes = [
             self.create_symintnode(
@@ -3976,6 +4009,64 @@ class ShapeEnv:
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
         )
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
+
+    def _compute_symbolic_stride(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
+
+        # iterate over unbound strides in val ascending order with
+        # index descending as a tie breaker since for cases like
+        # [(1, 1), (1, 0)], we want to fill in the right most
+        # stride first.
+        val_list = [(val, -i) for i, val in enumerate(ex_stride)]
+        val_list.sort(key=_nested_int_aware_sort)
+
+        for val, neg_i in val_list:
+            i = -neg_i
+            contiguous_stride = (
+                i != len(ex_stride) - 1
+                and ex_stride[i] == ex_size[i + 1] * ex_stride[i + 1]
+            )
+            if val in (0, 1) and not contiguous_stride:
+                out_stride = sympy.Integer(val)
+            else:
+                dynamic_stride = dynamic_strides[i]
+                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                    # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                    out_stride = candidates[val]
+                else:
+                    # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                    dyn_stride = dynamic_stride
+                    if dynamic_stride == DimDynamic.INFER_STRIDE:
+                        dyn_stride = (
+                            DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+                        )
+                    out_stride = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
+                    )
+            stride[i] = out_stride
+            candidates[ex_size[i] * val] = size[i] * out_stride
+
+        assert all(x is not None for x in stride)
+        return stride
 
     @record_shapeenv_event()
     def create_symintnode(
@@ -4080,12 +4171,20 @@ class ShapeEnv:
         return SymBool(SymNode(sym, self, bool, None))
 
     def _log_create_unbacked_symbol(
-        self, prefix: str, symbol: sympy.Symbol, vr: ValueRanges
+        self,
+        prefix: str,
+        symbol: sympy.Symbol,
+        vr: ValueRanges,
+        source: Optional[Source] = None,
     ) -> None:
         is_debug = config.extended_debug_create_symbol is not None and str(
             symbol
         ) in config.extended_debug_create_symbol.split(",")
-        sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
+        sloc: Union[str, SLoc]
+        if source is None:
+            sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
+        else:
+            sloc, maybe_extra_debug = source.name(), ""
         log.info(
             "%s %s [%s, %s] %s%s",
             prefix,
@@ -4131,7 +4230,7 @@ class ShapeEnv:
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
     @record_shapeenv_event()
-    def create_unbacked_symint(self) -> SymInt:
+    def create_unbacked_symint(self, source: Optional[Source] = None) -> SymInt:
         """Create a symbolic integer without a hint value"""
         symbol: sympy.Symbol = make_symbol(
             SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
@@ -4148,7 +4247,7 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr)
+        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr, source)
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -4261,14 +4360,15 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
-            out = self.create_unbacked_symint().node.expr
+        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
+            out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
-            # TODO: maybe put the hint somewhere
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
                 ] = out
+            if dynamic_dim is DimDynamic.OBLIVIOUS_SIZE:
+                self.oblivious_var_to_val[out] = val
             return out
 
         if do_not_specialize_zero_one:
@@ -5530,8 +5630,14 @@ class ShapeEnv:
             var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
-            for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
+            _SymbolInfo(
+                s,
+                var_ranges.get(s),
+                self.var_to_val.get(s),
+                s in self.size_like,
+                self.oblivious_upper_bound_exclusive.get(s),
+            )
+            for s in sorted(fs, key=str)  # TODO: speed up sort?
         )
 
         r = _maybe_evaluate_static_worker(
@@ -5634,6 +5740,34 @@ class ShapeEnv:
                 return r
             if allow_none:
                 return None
+
+            if self.oblivious_var_to_val:
+                # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
+                correct_hint = result_expr.xreplace(self.oblivious_var_to_val)
+                counterfactual_hint = result_expr.xreplace(
+                    {k: max(v, 2) for k, v in self.oblivious_var_to_val.items()}
+                )
+                if (
+                    not correct_hint.free_symbols
+                    and not counterfactual_hint.free_symbols
+                ):
+                    if correct_hint == counterfactual_hint:
+                        log.info("oblivious_size hit %s -> %s", expr, correct_hint)
+                        return correct_hint
+                    else:
+                        log.info(
+                            "oblivious_size counterfactual failed %s -> %s != %s",
+                            expr,
+                            correct_hint,
+                            counterfactual_hint,
+                        )
+                else:
+                    log.info(
+                        "oblivious_size miss %s -> %s (counterfactual: %s)",
+                        expr,
+                        correct_hint,
+                        counterfactual_hint,
+                    )
 
             if self.unbacked_var_to_val:
                 unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
@@ -5906,9 +6040,9 @@ class ShapeEnv:
                     "stack": structured.from_traceback(
                         CapturedTraceback.extract(skip=1).summary()
                     ),
-                    "user_stack": structured.from_traceback(user_tb)
-                    if user_tb
-                    else None,
+                    "user_stack": (
+                        structured.from_traceback(user_tb) if user_tb else None
+                    ),
                 },
             )
 
@@ -6138,7 +6272,7 @@ class ShapeEnv:
                     "version": 2,
                 },
             )
-            log.warning(
+            log.info(
                 "Ignored guard %s == %s, this could result in accuracy problems",
                 expr,
                 concrete_val,
@@ -6388,9 +6522,39 @@ class ShapeEnv:
                             expr, size_oblivious=True
                         )
 
+                    ok = False
+
                     # Last ditch
                     if (
-                        self.unbacked_var_to_val
+                        self.oblivious_var_to_val
+                        and not (
+                            correct_hint := orig_expr.xreplace(
+                                self.oblivious_var_to_val
+                            )
+                        ).free_symbols
+                        and not (
+                            counterfactual_hint := orig_expr.xreplace(
+                                {
+                                    k: max(2, v)
+                                    for k, v in self.oblivious_var_to_val.items()
+                                }
+                            )
+                        ).free_symbols
+                        and correct_hint == counterfactual_hint
+                    ):
+                        # TODO: better logging
+                        log.info(
+                            "oblivious_size %s -> %s (passed counterfactual)",
+                            orig_expr,
+                            correct_hint,
+                        )
+                        concrete_val = correct_hint
+                        # NB: do NOT transmute into runtime assert
+                        ok = True
+
+                    if (
+                        not ok
+                        and self.unbacked_var_to_val
                         and not (
                             unsound_result := orig_expr.xreplace(
                                 self.unbacked_var_to_val
@@ -6414,7 +6578,9 @@ class ShapeEnv:
                         )
                         transmute_into_runtime_assert = True
                         concrete_val = unsound_result
-                    else:
+                        ok = True
+
+                    if not ok:
                         raise self._make_data_dependent_error(
                             expr.xreplace(self.var_to_val),
                             expr,

@@ -251,7 +251,6 @@ class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
-        s3 = sympy.Symbol("baz", integer=True)
 
         common_cases = [
             # expr, result
@@ -386,6 +385,12 @@ class ExprPrinterTests(InductorTestCase):
             "darwin",
             "win32",
         ] else "(-1L)*s1"
+
+        s0 = sympy.Symbol("s0", integer=True)
+        s2 = sympy.S(2)
+        expr = FloorDiv(s0 + 1, s2)
+        self.assertEqual(pexpr(expr), "(1 + s0) // 2")
+        self.assertEqual(str(expr), "((s0 + 1)//2)")
 
     def test_print_Min_Max(self):
         cases = (

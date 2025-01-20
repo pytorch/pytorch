@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os
 import signal
 from threading import Thread
@@ -15,7 +14,7 @@ from typing import Optional
 #
 # This function cannot be an inner function since otherwise mp_context="spawn" would
 # not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid) -> None:
+def _async_compile_initializer(orig_ppid: int) -> None:
     def run() -> None:
         while True:
             sleep(1)

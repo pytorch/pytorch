@@ -199,14 +199,7 @@ the model.  For example:
           stage_index,
           num_stages,
           device,
-          input_args=example_input_microbatch,
       )
-
-
-The ``PipelineStage`` requires an example argument ``input_args`` representing
-the runtime input to the stage, which would be one microbatch worth of input
-data.  This argument is passed through the forward method of the stage module to
-determine the input and output shapes required for communication.
 
 When composing with other Data or Model parallelism techniques, ``output_args``
 may also be required, if the output shape/dtype of the model chunk will be
@@ -421,7 +414,7 @@ are subclasses of ``PipelineScheduleMulti``.
 Logging
 *******
 
-You can turn on additional logging using the `TORCH_LOGS` environment variable from [`torch._logging`](https://pytorch.org/docs/main/logging.html#module-torch._logging):
+You can turn on additional logging using the `TORCH_LOGS` environment variable from `torch._logging <https://pytorch.org/docs/main/logging.html#module-torch._logging>`_:
 
 * `TORCH_LOGS=+pp` will display `logging.DEBUG` messages and all levels above it.
 * `TORCH_LOGS=pp` will display `logging.INFO` messages and above.

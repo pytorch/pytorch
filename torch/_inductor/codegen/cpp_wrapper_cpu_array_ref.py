@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 import sympy
 
@@ -47,26 +47,20 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.device = "cpu"
         super().__init__()
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation
-        self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
+        self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
     def create(
@@ -215,7 +209,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = ""
+                if config.aot_inductor.compile_wrapper_with_O0:
+                    run_impl_proto += """
+                    #ifdef __clang__
+                    __attribute__((optnone))
+                    #else
+                    __attribute__((optimize("O0")))
+                    #endif
+                    """
+
+                run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -228,11 +232,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
+
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
                         __check_inputs_outputs(input_handles, output_handles);
                     """
+
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
                         """
@@ -366,7 +372,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
-    def generate_return(self, output_refs: List[str]):
+    def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
@@ -406,7 +412,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
 
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -765,7 +771,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -840,7 +846,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         call_strs = []
         final_tmp_name = None
 
-        def create_reinterpret_call() -> Tuple[str, str]:
+        def create_reinterpret_call() -> tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             args = [
                 f"{data.get_name()}",
@@ -864,7 +870,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> Tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]
