@@ -10,7 +10,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.fuzzer import ConfigFuzzer, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 def create_simple_test_model_cpu():
@@ -31,12 +31,12 @@ def create_simple_test_model_gpu():
     seq_length = 50
     hidden_size = 768
 
-    inp = torch.randn(batch_size, seq_length, hidden_size, device="cuda")
-    weight = torch.randn(hidden_size, hidden_size, device="cuda")
+    inp = torch.randn(batch_size, seq_length, hidden_size, device=GPU_TYPE)
+    weight = torch.randn(hidden_size, hidden_size, device=GPU_TYPE)
 
     def test_fn() -> bool:
         matmul_output = inp @ weight
-        torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
+        torch.nn.LayerNorm(hidden_size, device=GPU_TYPE)(matmul_output)
         return True
 
     return test_fn
