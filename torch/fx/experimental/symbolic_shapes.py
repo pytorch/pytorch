@@ -143,6 +143,7 @@ __all__ = [
     "is_symbol_binding_fx_node",
     "is_concrete_bool",
     "is_nested_int",
+    "is_unbacked_symint",
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
     "has_free_symbols",
