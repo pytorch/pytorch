@@ -4,7 +4,7 @@ import functools
 import inspect
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -366,14 +366,14 @@ def substitute_in_graph(
         if id(original_fn) in _polyfilled_function_ids:
             raise ValueError(f"Duplicate polyfilled object {original_fn}")
 
-        rule_map: Dict[Any, Type[VariableTracker]] = get_torch_obj_rule_map()
+        rule_map: dict[Any, type[VariableTracker]] = get_torch_obj_rule_map()
         if original_fn in rule_map:
             raise ValueError(
                 f"Duplicate object {original_fn} with different rules: "
                 f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
             )
 
-        polyfill_handlers: Dict[Callable[..., Any], FunctionType]
+        polyfill_handlers: dict[Callable[..., Any], FunctionType]
         polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
         if original_fn in polyfill_handlers:
             raise ValueError(
