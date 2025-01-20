@@ -29,10 +29,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestTraversal(FSDPTest):
     @property
     def world_size(self):
-        if (torch.cuda.is_available()):
-          gpu_cnt = torch.cuda.device_count()
-          if (gpu_cnt < 2):
-              return gpu_cnt
+        if torch.cuda.is_available():
+            gpu_cnt = torch.cuda.device_count()
+            if gpu_cnt < 2:
+                return gpu_cnt
         return 2
 
     @skip_if_lt_x_gpu(2)
