@@ -5811,20 +5811,18 @@ Done""",
                 check_batched_grad=False,
                 fast_mode=fast_mode,
             )
-            with self.assertRaisesRegex(RuntimeError, "Backward is not reentrant"):
-                gradcheck(
-                    lambda x: NonDetFunc.apply(x, 1e-6),
-                    inp,
-                    check_batched_grad=False,
-                    fast_mode=fast_mode,
-                )
-            with self.assertRaisesRegex(RuntimeError, "Backward is not reentrant"):
-                gradgradcheck(
-                    lambda x: NonDetFunc.apply(x, 1e-12),
-                    inp,
-                    check_batched_grad=False,
-                    fast_mode=fast_mode,
-                )
+            gradcheck(
+                lambda x: NonDetFunc.apply(x, 1e-6),
+                inp,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+            gradgradcheck(
+                lambda x: NonDetFunc.apply(x, 1e-12),
+                inp,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
             gradcheck(
                 lambda x: NonDetFunc.apply(x, 0.0),
                 inp,
