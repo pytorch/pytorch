@@ -18928,7 +18928,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('full_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16,
-                                            torch.uint16, torch.uint32, torch.uint64),
+                                            torch.uint16, torch.uint32),
            supports_out=False,
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
