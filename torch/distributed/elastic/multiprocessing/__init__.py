@@ -100,10 +100,10 @@ __all__ = [
 def start_processes(
     name: str,
     entrypoint: Union[Callable, str],
-    args: Dict[int, Tuple],
-    envs: Dict[int, Dict[str, str]],
+    args: dict[int, tuple],
+    envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,
-    log_line_prefixes: Optional[Dict[int, str]] = None,
+    log_line_prefixes: Optional[dict[int, str]] = None,
     start_method: str = "spawn",
 ) -> PContext:
     """
