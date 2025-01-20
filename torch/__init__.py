@@ -24,13 +24,9 @@ import threading
 from typing import (
     Any as _Any,
     Callable as _Callable,
-    Dict as _Dict,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
-    Set as _Set,
-    Tuple as _Tuple,
-    Type as _Type,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
     Union as _Union,

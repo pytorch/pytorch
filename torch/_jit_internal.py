@@ -1125,7 +1125,7 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann) -> bool:
-    if ann is Tuple:
+    if ann is Tuple or ann is tuple:
         raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -1139,7 +1139,7 @@ def is_tuple(ann) -> bool:
 
 
 def is_list(ann) -> bool:
-    if ann is List:
+    if ann is List or ann is list:
         raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, "__module__"):
@@ -1152,7 +1152,7 @@ def is_list(ann) -> bool:
 
 
 def is_dict(ann) -> bool:
-    if ann is dict:
+    if ann is Dict or ann is dict:
         raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, "__module__"):
@@ -1161,7 +1161,7 @@ def is_dict(ann) -> bool:
     ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
         return True
-    return ann.__module__ == "typing" and (ann_origin is dict or ann_origin is dict)
+    return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
 
 
 def is_union(ann):
@@ -1371,11 +1371,11 @@ def raise_error_container_parameter_missing(target_type) -> None:
 
 
 def check_args_exist(target_type) -> None:
-    if target_type is list or target_type is list:
+    if target_type is List or target_type is list:
         raise_error_container_parameter_missing("List")
-    elif target_type is tuple or target_type is tuple:
+    elif target_type is Tuple or target_type is tuple:
         raise_error_container_parameter_missing("Tuple")
-    elif target_type is dict or target_type is dict:
+    elif target_type is Dict or target_type is dict:
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
         raise_error_container_parameter_missing("Optional")
@@ -1399,7 +1399,7 @@ def container_checker(obj, target_type) -> bool:
     check_args_exist(target_type)
     if origin_type is None:
         return False
-    elif origin_type is list or origin_type is list:
+    elif origin_type is list or origin_type is List:
         check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
@@ -1413,7 +1413,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, arg_type):
                 return False
         return True
-    elif origin_type is dict or origin_type is dict:
+    elif origin_type is Dict or origin_type is dict:
         check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
@@ -1430,7 +1430,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(val, val_type):
                 return False
         return True
-    elif origin_type is tuple or origin_type is tuple:
+    elif origin_type is Tuple or origin_type is tuple:
         check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
