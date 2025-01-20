@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import List, Optional
 from collections import OrderedDict
+from typing import List, Optional
 
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
+from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
@@ -1031,7 +1032,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype in {torch.uint8, torch.int8}:
+                        elif output_dtype in OrderedSet([torch.uint8, torch.int8]):
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
