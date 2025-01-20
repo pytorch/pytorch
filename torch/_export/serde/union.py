@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Hashable
 from dataclasses import fields
+from typing import Hashable, Set
 
 
 class _UnionTag(str):
@@ -26,8 +26,8 @@ class _UnionTag(str):
         return hash(str(self))
 
 
-@functools.cache
-def _get_field_names(cls) -> set[str]:
+@functools.lru_cache(maxsize=None)
+def _get_field_names(cls) -> Set[str]:
     return {f.name for f in fields(cls)}
 
 

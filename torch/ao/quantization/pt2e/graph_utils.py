@@ -1,9 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from collections import OrderedDict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, List, Optional, OrderedDict, Sequence, Set, Union
 
 import torch
 from torch.export import ExportedProgram
@@ -22,7 +20,7 @@ __all__ = [
     "bfs_trace_with_node_process",
 ]
 
-_EQUIVALENT_TYPES: list[set] = [
+_EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.Conv1d, torch.nn.functional.conv1d},
     {torch.nn.Conv2d, torch.nn.functional.conv2d},
     {torch.nn.AdaptiveAvgPool2d, torch.nn.functional.adaptive_avg_pool2d},
@@ -45,7 +43,7 @@ def _create_equivalent_types_dict():
 _EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict()
 
 
-def get_equivalent_types() -> list[set]:
+def get_equivalent_types() -> List[Set]:
     return _EQUIVALENT_TYPES
 
 
@@ -80,7 +78,7 @@ def _get_matching_types(partition_type):
     return matching_types
 
 
-def _valid_type_sequence(partition_types: list[Any]):
+def _valid_type_sequence(partition_types: List[Any]):
     partition_types_set = set()  # type: ignore[var-annotated]
     for partition_type in partition_types:
         matching_types = _get_matching_types(partition_type)
@@ -93,7 +91,7 @@ def _valid_type_sequence(partition_types: list[Any]):
 
 def find_sequential_partitions(
     gm: torch.fx.GraphModule,
-    partition_types: list[Any],
+    partition_types: List[Any],
     include_functional_equivalent=True,
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ):
@@ -102,7 +100,7 @@ def find_sequential_partitions(
             f"Invalid partition types: {partition_types}. Each type in the sequence must be unique"
         )
 
-    typed_partitions: OrderedDict[Any, list[SourcePartition]] = OrderedDict()
+    typed_partitions: OrderedDict[Any, List[SourcePartition]] = OrderedDict()
     for partition_type in partition_types:
         types_to_match = _get_matching_types(partition_type)
         partitions = get_source_partitions(gm.graph, types_to_match, filter_fn)
@@ -134,7 +132,7 @@ def _get_submodule(
 
 def _get_control_flow_submodules(
     graph_module: torch.fx.GraphModule,
-) -> list[tuple[str, torch.nn.Module, torch.fx.Node]]:
+) -> List[tuple[str, torch.nn.Module, torch.fx.Node]]:
     """
     Returns a list of submodules used for control flow operations
     (torch.ops.higher_order.cond/map) that are in the given toplevel graph (does not look

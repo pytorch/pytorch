@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
 from ..scheduler import (
     BaseSchedulerNode,

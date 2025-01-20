@@ -5,7 +5,7 @@ from __future__ import annotations
 import builtins
 import math
 import operator
-from collections.abc import Sequence
+from typing import Sequence
 
 import torch
 

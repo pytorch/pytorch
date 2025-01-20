@@ -2,7 +2,7 @@
 import copy
 import logging
 import random
-from typing import Optional
+from typing import List, Optional
 
 import sympy
 
@@ -285,11 +285,11 @@ class CKGemmTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes: list[Buffer],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: Optional[List[int]] = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"

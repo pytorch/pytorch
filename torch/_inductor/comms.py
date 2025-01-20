@@ -7,7 +7,7 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -42,7 +42,7 @@ def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -52,8 +52,8 @@ def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
 
 
 def reorder_compute_for_overlap(
-    snodes: list[BaseSchedulerNode],
-) -> list[BaseSchedulerNode]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
         Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes
@@ -71,11 +71,11 @@ def reorder_compute_for_overlap(
 
 
 def _schedule_for_comm(
-    snodes: list[BaseSchedulerNode],
+    snodes: List[BaseSchedulerNode],
     raise_comms: bool,
     sink_waits: bool,
     reorder_for_overlap: bool,
-) -> list[BaseSchedulerNode]:
+) -> List[BaseSchedulerNode]:
     """
     Schedule `snodes` for various comm optimization objectives.
 
@@ -149,13 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
+    unmet_deps: Dict[BaseSchedulerNode, OrderedSet[str]] = {
         snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
         for snode in snodes
     }
 
-    ready: list[Runnable] = []
-    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
+    ready: List[Runnable] = []
+    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -226,8 +226,8 @@ def _schedule_for_comm(
 
 
 def decide_global_ordering_of_comms(
-    nodes: list[BaseSchedulerNode], name_to_buf, name_to_fused_node
-) -> list[BaseSchedulerNode]:
+    nodes: List[BaseSchedulerNode], name_to_buf, name_to_fused_node
+) -> List[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
@@ -303,8 +303,8 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: list[BaseSchedulerNode],
-) -> list[BaseSchedulerNode]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     order = snodes
 
     for p in config.reorder_for_compute_comm_overlap_passes:
@@ -653,10 +653,10 @@ def get_op_idx(snode):
 
 
 def enforce_comm_ordering_for_fsdp(
-    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: dict[str, BaseSchedulerNode],
-) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
+    snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
+    name_to_fused_node: Dict[str, BaseSchedulerNode],
+) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []

@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, Optional
+from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -73,7 +73,7 @@ class Shard(Placement):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> tuple[list[torch.Tensor], list[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         This function uses torch.chunk to split a tensor into num_chunks shards along
         the Shard placement dimension, and return a list of shards with their pad sizes.
@@ -236,7 +236,7 @@ class Shard(Placement):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: List[int],
     ) -> torch.Tensor:
         """
         This function all_gather all shards and return a tensor that
@@ -292,7 +292,7 @@ class Shard(Placement):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: List[int],
         new_shard_dim: int,
     ) -> torch.Tensor:
         """
@@ -464,7 +464,7 @@ class _StridedShard(Shard):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> tuple[list[torch.Tensor], list[int]]:
+    ) -> tuple[List[torch.Tensor], List[int]]:
         """
         TODO: currently _StridedShard does not support padding
         """
@@ -502,7 +502,7 @@ class _StridedShard(Shard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: List[int],
     ) -> torch.Tensor:
         """
         Note: currently _StridedShard does not support padding

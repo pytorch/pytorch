@@ -160,7 +160,7 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
-if SM80OrLater or MACOS_VERSION >= 14.0:
+if SM80OrLater:
     test_dtypes.append(torch.bfloat16)
 
 
@@ -335,8 +335,6 @@ class InputGen:
         return torch.randn((1,), device=self.device)
 
     def double(self):
-        if self.device == "mps":
-            raise unittest.SkipTest("MPS does not support torch.float64")
         return torch.randn((self.n, self.n), device=self.device, dtype=torch.double)
 
     def int(self):

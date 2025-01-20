@@ -1,9 +1,11 @@
+from typing import Set
+
 import torch.nn as nn
 
 
 def _annotate_modules_for_dynamo(
     module: nn.Module,
-    ignored_modules: set[nn.Module],
+    ignored_modules: Set[nn.Module],
     use_orig_params: bool,
 ) -> None:
     """

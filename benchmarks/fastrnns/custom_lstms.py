@@ -1,6 +1,7 @@
 import numbers
 import warnings
 from collections import namedtuple
+from typing import List
 
 import torch
 import torch.jit as jit
@@ -114,7 +115,7 @@ def script_lnlstm(
 LSTMState = namedtuple("LSTMState", ["hx", "cx"])
 
 
-def reverse(lst: list[Tensor]) -> list[Tensor]:
+def reverse(lst: List[Tensor]) -> List[Tensor]:
     return lst[::-1]
 
 
@@ -227,7 +228,7 @@ class LSTMLayer(jit.ScriptModule):
         self, input: Tensor, state: tuple[Tensor, Tensor]
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         inputs = input.unbind(0)
-        outputs = torch.jit.annotate(list[Tensor], [])
+        outputs = torch.jit.annotate(List[Tensor], [])
         for i in range(len(inputs)):
             out, state = self.cell(inputs[i], state)
             outputs += [out]
@@ -244,7 +245,7 @@ class ReverseLSTMLayer(jit.ScriptModule):
         self, input: Tensor, state: tuple[Tensor, Tensor]
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         inputs = reverse(input.unbind(0))
-        outputs = jit.annotate(list[Tensor], [])
+        outputs = jit.annotate(List[Tensor], [])
         for i in range(len(inputs)):
             out, state = self.cell(inputs[i], state)
             outputs += [out]
@@ -265,11 +266,11 @@ class BidirLSTMLayer(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
-    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: List[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, List[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: [forward LSTMState, backward LSTMState]
-        outputs = jit.annotate(list[Tensor], [])
-        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
+        outputs = jit.annotate(List[Tensor], [])
+        output_states = jit.annotate(List[tuple[Tensor, Tensor]], [])
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
         for direction in self.directions:
@@ -299,10 +300,10 @@ class StackedLSTM(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
-    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: List[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, List[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: One state per layer
-        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
+        output_states = jit.annotate(List[tuple[Tensor, Tensor]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
@@ -329,11 +330,11 @@ class StackedLSTM2(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: list[list[tuple[Tensor, Tensor]]]
-    ) -> tuple[Tensor, list[list[tuple[Tensor, Tensor]]]]:
+        self, input: Tensor, states: List[List[tuple[Tensor, Tensor]]]
+    ) -> tuple[Tensor, List[List[tuple[Tensor, Tensor]]]]:
         # List[List[LSTMState]]: The outer list is for layers,
         #                        inner list is for directions.
-        output_states = jit.annotate(list[list[tuple[Tensor, Tensor]]], [])
+        output_states = jit.annotate(List[List[tuple[Tensor, Tensor]]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
@@ -369,10 +370,10 @@ class StackedLSTMWithDropout(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
-    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: List[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, List[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: One state per layer
-        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
+        output_states = jit.annotate(List[tuple[Tensor, Tensor]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0

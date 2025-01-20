@@ -1,4 +1,5 @@
 from collections import namedtuple
+from typing import List
 
 import torch
 from torch import Tensor
@@ -264,13 +265,13 @@ def varlen_pytorch_lstm_creator(**kwargs):
 
 def varlen_lstm_factory(cell, script):
     def dynamic_rnn(
-        sequences: list[Tensor],
+        sequences: List[Tensor],
         hiddens: tuple[Tensor, Tensor],
         wih: Tensor,
         whh: Tensor,
         bih: Tensor,
         bhh: Tensor,
-    ) -> tuple[list[Tensor], tuple[list[Tensor], list[Tensor]]]:
+    ) -> tuple[List[Tensor], tuple[List[Tensor], List[Tensor]]]:
         hx, cx = hiddens
         hxs = hx.unbind(1)
         cxs = cx.unbind(1)
@@ -505,7 +506,7 @@ def lstm_factory_simple(cell, script):
 
 def lstm_factory_multilayer(cell, script):
     def dynamic_rnn(
-        input: Tensor, hidden: tuple[Tensor, Tensor], params: list[Tensor]
+        input: Tensor, hidden: tuple[Tensor, Tensor], params: List[Tensor]
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         params_stride = 4  # NB: this assumes that biases are there
         hx, cx = hidden

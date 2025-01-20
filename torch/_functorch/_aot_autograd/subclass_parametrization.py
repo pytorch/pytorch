@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any
+from typing import Any, Dict, List, Tuple
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -13,13 +13,13 @@ class SubclassCreationMeta:
     start_idx: int
     num_tensors: int
     class_type: Any
-    attrs: dict[str, "SubclassCreationMeta"]
+    attrs: Dict[str, "SubclassCreationMeta"]
     metadata: Any
 
 
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: list[torch.Tensor] = list(tensors)
+        todo: List[torch.Tensor] = list(tensors)
 
         def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
             if subclass_meta is None:
@@ -35,9 +35,9 @@ class UnwrapTensorSubclass(torch.nn.Module):
 
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
-    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
+    def right_inverse(self, tensor: torch.Tensor) -> List[torch.Tensor]:
         assert type(tensor) is not torch.Tensor
-        plain_tensors: list[torch.Tensor] = []
+        plain_tensors: List[torch.Tensor] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
             if type(tensor) is torch.Tensor:
@@ -79,7 +79,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: list[tuple[str, torch.nn.Parameter]] = list(
+    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
         module.named_parameters(recurse=False)
     )
     for name, param in name_param:

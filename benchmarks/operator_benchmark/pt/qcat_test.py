@@ -1,3 +1,5 @@
+from typing import List
+
 import operator_benchmark as op_bench
 
 import torch
@@ -56,7 +58,7 @@ class QCatBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {"input": self.input, "dim": dim}
         self.set_module_name("qcat")
 
-    def forward(self, input: list[torch.Tensor], dim: int):
+    def forward(self, input: List[torch.Tensor], dim: int):
         return self.qf.cat(input, dim=dim)
 
 

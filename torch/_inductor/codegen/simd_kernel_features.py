@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import collections
 import itertools
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, Dict, Iterable, List, Type, Union
 
 import sympy
 
@@ -14,10 +14,6 @@ from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 class NodeScheduleMarker:
@@ -32,7 +28,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = Union[SchedulerNode, type[NodeScheduleMarker]]
+NodeScheduleEntry = Union[SchedulerNode, Type[NodeScheduleMarker]]
 
 
 class DisableReduction(NodeScheduleMarker):
@@ -49,7 +45,7 @@ class EnableReduction(NodeScheduleMarker):
     """
 
     @staticmethod
-    def filter(node_schedule: list[NodeScheduleEntry]) -> Iterable[SchedulerNode]:
+    def filter(node_schedule: List[NodeScheduleEntry]) -> Iterable[SchedulerNode]:
         """
         Get the nodes from node_schedule skipping those in a
         DisableReduction block.
@@ -72,7 +68,7 @@ class SIMDKernelFeatures:
 
     def __init__(
         self,
-        node_schedule: list[NodeScheduleEntry],
+        node_schedule: List[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
     ):
@@ -89,11 +85,11 @@ class SIMDKernelFeatures:
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
         return tuple(NodeScheduleMarker.only_nodes(self.node_schedule))
 
-    def reduction_nodes(self) -> list[SchedulerNode]:
+    def reduction_nodes(self) -> List[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
 
     @cache_on_self
-    def buf_accesses(self) -> dict[str, list[Dep]]:
+    def buf_accesses(self) -> Dict[str, List[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
         for node in self.scheduler_nodes():
@@ -159,9 +155,9 @@ class SIMDKernelFeatures:
         return reduction_hint_val
 
     @cache_on_self
-    def buffer_read_counts(self) -> dict[str, int]:
+    def buffer_read_counts(self) -> Dict[str, int]:
         """Counts how many times each buffer is read within the kernel"""
-        read_counts: dict[str, int] = collections.defaultdict(int)
+        read_counts: Dict[str, int] = collections.defaultdict(int)
 
         for node in self.scheduler_nodes():
             # node.read_writes.reads contains MemoryDep objects for each read

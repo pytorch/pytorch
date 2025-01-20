@@ -4,7 +4,7 @@ import sys
 import token
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Iterator, Sequence, TYPE_CHECKING
 
 
 _PARENT = Path(__file__).parent.absolute()
@@ -16,7 +16,6 @@ else:
     import _linter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
 
 

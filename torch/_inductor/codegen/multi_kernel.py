@@ -3,13 +3,13 @@ import functools
 import logging
 import os
 import pathlib
-from typing import Any
+from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash, CodeCacheFuture, get_path
+from ..codecache import code_hash, get_path, TritonFuture
 from ..runtime.benchmarking import benchmarker
 from ..runtime.triton_heuristics import (
     cooperative_reduction_grid,
@@ -168,7 +168,7 @@ class MultiKernel:
         self.args = object()
 
     @staticmethod
-    def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
+    def _merge_workspace_args(left: List[WorkspaceArg], right: List[WorkspaceArg]):
         if left == right:
             return left
         result = {x.inner_name: x for x in left}
@@ -220,7 +220,7 @@ class MultiKernel:
             assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: list[Any] = []
+        grid: List[Any] = []
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
@@ -356,7 +356,7 @@ class MultiKernelCall:
         it may slow down the parallel compilation.
         """
         for i, kernel in enumerate(self._kernels):
-            if isinstance(kernel, CodeCacheFuture):
+            if isinstance(kernel, TritonFuture):
                 self._kernels[i] = kernel.result()
 
         return self._kernels

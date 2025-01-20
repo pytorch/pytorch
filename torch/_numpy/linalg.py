@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import functools
 import math
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 import torch
 
 from . import _dtypes_impl, _util
 from ._normalizations import ArrayLike, KeepDims, normalizer
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 class LinAlgError(Exception):

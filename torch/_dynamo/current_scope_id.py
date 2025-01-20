@@ -1,6 +1,6 @@
 import contextlib
 import threading
-from collections.abc import Generator
+from typing import Generator
 
 
 # Global variable to identify which SubgraphTracer we are in.

@@ -7,10 +7,21 @@ import itertools
 import math
 import operator
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._prims as prims
@@ -400,7 +411,7 @@ def _broadcast_shapes(*_shapes):
         assert isinstance(shape, Sequence)
 
     # Computes common shape
-    common_shape: list[Union[int, torch.SymInt]] = [
+    common_shape: List[Union[int, torch.SymInt]] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
@@ -1410,7 +1421,7 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.frexp)
 @out_wrapper("mantissa", "exponent")
-def frexp(self: TensorLikeType) -> tuple[TensorLikeType, TensorLikeType]:
+def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
     return torch.return_types.frexp(prims.frexp(self))
 
 
@@ -2041,7 +2052,7 @@ def _to_device(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     kwargs = {
         "device": device,
         "dtype": dtype,
@@ -2059,7 +2070,7 @@ def _to_device_str(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     kwargs = {
         "device": torch.device(device),
         "dtype": dtype,
@@ -2076,7 +2087,7 @@ def _to_dtype(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     kwargs = {
         "dtype": dtype,
         "non_blocking": non_blocking,
@@ -2092,7 +2103,7 @@ def _to_other(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     device = other.device
     dtype = other.dtype
     layout = other.layout
@@ -2300,7 +2311,7 @@ def any(
 @register_decomposition([aten.sum.dim_IntList, aten.sum.IntList_out])
 def sum(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -2352,7 +2363,7 @@ def sum_to_size(
 @register_decomposition(aten.prod)
 def prod(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
     dtype=None,
@@ -2470,7 +2481,7 @@ def var(
 @out_wrapper()
 def std(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -2649,7 +2660,7 @@ def addr(
 # CompositeImplicitAutograd - don't register decomp
 def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -2673,7 +2684,7 @@ def _unsqueeze_atleast(
 # CompositeImplicitAutograd - don't register decomp
 def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -2688,7 +2699,7 @@ def atleast_2d(
 # CompositeImplicitAutograd - don't register decomp
 def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -2731,7 +2742,7 @@ def broadcast_shapes(*shapes) -> ShapeType:
 
 @aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
-def broadcast_tensors(*tensors) -> list[TensorLikeType]:
+def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
         tensors = tensors[0]
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
@@ -2889,7 +2900,7 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.constant_pad_nd)
 @out_wrapper()
 def constant_pad_nd(
-    input: TensorLikeType, pad: list[int], value: NumberType = 0
+    input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
     torch._check(
         len(pad) % 2 == 0,
@@ -3034,7 +3045,7 @@ def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
 
-def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> tuple[TensorLikeType, ...]:
+def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = f"Expected at least one chunk, but got {chunks}!"
         raise ValueError(msg)
@@ -3137,7 +3148,7 @@ def narrow(
 
 def _normalize(
     a: Tensor, norm_dims: DimsType, eps: float
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     """Computes mean and 1/std of a tensor along norm_dims.
 
     Used as a helper function for normalization layers.
@@ -3165,7 +3176,7 @@ def _normalize(
 
 
 # add all specified dimensions
-def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeType:
+def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
     for dim in sorted(dimensions):
         x = torch.unsqueeze(x, dim)
     return x
@@ -3181,7 +3192,7 @@ def native_group_norm(
     flattened_inner_size: int,
     num_groups: int,
     eps: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     torch._check(
         input.ndim >= 2,
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
@@ -3232,7 +3243,7 @@ def native_layer_norm(
     weight: Optional[Tensor],
     bias: Optional[Tensor],
     eps: float,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     normalized_ndim = len(normalized_shape)
     torch._check(
         normalized_ndim >= 1,
@@ -4152,8 +4163,8 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
 @register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
-    self: Tensor, split_sizes: list[int], dim: int = 0
-) -> list[Tensor]:
+    self: Tensor, split_sizes: List[int], dim: int = 0
+) -> List[Tensor]:
     # NB: Perform the check_is_size tests first so that the
     # sum test does not try to do a replacement
     for i in range(len(split_sizes)):
@@ -4186,7 +4197,7 @@ def tensor_split(
     a: TensorLikeType,
     indices_or_sections: Union[Tensor, DimsType],
     dim: int = 0,
-) -> tuple[TensorLikeType, ...]:
+) -> Tuple[TensorLikeType, ...]:
     _dim = utils.canonicalize_dim(a.ndim, dim)
     if a.ndim == 0:
         msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
@@ -4252,7 +4263,7 @@ def tensor_split(
 # CompositeImplicitAutograd - don't register decomp
 def hsplit(
     a: TensorLikeType, indices_or_sections: DimsType
-) -> tuple[TensorLikeType, ...]:
+) -> Tuple[TensorLikeType, ...]:
     torch._check(
         a.ndim >= 1,
         lambda: (
@@ -4294,7 +4305,7 @@ def hsplit(
 # CompositeImplicitAutograd - don't register decomp
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
-) -> tuple[TensorLikeType, ...]:
+) -> Tuple[TensorLikeType, ...]:
     torch._check(
         a.ndim >= 2,
         lambda: (
@@ -4469,7 +4480,7 @@ def diag_embed(
 
 @register_decomposition(aten.block_diag)
 @out_wrapper()
-def _block_diag_iterable(tensors: list[TensorLikeType]) -> TensorLikeType:
+def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
     """
     Reference implementation of torch.block_diag
     """
@@ -4505,7 +4516,7 @@ def _block_diag_iterable(tensors: list[TensorLikeType]) -> TensorLikeType:
     return torch.cat(result, dim=0)
 
 
-def block_diag(*tensors: list[TensorLikeType]) -> TensorLikeType:
+def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
     """
     This is used as an input to PythonRefInfo. `torch.block_diag`
     expects arguments splatted, but `aten.block_diag` expects only
@@ -5294,9 +5305,9 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
 
 @register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
-    *tensors: Union[TensorLikeType, list[TensorLikeType], tuple[TensorLikeType]],
+    *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
-) -> list[TensorLikeType]:
+) -> List[TensorLikeType]:
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
@@ -5335,7 +5346,7 @@ def meshgrid(
             ),
         )
 
-    result_shape: list[int] = []
+    result_shape: List[int] = []
     for t in tensors:
         assert isinstance(t, TensorLike)  # mypy
         torch._check(
@@ -5344,7 +5355,7 @@ def meshgrid(
         )
         result_shape.append(t.numel())
 
-    grids: list[TensorLikeType] = []
+    grids: List[TensorLikeType] = []
     for i, t in enumerate(tensors):
         assert isinstance(t, TensorLike)  # mypy
         if t.ndim == 0:
@@ -5425,7 +5436,7 @@ def movedim(
 @register_decomposition(aten.empty_strided)
 @out_wrapper()
 def empty_strided(
-    shape: Union[ShapeType, tuple[ShapeType]],
+    shape: Union[ShapeType, Tuple[ShapeType]],
     strides: StrideType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -5843,7 +5854,7 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
 # form a pentagon that can be broken down into a top trapezoid and a bottom
 # rectangle. For the implementation of tril_indices, we need the sizes of
 # both of these, as well as the length of the top side of the trapezoid.
-def _get_tril_sizes(row: int, col: int, offset: int) -> tuple[int, int, int]:
+def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
 
@@ -5921,7 +5932,7 @@ def tril_indices(
 # a bottom rectangle instead. Note that you can't reduce this to
 # _get_tril_sizes(col, row, -offset) because that would correspond to
 # decomposing into a left trapezoid and right rectangle.
-def _get_triu_sizes(row: int, col: int, offset: int) -> tuple[int, int, int]:
+def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
 

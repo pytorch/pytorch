@@ -10,12 +10,24 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    IO,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Union,
+)
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -101,7 +113,7 @@ class _TensorLoader(ABC):
 class _SerialCpuLoader(_TensorLoader):
     def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items: list[tuple[int, object]] = []
+        self.items: List[tuple[int, object]] = []
 
     def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
@@ -129,7 +141,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
-        self.items: list[tuple[int, object]] = []
+        self.items: List[tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -149,7 +161,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self) -> list[tuple[torch.Tensor, object]]:
+    def _drain(self) -> List[tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -231,7 +243,7 @@ class _StorageWriterTransforms:
 
     def transform_save_stream(
         self, write_item: WriteItem, raw_stream: io.IOBase
-    ) -> tuple[IO[bytes], list[str]]:
+    ) -> tuple[IO[bytes], List[str]]:
         # In order to avoid leaking fds, transformers' close must
         # cascade to wrapped streams, but since this function can
         # append to the raw stream, we can't close the actual stream.
@@ -273,14 +285,14 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
     if bins == 1:
         return [items]
 
     bytes_w = [wi for wi in items if wi.type == WriteItemType.BYTE_IO]
     tensor_w = [wi for wi in items if wi.type != WriteItemType.BYTE_IO]
 
-    buckets: list[list[WriteItem]] = [[] for _ in range(bins)]
+    buckets: List[List[WriteItem]] = [[] for _ in range(bins)]
     bucket_sizes = [0 for _ in range(bins)]
 
     tensor_w.sort(key=_item_size, reverse=True)
@@ -572,7 +584,7 @@ class _FileSystemWriter(StorageWriter):
 
         return plan
 
-    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(plans)
@@ -583,7 +595,7 @@ class _FileSystemWriter(StorageWriter):
         self,
         plan: SavePlan,
         planner: SavePlanner,
-    ) -> Future[list[WriteResult]]:
+    ) -> Future[List[WriteResult]]:
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -644,11 +656,11 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            fut: Future[list[WriteResult]] = Future()
+            fut: Future[List[WriteResult]] = Future()
             fut.set_result(res)
             return fut
 
-    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
@@ -662,7 +674,7 @@ class _FileSystemWriter(StorageWriter):
             if self.sync_files:
                 try:
                     os.fsync(metadata_file.fileno())
-                except (AttributeError, UnsupportedOperation):
+                except AttributeError:
                     os.sync()
 
         # delete in-case other checkpoints were present.
@@ -725,7 +737,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: dict[MetadataIndex, _StorageInfo] = {}
+        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
 
@@ -740,7 +752,7 @@ class FileSystemReader(StorageReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: dict[str, list[ReadItem]] = {}
+        per_file: Dict[str, List[ReadItem]] = {}
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
@@ -816,7 +828,7 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
         return plans
 
     @property

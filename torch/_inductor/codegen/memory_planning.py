@@ -5,7 +5,7 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 import sympy
 
@@ -23,10 +23,6 @@ from .wrapper import (
     NullLine,
     ReuseLine,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 @dataclasses.dataclass
@@ -245,7 +241,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
          a.get_live_ranges().overlaps(b.get_live_ranges())
     """
 
-    allocations: list[AllocationTreeNode]
+    allocations: List[AllocationTreeNode]
 
     def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
@@ -375,8 +371,8 @@ class AllocationPool:
     can_expand: bool = True
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
-    names_to_del: list[str] = dataclasses.field(default_factory=list)
-    creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
+    names_to_del: List[str] = dataclasses.field(default_factory=list)
+    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: Allocation, is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
@@ -449,7 +445,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: dict[torch.device, list[AllocationPool]] = dataclasses.field(
+    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 
@@ -613,9 +609,9 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[list[BufferGroup]] = None
+    buffer_groups: Optional[List[BufferGroup]] = None
 
-    def plan(self, lines: list[Any]) -> list[Any]:
+    def plan(self, lines: List[Any]) -> List[Any]:
         """Call all the memory planning passes in sequence"""
         lines = [*lines]
         self.drop_removed_buffers(lines)
@@ -718,8 +714,8 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs: list[Allocation] = []
-        intermediates: list[Allocation] = []
+        outputs: List[Allocation] = []
+        intermediates: List[Allocation] = []
         for group in self.buffer_groups:
             assert group.allocation
             if group.is_output and config.memory_pool != "combined":

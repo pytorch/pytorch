@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -85,7 +85,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[tuple[int, ...]],
+        stride: Optional[Tuple[int, ...]],
         device: _device,
         dtype: _dtype,
     ):
@@ -102,7 +102,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[tuple[int, ...]],
+        stride: Optional[Tuple[int, ...]],
         device: _device,
         dtype: _dtype,
     ):

@@ -1,6 +1,5 @@
 import contextlib
-from collections.abc import Generator
-from typing import Any, Union
+from typing import Any, Generator, Tuple, Union
 
 import torch
 from torch._C._functorch import (
@@ -29,7 +28,7 @@ def enable_single_level_autograd_function() -> Generator[None, None, None]:
         set_single_level_autograd_function_allowed(prev_state)
 
 
-def unwrap_dead_wrappers(args: tuple[Any, ...]) -> tuple[Any, ...]:
+def unwrap_dead_wrappers(args: Tuple[Any, ...]) -> Tuple[Any, ...]:
     # NB: doesn't use tree_map_only for performance reasons
     result = tuple(
         unwrap_if_dead(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
@@ -37,4 +36,4 @@ def unwrap_dead_wrappers(args: tuple[Any, ...]) -> tuple[Any, ...]:
     return result
 
 
-argnums_t = Union[int, tuple[int, ...]]
+argnums_t = Union[int, Tuple[int, ...]]

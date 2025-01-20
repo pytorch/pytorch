@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-from collections import OrderedDict, OrderedDict as OrdDict
-from typing import Any
+from collections import OrderedDict as OrdDict
+from typing import Any, Dict, List, OrderedDict, Set
 
 import torch
 
@@ -92,7 +92,7 @@ class ModelReportVisualizer:
         """
         self.generated_reports = generated_reports
 
-    def get_all_unique_module_fqns(self) -> set[str]:
+    def get_all_unique_module_fqns(self) -> Set[str]:
         r"""
         The purpose of this method is to provide a user the set of all module_fqns so that if
         they wish to use some of the filtering capabilities of the ModelReportVisualizer class,
@@ -106,7 +106,7 @@ class ModelReportVisualizer:
 
     def get_all_unique_feature_names(
         self, plottable_features_only: bool = True
-    ) -> set[str]:
+    ) -> Set[str]:
         r"""
         The purpose of this method is to provide a user the set of all feature names so that if
         they wish to use the filtering capabilities of the generate_table_view(), or use either of
@@ -125,7 +125,7 @@ class ModelReportVisualizer:
         unique_feature_names = set()
         for module_fqn in self.generated_reports:
             # get dict of the features
-            feature_dict: dict[str, Any] = self.generated_reports[module_fqn]
+            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
 
             # loop through features
             for feature_name in feature_dict:
@@ -179,9 +179,9 @@ class ModelReportVisualizer:
 
     def _generate_tensor_table(
         self,
-        filtered_data: OrderedDict[str, dict[str, Any]],
-        tensor_features: list[str],
-    ) -> tuple[list, list]:
+        filtered_data: OrderedDict[str, Dict[str, Any]],
+        tensor_features: List[str],
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
@@ -199,8 +199,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the tensor information table
-        tensor_table: list[list[Any]] = []
-        tensor_headers: list[str] = []
+        tensor_table: List[List[Any]] = []
+        tensor_headers: List[str] = []
 
         # append the table row to the table only if we have features
         if len(tensor_features) > 0:
@@ -236,9 +236,9 @@ class ModelReportVisualizer:
     def _generate_channels_table(
         self,
         filtered_data: OrderedDict[str, Any],
-        channel_features: list[str],
+        channel_features: List[str],
         num_channels: int,
-    ) -> tuple[list, list]:
+    ) -> tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the channels headers and table
 
@@ -257,8 +257,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the table for the channel information table
-        channel_table: list[list[Any]] = []
-        channel_headers: list[str] = []
+        channel_table: List[List[Any]] = []
+        channel_headers: List[str] = []
 
         # counter to keep track of number of entries in
         channel_table_entry_counter: int = 0
@@ -297,7 +297,7 @@ class ModelReportVisualizer:
 
     def generate_filtered_tables(
         self, feature_filter: str = "", module_fqn_filter: str = ""
-    ) -> dict[str, tuple[list, list]]:
+    ) -> Dict[str, tuple[List, List]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
@@ -348,8 +348,8 @@ class ModelReportVisualizer:
         )
 
         # now we split into tensor and per-channel data
-        tensor_features: set[str] = set()
-        channel_features: set[str] = set()
+        tensor_features: Set[str] = set()
+        channel_features: Set[str] = set()
 
         # keep track of the number of channels we have
         num_channels: int = 0
@@ -372,8 +372,8 @@ class ModelReportVisualizer:
                     tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
-        tensor_features_list: list[str] = sorted(tensor_features)
-        channel_features_list: list[str] = sorted(channel_features)
+        tensor_features_list: List[str] = sorted(tensor_features)
+        channel_features_list: List[str] = sorted(channel_features)
 
         # get the tensor info
         tensor_headers, tensor_table = self._generate_tensor_table(
@@ -467,7 +467,7 @@ class ModelReportVisualizer:
 
     def _get_plottable_data(
         self, feature_filter: str, module_fqn_filter: str
-    ) -> tuple[list, list[list], bool]:
+    ) -> tuple[List, List[List], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 
@@ -510,8 +510,8 @@ class ModelReportVisualizer:
             )
             table = channel_table
 
-        x_data: list = []
-        y_data: list[list] = []
+        x_data: List = []
+        y_data: List[List] = []
         # the feature will either be a tensor feature or channel feature
         if is_valid_per_tensor_plot:
             for table_row_num, row in enumerate(table):

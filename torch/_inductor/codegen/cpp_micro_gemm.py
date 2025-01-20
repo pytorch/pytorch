@@ -2,7 +2,7 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, Dict, List, Optional, Type
 
 import sympy
 
@@ -189,12 +189,12 @@ class CppMicroGemmConfig:
     input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
-    vec_isa_cls: type[VecISA]
+    vec_isa_cls: Type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
 
 
-micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
+micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):

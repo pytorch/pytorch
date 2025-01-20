@@ -1,9 +1,11 @@
+from typing import List, Tuple
+
 import torch
 
 
 def greedy_knapsack(
-    memory: list[float], runtimes: list[float], max_memory: float
-) -> tuple[float, list[int], list[int]]:
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
     n = len(runtimes)
     items = list(range(n))
 
@@ -26,8 +28,8 @@ def greedy_knapsack(
 
 
 def ilp_knapsack(
-    memory: list[float], runtimes: list[float], max_memory: float
-) -> tuple[float, list[int], list[int]]:
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
     import numpy as np
 
     try:
@@ -62,8 +64,8 @@ def ilp_knapsack(
 
 
 def dp_knapsack(
-    memory: list[float], runtime: list[float], max_memory: float
-) -> tuple[float, list[int], list[int]]:
+    memory: List[float], runtime: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
     # Scaling factor to convert floating point weights to integers
     S = 10000
 

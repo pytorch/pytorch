@@ -1,7 +1,7 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -86,7 +86,7 @@ class StorageWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         """
         Perform centralized planning of storage.
 
@@ -105,7 +105,7 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[list[WriteResult]]:
+    ) -> Future[List[WriteResult]]:
         """
         Write all items from ``plan`` using ``planner`` to resolve the data.
 
@@ -127,7 +127,7 @@ class StorageWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         """
         Write the metadata and marks the current checkpoint as successful.
 
@@ -236,7 +236,7 @@ class StorageReader(abc.ABC):
         """
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
         """
         Perform centralized planning of storage loading.
 
