@@ -4,6 +4,32 @@
 namespace c10 {
 namespace metal {
 
+// Translated to metal from https://www.johndcook.com/cpp_erf.html
+
+template <typename T>
+T erf(T x) {
+  T a1 = 0.254829592;
+  T a2 = -0.284496736;
+  T a3 = 1.421413741;
+  T a4 = -1.453152027;
+  T a5 = 1.061405429;
+  T p = 0.3275911;
+
+  // Save the sign of x
+  int sign = 1;
+  if (x < 0)
+    sign = -1;
+  x = ::metal::fabs(x);
+
+  // A&S formula 7.1.26
+  T t = 1.0 / (1.0 + p * x);
+  T y = 1.0 -
+      (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t *
+          ::metal::exp(-x * x);
+
+  return sign * y;
+}
+
 /*
  * For licensing information and documentation, please refer to the cpu
  * implementation located in "ATen/native/Math.h".
