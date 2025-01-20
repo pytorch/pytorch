@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -23,13 +23,13 @@ if TYPE_CHECKING:
 generated_kernel_count = 0
 generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
-nodes_num_elem: List[
+nodes_num_elem: list[
     tuple[
         BaseSchedulerNode,
         int,
     ]
 ] = []
-node_runtimes: List[tuple[BaseSchedulerNode, float]] = []
+node_runtimes: list[tuple[BaseSchedulerNode, float]] = []
 
 # counters for tracking fusions
 ir_nodes_pre_fusion = 0
@@ -45,7 +45,7 @@ class CppOuterLoopFusedCount:
 
 
 # The length counts the number of outer loop fusions.
-cpp_outer_loop_fused_inner_counts: List[CppOuterLoopFusedCount] = []
+cpp_outer_loop_fused_inner_counts: list[CppOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
@@ -122,13 +122,13 @@ class CachedMetricsHelper:
             globals()[metric] += getattr(delta, metric)
 
 
-REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
+REGISTERED_METRIC_TABLES: dict[str, MetricTable] = {}
 
 
 @dataclass
 class MetricTable:
     table_name: str
-    column_names: List[str]
+    column_names: list[str]
 
     num_rows_added: int = 0
 
