@@ -38,10 +38,12 @@ from typing import (
     Callable,
     cast,
     Generic,
+    List,
     NamedTuple,
     Optional,
     overload,
     Protocol,
+    Tuple,
     TypeVar,
     Union,
 )
@@ -116,7 +118,7 @@ class EnumEncoder(json.JSONEncoder):
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
@@ -887,7 +889,7 @@ def tree_flatten(
     to reconstruct the pytree.
     """
 
-    def helper(node: PyTree, leaves: list[Any]) -> TreeSpec:
+    def helper(node: PyTree, leaves: List[Any]) -> TreeSpec:
         if _is_leaf(node, is_leaf=is_leaf):
             leaves.append(node)
             return _LEAF_SPEC
