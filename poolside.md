@@ -14,9 +14,10 @@ To avoid this, we try to follow these principles:
   * If the risk for potential conflicts is significant, we should consider commiting the changes to the upstream.
 
 ## Repository organisation:
-Right now we have two branches:
-* `main` -- follows the `main` branch of the upstream
-* `poolside-main` -- contains our changes and should be rebased over `main`
+Right now we have three branches:
+* `main` -- A periodically updated snapshot of the `main` branch of the upstream;
+* `poolside-cherry-picks` -- contains specific cherry-picked commits in-between updates of the `main` branch. Should be rebased over `main`;
+* `poolside-main` -- contains our changes and should be rebased over `poolside-cherry-picks`.
 
 We commit our changes to `poolside-main`.
 If we want to commit our changes to the upstream, we branch from `main` and cherry-pick the corresponding commits from `poolside-main`.
@@ -63,21 +64,33 @@ The following instructions will assume that `$COMMIT` is an ancestor of our `mai
 git fetch upstream main
 # we should have fetched the $COMMIT from main by now
 git checkout main
-git reset --mixed $COMMIT
+git reset --hard $COMMIT
 # This should work as `main` branch is an ancestor of $COMMIT originally
 git push origin main
+```
+
+### Reset `poolside-cherry-picks` to `main`
+We assume here that our cherry-picked commits are already present in `main` after the last step.
+Otherwise you need to find the original commits and cherry-pick them on top of the local branch before the push.
+
+```shell
+git checkout poolside-cherry-picks
+git reset --hard main
+# cherry-pick the desired commits here if they are not in main already
+...
+git push origin poolside-cherry-picks --force-with-lease
 ```
 
 ### Rebase `poolside-main` onto `main`
 
 ```shell
 git checkout poolside-main
-git rebase main
+git rebase poolside-cherry-picks
 ```
 
 Now you need to fix the rebase conflicts if any.
 
-You also need to Update the date in `PYTORCH_BUILD_VERSION_PREFIX` variable in our CI to `$DATE` [here](https://github.com/poolsideai/pytorch/blob/poolside-main/.github/workflows/poolside-nightly-build.yaml).
+You also need to Update the date in `PYTORCH_BUILD_VERSION_PREFIX` variable in our CI to `$NIGHTLY_DATE` [here](https://github.com/poolsideai/pytorch/blob/poolside-main/.github/workflows/poolside-nightly-build.yaml).
 This is needed to represent that our fork is rebased over the specific pytorch nightly.
 
 Now we're ready to push the updated version:
