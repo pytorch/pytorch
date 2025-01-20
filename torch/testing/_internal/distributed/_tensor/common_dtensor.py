@@ -14,7 +14,6 @@ from typing import (
     Iterator,
     List,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -33,6 +32,10 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_utils import (
+    TEST_HPU,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -42,17 +45,26 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch._utils import _get_device_module
 
-DEVICE_TYPE = (
-    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
-)
+if TEST_CUDA:
+    DEVICE_TYPE = "cuda"
+    PG_BACKEND = "nccl"
+    DEVICE_COUNT = _get_device_module("cuda").device_count()
+elif TEST_HPU:
+    DEVICE_TYPE = "hpu"
+    PG_BACKEND = "hccl"
+    DEVICE_COUNT = _get_device_module("hpu").device_count()
+else:
+    DEVICE_TYPE = "cpu"
+    PG_BACKEND = "gloo"
 
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+if TEST_CUDA and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
-    NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
+    NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
 T = TypeVar("T")
 
@@ -312,7 +324,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
@@ -322,7 +334,7 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
@@ -331,7 +343,6 @@ class DTensorTestBase(MultiProcessTestCase):
             torch.cuda.set_device(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
-
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
@@ -343,11 +354,10 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id=device_id,
         )
 
-
     def destroy_pg(self) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
-        # dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
+        # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         dist.barrier()
@@ -381,10 +391,10 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
+            self, *args: tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
+            if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE
@@ -426,7 +436,7 @@ class DTensorConverter:
     def __init__(
         self,
         mesh: DeviceMesh,
-        args: Tuple[object, ...],
+        args: tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> None:
         self.hit = 0
@@ -500,7 +510,7 @@ class DTensorConverter:
     def __iter__(self) -> "DTensorConverter":
         return self
 
-    def __next__(self) -> Tuple[Tuple[object, ...], Dict[str, object]]:
+    def __next__(self) -> tuple[tuple[object, ...], Dict[str, object]]:
         try:
             next_sharding_choices = next(self.sharding_combs)
             idx = 0

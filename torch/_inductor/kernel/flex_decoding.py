@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
-from typing import Any, List, Tuple
+from typing import Any, List
 
 import sympy
 
@@ -309,7 +309,7 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
     return split_k
 
 
-def _get_decoding_default_config(key) -> Tuple[int, int, int]:
+def _get_decoding_default_config(key) -> tuple[int, int, int]:
     dtype = key.get_dtype()
     head_dim = key.get_size()[-1]
     sm_version = torch.cuda.get_device_capability()
@@ -362,6 +362,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     B = Bq
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.evaluate_static_shape(v)
+        if isinstance(v, sympy.Symbol)
+        else v
+        for k, v in kernel_options.items()
+    }
 
     # TODO: Fix flex decoding non-divisible case!
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -409,7 +416,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
-    configs: List[Tuple[int, int, int]] = []
+    configs: List[tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
     if config.max_autotune:
