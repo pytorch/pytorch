@@ -1,6 +1,9 @@
-# mypy: allow-untyped-defs
 from collections import namedtuple
+<<<<<<< HEAD
 from typing import Any, Callable, NamedTuple, Optional, TypeVar
+=======
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar
+>>>>>>> d723fdb84c8 (Address reviewer comments)
 from typing_extensions import NamedTuple
 
 import torch.return_types
@@ -37,7 +40,7 @@ def _deregister_pytree_flatten_spec(
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
-    exact_structural_match=False,
+    exact_structural_match : bool =False,
 ) -> list[Any]:
     if spec.is_leaf():
         return [pytree]
@@ -79,15 +82,15 @@ def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> list[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
-def _dict_flatten_spec_exact_match(d: dict[Any, Any], spec: TreeSpec) -> bool:
+def _dict_flatten_spec_exact_match(d: dict[_K, _V], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 
-def _list_flatten_spec_exact_match(d: list[Any], spec: TreeSpec) -> bool:
+def _list_flatten_spec_exact_match(d: list[_T], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 
-def _tuple_flatten_spec_exact_match(d: tuple[Any], spec: TreeSpec) -> bool:
+def _tuple_flatten_spec_exact_match(d: tuple[_T, ...], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 

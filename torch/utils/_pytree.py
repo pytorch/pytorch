@@ -39,7 +39,6 @@ from typing import (
     Iterable,
     List,
     Mapping,
-    NamedTuple,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
@@ -50,7 +49,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, NamedTuple
 
 
 __all__ = [
@@ -448,56 +447,56 @@ class GetAttrKey:
         return getattr(obj, self.name)
 
 
-def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
+def _tuple_flatten(d: Tuple[T, ...]) -> Tuple[List[T], Context]:
     return list(d), None
 
 
 def _tuple_flatten_with_keys(
-    d: Tuple[Any, ...]
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: Tuple[T, ...]
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _tuple_unflatten(values: Iterable[Any], context: Context) -> Tuple[Any, ...]:
+def _tuple_unflatten(values: Iterable[T], context: Context) -> Tuple[T, ...]:
     return tuple(values)
 
 
-def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
+def _list_flatten(d: List[T]) -> Tuple[List[T], Context]:
     return d, None
 
 
-def _list_flatten_with_keys(d: List[Any]) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+def _list_flatten_with_keys(d: List[T]) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _list_unflatten(values: Iterable[Any], context: Context) -> List[Any]:
+def _list_unflatten(values: Iterable[T], context: Context) -> List[T]:
     return list(values)
 
 
-def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
+def _dict_flatten(d: Dict[Any, T]) -> Tuple[List[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: Dict[Any, Any]
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: Dict[Any, T]
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
-def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
+def _dict_unflatten(values: Iterable[T], context: Context) -> Dict[Any, T]:
     return dict(zip(context, values))
 
 
-def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
+def _namedtuple_flatten(d: NamedTuple[T]) -> Tuple[List[T], Context]:
     return list(d), type(d)
 
 
 def _namedtuple_flatten_with_keys(
-    d: NamedTuple,
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: NamedTuple[T],
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _namedtuple_flatten(d)
     return (
         [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
@@ -505,7 +504,7 @@ def _namedtuple_flatten_with_keys(
     )
 
 
-def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple:
+def _namedtuple_unflatten(values: Iterable[T], context: Context) -> NamedTuple[T]:
     return cast(NamedTuple, context(*values))
 
 
@@ -540,21 +539,21 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return typ
 
 
-def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
+def _ordereddict_flatten(d: GenericOrderedDict[Any, T]) -> Tuple[List[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _ordereddict_flatten_with_keys(
-    d: GenericOrderedDict[Any, Any]
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: GenericOrderedDict[Any, T]
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
 def _ordereddict_unflatten(
-    values: Iterable[Any],
+    values: Iterable[T],
     context: Context,
-) -> GenericOrderedDict[Any, Any]:
+) -> GenericOrderedDict[Any, T]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
@@ -562,23 +561,23 @@ _odict_flatten = _ordereddict_flatten
 _odict_unflatten = _ordereddict_unflatten
 
 
-def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
+def _defaultdict_flatten(d: DefaultDict[Any, T]) -> Tuple[List[T], Context]:
     values, dict_context = _dict_flatten(d)
     return values, [d.default_factory, dict_context]
 
 
 def _defaultdict_flatten_with_keys(
-    d: DefaultDict[Any, Any]
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: DefaultDict[Any, T]
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
 def _defaultdict_unflatten(
-    values: Iterable[Any],
+    values: Iterable[T],
     context: Context,
-) -> DefaultDict[Any, Any]:
+) -> DefaultDict[Any, T]:
     default_factory, dict_context = context
     return defaultdict(default_factory, _dict_unflatten(values, dict_context))
 
@@ -612,18 +611,18 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     return [default_factory, dict_context]
 
 
-def _deque_flatten(d: Deque[Any]) -> Tuple[List[Any], Context]:
+def _deque_flatten(d: Deque[T]) -> Tuple[List[T], Context]:
     return list(d), d.maxlen
 
 
 def _deque_flatten_with_keys(
-    d: Deque[Any],
-) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    d: Deque[T],
+) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
+def _deque_unflatten(values: Iterable[T], context: Context) -> Deque[T]:
     return deque(values, maxlen=context)
 
 
@@ -691,7 +690,7 @@ BUILTIN_TYPES: FrozenSet[type] = frozenset(
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
-def _is_namedtuple_instance(tree: Any) -> bool:
+def _is_namedtuple_instance(tree: object) -> bool:
     typ = type(tree)
     bases = typ.__bases__
     if len(bases) != 1 or bases[0] != tuple:
@@ -702,7 +701,7 @@ def _is_namedtuple_instance(tree: Any) -> bool:
     return all(type(entry) == str for entry in fields)
 
 
-def _get_node_type(tree: Any) -> Any:
+def _get_node_type(tree: object) -> Any:
     if _is_namedtuple_instance(tree):
         return namedtuple
     return type(tree)
@@ -1666,7 +1665,7 @@ def keystr(kp: KeyPath) -> str:
     return "".join([str(k) for k in kp])
 
 
-def key_get(obj: Any, kp: KeyPath) -> Any:
+def key_get(obj: object, kp: KeyPath) -> Any:
     """Given an object and a key path, return the value at the key path."""
     for k in kp:
         obj = k.get(obj)
