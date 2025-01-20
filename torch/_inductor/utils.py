@@ -963,14 +963,6 @@ class LineContext(NamedTuple):
     context: Any
 
 
-def _line_to_str(line: DeferredLineBase | LineContext | str) -> str | None:
-    if isinstance(line, str):
-        return line
-    if isinstance(line, DeferredLineBase):
-        return line()
-    return None
-
-
 class IndentedBuffer:
     tabwidth = 4
 
