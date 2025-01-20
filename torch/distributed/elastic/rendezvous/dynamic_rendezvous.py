@@ -1433,8 +1433,8 @@ def create_handler(
             params.max_nodes,
             params.local_addr,
             timeout,
-            keep_alive_interval=params.config.get("keep_alive_interval", 5),
-            keep_alive_max_attempt=params.config.get("keep_alive_max_attempt", 3),
+            keep_alive_interval=params.get_as_int("keep_alive_interval", 5),
+            keep_alive_max_attempt=params.get_as_int("keep_alive_max_attempt", 3),
         )
     except Exception as e:
         construct_and_record_rdzv_event(
