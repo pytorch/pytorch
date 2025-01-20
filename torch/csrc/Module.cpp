@@ -1133,26 +1133,6 @@ static PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setSMCarveout(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyLong_Check(arg),
-      "set_sm_carveout expects an int, "
-      "but got ",
-      THPUtils_typename(arg));
-  long val = PyLong_AsLong(arg);
-  if (val == -1 && PyErr_Occurred() != nullptr) {
-    return nullptr;
-  }
-  at::globalContext().setSMCarveout(static_cast<int>(val));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_SMCarveout(PyObject* _unused, PyObject* noargs) {
-  return PyLong_FromLong(static_cast<long>(at::globalContext().SMCarveout()));
-}
-
 static PyObject* THPModule_setAllowFP16ReductionCPU(
     PyObject* _unused,
     PyObject* arg) {
@@ -1592,14 +1572,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
-     METH_O,
-     nullptr},
-    {"_get_sm_carveout",
-     THPModule_SMCarveout,
-     METH_NOARGS,
-     nullptr},
-    {"_set_sm_carveout",
-     THPModule_setSMCarveout,
      METH_O,
      nullptr},
     {"_get_cpu_allow_fp16_reduced_precision_reduction",
@@ -2232,6 +2204,13 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_set_sm_carveout_experimental", [](std::optional<int> val) {
+    at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
+  });
+  py_module.def("_get_sm_carveout_experimental", []() {
+    return at::globalContext()._SMCarveout_EXPERIMENTAL();
   });
 
   py_module.def(

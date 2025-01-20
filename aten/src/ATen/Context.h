@@ -337,8 +337,19 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
-  int SMCarveout() const;
-  void setSMCarveout(int);
+
+  // Matmuls can use a so-called "persistent" kernel which launches one CUDA
+  // block for each SM on the GPU, and each block then iterates over multiple
+  // output tiles. This allows to use software pipelining to hide the begin/end
+  // latencies (e.g., epilogue), especially when only one tile fits per SM.
+  // However, if some SMs are busy (e.g., with a background NCCL kernel), the
+  // matmul's blocks will be scheduled in two waves and, in the absence of some
+  // smart load balancing, the kernel will take twice as long. This flag allows
+  // to make matmuls target only a subset of the SMs, so they can fully schedule
+  // even next to a comms kernel, and only be a few percent slower.
+  std::optional<int> _SMCarveout_EXPERIMENTAL() const;
+  void _setSMCarveout_EXPERIMENTAL(std::optional<int>);
+
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -420,7 +431,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
-  int sm_carveout = 0;
+  std::optional<int> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =

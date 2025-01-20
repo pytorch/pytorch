@@ -90,7 +90,7 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return bmm_flop(a_shape, b_shape)
 
 @register_flop_formula(aten._scaled_mm)
-def scaled_mm_flop(
+def _scaled_mm_flop(
     a_shape,
     b_shape,
     scale_a_shape,
@@ -557,7 +557,7 @@ flop_registry = {
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
     aten.baddbmm: baddbmm_flop,
-    aten._scaled_mm: scaled_mm_flop,
+    aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
