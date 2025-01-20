@@ -712,7 +712,9 @@ class AOTInductorTestsTemplate:
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8(self):
-        if self.device == "cuda" and (not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)):
+        if self.device == "cuda" and (
+            not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
+        ):
             raise unittest.SkipTest("FP8 is only supported on H100+ and sm_89 and MI300+ devices")
 
         class Model(torch.nn.Module):
@@ -757,7 +759,9 @@ class AOTInductorTestsTemplate:
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8_view_of_param(self):
-        if self.device == "cuda" and not SM90OrLater:
+        if self.device == "cuda" and (
+            not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
+        ):
             raise unittest.SkipTest("FP8 is only supported on H100+")
 
         class Model(torch.nn.Module):
