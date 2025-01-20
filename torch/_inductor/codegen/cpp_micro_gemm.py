@@ -68,7 +68,8 @@ inline void {{kernel_name}}(
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc
+    int64_t ldc,
+    bool trans_b
 )
 """
 
@@ -135,6 +136,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        trans_b: bool = False
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -163,7 +165,13 @@ inline void {{kernel_name}}(
             res.writeline(f"{K},")
             res.writeline(f"{lda},")
             res.writeline(f"{ldb},")
-            res.writeline(f"{ldc}")
+            if trans_b:
+                res.writeline(f"{ldc},")
+                res.writeline("true")
+            else:
+                res.writeline(f"{ldc},")
+                res.writeline("false")
+
         res.writeline(");")
         return res.getvalue()
 
@@ -357,34 +365,59 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    using Vectorized = at::vec::Vectorized<{{compute_t}}>;
+    constexpr auto VLEN = Vectorized::size();
+    {{kernel.assert_function}}({{block_n}} % VLEN == 0, "{{block_n}} dimension must be multiple of size of Vectorized");
     {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         for (int64_t n = 0; n < N; n += {{block_n}}) {
-            if (block_m == {{block_m}}) {
+            int64_t block_n = std::min<int64_t>(N - n, {{block_n}});
+            if (block_m == {{block_m}} && block_n == {{block_n}}) {
                 {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
                     A + m * lda,
-                    B + n,
+                    B + (trans_b ? (n * ldb) : n),
                     C + m * ldc + n,
                     K,
                     lda,
                     ldb,
-                    ldc
+                    ldc,
+                    trans_b
                 );
-            } else {
+            } else if (block_n == {{block_n}}){
                 switch (block_m) {
 {%- for b in range(block_m - 1, 0, -1) %}
                 case {{b}}:
                     {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
                         A + m * lda,
-                        B + n,
+                        B + (trans_b ? (n * ldb) : n),
                         C + m * ldc + n,
                         K,
                         lda,
                         ldb,
-                        ldc
+                        ldc,
+                        trans_b
+                    );
+                    break;
+{%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
+                }
+            } else {
+                switch (block_m) {
+{%- for b in range(block_m, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum>(
+                        A + m * lda,
+                        B + (trans_b ? (n * ldb) : n),
+                        C + m * ldc + n,
+                        block_n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc,
+                        trans_b
                     );
                     break;
 {%- endfor %}
@@ -397,7 +430,202 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 }
 """
 
+# TODO simplfy the implementation by adding a flag to indicate if param N is needed and thus other related code
     TEMPLATE_KERNEL = r"""
+
+// For the case of N has tail
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_ntail_kernel(
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t N,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    bool trans_b = false
+) {
+    using Vectorized = at::vec::Vectorized<{{compute_t}}>;
+    using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
+    constexpr auto VLEN = Vectorized::size();
+    if (!trans_b) {
+        constexpr auto ROWS = BLOCK_M;
+        constexpr auto COLS = BLOCK_N / VLEN;
+
+        Vectorized va;
+        at::vec::VectorizedN<{{compute_t}}, COLS> vb;
+        at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
+
+        int64_t rCOLS = (N + VLEN - 1) / VLEN;
+        int ntail = N % VLEN;
+
+        auto loadc = [&](auto i) {
+            if constexpr (accum) {
+                constexpr int row = i / COLS;
+                constexpr int col = i % COLS;
+                int eVLEN = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
+                if (col < rCOLS) {
+                    vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN, eVLEN);
+                }
+            } else {
+                vc[i] = Vectorized(0.0f);
+            }
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+        auto compute = [&, COLS](auto i, int k) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+
+            int eVLEN = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
+            if constexpr (col == 0) {
+{%- if alpha != 1 %}
+                va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]) * {{alpha}});
+{%- else %}
+                va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]));
+{%- endif %}
+            }
+
+            if constexpr (row == 0) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+                if (col < rCOLS) {
+                    auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, eVLEN);
+                    vb[col] = at::vec::convert<{{compute_t}}>(b);
+                } else {
+                    vb[col] = Vectorized(0.0f);
+                }
+{%- elif input2_dtype == torch.int8 %}
+                // Convert VLEN int8 elements to int32, and then fp32
+                if (col < rCOLS) {
+                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN, eVLEN);
+                    vb[col] = at::vec::convert<float>(b32);
+                } else {
+                    vb[col] = at::vec::Vectorized<float>(0.0f);
+                }
+{%- else %}
+                if (col < rCOLS) {
+                    vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN, eVLEN);
+                } else {
+                    vb[col] = Vectorized(0.0f);
+                }
+{%- endif %}
+            }
+
+            constexpr int idx = row * COLS + col;
+            if (col < rCOLS) {
+                vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+            }
+        };
+
+        for (int k = 0; k < K; ++k) {
+            c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+        }
+
+        // store to C
+        auto storec = [&](auto i) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            int eVLEN = (col == rCOLS - 1 && ntail != 0) ? ntail : VLEN;
+            if (col < rCOLS) {
+                vc[i].store(C + row * ldc + col * VLEN, eVLEN);
+            }
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(storec);
+
+    } else {
+        // for B of [N, K], K dim is contiguous.
+        // Note ldb should be ld of N dim.
+        int _K = (K + VLEN - 1) / VLEN;
+        constexpr int sN = 4;
+        constexpr int sM = 4;
+        int bN = (N + sN - 1) / sN;
+        constexpr int bM = (BLOCK_M + sM - 1) / sM;
+
+        Vectorized va;
+        at::vec::VectorizedN<{{compute_t}}, sN> vb;
+        at::vec::VectorizedN<{{compute_t}}, sN * sM> vmid;
+
+        int ntail = N % sN;
+        constexpr int mtail = BLOCK_M % sM;
+        int ktail = K % VLEN;
+
+        auto compute_trans = [&](int m, int n, int k) {
+            int e_n = (n == bN - 1 && ntail != 0) ? (N - n * sN) : sN;
+            int e_m = (m == bM - 1 && mtail != 0) ? (BLOCK_M - m * sM) : sM;
+            int e_k = (k == _K - 1 && ktail != 0) ? (K - k * VLEN) : VLEN;
+            {{kernel.unroll_pragma(4)}}
+            for (int i = 0; i < e_n; i++) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+                auto b = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
+                vb[i] = at::vec::convert<{{compute_t}}>(b);
+{%- elif input2_dtype == torch.int8 %}
+                auto b32 = at::vec::convert_to_int32<int8_t>(B + (sN * n + i) * ldb + k * VLEN, e_k);
+                vb[i] = at::vec::convert<float>(b32);
+{%- else %}
+                vb[i] = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
+{%- endif %}
+            }
+
+            {{kernel.unroll_pragma(4)}}
+            for (int s = 0; s < e_m; s++) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+                auto a = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
+                va = at::vec::convert<{{compute_t}}>(a);
+{%- elif input2_dtype == torch.int8 %}
+                auto a32 = at::vec::convert_to_int32<int8_t>(A + (sM * m + s) * lda + k * VLEN, e_k);
+                va = at::vec::convert<float>(a32);
+{%- else %}
+                va = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
+{%- endif %}
+
+{%- if alpha != 1 %}
+                va = va * Vectorized({{alpha}});
+{%- endif %}
+
+                if (k == 0) {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        vmid[sN * s + i] = at::vec::fmadd(va, vb[i], Vectorized(0.0f));
+                    }
+                } else {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        vmid[sN * s + i] = at::vec::fmadd(va, vb[i], vmid[sN * s + i]);
+                    }
+                }
+            }
+
+            // store to C
+            if (k == _K - 1) {
+                {{kernel.unroll_pragma(4)}}
+                for (int s = 0; s < e_m; s++) {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        auto v = at::vec::vec_reduce_all([](Vectorized& x, Vectorized& y) { return x + y; }, vmid[sN * s + i]);
+                        if constexpr (accum) {
+                            auto c = *(C + (sM * m + s) * ldc + sN * n + i);
+                            *(C + (sM * m + s) * ldc + sN * n + i) = c + v;
+                        } else {
+                            *(C + (sM * m + s) * ldc + sN * n + i) = v;
+                        }
+                    }
+                }
+            }
+        };
+
+        for (int n = 0; n < bN; ++n) {
+            for (int m = 0; m < bM; ++m) {
+                {{kernel.unroll_pragma(4)}}
+                for (int k = 0; k < _K; ++k) {
+                    compute_trans(m, n, k);
+                }
+            }
+        }
+    }
+}
+
+// For the case of N is divisible by BLOCK_N
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
@@ -406,69 +634,208 @@ inline void {{kernel_name}}_kernel(
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc
+    int64_t ldc,
+    bool trans_b = false
 ) {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
     using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
     constexpr auto VLEN = Vectorized::size();
-    constexpr auto ROWS = BLOCK_M;
-    constexpr auto COLS = BLOCK_N / VLEN;
+    if (!trans_b) {
+        constexpr auto ROWS = BLOCK_M;
+        constexpr auto COLS = BLOCK_N / VLEN;
 
-    Vectorized va;
-    at::vec::VectorizedN<{{compute_t}}, COLS> vb;
-    at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
+        Vectorized va;
+        at::vec::VectorizedN<{{compute_t}}, COLS> vb;
+        at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
 
-    auto loadc = [&](auto i) {
-        if constexpr (accum) {
+        auto loadc = [&](auto i) {
+            if constexpr (accum) {
+                constexpr int row = i / COLS;
+                constexpr int col = i % COLS;
+                vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
+            } else {
+                vc[i] = Vectorized(0.0f);
+            }
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+        auto compute = [&, COLS](auto i, int k) {
             constexpr int row = i / COLS;
             constexpr int col = i % COLS;
-            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
-        } else {
-            vc[i] = Vectorized(0.0f);
-        }
-    };
-    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
-    auto compute = [&, COLS](auto i, int k) {
-        constexpr int row = i / COLS;
-        constexpr int col = i % COLS;
-
-        if constexpr (col == 0) {
+            if constexpr (col == 0) {
 {%- if alpha != 1 %}
-            va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]) * {{alpha}});
+                va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]) * {{alpha}});
 {%- else %}
-            va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]));
+                va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]));
 {%- endif %}
-        }
+            }
 
-        if constexpr (row == 0) {
+            if constexpr (row == 0) {
 {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
-            vb[col] = at::vec::convert<{{compute_t}}>(b);
+                auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
+                vb[col] = at::vec::convert<{{compute_t}}>(b);
 {%- elif input2_dtype == torch.int8 %}
-            // Convert VLEN int8 elements to int32, and then fp32
-            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
-            vb[col] = at::vec::convert<float>(b32);
+                // Convert VLEN int8 elements to int32, and then fp32
+                // TODO add support for tail
+                auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+                vb[col] = at::vec::convert<float>(b32);
 {%- else %}
-            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
+                vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
 {%- endif %}
+            }
+
+            constexpr int idx = row * COLS + col;
+            vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+        };
+
+        for (int k = 0; k < K; ++k) {
+            c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
         }
 
-        constexpr int idx = row * COLS + col;
-        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
-    };
+        // store to C
+        auto storec = [&](auto i) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            vc[i].store(C + row * ldc + col * VLEN);
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(storec);
 
-    for (int k = 0; k < K; ++k) {
-        c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    } else if (K % VLEN == 0 && 24 * BLOCK_M > K) {
+        // TODO use a more general check for 16x16 (36) and 8x8(24)
+        constexpr auto ROWS = BLOCK_M;
+        constexpr auto COLS = BLOCK_N / VLEN;
+        int _K = K / VLEN;
+        Vectorized va;
+        at::vec::VectorizedN<{{compute_t}}, VLEN> vb;
+        at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
+        auto loadc = [&](auto i) {
+            if constexpr (accum) {
+                constexpr int row = i / COLS;
+                constexpr int col = i % COLS;
+                vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
+            } else {
+                vc[i] = Vectorized(0.0f);
+            }
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+        auto compute_trans = [&, COLS](auto i, int k) {
+            constexpr int row = i % ROWS;
+            constexpr int col = i / ROWS;
+            constexpr int e_col = col * VLEN;
+            int idk = k * VLEN;
+            if constexpr (row == 0) {
+                transpose_NxN(vb, B + e_col * ldb + idk, ldb, VLEN);
+            }
+            constexpr int idx = row * COLS + col;
+            #pragma unroll
+            for (int i = 0; i < VLEN; i++) {
+{%- if alpha != 1 %}
+                    va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + idk + i]) * {{alpha}});
+{%- else %}
+                    va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + idk + i]));
+{%- endif %}
+                vc[idx] = at::vec::fmadd(va, vb[i], vc[idx]);
+            }
+        };
+        for (int k = 0; k < _K; ++k) {
+            c10::ForcedUnroll<ROWS * COLS>{}(compute_trans, k);
+        }
+        // store to C
+        auto storec = [&](auto i) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            vc[i].store(C + row * ldc + col * VLEN);
+        };
+        c10::ForcedUnroll<ROWS * COLS>{}(storec);
+    } else {
+        int _K = (K + VLEN - 1) / VLEN;
+        // sub-block size of BLOCK_N and BLOCK_M
+        constexpr int sN = 4;
+        constexpr int sM = 4;
+        constexpr int bN = (BLOCK_N + sN - 1) / sN;
+        constexpr int bM = (BLOCK_M + sM - 1) / sM;
+
+        at::vec::Vectorized<{{compute_t}}> va;
+        at::vec::Vectorized<{{compute_t}}> vb[sN];
+        at::vec::VectorizedN<{{compute_t}}, sN * sM> vmid;
+
+        constexpr int ntail = BLOCK_N % sN;
+        constexpr int mtail = BLOCK_M % sM;
+        int ktail = K % VLEN;
+
+        auto compute_trans = [&](int m, int n, int k) {
+            int e_n = (n == bN - 1 && ntail != 0) ? (BLOCK_N - n * sN) : sN;
+            int e_m = (m == bM - 1 && mtail != 0) ? (BLOCK_M - m * sM) : sM;
+            int e_k = (k == _K - 1 && ktail != 0) ? (K - k * VLEN) : VLEN;
+            {{kernel.unroll_pragma(4)}}
+            for (int i = 0; i < e_n; i++) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+                auto b = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
+                vb[i] = at::vec::convert<{{compute_t}}>(b);
+{%- elif input2_dtype == torch.int8 %}
+                auto b32 = at::vec::convert_to_int32<int8_t>(B + (sN * n + i) * ldb + k * VLEN, e_k);
+                vb[i] = at::vec::convert<float>(b32);
+{%- else %}
+                vb[i] = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
+{%- endif %}
+            }
+
+            {{kernel.unroll_pragma(4)}}
+            for (int s = 0; s < e_m; s++) {
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+                auto a = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
+                va = at::vec::convert<{{compute_t}}>(a);
+{%- elif input2_dtype == torch.int8 %}
+                auto a32 = at::vec::convert_to_int32<int8_t>(A + (sM * m + s) * lda + k * VLEN, e_k);
+                va = at::vec::convert<float>(a32);
+{%- else %}
+                va = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
+{%- endif %}
+
+{%- if alpha != 1 %}
+                va = va * Vectorized({{alpha}});
+{%- endif %}
+                if (k == 0) {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        vmid[sN * s + i] = at::vec::fmadd(va, vb[i], Vectorized(0.0f));
+                    }
+                } else {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        vmid[sN * s + i] = at::vec::fmadd(va, vb[i], vmid[sN * s + i]);
+                    }
+                }
+            }
+
+            // store to C
+            if (k == _K - 1) {
+                {{kernel.unroll_pragma(4)}}
+                for (int s = 0; s < e_m; s++) {
+                    {{kernel.unroll_pragma(4)}}
+                    for (int i = 0; i < e_n; i++) {
+                        auto v = at::vec::vec_reduce_all([](Vectorized& x, Vectorized& y) { return x + y; }, vmid[sN * s + i]);
+                        if constexpr (accum) {
+                            auto c = *(C + (sM * m + s) * ldc + sN * n + i);
+                            *(C + (sM * m + s) * ldc + sN * n + i) = c + v;
+                        } else {
+                            *(C + (sM * m + s) * ldc + sN * n + i) = v;
+                        }
+                    }
+                }
+            }
+        };
+
+        for (int n = 0; n < bN; ++n) {
+            for (int m = 0; m < bM; ++m) {
+                {{kernel.unroll_pragma(4)}}
+                for (int k = 0; k < _K; ++k) {
+                    compute_trans(m, n, k);
+                }
+            }
+        }
     }
-
-    // store to C
-    auto storec = [&](auto i) {
-        constexpr int row = i / COLS;
-        constexpr int col = i % COLS;
-        vc[i].store(C + row * ldc + col * VLEN);
-    };
-    c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 """
 

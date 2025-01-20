@@ -221,6 +221,7 @@ GEMM_TEMPLATE = r"""
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
+                    //std::cout << "nci: " << nci << " nc_block_end: " << nc_block_end << std::endl;
 {%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- if template.should_block_weights %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
@@ -1067,6 +1068,7 @@ class CppGemmTemplate(CppTemplate):
                 .transpose(-3, -2)
                 .contiguous()
             )
+            print("blocked_w size: ", blocked_w.shape, " strides: ", blocked_w.stride())
         return blocked_w
 
     @classmethod

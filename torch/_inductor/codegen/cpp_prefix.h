@@ -945,3 +945,227 @@ class AMXState {
     tile_release();
   }
 };
+
+#if defined(CPU_CAPABILITY_AVX512)
+template<typename compute_t, typename input_t, int N>
+inline std::enable_if_t<std::is_same_v<compute_t, float> && N==16, void>
+transpose_NxN(
+  at::vec::VectorizedN<compute_t, N>& srcs,
+  const input_t * __restrict__ src_ptr,
+  int64_t ld,
+  int64_t load_size) {
+  using VectorizedIn = at::vec::Vectorized<input_t>;
+  if constexpr (std::is_reduced_floating_point_v<input_t>) {
+    srcs[0] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr, load_size));
+    srcs[1] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + ld, load_size));
+    srcs[2] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 2 * ld, load_size));
+    srcs[3] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 3 * ld, load_size));
+    srcs[4] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 4 * ld, load_size));
+    srcs[5] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 5 * ld, load_size));
+    srcs[6] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 6 * ld, load_size));
+    srcs[7] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 7 * ld, load_size));
+    srcs[8] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 8 * ld, load_size));
+    srcs[9] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 9 * ld, load_size));
+    srcs[10] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 10 * ld, load_size));
+    srcs[11] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 11 * ld, load_size));
+    srcs[12] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 12 * ld, load_size));
+    srcs[13] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 13 * ld, load_size));
+    srcs[14] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 14 * ld, load_size));
+    srcs[15] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 15 * ld, load_size));
+  } else if constexpr (std::is_same_v<input_t, int8_t>) {
+    srcs[0] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr, load_size));
+    srcs[1] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + ld, load_size));
+    srcs[2] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 2 * ld, load_size));
+    srcs[3] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 3 * ld, load_size));
+    srcs[4] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 4 * ld, load_size));
+    srcs[5] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 5 * ld, load_size));
+    srcs[6] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 6 * ld, load_size));
+    srcs[7] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 7 * ld, load_size));
+    srcs[8] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 8 * ld, load_size));
+    srcs[9] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 9 * ld, load_size));
+    srcs[10] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 10 * ld, load_size));
+    srcs[11] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 11 * ld, load_size));
+    srcs[12] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 12 * ld, load_size));
+    srcs[13] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 13 * ld, load_size));
+    srcs[14] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 14 * ld, load_size));
+    srcs[15] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 15 * ld, load_size));
+  } else {
+    srcs[0] = VectorizedIn::loadu(src_ptr, load_size);
+    srcs[1] = VectorizedIn::loadu(src_ptr + ld, load_size);
+    srcs[2] = VectorizedIn::loadu(src_ptr + 2 * ld, load_size);
+    srcs[3] = VectorizedIn::loadu(src_ptr + 3 * ld, load_size);
+    srcs[4] = VectorizedIn::loadu(src_ptr + 4 * ld, load_size);
+    srcs[5] = VectorizedIn::loadu(src_ptr + 5 * ld, load_size);
+    srcs[6] = VectorizedIn::loadu(src_ptr + 6 * ld, load_size);
+    srcs[7] = VectorizedIn::loadu(src_ptr + 7 * ld, load_size);
+    srcs[8] = VectorizedIn::loadu(src_ptr + 8 * ld, load_size);
+    srcs[9] = VectorizedIn::loadu(src_ptr + 9 * ld, load_size);
+    srcs[10] = VectorizedIn::loadu(src_ptr + 10 * ld, load_size);
+    srcs[11] = VectorizedIn::loadu(src_ptr + 11 * ld, load_size);
+    srcs[12] = VectorizedIn::loadu(src_ptr + 12 * ld, load_size);
+    srcs[13] = VectorizedIn::loadu(src_ptr + 13 * ld, load_size);
+    srcs[14] = VectorizedIn::loadu(src_ptr + 14 * ld, load_size);
+    srcs[15] = VectorizedIn::loadu(src_ptr + 15 * ld, load_size);
+  }
+  at::vec::VectorizedN<compute_t, N> v_trans;
+  v_trans[0] = _mm512_unpacklo_ps(srcs[0], srcs[1]);
+  v_trans[1] = _mm512_unpackhi_ps(srcs[0], srcs[1]);
+  v_trans[2] = _mm512_unpacklo_ps(srcs[2], srcs[3]);
+  v_trans[3] = _mm512_unpackhi_ps(srcs[2], srcs[3]);
+  v_trans[4] = _mm512_unpacklo_ps(srcs[4], srcs[5]);
+  v_trans[5] = _mm512_unpackhi_ps(srcs[4], srcs[5]);
+  v_trans[6] = _mm512_unpacklo_ps(srcs[6], srcs[7]);
+  v_trans[7] = _mm512_unpackhi_ps(srcs[6], srcs[7]);
+  v_trans[8] = _mm512_unpacklo_ps(srcs[8], srcs[9]);
+  v_trans[9] = _mm512_unpackhi_ps(srcs[8], srcs[9]);
+  v_trans[10] = _mm512_unpacklo_ps(srcs[10], srcs[11]);
+  v_trans[11] = _mm512_unpackhi_ps(srcs[10], srcs[11]);
+  v_trans[12] = _mm512_unpacklo_ps(srcs[12], srcs[13]);
+  v_trans[13] = _mm512_unpackhi_ps(srcs[12], srcs[13]);
+  v_trans[14] = _mm512_unpacklo_ps(srcs[14], srcs[15]);
+  v_trans[15] = _mm512_unpackhi_ps(srcs[14], srcs[15]);
+
+  srcs[0] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[0]), _mm512_castps_pd(v_trans[2])));
+  srcs[1] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[0]), _mm512_castps_pd(v_trans[2])));
+  srcs[2] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[1]), _mm512_castps_pd(v_trans[3])));
+  srcs[3] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[1]), _mm512_castps_pd(v_trans[3])));
+  srcs[4] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[4]), _mm512_castps_pd(v_trans[6])));
+  srcs[5] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[4]), _mm512_castps_pd(v_trans[6])));
+  srcs[6] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[5]), _mm512_castps_pd(v_trans[7])));
+  srcs[7] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[5]), _mm512_castps_pd(v_trans[7])));
+  srcs[8] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[8]), _mm512_castps_pd(v_trans[10])));
+  srcs[9] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[8]), _mm512_castps_pd(v_trans[10])));
+  srcs[10] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[9]), _mm512_castps_pd(v_trans[11])));
+  srcs[11] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[9]), _mm512_castps_pd(v_trans[11])));
+  srcs[12] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[12]), _mm512_castps_pd(v_trans[14])));
+  srcs[13] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[12]), _mm512_castps_pd(v_trans[14])));
+  srcs[14] = _mm512_castpd_ps(
+      _mm512_unpacklo_pd(_mm512_castps_pd(v_trans[13]), _mm512_castps_pd(v_trans[15])));
+  srcs[15] = _mm512_castpd_ps(
+      _mm512_unpackhi_pd(_mm512_castps_pd(v_trans[13]), _mm512_castps_pd(v_trans[15])));
+
+  v_trans[0] = _mm512_shuffle_f32x4(srcs[0], srcs[4], 0x88);
+  v_trans[1] = _mm512_shuffle_f32x4(srcs[1], srcs[5], 0x88);
+  v_trans[2] = _mm512_shuffle_f32x4(srcs[2], srcs[6], 0x88);
+  v_trans[3] = _mm512_shuffle_f32x4(srcs[3], srcs[7], 0x88);
+  v_trans[4] = _mm512_shuffle_f32x4(srcs[0], srcs[4], 0xdd);
+  v_trans[5] = _mm512_shuffle_f32x4(srcs[1], srcs[5], 0xdd);
+  v_trans[6] = _mm512_shuffle_f32x4(srcs[2], srcs[6], 0xdd);
+  v_trans[7] = _mm512_shuffle_f32x4(srcs[3], srcs[7], 0xdd);
+  v_trans[8] = _mm512_shuffle_f32x4(srcs[8], srcs[12], 0x88);
+  v_trans[9] = _mm512_shuffle_f32x4(srcs[9], srcs[13], 0x88);
+  v_trans[10] = _mm512_shuffle_f32x4(srcs[10], srcs[14], 0x88);
+  v_trans[11] = _mm512_shuffle_f32x4(srcs[11], srcs[15], 0x88);
+  v_trans[12] = _mm512_shuffle_f32x4(srcs[8], srcs[12], 0xdd);
+  v_trans[13] = _mm512_shuffle_f32x4(srcs[9], srcs[13], 0xdd);
+  v_trans[14] = _mm512_shuffle_f32x4(srcs[10], srcs[14], 0xdd);
+  v_trans[15] = _mm512_shuffle_f32x4(srcs[11], srcs[15], 0xdd);
+
+  srcs[0] = _mm512_shuffle_f32x4(v_trans[0], v_trans[8], 0x88);
+  srcs[1] = _mm512_shuffle_f32x4(v_trans[1], v_trans[9], 0x88);
+  srcs[2] = _mm512_shuffle_f32x4(v_trans[2], v_trans[10], 0x88);
+  srcs[3] = _mm512_shuffle_f32x4(v_trans[3], v_trans[11], 0x88);
+  srcs[4] = _mm512_shuffle_f32x4(v_trans[4], v_trans[12], 0x88);
+  srcs[5] = _mm512_shuffle_f32x4(v_trans[5], v_trans[13], 0x88);
+  srcs[6] = _mm512_shuffle_f32x4(v_trans[6], v_trans[14], 0x88);
+  srcs[7] = _mm512_shuffle_f32x4(v_trans[7], v_trans[15], 0x88);
+  srcs[8] = _mm512_shuffle_f32x4(v_trans[0], v_trans[8], 0xdd);
+  srcs[9] = _mm512_shuffle_f32x4(v_trans[1], v_trans[9], 0xdd);
+  srcs[10] = _mm512_shuffle_f32x4(v_trans[2], v_trans[10], 0xdd);
+  srcs[11] = _mm512_shuffle_f32x4(v_trans[3], v_trans[11], 0xdd);
+  srcs[12] = _mm512_shuffle_f32x4(v_trans[4], v_trans[12], 0xdd);
+  srcs[13] = _mm512_shuffle_f32x4(v_trans[5], v_trans[13], 0xdd);
+  srcs[14] = _mm512_shuffle_f32x4(v_trans[6], v_trans[14], 0xdd);
+  srcs[15] = _mm512_shuffle_f32x4(v_trans[7], v_trans[15], 0xdd);
+}
+#endif
+
+
+#if defined(CPU_CAPABILITY_AVX2)
+template<typename compute_t, typename input_t, int N>
+inline std::enable_if_t<std::is_same_v<compute_t, float> && N==8, void>
+transpose_NxN(at::vec::VectorizedN<compute_t, N>& srcs,
+const input_t * __restrict__ src_ptr,
+int64_t ld,
+int64_t load_size) {
+  using VectorizedIn = at::vec::Vectorized<input_t>;
+  if constexpr (std::is_reduced_floating_point_v<input_t>) {
+    srcs[0] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr, load_size));
+    srcs[1] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + ld, load_size));
+    srcs[2] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 2 * ld, load_size));
+    srcs[3] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 3 * ld, load_size));
+    srcs[4] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 4 * ld, load_size));
+    srcs[5] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 5 * ld, load_size));
+    srcs[6] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 6 * ld, load_size));
+    srcs[7] = at::vec::convert<compute_t>(VectorizedIn::loadu(src_ptr + 7 * ld, load_size));
+  } else if constexpr (std::is_same_v<input_t, int8_t>) {
+    srcs[0] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr, load_size));
+    srcs[1] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + ld, load_size));
+    srcs[2] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 2 * ld, load_size));
+    srcs[3] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 3 * ld, load_size));
+    srcs[4] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 4 * ld, load_size));
+    srcs[5] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 5 * ld, load_size));
+    srcs[6] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 6 * ld, load_size));
+    srcs[7] = at::vec::convert<compute_t>(at::vec::convert_to_int32<int8_t>(src_ptr + 7 * ld, load_size));
+  } else {
+    srcs[0] = VectorizedIn::loadu(src_ptr, load_size);
+    srcs[1] = VectorizedIn::loadu(src_ptr + ld, load_size);
+    srcs[2] = VectorizedIn::loadu(src_ptr + 2 * ld, load_size);
+    srcs[3] = VectorizedIn::loadu(src_ptr + 3 * ld, load_size);
+    srcs[4] = VectorizedIn::loadu(src_ptr + 4 * ld, load_size);
+    srcs[5] = VectorizedIn::loadu(src_ptr + 5 * ld, load_size);
+    srcs[6] = VectorizedIn::loadu(src_ptr + 6 * ld, load_size);
+    srcs[7] = VectorizedIn::loadu(src_ptr + 7 * ld, load_size);
+  }
+  at::vec::VectorizedN<float, 8> v_mid;
+  v_mid[0] = _mm256_unpacklo_ps(srcs[0], srcs[1]);
+  v_mid[1] = _mm256_unpacklo_ps(srcs[0], srcs[1]);
+  v_mid[2] = _mm256_unpacklo_ps(srcs[2], srcs[3]);
+  v_mid[3] = _mm256_unpacklo_ps(srcs[2], srcs[3]);
+  v_mid[4] = _mm256_unpacklo_ps(srcs[4], srcs[5]);
+  v_mid[5] = _mm256_unpacklo_ps(srcs[4], srcs[5]);
+  v_mid[6] = _mm256_unpacklo_ps(srcs[6], srcs[7]);
+  v_mid[7] = _mm256_unpacklo_ps(srcs[6], srcs[7]);
+
+  at::vec::VectorizedN<compute_t, N> v_mid2;
+  v_mid2[0] = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(v_mid[0]), _mm256_castps_pd(v_mid[2])));
+  v_mid2[1] = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(v_mid[0]), _mm256_castps_pd(v_mid[2])));
+  v_mid2[2] = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(v_mid[1]), _mm256_castps_pd(v_mid[3])));
+  v_mid2[3] = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(v_mid[1]), _mm256_castps_pd(v_mid[3])));
+  v_mid2[4] = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(v_mid[4]), _mm256_castps_pd(v_mid[6])));
+  v_mid2[5] = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(v_mid[4]), _mm256_castps_pd(v_mid[6])));
+  v_mid2[6] = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(v_mid[5]), _mm256_castps_pd(v_mid[7])));
+  v_mid2[7] = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(v_mid[5]), _mm256_castps_pd(v_mid[7])));
+
+  srcs[0] = _mm256_permute2f128_ps(v_mid2[0], v_mid2[4], 0x20);
+  srcs[1] = _mm256_permute2f128_ps(v_mid2[1], v_mid2[5], 0x20);
+  srcs[2] = _mm256_permute2f128_ps(v_mid2[2], v_mid2[6], 0x20);
+  srcs[3] = _mm256_permute2f128_ps(v_mid2[3], v_mid2[7], 0x20);
+  srcs[4] = _mm256_permute2f128_ps(v_mid2[0], v_mid2[4], 0x31);
+  srcs[5] = _mm256_permute2f128_ps(v_mid2[1], v_mid2[5], 0x31);
+  srcs[6] = _mm256_permute2f128_ps(v_mid2[2], v_mid2[6], 0x31);
+  srcs[7] = _mm256_permute2f128_ps(v_mid2[3], v_mid2[7], 0x31);
+}
+#endif
