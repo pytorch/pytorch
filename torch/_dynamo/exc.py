@@ -161,6 +161,12 @@ class AttributeMutationError(Unsupported):
         super().__init__(msg)
 
 
+class InfiniteGeneratorError(Unsupported):
+    # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -251,6 +257,10 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
+class ObservedGeneratorExit(ObservedException):
+    pass
+
+
 class ObservedKeyError(ObservedException):
     # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
     pass
@@ -262,14 +272,22 @@ class ObservedAttributeError(ObservedException):
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
+    pass
+
+
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
     pass
 
 
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
+    GeneratorExit: ObservedGeneratorExit,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
+    TypeError: ObservedTypeError,
 }
 
 

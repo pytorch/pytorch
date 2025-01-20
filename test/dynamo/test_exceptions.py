@@ -411,6 +411,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(SpeculationLogDivergence):
             log.next("bad", 58, "bad", Instruction(2, "different", 2, 2))
 
+    def test_raise_GeneratorExit(self):
+        # GeneratorExit does not inherit from Exception
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise GeneratorExit
+            except Exception:
+                return t.sin()
+            except BaseException:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.cos())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
