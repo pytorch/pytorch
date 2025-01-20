@@ -690,7 +690,7 @@ BUILTIN_TYPES: FrozenSet[type] = frozenset(
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
-def _is_namedtuple_instance(tree: object) -> bool:
+def _is_namedtuple_instance(tree: Any) -> bool:
     typ = type(tree)
     bases = typ.__bases__
     if len(bases) != 1 or bases[0] != tuple:
@@ -701,7 +701,7 @@ def _is_namedtuple_instance(tree: object) -> bool:
     return all(type(entry) == str for entry in fields)
 
 
-def _get_node_type(tree: object) -> Any:
+def _get_node_type(tree: Any) -> Any:
     if _is_namedtuple_instance(tree):
         return namedtuple
     return type(tree)
@@ -1665,7 +1665,7 @@ def keystr(kp: KeyPath) -> str:
     return "".join([str(k) for k in kp])
 
 
-def key_get(obj: object, kp: KeyPath) -> Any:
+def key_get(obj: Any, kp: KeyPath) -> Any:
     """Given an object and a key path, return the value at the key path."""
     for k in kp:
         obj = k.get(obj)
