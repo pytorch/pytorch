@@ -160,7 +160,7 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
-if SM80OrLater:
+if SM80OrLater or MACOS_VERSION >= 14.0:
     test_dtypes.append(torch.bfloat16)
 
 
