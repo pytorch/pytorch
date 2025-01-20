@@ -1,3 +1,4 @@
+# Owner(s): ["module: cuda"]
 import contextlib
 import ctypes
 import gc
