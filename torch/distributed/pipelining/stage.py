@@ -586,9 +586,9 @@ class _PipelineStageBase(ABC):
         # PP scales only for its own contribution (microbatches), but relies on DP to scale further
         # for DP degree.
         if grad_scale_factor != 1:
-            for name, p in self.submod.named_parameters():
-                assert p.grad is not None, name
-                p.grad.div_(grad_scale_factor)
+            for p in self.submod.parameters():
+                if p.grad is not None:
+                    p.grad.div_(grad_scale_factor)
 
     def backward_maybe_with_nosync(
         self,
@@ -1385,7 +1385,6 @@ class PipelineStage(_PipelineStageBase):
 
         # set attributes needed for forward
         with torch.no_grad():
-            logger.debug("Shape inference: stage %s running forward", self.stage_index)
             outputs = self.submod(*args, **kwargs)
 
         # if single tensor, convert so it is always a list
@@ -1397,6 +1396,12 @@ class PipelineStage(_PipelineStageBase):
         # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
         outputs_meta = tuple(
             tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        )
+        logger.debug(
+            "Shape inference: stage %s inputs %s, outputs %s",
+            self.stage_index,
+            self.inputs_meta,
+            outputs_meta,
         )
         self._configure_outputs_meta(outputs_meta)
 

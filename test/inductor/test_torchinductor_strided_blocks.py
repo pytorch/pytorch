@@ -609,6 +609,7 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
+    @config.patch("triton.cooperative_reductions", False)
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [

@@ -22,8 +22,11 @@ from torch.distributed.checkpoint import (
     load_state_dict,
     save_state_dict,
 )
+from torch.distributed.checkpoint._extension import ZStandard
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -34,6 +37,10 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     MyShardedModel1,
+)
+from torch.testing._internal.distributed.checkpoint_utils import (
+    get_test_extension_registry,
+    Rot13Example,
 )
 
 
@@ -159,7 +166,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    def test_read_write_shard_tensor(self) -> None:
+    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
+    def test_read_write_shard_tensor(self, extensions) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -180,7 +188,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(path=path)
+        fs_writer = FileSystemWriter(path=path, _extensions=extensions)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         dist.barrier()
@@ -198,7 +206,9 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
-        fs_reader = FileSystemReader(path=path)
+        fs_reader = FileSystemReader(
+            path=path, _extension_registry=get_test_extension_registry()
+        )
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
@@ -493,6 +503,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
 
+
+instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 
 if __name__ == "__main__":
     run_tests()
