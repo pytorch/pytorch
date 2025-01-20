@@ -4,7 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -47,7 +47,7 @@ class ExtraOpData:
     # Returns: tuple of (single dim argname if available, dim list argname if available)
     # If the op doesn't support dim-related args at all OR this op only has overloads
     # with multiple dim args (e.g. transpose()), then this returns (None, None).
-    def get_dim_argnames(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_dim_argnames(self) -> tuple[Optional[str], Optional[str]]:
         if self.dim_args is None:
             return (None, None)
 
@@ -226,7 +226,7 @@ def _raggedness_matches(nt1, nt2):
 # as this causes autograd problems.
 def _clone(t):
     requires_grad = t.requires_grad
-    return t.clone().detach().requires_grad_(requires_grad)
+    return t.detach().clone().requires_grad_(requires_grad)
 
 
 # Helper function to update a sample with new kwargs / name
@@ -831,7 +831,7 @@ def batchwise_reference_chunk(op, sample):
         start += chunk_size
 
     # rejoin into NJT outputs
-    return [torch.nested.nested_tensor(lst, layout=torch.jagged) for lst in chunks]
+    return [torch.nested.as_nested_tensor(lst, layout=torch.jagged) for lst in chunks]
 
 
 def batchwise_reference_narrow(op, sample):
@@ -1217,6 +1217,41 @@ def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **
         )
 
 
+def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
+    ):
+        # Second dim is interpreted as number of channels; this should be non-ragged for now
+        num_channels = njt.size(1)
+        if is_nested_int(num_channels):
+            continue
+
+        # 1D weight
+        weight = torch.randn(
+            num_channels,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+        yield SampleInput(
+            _clone(njt),
+            kwargs={
+                "weight": _clone(weight),
+            },
+            name=f"{_describe_njt(njt)}: 1D weight",
+        )
+
+        # scalar tensor weight
+        yield SampleInput(
+            _clone(njt),
+            kwargs={
+                "weight": torch.tensor(4.2, device=device, dtype=dtype),
+            },
+            name=f"{_describe_njt(njt)}: scalar tensor weight",
+        )
+
+
 def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -1316,10 +1351,10 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
         # non-contiguous transposed
         yield njt.transpose(1, 3)
         # non-contiguous with holes
-        values = njt.values().clone().detach()
-        offsets = njt.offsets().clone().detach()
+        values = njt.values().detach().clone()
+        offsets = njt.offsets().detach().clone()
         # subtract 1 to cause holes
-        lengths = (offsets.diff() - 1).clone().detach()
+        lengths = (offsets.diff() - 1).detach().clone()
         yield torch.nested.nested_tensor_from_jagged(
             values=values,
             offsets=offsets,
@@ -1412,6 +1447,7 @@ njt_sample_inputs = {
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
     "nn.functional.linear": sample_inputs_nn_functional_linear,
+    "nn.functional.prelu": sample_inputs_nn_functional_prelu,
     "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},

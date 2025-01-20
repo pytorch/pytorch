@@ -129,6 +129,7 @@ factory_common_args = merge_dicts(
 factory_like_common_args = parse_kwargs(
     """
     input (Tensor): the size of :attr:`input` will determine size of the output tensor.
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
         Default: if ``None``, defaults to the layout of :attr:`input`.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
@@ -8816,8 +8817,9 @@ Example::
 
 add_docstr(
     torch.rand_like,
-    r"""
-rand_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+    """
+rand_like(input, *, generator=None, dtype=None, layout=None, device=None, requires_grad=False, \
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -8828,6 +8830,7 @@ Args:
     {input}
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -8888,7 +8891,7 @@ Example::
 add_docstr(
     torch.randint_like,
     """
-randint_like(input, low=0, high, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randint_like(input, low=0, high, \\*, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
@@ -8905,6 +8908,7 @@ Args:
     high (int): One above the highest integer to be drawn from the distribution.
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -8972,8 +8976,9 @@ Example::
 
 add_docstr(
     torch.randn_like,
-    r"""
-randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+    """
+randn_like(input, *, generator=None, dtype=None, layout=None, device=None, requires_grad=False, \
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
@@ -8984,6 +8989,7 @@ Args:
     {input}
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -9034,8 +9040,8 @@ Constructs a tensor with no autograd history (also known as a "leaf tensor", see
     When working with tensors prefer using :func:`torch.Tensor.clone`,
     :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    ``t.detach().clone()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.detach().clone().requires_grad_(True)``.
 
 .. seealso::
 
@@ -13215,7 +13221,8 @@ Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
-the correct task sequencing.
+the correct task sequencing. It supports with statement as a context manager to ensure the operators
+within the with block are running on the corresponding stream.
 
 See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
 on the exact semantic that applies to all devices.
@@ -13232,7 +13239,10 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
+    >>> with torch.Stream(device='cuda') as s_cuda:
+    >>>     a = torch.randn(10, 5, device='cuda')
+    >>>     b = torch.randn(5, 10, device='cuda')
+    >>>     c = torch.mm(a, b)
 """,
 )
 
