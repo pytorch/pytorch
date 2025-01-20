@@ -1248,7 +1248,6 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
-        "include/c10/metal/*.h",
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 import sympy
 
@@ -77,12 +77,12 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
 
 
 def signature_to_meta(
-    signature: list[KernelArgType],
+    signature: List[KernelArgType],
     *,
     size_dtype: Optional[str],
-    argdefs: list[str],
-    indices: Optional[list[int]] = None,
-) -> dict[str, str]:
+    argdefs: List[str],
+    indices: Optional[List[int]] = None,
+) -> Dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {
@@ -119,9 +119,9 @@ def is_unaligned_buffer(arg: TensorArg):
 
 
 def config_of(
-    args: list[KernelArgType],
+    args: List[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: Optional[List[int]] = None,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))

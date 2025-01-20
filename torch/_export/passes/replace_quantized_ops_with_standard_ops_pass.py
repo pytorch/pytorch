@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.export._trace
@@ -269,9 +269,9 @@ def _conv1d_op_with_squeeze(
     inp: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor],
-    stride: list[int],
-    padding: list[int],
-    dilation: list[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
     groups: int,
 ) -> torch.Tensor:
     # In quantized version, conv1d is emulated using conv2d with squeeze and unsqueeze

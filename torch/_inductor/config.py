@@ -1,11 +1,21 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import Config, get_tristate_env, install_config_module
+from torch.utils._config_module import get_tristate_env, install_config_module
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -183,8 +193,8 @@ pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: Optional[
     Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
+        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+        List["torch._inductor.scheduler.BaseSchedulerNode"],
     ]
 ] = None
 
@@ -221,11 +231,11 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: dict[str, dict[str, Any]] = {}
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -247,7 +257,7 @@ use_mixed_mm = True
 # floating point numbers,about 16 decimal digits for double precision floating point numbers)
 # according to PyTorch documentation.
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
-fx_passes_numeric_check: dict[str, Any] = {
+fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
@@ -277,12 +287,12 @@ reorder_for_compute_comm_overlap = False
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
-reorder_for_compute_comm_overlap_passes: list[
+reorder_for_compute_comm_overlap_passes: List[
     Union[
         str,
         Callable[
-            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-            list["torch._inductor.scheduler.BaseSchedulerNode"],
+            [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+            List["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
 ] = [
@@ -305,16 +315,6 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
-
-# use Inductor's experimental benchmarker (runtime/benchmarking.py)
-# to benchmark kernels during autotuning, otherwise fall back to
-# Triton's `do_bench`. the experimental benchmarker may produce
-# results that are not consistent with `do_bench`'s results
-use_experimental_benchmarker: bool = Config(
-    default=True,
-    env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER",
-    justknob="pytorch/inductor:use_experimental_benchmarker",
-)
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -608,7 +608,7 @@ _fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-_fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
+_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
@@ -842,7 +842,7 @@ class cpp:
     simdlen: Optional[int] = None
     min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
 
-    cxx: tuple[Literal[None], str] = (
+    cxx: Tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
     )  # type: ignore[assignment]
@@ -1107,12 +1107,6 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
-    # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to skip cpp compiler optimizations for faster compilation.
-    compile_wrapper_with_O0 = (
-        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
-    )
-
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
@@ -1147,7 +1141,7 @@ class aot_inductor:
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
-    metadata: dict[str, str] = {}
+    metadata: Dict[str, str] = {}
 
     # fbcode only. Whether to raise error if C++ codegen is too big to optimize
     raise_error_on_ignored_optimization: bool = (
@@ -1158,7 +1152,7 @@ class aot_inductor:
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
     # Dictionary of presets that can be passed in
-    presets: dict[str, Any] = {}
+    presets: Dict[str, Any] = {}
 
     # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
     # should be run with this flag both on and off to make sure we have coverage.
@@ -1249,17 +1243,17 @@ class cuda:
     # Set this to "pingpong" to avoid numerical issues
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
-    cutlass_op_denylist_regex: Optional[str] = None
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
-    arch: list[str] = []
+    arch: List[str] = []
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: list[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance.
     # The type will not necessarily be comprehensive and won't be enforced at runtime.
@@ -1405,7 +1399,7 @@ class trace:
     log_inductor_triton_kernel_to_post_grad_node_info: bool = True
 
 
-_save_config_ignore: list[str] = [
+_save_config_ignore: List[str] = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
     "joint_custom_pre_pass",
@@ -1413,7 +1407,7 @@ _save_config_ignore: list[str] = [
     "pre_grad_custom_pass",
 ]
 
-_cache_config_ignore_prefix: list[str] = [
+_cache_config_ignore_prefix: List[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
@@ -1429,7 +1423,7 @@ _cache_config_ignore_prefix: list[str] = [
 ]
 
 # External callable for matmul tuning candidates
-external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
 class test_configs:

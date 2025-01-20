@@ -1,8 +1,8 @@
 import dataclasses
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 
-all_experiments: dict[str, Callable] = {}
+all_experiments: Dict[str, Callable] = {}
 
 
 @dataclasses.dataclass

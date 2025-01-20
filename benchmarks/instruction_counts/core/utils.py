@@ -3,7 +3,7 @@ import atexit
 import re
 import shutil
 import textwrap
-from typing import Optional
+from typing import List, Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
@@ -70,7 +70,7 @@ def parse_stmts(stmts: str) -> tuple[str, str]:
       - The column separator is " | ", not "|". Whitespace matters.
     """
     stmts = textwrap.dedent(stmts).strip()
-    lines: list[str] = stmts.splitlines(keepends=False)
+    lines: List[str] = stmts.splitlines(keepends=False)
     assert len(lines) >= 3, f"Invalid string:\n{stmts}"
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
@@ -87,8 +87,8 @@ def parse_stmts(stmts: str) -> tuple[str, str]:
 
     assert re.search(separation_pattern, lines[1])
 
-    py_lines: list[str] = []
-    cpp_lines: list[str] = []
+    py_lines: List[str] = []
+    cpp_lines: List[str] = []
     for l in lines[2:]:
         l_match = re.search(code_pattern, l)
         if l_match is None:

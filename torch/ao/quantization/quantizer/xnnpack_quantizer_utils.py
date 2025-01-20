@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
-import typing
 from dataclasses import dataclass
-from typing import Callable, NamedTuple, Optional
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
@@ -54,8 +53,7 @@ class QuantizationConfig:
     is_qat: bool = False
 
 
-# Use Annotated because list[Callable].__module__ is read-only.
-OperatorPatternType = typing.Annotated[list[Callable], None]
+OperatorPatternType = List[Callable]
 OperatorPatternType.__module__ = (
     "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
 )
@@ -66,9 +64,9 @@ AnnotatorType = Callable[
         Optional[QuantizationConfig],
         Optional[Callable[[Node], bool]],
     ],
-    Optional[list[list[Node]]],
+    Optional[List[List[Node]]],
 ]
-OP_TO_ANNOTATOR: dict[str, AnnotatorType] = {}
+OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
 
 
 def register_annotator(op: str) -> Callable[[AnnotatorType], None]:
@@ -88,10 +86,10 @@ class OperatorConfig(NamedTuple):
     # Note this pattern is not really informative since it does not really
     # tell us the graph structure resulting from the list of ops.
     config: QuantizationConfig
-    operators: list[OperatorPatternType]
+    operators: List[OperatorPatternType]
 
 
-def _is_annotated(nodes: list[Node]):
+def _is_annotated(nodes: List[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     check if any of the node is annotated, return True if any of the node
@@ -106,7 +104,7 @@ def _is_annotated(nodes: list[Node]):
     return annotated
 
 
-def _mark_nodes_as_annotated(nodes: list[Node]):
+def _mark_nodes_as_annotated(nodes: List[Node]):
     for node in nodes:
         if node is not None:
             if "quantization_annotation" not in node.meta:
@@ -176,7 +174,7 @@ def _annotate_linear(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
@@ -224,7 +222,7 @@ def _annotate_linear_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
@@ -290,7 +288,7 @@ def _annotate_conv(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for n in gm.graph.nodes:
         if n.op != "call_function" or n.target not in [
@@ -398,7 +396,7 @@ def _annotate_conv_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     return _do_annotate_conv_relu(
         gm, quantization_config, filter_fn, is_conv_transpose=False
     )
@@ -409,7 +407,7 @@ def _annotate_conv_transpose_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     return _do_annotate_conv_relu(
         gm, quantization_config, filter_fn, is_conv_transpose=True
     )
@@ -420,7 +418,7 @@ def _annotate_conv_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     """
     Find conv + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -433,7 +431,7 @@ def _annotate_conv_bn_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     """
     Find conv + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -446,7 +444,7 @@ def _annotate_conv_transpose_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     """
     Find conv_transpose + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -461,7 +459,7 @@ def _annotate_conv_transpose_bn_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     """
     Find conv_transpose + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -477,7 +475,7 @@ def _do_annotate_conv_bn(
     filter_fn: Optional[Callable[[Node], bool]],
     has_relu: bool,
     is_conv_transpose: bool = False,
-) -> list[list[Node]]:
+) -> List[List[Node]]:
     """
     Given a function that takes in a `conv_fn` and returns a conv-bn[-relu] pattern,
     return a list of annotated partitions.
@@ -616,7 +614,7 @@ def _annotate_gru_io_only(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU], filter_fn)
     gru_partitions = list(itertools.chain.from_iterable(gru_partitions.values()))
     annotated_partitions = []
@@ -667,7 +665,7 @@ def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     """Always annotate adaptive_avg_pool2d op"""
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d], filter_fn
@@ -741,7 +739,7 @@ def _annotate_add_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -816,7 +814,7 @@ def _annotate_add(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -869,7 +867,7 @@ def _annotate_mul_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -943,7 +941,7 @@ def _annotate_mul(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -997,7 +995,7 @@ def _annotate_cat(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+) -> Optional[List[List[Node]]]:
     cat_partitions = get_source_partitions(gm.graph, [torch.cat], filter_fn)
     cat_partitions = list(itertools.chain.from_iterable(cat_partitions.values()))
     annotated_partitions = []

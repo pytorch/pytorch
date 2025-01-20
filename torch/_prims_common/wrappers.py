@@ -2,7 +2,6 @@
 import inspect
 import warnings
 from functools import wraps
-from types import GenericAlias
 from typing import (
     Callable,
     List,
@@ -263,15 +262,6 @@ def out_wrapper(
         out_type = (
             TensorLikeType
             if is_tensor
-            else GenericAlias(
-                tuple, tuple(TensorLikeType for _ in range(len(out_names)))
-            )
-        )
-        # For backward compatibility - should be able to remove once PEP585
-        # conversion is complete.
-        bc_out_type = (
-            TensorLikeType
-            if is_tensor
             else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
         )
         return_type = (
@@ -311,12 +301,12 @@ def out_wrapper(
             assert (
                 (isinstance(result, TensorLike) and is_tensor)
                 or (
-                    isinstance(result, tuple)  # type: ignore[arg-type]
+                    isinstance(result, Tuple)  # type: ignore[arg-type]
                     and len(result) == len(out_names)  # type: ignore[arg-type]
                 )
                 or (
                     fn.__name__ == "unbind"
-                    and isinstance(result, (List, tuple))  # type: ignore[arg-type]
+                    and isinstance(result, (List, Tuple))  # type: ignore[arg-type]
                 )
             )
             # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
@@ -346,9 +336,9 @@ def out_wrapper(
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     if fn.__name__ != "unbind":
-                        assert isinstance(out, tuple)  # type: ignore[arg-type]
+                        assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     else:
-                        assert isinstance(out, (list, tuple))  # type: ignore[arg-type]
+                        assert isinstance(out, (List, Tuple))  # type: ignore[arg-type]
                     torch._check_type(
                         len(out) == len(result),  # type: ignore[arg-type]
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]
@@ -372,7 +362,6 @@ def out_wrapper(
         assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
             sig.empty,
             out_type,
-            bc_out_type,
         )
         params = *sig.parameters.values(), out_param
 

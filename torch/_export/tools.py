@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import warnings
-from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 import torch.export
@@ -19,8 +18,8 @@ def _generate_inputs_for_submodules(
     model: torch.nn.Module,
     target_submodules: Iterable[str],
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
-) -> dict[str, tuple[Any, Any]]:
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, tuple[Any, Any]]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -62,11 +61,11 @@ def _generate_inputs_for_submodules(
 def report_exportability(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     strict: bool = True,
     pre_dispatch: bool = False,
-) -> dict[str, Optional[Exception]]:
+) -> Dict[str, Optional[Exception]]:
     """
     Report exportability issues for a module in one-shot.
 
@@ -93,7 +92,7 @@ def report_exportability(
     submod_inputs = _generate_inputs_for_submodules(mod, all_submod_names, args, kwargs)
 
     tried_module_types = set()
-    report: dict[str, Optional[Exception]] = {}
+    report: Dict[str, Optional[Exception]] = {}
 
     def try_export(module, module_name, args, kwargs):
         nonlocal submod_inputs, report, strict, pre_dispatch, tried_module_types

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Sequence, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor

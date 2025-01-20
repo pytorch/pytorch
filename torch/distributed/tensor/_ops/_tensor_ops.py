@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence, Sized
-from typing import cast, Optional
+from typing import cast, List, Optional, Sequence, Sized
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -466,7 +465,7 @@ def _derive_follow_placements_from_tuple_strategy(
             # current replicate, just follow new placement
             return new_placement
 
-    follow_placements: Optional[list[Placement]] = None
+    follow_placements: Optional[List[Placement]] = None
     for arg_strategy in tuple_strategy.childs:
         assert isinstance(arg_strategy, OpStrategy)
         for placement_strategy in arg_strategy.strategies:
@@ -490,7 +489,7 @@ def normalize_shard_for_stack(
 ) -> Sequence[Placement]:
     # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
     # be normalized with the new Shard placement
-    normalized_placements: list[Placement] = []
+    normalized_placements: List[Placement] = []
     for placement in placements:
         if isinstance(placement, Shard) and placement.dim >= insert_dim:
             normalized_placements.append(Shard(placement.dim + 1))
@@ -576,7 +575,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(dim, int)
     assert isinstance(indices_spec, DTensorSpec)
 
-    all_indices_spec: list[Optional[DTensorSpec]] = [
+    all_indices_spec: List[Optional[DTensorSpec]] = [
         indices_spec if dim == i else None for i in range(values_spec.ndim)
     ]
 
@@ -621,8 +620,8 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     values_spec, multi_indices_spec = op_schema.args_schema
     assert isinstance(values_spec, DTensorSpec)
     assert isinstance(multi_indices_spec, list)
-    multi_indices_spec = cast(list[Optional[DTensorSpec]], multi_indices_spec)
-    valid_indices_spec: list[tuple[int, DTensorSpec]] = [
+    multi_indices_spec = cast(List[Optional[DTensorSpec]], multi_indices_spec)
+    valid_indices_spec: List[tuple[int, DTensorSpec]] = [
         (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
     ]
 
@@ -732,7 +731,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     schema_info=RuntimeSchemaInfo(1),
 )
 def split_rule(op_schema: OpSchema) -> OutputSharding:
-    output_spec_list: list[DTensorSpec] = []
+    output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
     ndim = input_spec.ndim
     split_size_or_sections = op_schema.args_schema[1]
@@ -770,7 +769,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
             ),
         )
 
-    def size_split(N, i) -> list:
+    def size_split(N, i) -> List:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
         assert i > 0

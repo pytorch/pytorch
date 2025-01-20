@@ -10,10 +10,19 @@ import os
 import queue
 import time
 import warnings
-from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -387,8 +396,8 @@ class TuningProcessPool:
 
     def benchmark(
         self,
-        choices: list[TritonTemplateCaller],
-    ) -> dict[TritonTemplateCaller, float]:
+        choices: List[TritonTemplateCaller],
+    ) -> Dict[TritonTemplateCaller, float]:
         """
         Benchmark each choice in a separate process.
         """
@@ -423,9 +432,9 @@ class TensorMeta:
     @classmethod
     def from_irnodes(
         cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
-    ) -> Union[TensorMeta, list[TensorMeta]]:
+    ) -> Union[TensorMeta, List[TensorMeta]]:
         if isinstance(irnodes, Sequence):
-            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
+            result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
 
@@ -479,8 +488,8 @@ class BenchmarkRequest:
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
     ) -> None:
         # the kernel name defined in the module
@@ -631,12 +640,12 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
-        grid: list[int],
+        grid: List[int],
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
@@ -761,8 +770,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
@@ -880,8 +889,8 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
@@ -937,8 +946,8 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
 
 
 def benchmark_in_sub_process(
-    choices: list[TritonTemplateCaller],
-) -> dict[TritonTemplateCaller, float]:
+    choices: List[TritonTemplateCaller],
+) -> Dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """

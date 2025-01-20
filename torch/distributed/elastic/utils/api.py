@@ -9,7 +9,7 @@
 import os
 import socket
 from string import Template
-from typing import Any
+from typing import Any, List
 
 
 def get_env_variable_or_raise(env_name: str) -> str:
@@ -51,7 +51,7 @@ class macros:
     local_rank = "${local_rank}"
 
     @staticmethod
-    def substitute(args: list[Any], local_rank: str) -> list[str]:
+    def substitute(args: List[Any], local_rank: str) -> List[str]:
         args_sub = []
         for arg in args:
             if isinstance(arg, str):

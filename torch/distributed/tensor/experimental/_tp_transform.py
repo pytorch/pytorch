@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import operator
-from collections.abc import Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast, Dict, List, Optional, Sequence
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -37,7 +36,7 @@ def tensor_parallel_transformation(
     rank: int,
     world_size: int,
     device_type: str,
-    parallel_strategies: dict[str, ParallelStyle],
+    parallel_strategies: Dict[str, ParallelStyle],
 ) -> ExportedProgram:
     """
     The entry point function to perform graph transformations on an exported program
@@ -78,14 +77,14 @@ class _TensorParallelTransformPass(PassBase):
         rank: int,
         world_size: int,
         device_type: str,
-        state_dict: dict[str, torch.Tensor],
+        state_dict: Dict[str, torch.Tensor],
         graph_signature: ExportGraphSignature,
-        parallel_strategies: dict[str, ParallelStyle],
+        parallel_strategies: Dict[str, ParallelStyle],
     ) -> None:
         super().__init__()
         self.rank = rank
         self.mesh = DeviceMesh(device_type, torch.arange(world_size))
-        self.state_dict: dict[str, torch.Tensor] = state_dict
+        self.state_dict: Dict[str, torch.Tensor] = state_dict
         self.graph_signature = graph_signature
         self.parallel_strategies = parallel_strategies
 
@@ -106,13 +105,13 @@ class _TensorParallelTransformPass(PassBase):
 
 
 def _generate_parameter_and_buffer_placements(
-    params_and_buffers: list[str],
-    parallel_strategies: dict[str, ParallelStyle],
-) -> dict[str, Placement]:
+    params_and_buffers: List[str],
+    parallel_strategies: Dict[str, ParallelStyle],
+) -> Dict[str, Placement]:
     """
     Build parameter placements based on the give parallel style of linear layers.
     """
-    parameter_placements: dict[str, Placement] = {}
+    parameter_placements: Dict[str, Placement] = {}
     for linear_fqn, parallel_style in parallel_strategies.items():
         weight_fqn = f"{linear_fqn}.weight"
         bias_fqn = f"{linear_fqn}.bias"
@@ -131,12 +130,12 @@ def _mark_tensor_parallel_shardings(
     gm: GraphModule,
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
-    parameter_placements: dict[str, Placement],
-) -> dict[Node, PlacementStrategy]:
+    parameter_placements: Dict[str, Placement],
+) -> Dict[Node, PlacementStrategy]:
     """
     Mark the placement strategies of the parameter and buffer placeholder nodes.
     """
-    placement_strategies: dict[Node, PlacementStrategy] = {}
+    placement_strategies: Dict[Node, PlacementStrategy] = {}
     num_params_and_buffers = len(graph_signature.inputs_to_parameters) + len(
         graph_signature.inputs_to_buffers
     )
@@ -183,12 +182,12 @@ def _mark_sharding(
     gm: GraphModule,
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
-    parameter_placements: dict[str, Placement],
-) -> dict[Node, PlacementStrategy]:
+    parameter_placements: Dict[str, Placement],
+) -> Dict[Node, PlacementStrategy]:
     """
     Mark the sharding strategy for each node in the graph module.
     """
-    placement_strategies: dict[
+    placement_strategies: Dict[
         Node, PlacementStrategy
     ] = _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
 
@@ -486,12 +485,12 @@ def _clean_up_graph_metadata(gm: torch.fx.GraphModule) -> None:
 
 
 def _get_input_node_specs(
-    node: Node, placement_strategies: dict[Node, PlacementStrategy]
+    node: Node, placement_strategies: Dict[Node, PlacementStrategy]
 ) -> tuple[DTensorSpec, ...]:
     """
     Get the input specs of a node.
     """
-    input_specs_list: list[DTensorSpec] = []
+    input_specs_list: List[DTensorSpec] = []
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
             output_spec = placement_strategies[input_arg].output_specs
@@ -503,7 +502,7 @@ def _get_input_node_specs(
 
 
 def _get_op_schema(
-    node: Node, placement_strategies: dict[Node, PlacementStrategy]
+    node: Node, placement_strategies: Dict[Node, PlacementStrategy]
 ) -> OpSchema:
     """
     Util function to construct the operator schema of a node.
@@ -514,14 +513,14 @@ def _get_op_schema(
     op_schema = OpSchema(
         op=cast(torch._ops.OpOverload, node.target),
         args_schema=tuple(args_schema_list),
-        kwargs_schema=cast(dict[str, object], node.kwargs),
+        kwargs_schema=cast(Dict[str, object], node.kwargs),
     )
     return op_schema
 
 
 def _shard_state_dict(
-    state_dict: dict[str, torch.Tensor],
-    placement_strategies: dict[Node, PlacementStrategy],
+    state_dict: Dict[str, torch.Tensor],
+    placement_strategies: Dict[Node, PlacementStrategy],
     graph_signature: ExportGraphSignature,
     mesh: DeviceMesh,
 ) -> None:

@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -10,7 +10,7 @@ disable_progress = True
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
-def get_loggers() -> list[logging.Logger]:
+def get_loggers() -> List[logging.Logger]:
     return [
         logging.getLogger("torch.fx.experimental.symbolic_shapes"),
         logging.getLogger("torch._dynamo"),

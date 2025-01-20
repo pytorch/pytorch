@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import Optional
+from typing import List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -26,9 +26,9 @@ class CUDATemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        input_nodes: list[Buffer],
+        input_nodes: List[Buffer],
         layout: Layout,
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: Optional[List[int]] = None,
     ) -> None:
         """
 
@@ -106,7 +106,7 @@ class CUDATemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[list[IRNode]] = None,
+            epilogue_nodes: Optional[List[IRNode]] = None,
         ):
             kernel = CUDATemplateKernel(
                 kernel_name="KERNEL_NAME",

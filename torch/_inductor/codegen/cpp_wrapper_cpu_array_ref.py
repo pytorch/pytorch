@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Callable, Optional
+from typing import Callable, Dict, List, Optional
 
 import sympy
 
@@ -60,7 +60,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation
-        self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
+        self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
     @staticmethod
     def create(
@@ -209,17 +209,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
-                run_impl_proto += """
+                run_impl_proto = """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -232,13 +222,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
-
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
                         __check_inputs_outputs(input_handles, output_handles);
                     """
-
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
                         """
@@ -372,7 +360,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
-    def generate_return(self, output_refs: list[str]):
+    def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
@@ -412,7 +400,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
 
-        output2idx: dict[str, int] = {}
+        output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -771,7 +759,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: list[str],
+        codegen_args: List[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -870,7 +858,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]

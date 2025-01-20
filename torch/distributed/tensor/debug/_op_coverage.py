@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from operator import itemgetter
+from typing import List
 
 import torch
 import torch.fx
@@ -12,7 +13,7 @@ from torch.distributed.tensor import DTensor
 
 inductor_decomps = select_decomp_table()
 
-graphs: list[torch.fx.GraphModule] = []
+graphs: List[torch.fx.GraphModule] = []
 
 
 def fwd_bwd_compiler(fx_g, _):

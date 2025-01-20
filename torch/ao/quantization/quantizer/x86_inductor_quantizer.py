@@ -3,9 +3,18 @@ import functools
 import itertools
 import operator
 import warnings
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 from typing_extensions import TypeAlias
 
 import torch
@@ -43,7 +52,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
 )
 
 
-FilterFn: TypeAlias = Callable[[list[Node]], bool]
+FilterFn: TypeAlias = Callable[[List[Node]], bool]
 
 
 if TYPE_CHECKING:
@@ -69,7 +78,7 @@ class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
 # Operators that:
 # 1. Operators are optimized to run with int8 when int8 input provided.
 # 2. Operators do not support int8 input and produce fp32 output.
-int8_in_int8_out_ops: set = {
+int8_in_int8_out_ops: Set = {
     torch.ops.aten.max_pool2d.default,
     torch.ops.aten.cat.default,
     torch.ops.aten.avg_pool2d.default,
@@ -97,7 +106,7 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
-def _skip_annotate(nodes: list[Node], filter_fn: Optional[FilterFn] = None) -> bool:
+def _skip_annotate(nodes: List[Node], filter_fn: Optional[FilterFn] = None) -> bool:
     """Determine whether to skip annotation for a list of nodes."""
 
     # 1) Skip annotate if any node is already annotated
@@ -129,7 +138,7 @@ def _create_module_name_filter(module_name: str) -> FilterFn:
 
     filter_fn = _get_module_name_filter(module_name)
 
-    def check_all_nodes_from_module(nodes: list[Node]) -> bool:
+    def check_all_nodes_from_module(nodes: List[Node]) -> bool:
         all_nodes_from_module_name: bool = all(filter_fn(n) for n in nodes)
         return all_nodes_from_module_name
 
@@ -153,7 +162,7 @@ def _create_operator_type_filter(
     # True  # These two nodes are determined by `_annotate_linear_unary` function and the second node is `linear`.
     """
 
-    def operator_type_filter(nodes: list[Node]):
+    def operator_type_filter(nodes: List[Node]):
         num_nodes_with_operator_type = sum(
             node.target == operator_type for node in nodes
         )
@@ -166,7 +175,7 @@ def _create_operator_type_filter(
     return operator_type_filter
 
 
-def _global_config_filter(nodes: list[Node]) -> bool:
+def _global_config_filter(nodes: List[Node]) -> bool:
     """Filter function for global configuration.
 
     This filter function takes a list of nodes and returns True if there is exactly one node
@@ -183,7 +192,7 @@ def _global_config_filter(nodes: list[Node]) -> bool:
 
 
 def _map_module_function_to_aten_operator_type():
-    module_function_to_aten_operator: dict[Callable, torch._ops.OpOverloadPacket] = {}
+    module_function_to_aten_operator: Dict[Callable, torch._ops.OpOverloadPacket] = {}
     map_list = (
         ([torch.nn.Conv2d, F.conv2d], torch.ops.aten.conv2d.default),
         ([torch.nn.Linear, F.linear], torch.ops.aten.linear.default),
@@ -217,7 +226,7 @@ def _map_module_function_to_aten_operator_type():
     return module_function_to_aten_operator
 
 
-def _mark_nodes_as_annotated(nodes: list[Node]):
+def _mark_nodes_as_annotated(nodes: List[Node]):
     for node in nodes:
         if node is not None:
             if QUANT_ANNOTATION_KEY not in node.meta:
@@ -235,7 +244,7 @@ def _is_node_annotated(_node):
     )
 
 
-def _is_any_annotated(nodes: list[Node]):
+def _is_any_annotated(nodes: List[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     check if any of the node is annotated, return True if any of the node
@@ -244,7 +253,7 @@ def _is_any_annotated(nodes: list[Node]):
     return any(_is_node_annotated(node) for node in nodes)
 
 
-def _is_all_annotated(nodes: list[Node]):
+def _is_all_annotated(nodes: List[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     return True if all of the node is annotated, otherwise return False.
@@ -275,7 +284,7 @@ def get_default_x86_inductor_quantization_config(
     """
     reduce_range is False by default. Set it to True on earlier CPUs without VNNI to avoid accuracy issue.
     """
-    extra_args: dict[str, Any] = {"eps": 2**-12}
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
@@ -351,7 +360,7 @@ def get_x86_inductor_linear_dynamic_fp16_config():
     return quantization_config
 
 
-def _annotate_nodes_not_quantize(nodes: Union[Node, list[Node]]) -> None:
+def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
     """Annotate nodes to exclude them from quantization (their `quantization_config` is `None`)."""
     if not isinstance(nodes, list):
         nodes = [nodes]
@@ -403,10 +412,10 @@ class X86InductorQuantizer(Quantizer):
     def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_qconfig: dict[
+        self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_name_qconfig: dict[str, Optional[QuantizationConfig]] = {}
+        self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
 
     def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""
@@ -627,8 +636,8 @@ class X86InductorQuantizer(Quantizer):
 
     def _get_output_nodes_of_partitions(
         self,
-        partition_list: list[SourcePartition],
-    ) -> list[torch.fx.Node]:
+        partition_list: List[SourcePartition],
+    ) -> List[torch.fx.Node]:
         """Helper function to get the output node list from partition list"""
         output_node_list = []
         for partition in partition_list:
@@ -1454,7 +1463,7 @@ class X86InductorQuantizer(Quantizer):
             torch.nn.Tanh,
             torch.nn.GELU,
         ]
-        fused_partitions: list[tuple] = []
+        fused_partitions: List[tuple] = []
         for postop in postop_list:
             fused_partitions = fused_partitions + find_sequential_partitions(
                 gm, [torch.nn.Linear, postop]

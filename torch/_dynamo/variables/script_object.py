@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
+from typing import Dict
 
 import torch
 
@@ -24,7 +25,7 @@ def _raise_hard_error_if_graph_break(reason):
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
-    _fake_script_object_cache: dict[int, "TorchScriptObjectVariable"] = {}
+    _fake_script_object_cache: Dict[int, "TorchScriptObjectVariable"] = {}
 
     @classmethod
     def is_matching_cls(cls, user_cls: type):

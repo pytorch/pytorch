@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 import torch
 
@@ -121,7 +121,7 @@ def install_storage_overlapping_guard(
 ): ...
 def profile_guard_manager(
     guard_manager: GuardManager,
-    f_locals: dict[str, Any],
+    f_locals: Dict[str, Any],
 ) -> float: ...
 
 class TensorGuards:

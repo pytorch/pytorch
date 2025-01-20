@@ -10,6 +10,7 @@ underlying benchmark generation infrastructure in the mean time.
 
 import argparse
 import sys
+from typing import List
 
 from applications import ci
 from core.expand import materialize
@@ -18,7 +19,7 @@ from execution.runner import Runner
 from execution.work import WorkOrder
 
 
-def main(argv: list[str]) -> None:
+def main(argv: List[str]) -> None:
     work_orders = tuple(
         WorkOrder(label, autolabels, timer_args, timeout=600, retries=2)
         for label, autolabels, timer_args in materialize(BENCHMARKS)

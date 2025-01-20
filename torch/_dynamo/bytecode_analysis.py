@@ -3,7 +3,7 @@ import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Union
+from typing import Any, Set, Union
 
 
 TERMINAL_OPCODES = {
@@ -12,7 +12,8 @@ TERMINAL_OPCODES = {
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
 }
-TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+if sys.version_info >= (3, 9):
+    TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
@@ -132,9 +133,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: set[Any]
-    writes: set[Any]
-    visited: set[Any]
+    reads: Set[Any]
+    writes: Set[Any]
+    visited: Set[Any]
 
 
 def livevars_analysis(instructions, instruction):

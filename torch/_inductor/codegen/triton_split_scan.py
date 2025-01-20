@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Dict
 
 import sympy
 
@@ -31,7 +32,7 @@ class TritonSplitScanKernel(TritonKernel):
 
     def __init__(
         self,
-        tiling: dict[str, sympy.Expr],
+        tiling: Dict[str, sympy.Expr],
         pid_cache=None,
         fixed_config=None,
         **kwargs,

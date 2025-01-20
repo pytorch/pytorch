@@ -134,13 +134,15 @@ class MetalOverrides(OpOverrides):
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"c10::metal::max({typecast_a}, {typecast_b})"
+        max_res = f"metal::max({typecast_a}, {typecast_b})"
+        return f"isnan({a} + {b}) ? {a} + {b} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
-        return f"c10::metal::min({typecast_a}, {typecast_b})"
+        min_res = f"metal::min({typecast_a}, {typecast_b})"
+        return f"isnan({a} + {b})  ? {a} + {b} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -181,18 +183,6 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
-
-    @staticmethod
-    def i0(x: CSEVariable) -> str:
-        return f"c10::metal::i0({x})"
-
-    @staticmethod
-    def i1(x: CSEVariable) -> str:
-        return f"c10::metal::i1({x})"
-
-    @staticmethod
-    def erf(x: CSEVariable) -> str:
-        return f"c10::metal::erf({x})"
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
@@ -323,8 +313,12 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
-            #include <c10/metal/special_math.h>
-            #include <c10/metal/utils.h>
+            template<typename T> inline bool isnan(T) { return false; }
+            template<> inline bool isnan(float x) { return metal::isnan(x); }
+            template<> inline bool isnan(half x) { return metal::isnan(x); }
+            #if __METAL_VERSION__ >= 310
+            template<> inline bool isnan(bfloat x) { return metal::isnan(x); }
+            #endif
             """,
                 strip=True,
             )

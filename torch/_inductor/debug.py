@@ -12,8 +12,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from collections.abc import Iterator
-from typing import Any, Callable, IO, Optional, Union
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -40,7 +39,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-SchedulerNodeList = list[Any]
+SchedulerNodeList = List[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
@@ -55,7 +54,7 @@ def has_dot() -> bool:
 
 
 def draw_buffers(
-    nodes: list[BaseSchedulerNode],
+    nodes: List[BaseSchedulerNode],
     print_graph: bool = False,
     fname: Optional[str] = None,
 ) -> None:
@@ -100,7 +99,7 @@ def draw_buffers(
     )
 
 
-def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
@@ -200,7 +199,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
 
 def update_orig_fx_node_name_to_buf_name(
     nodes: Optional[SchedulerNodeList],
-    node_name_to_buf_name: dict[str, str],
+    node_name_to_buf_name: Dict[str, str],
     parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
 ) -> None:
@@ -234,8 +233,8 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: dict[str, str]
-) -> dict[str, BufMeta]:
+    node_name_to_buf_name: Dict[str, str]
+) -> Dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
@@ -257,7 +256,7 @@ def annotate_orig_fx_with_snodes(
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
-    node_name_to_buf_name: dict[str, str] = {}
+    node_name_to_buf_name: Dict[str, str] = {}
     update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
     if node_name_to_buf_name is None:
         return
@@ -310,7 +309,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
-    _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
+    _inductor_triton_kernel_to_post_grad_node_info: Dict[str, List[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -426,7 +425,7 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
+        exc_type: Optional[Type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[Any],
     ) -> None:
@@ -475,7 +474,7 @@ class DebugFormatter:
     def fx_graph(
         self,
         gm: torch.fx.GraphModule,
-        inputs: list[torch.Tensor],
+        inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_dir = None
@@ -505,7 +504,7 @@ class DebugFormatter:
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
-        inputs: list[torch.Tensor],
+        inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -558,14 +557,14 @@ class DebugFormatter:
     def log_autotuning_results(
         self,
         name: str,
-        input_nodes: list[ir.IRNode],
-        timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        input_nodes: List[ir.IRNode],
+        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
     ) -> None:
         from .ir import FixedLayout
 
-        def build_node_info(node: ir.IRNode) -> dict[str, str]:
+        def build_node_info(node: ir.IRNode) -> Dict[str, str]:
             if hasattr(node, "name"):
                 node_name = node.name
             else:
@@ -726,7 +725,7 @@ def aot_inductor_minifier_wrapper(
     func: Callable[..., str],
     exported_program: torch.export.ExportedProgram,
     *,
-    inductor_configs: dict[str, Any],
+    inductor_configs: Dict[str, Any],
     package_path: Optional[Union[str, io.BytesIO]] = None,
 ) -> str:
     from torch._inductor import config

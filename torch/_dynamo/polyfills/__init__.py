@@ -8,9 +8,8 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
-from collections.abc import MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, TYPE_CHECKING
+from typing import Any, Callable, List, Sequence, TYPE_CHECKING
 
 import torch
 
@@ -149,7 +148,7 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
 
 def foreach_map_fn(*args):
     op = args[0]
-    new_args: list[Any] = []
+    new_args: List[Any] = []
     at_least_one_list = False
     for arg in args[1:]:
         if not isinstance(arg, (list, tuple)):

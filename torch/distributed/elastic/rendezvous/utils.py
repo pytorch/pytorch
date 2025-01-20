@@ -13,20 +13,20 @@ import time
 import weakref
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 
 __all__ = ["parse_rendezvous_endpoint"]
 
 
-def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
+def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
     """Extract key-value pairs from a rendezvous configuration string.
 
     Args:
         config_str:
             A string in format <key1>=<value1>,...,<keyN>=<valueN>.
     """
-    config: dict[str, str] = {}
+    config: Dict[str, str] = {}
 
     config_str = config_str.strip()
     if not config_str:
@@ -196,7 +196,7 @@ class _PeriodicTimer:
         interval: float
         function: Callable[..., None]
         args: tuple[Any, ...]
-        kwargs: dict[str, Any]
+        kwargs: Dict[str, Any]
         stop_event: Event
 
     _name: Optional[str]

@@ -14,7 +14,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -273,7 +273,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
-        self.dispatch_table: dict
+        self.dispatch_table: Dict
         self.dispatch_table.update(
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
@@ -313,7 +313,7 @@ def autograd_cache_key(
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
-) -> tuple[str, list[str]]:
+) -> Tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -399,7 +399,7 @@ class CompiledBackward(FXGraphCacheLoadable):
     """
 
     # Used by AOTDispatchAutograd.post_compile
-    backward_state_indices: list[int]
+    backward_state_indices: List[int]
     num_symints_saved_for_bw_: int
 
     def is_backward(self):
@@ -424,14 +424,14 @@ class AOTAutogradCacheEntry:
     runtime_metadata: ViewAndMutationMeta
 
     # Wrappers that run after each aot_dispatch_* function
-    dispatch_wrappers: list[CompilerWrapper]
+    dispatch_wrappers: List[CompilerWrapper]
 
     # Used by AOTSubclassWrapper
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
 
     # Used by RuntimeWrapepr
-    indices_of_inps_to_detach: list[int]
+    indices_of_inps_to_detach: List[int]
 
     # Time taken to trace/compile the forward
     # forward_time_taken includes AOTAutograd tracing time + inductor compilation time
@@ -442,7 +442,7 @@ class AOTAutogradCacheEntry:
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
-        args: list[torch.Tensor],
+        args: List[torch.Tensor],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
     ) -> Callable:
@@ -675,9 +675,9 @@ class AOTAutogradCache:
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         with sanitize_gm_for_cache(gm):
             compiled_fn = None
-            cache_info: dict[str, Any] = {}
+            cache_info: Dict[str, Any] = {}
             cache_key = None
-            debug_lines: list[str] = []
+            debug_lines: List[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
             fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}

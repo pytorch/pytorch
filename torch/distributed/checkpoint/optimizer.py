@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from collections.abc import Sequence
-from typing import cast, Optional, Union
+from typing import cast, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.distributed as dist
@@ -42,7 +41,7 @@ from torch.distributed.remote_device import _remote_device
 from torch.distributed.tensor import DTensor
 
 
-STATE_DICT_2D_LAYOUT = dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
+STATE_DICT_2D_LAYOUT = Dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
 
 
 # TODO: Update docstrings for optimizer.py
@@ -78,7 +77,7 @@ def _create_colwise_spec(
         ]
     return ChunkShardingSpec(
         dim=0,
-        placements=cast(list[Union[_remote_device, str]], placements),
+        placements=cast(List[Union[_remote_device, str]], placements),
     )
 
 
@@ -155,11 +154,11 @@ def _get_state_dict_2d_layout(
 
 
 class _ReaderWithOffset(DefaultLoadPlanner):
-    translation: dict[MetadataIndex, MetadataIndex]
+    translation: Dict[MetadataIndex, MetadataIndex]
     state_dict: STATE_DICT_TYPE
     metadata: Metadata
 
-    def __init__(self, fqn_to_offset: dict[str, Sequence[int]]) -> None:
+    def __init__(self, fqn_to_offset: Dict[str, Sequence[int]]) -> None:
         super().__init__()
         self.fqn_to_offset = fqn_to_offset
         self.metadata = Metadata({})
@@ -285,7 +284,7 @@ def load_sharded_optimizer_state_dict(
     # Create a state_dict for optimizer state
     state_dict: STATE_DICT_TYPE = {}
 
-    fqn_to_offset: dict[str, Sequence[int]] = {}
+    fqn_to_offset: Dict[str, Sequence[int]] = {}
     for key, value in metadata.state_dict_metadata.items():
         key_path = metadata.planner_data[key]
         if key_path[0] != optimizer_key:

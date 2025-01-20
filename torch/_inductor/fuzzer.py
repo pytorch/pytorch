@@ -6,17 +6,21 @@ import signal
 import string
 import sys
 import traceback
-from collections.abc import KeysView
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
 from typing import (
     Any,
     Callable,
+    Dict,
     get_args,
     get_origin,
+    KeysView,
+    List,
     Literal,
     Optional,
+    Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -88,14 +92,14 @@ class TypeExemplars:
     }
 
     @staticmethod
-    def example(t: type[T]) -> Optional[T]:
+    def example(t: Type[T]) -> Optional[T]:
         """
         Return an example of a class.
         """
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
-    def contains(t: type[T]) -> bool:
+    def contains(t: Type[T]) -> bool:
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -132,7 +136,7 @@ class Status(Enum):
 
 # Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
-TYPE_OVERRIDES: dict[str, list[Any]] = {
+TYPE_OVERRIDES: Dict[str, List[Any]] = {
     "post_grad_fusion_options": [
         {
             "batch_linear_post_grad": {
@@ -156,7 +160,7 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
     "autoheuristic_collect": ["pad_mm", "mixed_mm"],
     "autoheuristic_use": ["pad_mm", "mixed_mm"],
 }
-SamplingType = Callable[[str, type[Any], Any], Any]
+SamplingType = Callable[[str, Type[Any], Any], Any]
 
 
 class SamplingMethod(Enum):
@@ -174,7 +178,7 @@ class SamplingMethod(Enum):
 
     @staticmethod
     def _generate_value_for_type(
-        random_sample: bool, field_name: str, type_hint: type[Any], default: Any
+        random_sample: bool, field_name: str, type_hint: Type[Any], default: Any
     ) -> Any:
         """
         Generates a value of a type based on the setting.
@@ -300,11 +304,9 @@ class SamplingMethod(Enum):
                 if random_sample:
                     return random.choice(type_hint.__args__)
                 else:
-                    choices = [t for t in type_hint.__args__ if t != default]
-                    if choices:
-                        return random.choice(choices)
-                    else:
-                        return default
+                    return random.choice(
+                        [t for t in type_hint.__args__ if t != default]
+                    )
             except AttributeError as err:
                 raise ValueError("Literal type with no args") from err
         elif is_optional_type(type_hint):
@@ -372,7 +374,7 @@ class Default:
 DEFAULT = Default()
 
 # The combination of config settings being set (based on their strings)
-ComboType = tuple[str, ...]
+ComboType = Tuple[str, ...]
 
 
 class ResultType:
@@ -380,7 +382,7 @@ class ResultType:
     The mapping of the combo strings to the result status after running the config fuzzer.
     """
 
-    _vals: dict[ComboType, Status]
+    _vals: Dict[ComboType, Status]
 
     def __repr__(self) -> str:
         return f"ResultType[{self._vals}]"
@@ -414,7 +416,7 @@ class ResultType:
 
 
 # Type that maps config strings to their default value
-ConfigType = dict[str, Any]
+ConfigType = Dict[str, Any]
 # Callable that returns a bool
 FactoryOutputType = Callable[[], bool]
 # input function factory
@@ -502,10 +504,10 @@ class ConfigFuzzer:
             return
         self.seed = seed
         self.test_timeout = test_timeout
-        self.detailed_results: dict[ComboType, dict[str, Any]] = {}
+        self.detailed_results: Dict[ComboType, Dict[str, Any]] = {}
         self.config_module = config_module
         self.test_model_fn_factory = test_model_fn_factory
-        self.fields: dict[str, _ConfigEntry] = self.config_module._config
+        self.fields: Dict[str, _ConfigEntry] = self.config_module._config
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:
@@ -585,7 +587,7 @@ class ConfigFuzzer:
         }
         return ret
 
-    def reproduce(self, configs: list[ConfigType]) -> ResultType:
+    def reproduce(self, configs: List[ConfigType]) -> ResultType:
         """entrypoint to reproduce any failure"""
         results = ResultType()
         for conf in configs:
@@ -673,7 +675,7 @@ class ConfigFuzzer:
             for field, value in config.items():
                 print(f"{field} = {value}")
 
-        def get_error_info(exc: Exception) -> dict[str, Any]:
+        def get_error_info(exc: Exception) -> Dict[str, Any]:
             return {
                 "exception": str(exc),
                 "traceback": traceback.format_exc(),
@@ -739,7 +741,7 @@ class ConfigFuzzer:
         else:
             return handle_return("Function succeeded", Status.PASSED, False, None)
 
-    def bisect(self, num_attempts: int = 100, p: float = 0.5) -> list[ConfigType]:
+    def bisect(self, num_attempts: int = 100, p: float = 0.5) -> List[ConfigType]:
         """
         Test configs and bisect to minimal failing configuration.
         """
@@ -747,7 +749,7 @@ class ConfigFuzzer:
         random.seed(self.seed)
         self._reset_configs()
         results = ResultType()
-        ret: list[ConfigType] = []
+        ret: List[ConfigType] = []
 
         for attempt in range(num_attempts):
             print(f"Random attempt {attempt + 1}/{num_attempts}")
@@ -781,7 +783,7 @@ class ConfigFuzzer:
         return self._bisect_failing_config_helper(results, list(failing_config.items()))
 
     def _bisect_failing_config_helper(
-        self, results: ResultType, failing_config: list[tuple[str, Any]]
+        self, results: ResultType, failing_config: List[Tuple[str, Any]]
     ) -> Optional[ConfigType]:
         """
         Bisect a failing configuration to find minimal set of configs that cause failure.
@@ -793,7 +795,7 @@ class ConfigFuzzer:
         if not failing_config:
             return None
 
-        def test(x: list[tuple[str, Any]]) -> Status:
+        def test(x: List[Tuple[str, Any]]) -> Status:
             d = dict(x)
             result = self.test_config(results, d)
             return result

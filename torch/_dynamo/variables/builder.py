@@ -17,8 +17,19 @@ import re
 import types
 import warnings
 import weakref
-from collections.abc import MutableMapping
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -243,7 +254,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-DimList = list
+DimList = List
 
 
 def safe_has_grad(t):
@@ -339,13 +350,13 @@ class BackwardStateGraphArg(GraphArg):
 
 # All class-based iterators in itertools
 # NOTE: use id() because some objects are not hashable, it will raise error during lookup
-ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
+ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
     id(member)
     for name, member in vars(itertools).items()
     if not name.startswith("_") and inspect.isclass(member)
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
+ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
 
 
 class VariableBuilder:
@@ -478,7 +489,7 @@ class VariableBuilder:
     @functools.lru_cache(None)
     def _id_dispatch(
         cls,
-    ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
+    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
