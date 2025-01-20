@@ -23,8 +23,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
@@ -59,8 +59,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   TORCH_INTERNAL_ASSERT(false, "mkldnn_scaled_mm: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 
