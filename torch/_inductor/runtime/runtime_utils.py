@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
 import operator
+from typing import Any, Hashable, TYPE_CHECKING
 
 import torch
 from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
@@ -12,7 +12,11 @@ from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
 )
 
 
-def conditional_product(*args):
+if TYPE_CHECKING:
+    from .triton_compat import Config
+
+
+def conditional_product(*args: int) -> int:
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
@@ -54,7 +58,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
-def triton_config_to_hashable(cfg):
+def triton_config_to_hashable(cfg: Config) -> Hashable:
     """
     Convert triton config to a tuple that can uniquely identify it. We can use
     the return value as a dictionary key.
@@ -65,7 +69,7 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
-def validate_triton_config(cfg):
+def validate_triton_config(cfg: Config) -> None:
     # [Note: Triton pre_hook in inductor]
     # pre-hook is a lambda function, which we don't attempt to serialize.
     # right now, if a pre-hook is attached to the config, it will not be saved;
@@ -76,13 +80,20 @@ def validate_triton_config(cfg):
     ), "triton configs with pre_hooks not supported"
 
 
-def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
+def create_bandwidth_info_str(
+    ms: float,
+    num_gb: float,
+    gb_per_s: float,
+    prefix: str = "",
+    suffix: str = "",
+    color: bool = True,
+) -> str:
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     slow = ms > 0.012 and gb_per_s < 650
     return red_text(info_str) if color and slow else info_str
 
 
-def get_max_y_grid():
+def get_max_y_grid() -> int:
     return 65535
 
 
@@ -95,30 +106,34 @@ except ModuleNotFoundError:
     colorama = None  # type: ignore[assignment]
 
 
-def _color_text(msg, color):
-    if not HAS_COLORAMA:
+if HAS_COLORAMA:
+
+    def _color_text(msg: str, color: str) -> str:
+        return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
+
+else:
+
+    def _color_text(msg: str, color: str) -> str:
         return msg
 
-    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
 
-
-def green_text(msg):
+def green_text(msg: str) -> str:
     return _color_text(msg, "green")
 
 
-def yellow_text(msg):
+def yellow_text(msg: str) -> str:
     return _color_text(msg, "yellow")
 
 
-def red_text(msg):
+def red_text(msg: str) -> str:
     return _color_text(msg, "red")
 
 
-def blue_text(msg):
+def blue_text(msg: str) -> str:
     return _color_text(msg, "blue")
 
 
-def get_first_attr(obj, *attrs):
+def get_first_attr(obj: Any, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """
@@ -132,7 +147,7 @@ def get_first_attr(obj, *attrs):
 dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 
 
-def triton_hash_to_path_key(key):
+def triton_hash_to_path_key(key: str) -> str:
     # In early versions of Triton, the hash is directly used in the path name.
     # Later, the hash is converted to base64 before being used in the path name.
     # Later, the base64 convertion was replaced to the base32
@@ -152,3 +167,13 @@ def triton_hash_to_path_key(key):
             return _base32(key)
         except Exception:
             return key
+
+
+def compile_mps_shader(source: str) -> Any:
+    """
+    Compiles shader source but raise more actionable error message when needed
+    """
+    try:
+        return torch.mps._compile_shader(source)
+    except SyntaxError as err:
+        raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
