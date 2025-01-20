@@ -3,7 +3,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from typing import Any, Callable, cast, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, Callable, cast, Optional
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -122,10 +124,10 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: tuple[Placement, ...],
         run_check: bool,
         shape: Optional[torch.Size] = None,
-        stride: Optional[Tuple[int, ...]] = None,
+        stride: Optional[tuple[int, ...]] = None,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
@@ -357,7 +359,7 @@ class DTensor(torch.Tensor):
         *,
         run_check: bool = False,
         shape: Optional[torch.Size] = None,
-        stride: Optional[Tuple[int, ...]] = None,
+        stride: Optional[tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -584,7 +586,7 @@ class DTensor(torch.Tensor):
         return self._spec.mesh
 
     @property
-    def placements(self) -> Tuple[Placement, ...]:
+    def placements(self) -> tuple[Placement, ...]:
         """
         The placements attribute of this DTensor that describes the layout of this
         DTensor on the its DeviceMesh.
@@ -791,6 +793,7 @@ def distribute_tensor(
     )
 
 
+@deprecated("Please use `distribute_tensor` with `src_data_rank=None` instead.")
 def _shard_tensor(
     full_tensor: torch.Tensor,
     placements: Sequence[Shard],
@@ -825,17 +828,7 @@ def _shard_tensor(
         >>> full_tensor = torch.arange(world_size, device=f"cuda:{rank}")
         >>> dtensor = _shard_tensor(full_tensor, [Shard(1)], device_mesh)
     """
-    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-
-    shape, offset = compute_local_shape_and_global_offset(
-        full_tensor.shape, device_mesh, placements
-    )
-    slices = [
-        slice(cur_offset, cur_offset + cur_shape)
-        for cur_shape, cur_offset in zip(shape, offset)
-    ]
-    local_tensor = full_tensor[slices]
-    return DTensor.from_local(local_tensor, device_mesh, placements)
+    return distribute_tensor(full_tensor, device_mesh, placements, src_data_rank=None)
 
 
 def distribute_module(

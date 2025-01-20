@@ -51,5 +51,11 @@ $external_backend_headers
 $dispatch_headers
 $ops_headers
 
+namespace at {
+namespace {
+$dispatch_helpers
+} // namespace
+} // namespace at
+
 // See template file RegisterDispatchDefinitions.ini
 $dispatch_definitions
