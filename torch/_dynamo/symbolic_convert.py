@@ -3082,22 +3082,19 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
-    def raise_if_return_is_generator(self):
+    def replace_tos_if_return_is_generator(self):
         if (
             len(self.stack)
             and (tos := self.stack[-1])
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
-            raise exc.IncorrectUsage(
-                "NYI: Returning a generator object from a torch.compile function"
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
             )
-            # self.stack[-1] = ListIteratorVariable(
-            #     tos.force_unpack_var_sequence(self),
-            #     mutation_type=ValueMutationNew(),
-            # )
 
     def _return(self, inst):
-        self.raise_if_return_is_generator()
+        self.replace_tos_if_return_is_generator()
 
         if (
             self.output.count_calls() == 0

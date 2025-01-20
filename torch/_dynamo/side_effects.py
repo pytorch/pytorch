@@ -19,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented
+from .exc import MutationError, unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -134,6 +134,14 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
+    def is_tracing_generator(self):
+        output_graph = self.output_graph_weakref()
+
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.under_generator
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -143,6 +151,12 @@ class SideEffects:
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
+        if self.is_tracing_generator() and not is_side_effect_safe(
+            item.mutation_type, allow_mutation_to_top_level_scope=False
+        ):
+            raise MutationError(
+                "Generator: Mutating a variable not in the current scope (SideEffects)"
+            )
         if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
@@ -836,3 +850,13 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: i
         yield
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+
+
+@contextlib.contextmanager
+def disallow_side_effects_under_generator(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    orig_val = tx.output.current_tracer.under_generator
+    try:
+        tx.output.current_tracer.under_generator = True
+        yield
+    finally:
+        tx.output.current_tracer.under_generator = orig_val
