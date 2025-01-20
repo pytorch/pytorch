@@ -421,4 +421,13 @@ inline bool definitely_true(
   return b.has_hint() && b.guard_bool(file, line);
 }
 
+
+#define TORCH_CHECK_IS_SIZE(x, ...)                      \
+  TORCH_CHECK(                                           \
+      x.expect_size(__FILE__, __LINE__),                 \
+      "Invalid size: expected nonnegative dimension, but got ", \
+      x,                                                \
+      " in size: ",                                     \
+      ##__VA_ARGS__);                                   \
+
 } // namespace c10
