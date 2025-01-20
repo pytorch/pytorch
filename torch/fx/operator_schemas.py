@@ -260,7 +260,7 @@ def create_type_hint(x):
             else:
 
                 def ret_type(x):
-                    return tuple[x, ...]
+                    return tuple[x, ...]  # type: ignore[valid-type]
 
             if len(x) == 0:
                 return ret_type(Any)
