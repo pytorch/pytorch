@@ -3,8 +3,7 @@
 import logging
 import warnings
 from collections import OrderedDict
-from collections.abc import Iterable
-from typing import Union
+from typing import Dict, Iterable, Union
 
 import torch
 import torch.distributed as dist
@@ -160,7 +159,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
     def average_parameters(
         self,
         params: Union[
-            Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
+            Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]
         ],
     ):
         """
