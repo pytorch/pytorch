@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Dict, Generic, List, TYPE_CHECKING
+from typing import Generic, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -290,8 +290,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             name == "__subclasses__"
@@ -300,7 +300,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutation_type": ValueMutationNew()}
-            subs_as_vars: List[VariableTracker] = []
+            subs_as_vars: list[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(
@@ -327,8 +327,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
@@ -753,8 +753,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
@@ -843,8 +843,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
 
@@ -936,10 +936,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def _check_for_getattribute(self):
-        if object_has_getattribute(self.value):
-            unimplemented("UserDefinedObjectVariable with custom __getattribute__")
-
     def _check_for_getattr(self):
         return get_custom_getattr(self.value)
 
@@ -961,7 +957,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-        if (
+        if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or isinstance(
                 subobj, _collections._tuplegetter
@@ -970,15 +966,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
             or self._is_c_defined_property(subobj)
+            or inspect.isgetsetdescriptor(
+                subobj
+            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = self.value.__getattribute__(name)
+        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+            # If the object has an overridden getattribute method, Dynamo has
+            # already tried tracing it, and encountered an AttributeError. We
+            # call getattr_static only when the __getattribute__ tracing fails
+            # (check var_getattr impl). So, it is safe here to raise the
+            # AttributeError.
+            raise AttributeError
 
         return subobj
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
-        self._check_for_getattribute()
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
@@ -1298,8 +1303,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
@@ -1405,8 +1410,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:

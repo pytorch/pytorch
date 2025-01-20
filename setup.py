@@ -699,7 +699,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -1166,7 +1166,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 12) + 1
+    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1248,6 +1248,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/metal/*.h",
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
