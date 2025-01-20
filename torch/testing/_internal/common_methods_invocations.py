@@ -20081,9 +20081,9 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    dtypes=[torch.complex64, torch.cdouble]),
+                                    dtypes=[torch.complex64, torch.cdouble], device_type='cuda'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
+                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble], device_type='cuda')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
@@ -22579,10 +22579,10 @@ python_ref_db = [
             # Reference: https://github.com/pytorch/pytorch/issues/56012
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         dtypes=[torch.complex64, torch.cdouble]),
+                         dtypes=[torch.complex64, torch.cdouble], device_type='cuda'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         dtypes=[torch.chalf, torch.complex64, torch.cdouble])
+                         dtypes=[torch.chalf, torch.complex64, torch.cdouble], device_type='cuda')
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
