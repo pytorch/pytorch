@@ -6,10 +6,11 @@ import torch
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.planner import SavePlan, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-def create_plan(second_fqn: str) -> SavePlan:
+def create_plan(second_fqn: str, device) -> SavePlan:
     """
     Creates a SavePlan with two write items:
 
@@ -23,11 +24,15 @@ def create_plan(second_fqn: str) -> SavePlan:
         SavePlan: A plan that includes the two write items.
     """
     # the first write item is for a duplicated shard (that covers the whole tensor)
-    write_item_1 = _create_write_item_for_tensor("tensor_0", torch.rand(4))
+    write_item_1 = _create_write_item_for_tensor(
+        "tensor_0", torch.rand(4, device=device)
+    )
     write_item_1 = dataclasses.replace(write_item_1, type=WriteItemType.SHARD)
 
     # the second write item has different keys
-    write_item_2 = _create_write_item_for_tensor(second_fqn, torch.rand(10))
+    write_item_2 = _create_write_item_for_tensor(
+        second_fqn, torch.rand(10, device=device)
+    )
 
     return SavePlan([write_item_1, write_item_2])
 
@@ -37,9 +42,9 @@ class TestDedupTensor(TestCase):
     Test class for deduplication of tensor write items across different ranks.
     """
 
-    def test_dedup_shards(self):
-        rank0 = create_plan("r0")
-        rank1 = create_plan("r1")
+    def test_dedup_shards(self, device):
+        rank0 = create_plan("r0", device)
+        rank1 = create_plan("r1", device)
 
         dedup_plans = dedup_tensors([rank0, rank1])
 
@@ -51,6 +56,9 @@ class TestDedupTensor(TestCase):
 
         self.assertIn("r1", (item.index.fqn for item in dedup_plans[1].items))
 
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(TestDedupTensor, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

@@ -15,6 +15,7 @@ from torch.distributed.c10d_logger import _c10d_logger
 from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.utils import _create_file_view, find_state_dict_object
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -31,7 +32,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-def create_sharded_tensor(rank, world_size, shards_per_rank):
+def create_sharded_tensor(rank, world_size, shards_per_rank, device):
     shards_metadata = []
     local_shards = []
     for idx in range(0, world_size * shards_per_rank):
@@ -42,7 +43,7 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
         shards_metadata.append(shard_md)
         if shard_rank == rank:
             shard = Shard.from_tensor_and_offsets(
-                torch.rand(*shard_md.shard_sizes),
+                torch.rand(*shard_md.shard_sizes, device=device),
                 shard_offsets=shard_md.shard_offsets,
                 rank=rank,
             )
@@ -51,7 +52,9 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
     sharded_tensor_md = ShardedTensorMetadata(
         shards_metadata=shards_metadata,
         size=torch.Size([8 * len(shards_metadata)]),
-        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1)),
+        tensor_properties=TensorProperties.create_from_tensor(
+            torch.zeros(1, device=device)
+        ),
     )
 
     return ShardedTensor._init_from_local_shards_and_global_metadata(
@@ -75,10 +78,10 @@ class TestMedatadaIndex(TestCase):
         b = MetadataIndex("foo", index=99)
         self.assertEqual(hash(a), hash(b))
 
-    def test_flat_data(self):
+    def test_flat_data(self, device):
         state_dict = {
-            "a": torch.rand(10),
-            "b": [1, 2, 3],
+            "a": torch.rand(10, device=device),
+            "b": torch.tensor([1, 2, 3], device=device),
         }
 
         a = find_state_dict_object(state_dict, MetadataIndex("a"))
@@ -99,8 +102,10 @@ class TestMedatadaIndex(TestCase):
             find_state_dict_object(state_dict, MetadataIndex("b", [1]))
 
     @with_fake_comms(rank=0, world_size=2)
-    def test_sharded_tensor_lookup(self):
-        st = create_sharded_tensor(rank=0, world_size=2, shards_per_rank=3)
+    def test_sharded_tensor_lookup(self, device):
+        st = create_sharded_tensor(
+            rank=0, world_size=2, shards_per_rank=3, device=device
+        )
         state_dict = {"st": st}
 
         obj = find_state_dict_object(state_dict, MetadataIndex("st", [8]))
@@ -184,6 +189,9 @@ class TestReaderView(TestCase):
         self.assertEqual(self.back_view.readinto(ba), 0)
         self.assertEqual(ba, b"VWXYZ\0\0\0")
 
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(TestMedatadaIndex, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

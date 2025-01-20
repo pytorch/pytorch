@@ -2,10 +2,9 @@
 
 import contextlib
 import functools
-import os
 import unittest
 from copy import deepcopy
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -26,8 +25,9 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DistributedTestBase,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
@@ -72,31 +72,7 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
-    """
-    A version of MultiProcessTestCase that derives from the Inductor TestCase
-    to handle isolation of the inductor cache dir.
-    """
-
-
-class ReplicateTest(MultiProcessInductorTestCase):
-    # TODO: consider using all devices? The min(2, ...) here would limit the
-    # test to always run on 2 GPUs only.
-    @property
-    def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
+class ReplicateTest(DistributedTestBase, InductorTestCase):
     def _test_compile(
         self,
         *,
@@ -106,20 +82,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
         no_inductor: bool = False,
         no_compile_forward: bool = False,
         checkpoint: bool = False,
+        device: Union[str, torch.device],
     ):
-        backend = "nccl" if use_gpu else "gloo"
-        dist.init_process_group(
-            backend=backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
-        if use_gpu:
-            torch.cuda.set_device(f"cuda:{self.rank}")
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
-
+        self.create_pg(device)
         torch._dynamo.config.optimize_ddp = (
             "python_reducer_without_compiled_forward"
             if no_compile_forward
@@ -202,6 +167,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.assertEqual(
             tuple(model.parameters()), tuple(compiled_ddp_model.parameters())
         )
+        dist.destroy_process_group()
 
     def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
@@ -209,7 +175,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-        self._test_compile(use_gpu=False, no_sync=False)
+        self._test_compile(use_gpu=False, no_sync=False, device="cpu")
 
     def test_compile_cpu_no_sync(self):
         # Test the coalesced_op with CPU.
@@ -217,7 +183,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-        self._test_compile(use_gpu=False, no_sync=True)
+        self._test_compile(use_gpu=False, no_sync=True, device="cpu")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
@@ -240,9 +206,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_bf16(self):
+    def test_compile_bf16(self, device):
         # Check device capability wrt bf16
-        device = torch.device("cuda", self.rank % torch.cuda.device_count())
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
@@ -393,11 +358,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 
 class DDP_TP_Test(InductorTestCase):
-    def setUp(self):
+    def setUp(self, device):
         # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
-        torch.cuda.set_device("cuda:0")
+        torch.get_device_module(device).set_device(device)
 
         store = FakeStore()
         dist.init_process_group(
@@ -415,11 +380,11 @@ class DDP_TP_Test(InductorTestCase):
     )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
-    def test_ddp_tp(self):
+    def test_ddp_tp(self, device):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
-            "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            device, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -456,6 +421,11 @@ class DDP_TP_Test(InductorTestCase):
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
 
+
+devices = ["cuda", "hpu"]
+
+instantiate_device_type_tests(DDP_TP_Test, globals(), only_for=devices)
+instantiate_device_type_tests(ReplicateTest, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

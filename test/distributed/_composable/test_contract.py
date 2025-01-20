@@ -5,6 +5,7 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributed._composable import _get_registry, contract
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -18,14 +19,14 @@ class ToyModel(nn.Module):
 
     def forward(self, x, y):
         with torch.no_grad():
-            self.b += x.sum() + y.sum()
+            self.b += x.to(self.b.device).sum() + y.to(self.b.device).sum()
 
         return self.p + self.seq1(x) + self.seq2(y)
 
 
 class TestContract(TestCase):
     @skipIfTorchDynamo("Dynamo does not support the state key")
-    def test_add_hooks(self):
+    def test_add_hooks(self, device):
         def forward_pre_hook(
             module: nn.Module, inp: tuple[torch.Tensor]
         ) -> tuple[torch.Tensor]:
@@ -56,12 +57,12 @@ class TestContract(TestCase):
             module.register_full_backward_hook(backward_hook)
             return module
 
-        model = ToyModel()
+        model = ToyModel().to(device)
         model_with_hooks = deepcopy(model)
         noop_api(model.seq1)
         noop_api(model.seq2)
 
-        x, y = torch.randn(10, 10), torch.randn(10, 10)
+        x, y = torch.randn(10, 10).to(device), torch.randn(10, 10).to(device)
         model(x, y).sum().backward()
         model_with_hooks(x, y).sum().backward()
 
@@ -69,7 +70,7 @@ class TestContract(TestCase):
             self.assertEqual(p1, p2)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")
-    def test_modify_fqn(self):
+    def test_modify_fqn(self, device):
         class ModelWrapper(nn.Module):
             def __init__(self, module):
                 super().__init__()
@@ -82,14 +83,14 @@ class TestContract(TestCase):
         def wrap_module(module: nn.Module) -> nn.Module:
             return ModelWrapper(module)
 
-        model = ToyModel()
+        model = ToyModel().to(device)
 
         regex = "Checking parameters: Composable distributed API implementations cannot modify FQNs."
         with self.assertRaisesRegex(RuntimeError, regex):
             wrap_module(model.seq1)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")
-    def test_state(self):
+    def test_state(self, device):
         def check_and_update_state_hook(
             module: nn.Module, inp: tuple[torch.Tensor]
         ) -> tuple[torch.Tensor]:
@@ -105,15 +106,15 @@ class TestContract(TestCase):
             module.register_forward_pre_hook(check_and_update_state_hook)
             return module
 
-        model = ToyModel()
+        model = ToyModel().to(device)
         api(model.seq1)
 
         self.assertEqual(api.state(model.seq1).dummy_state, 7)
-        model(torch.zeros(10, 10), torch.zeros(10, 10))
+        model(torch.zeros(10, 10).to(device), torch.zeros(10, 10).to(device))
         self.assertEqual(api.state(model.seq1).dummy_state, 8)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")
-    def test_registry(self):
+    def test_registry(self, device):
         @contract()
         def api1(module: nn.Module) -> nn.Module:
             return module
@@ -122,7 +123,7 @@ class TestContract(TestCase):
         def api2(module: nn.Module) -> nn.Module:
             return module
 
-        model = ToyModel()
+        model = ToyModel().to(device)
         model = api1(model)
         self.assertEqual(1, len(_get_registry(model)))
         self.assertTrue("api1" in _get_registry(model))
@@ -136,12 +137,12 @@ class TestContract(TestCase):
             model = api1(model)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")
-    def test_multi_module_api(self):
+    def test_multi_module_api(self, device):
         @contract()
         def multi_module_api(modules: list[nn.Module]) -> nn.Module:
             return modules
 
-        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)])
+        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)]).to(device)
         multi_module_api([model[0], model[1]])
         multi_module_api([model[2], model[3]])
         multi_module_api([model[4]])
@@ -160,7 +161,7 @@ class TestContract(TestCase):
         self.assertNotEqual(registries[0], registries[4])
         self.assertNotEqual(registries[2], registries[4])
         # Check that applying an API to a module multiple times errors
-        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)])
+        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)]).to(device)
         multi_module_api([model[0], model[1]])
         with self.assertRaisesRegex(
             AssertionError,
@@ -170,6 +171,9 @@ class TestContract(TestCase):
         ):
             multi_module_api([model[0], model[2]])
 
+
+devices = ["cpu", "cuda", "hpu"]
+instantiate_device_type_tests(TestContract, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
