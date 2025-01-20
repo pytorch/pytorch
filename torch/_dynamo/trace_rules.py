@@ -32,7 +32,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -293,18 +293,25 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
+    # functorch/C++ bindings
+    "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
+    "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
+    "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
+    "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
+    "torch._C._functorch._unwrap_batched": TorchInGraphFunctionVariable,
+    "torch._C._functorch.current_level": TorchInGraphFunctionVariable,
+    "torch._C._functorch.maybe_current_level": TorchInGraphFunctionVariable,
+    "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
+    "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
+    "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
     # everything else
+    "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
+    "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
-    "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
-    "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
-    "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
-    "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
-    "torch._C._functorch.maybe_current_level": TorchInGraphFunctionVariable,
-    "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
@@ -616,6 +623,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_function_stack_at",
         "torch._C._get_graph_executor_optimize",
         "torch._C._get_linalg_preferred_backend",
+        "torch._C._get_rocm_fa_preferred_backend",
         "torch._C._get_math_sdp_enabled",
         "torch._C._get_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._get_max_operator_version",
@@ -1144,6 +1152,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_grad_enabled",
         "torch._C._set_graph_executor_optimize",
         "torch._C._set_linalg_preferred_backend",
+        "torch._C._set_rocm_fa_preferred_backend",
         "torch._C._set_meta_in_tls_dispatch_include",
         "torch._C._set_mkldnn_enabled",
         "torch._C._set_multithreading_enabled",
@@ -2226,14 +2235,21 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-if sys.version_info >= (3, 9):
-    torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
+torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
 
 # In graph functions (including constant folding) that are not C bindings
+# NOTE: [Cacheability of in-graph torch functions]
+# Functions in this list have the property that graphs containing them are safe to cache/serialize.
+# serialize given only the information in the graph. I.e, either:
+# - Your function does not access or close over global state, or
+# - Your function closes over global state, but this state is guarded by dynamo, either
+#   through constant folding or other mechanisms
+# If your function needs a custom special handler (via @register on TorchInGraphFunctionVariable),
+# or captures global state, please add it to manual_torch_name_rule_map instead
 torch_non_c_binding_in_graph_functions = dict.fromkeys(
     [
         "torch.__future__.get_overwrite_module_params_on_conversion",
@@ -2251,18 +2267,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
-        "torch._functorch.autograd_function.custom_function_call_functionalize",
-        "torch._functorch.autograd_function.custom_function_call_grad",
-        "torch._functorch.autograd_function.custom_function_call_vmap_generate_rule",
-        "torch._functorch.autograd_function.custom_function_call_vmap",
-        "torch._functorch.autograd_function.generate_single_level_function",
-        "torch._functorch.autograd_function.get_tangents_in_dims",
-        "torch._functorch.autograd_function.has_overriden_vmap_rule",
-        "torch._functorch.autograd_function.reductify_leaf",
-        "torch._functorch.autograd_function.reductify",
-        "torch._functorch.autograd_function.validate_vmap_returns_tuple_of_two_elements",
-        "torch._functorch.autograd_function.vmapify_autograd_function",
-        "torch._functorch.autograd_function.wrap_outputs_maintaining_identity",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",
         "torch._functorch.batch_norm_replacement.replace_all_batch_norm_modules_",
         "torch._functorch.deprecated.combine_state_for_ensemble",
@@ -2284,11 +2288,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.noop",
-        "torch._functorch.pyfunctorch.coerce_cinterpreter",
-        "torch._functorch.pyfunctorch.dispatch_functorch",
-        "torch._functorch.pyfunctorch.nested",
-        "torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter",
-        "torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack",
         "torch._functorch.utils.enable_single_level_autograd_function",
         "torch._functorch.utils.exposed_in",
         "torch._functorch.utils.unwrap_dead_wrappers",
@@ -2335,15 +2334,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._lowrank.get_approximate_basis",
         "torch._lowrank.pca_lowrank",
         "torch._lowrank.svd_lowrank",
-        "torch._ops._compute_keyset",
-        "torch._ops._get_tensors",
-        "torch._ops._to_flat_tuple",
-        "torch._ops.add_cached_op",
-        "torch._ops.dl_open_guard",
-        "torch._ops.get_cached_ops",
-        "torch._ops.key_extractor",
-        "torch._ops.reset_cached_ops",
-        "torch._ops.resolve_key",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
         "torch._running_with_deploy",
@@ -2424,6 +2414,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.enable_cudnn_sdp",
         "torch.backends.cuda.preferred_blas_library",
         "torch.backends.cuda.preferred_linalg_library",
+        "torch.backends.cuda.preferred_rocm_fa_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
         "torch.backends.cudnn.flags",
@@ -2850,7 +2841,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.sym_min",
         "torch.sym_not",
         "torch.tensordot",
-        "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
     ],
@@ -2871,8 +2861,8 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 
 @functools.lru_cache(None)
-def get_torch_obj_rule_map() -> Dict[Any, Type["VariableTracker"]]:
-    d: Dict[Any, Type[VariableTracker]] = {}
+def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
+    d: dict[Any, type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2966,15 +2956,15 @@ class FunctionIdSet:
     added to the graph and what will cause a graph break.
     """
 
-    function_ids: Optional[Set[int]] = None
-    function_names: Optional[Dict[int, str]] = None
+    function_ids: Optional[set[int]] = None
+    function_names: Optional[dict[int, str]] = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+        self, lazy_initializer: Callable[[], Union[dict[int, str], set[int]]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self) -> Set[int]:
+    def __call__(self) -> set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -3004,19 +2994,19 @@ class FunctionIdSet:
 
 
 @FunctionIdSet
-def _allowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _allowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _disallowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _disallowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _builtin_function_ids() -> Dict[int, str]:
+def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
@@ -3040,13 +3030,13 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _polyfilled_function_ids() -> Set[int]:
+def _polyfilled_function_ids() -> set[int]:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
     return set()
 
 
 @FunctionIdSet
-def _numpy_function_ids() -> Dict[int, str]:
+def _numpy_function_ids() -> dict[int, str]:
     unsupported_funcs = {
         "seed",
         "ranf",
@@ -3080,7 +3070,7 @@ def _numpy_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _builtin_constant_ids() -> Dict[int, str]:
+def _builtin_constant_ids() -> dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
@@ -3092,7 +3082,7 @@ def _builtin_constant_ids() -> Dict[int, str]:
     return rv
 
 
-_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+_lazy_module_init: dict[str, list[Callable[[], None]]] = defaultdict(list)
 
 
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
@@ -3291,15 +3281,18 @@ MOD_INLINELIST = [
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
+    "torch._functorch.pyfunctorch",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.invoke_subgraph",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.triton_kernel_wrap",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
     "torch._library.autograd",
     "torch._library.custom_ops",
+    "torch._ops",
     "torch._prims",
     "torch._refs",
     "torch._tensor",
@@ -3372,7 +3365,7 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS: Set[str] = set()
+FBCODE_SKIP_DIRS: set[str] = set()
 
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
@@ -3548,7 +3541,7 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
-    reasons: Set[str] = set()
+    reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
@@ -3626,7 +3619,7 @@ def lookup_inner(
     name=None,
     filename=None,
     is_direct_call=True,
-    reasons: Union[None, Set[str]] = None,
+    reasons: Union[None, set[str]] = None,
 ):
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:

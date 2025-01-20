@@ -8,8 +8,9 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
+from collections.abc import MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, Sequence, TYPE_CHECKING
+from typing import Any, Callable, List, TYPE_CHECKING
 
 import torch
 
@@ -122,38 +123,6 @@ def set_difference(set1, set2):
     return difference_set
 
 
-def dropwhile(predicate, iterable):
-    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
-    iterable = iter(iterable)
-    for x in iterable:
-        if not predicate(x):
-            yield x
-            break
-    yield from iterable
-
-
-def zip_longest(*iterables, fillvalue=None):
-    # Create a list of iterators from the input iterables
-    iterators = [iter(it) for it in iterables]
-    result = []
-    while True:
-        row = []
-        active = False
-        for it in iterators:
-            try:
-                # Try to get the next item from the iterator
-                value = next(it)
-                row.append(value)
-                active = True
-            except StopIteration:
-                # If the iterator is exhausted, use the fillvalue
-                row.append(fillvalue)
-        if not active:
-            break
-        result.append(tuple(row))
-    return result
-
-
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
@@ -180,7 +149,7 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
 
 def foreach_map_fn(*args):
     op = args[0]
-    new_args: List[Any] = []
+    new_args: list[Any] = []
     at_least_one_list = False
     for arg in args[1:]:
         if not isinstance(arg, (list, tuple)):
