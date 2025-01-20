@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from collections import OrderedDict
 from typing import List, Optional
 
 import torch
@@ -729,7 +728,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype in OrderedDict([torch.uint8, torch.int8]):
+                        elif output_dtype in OrderedSet([torch.uint8, torch.int8]):
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -764,7 +763,7 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    assert x.get_dtype() in OrderedDict([torch.uint8, torch.int8])
+                    assert x.get_dtype() in OrderedSet([torch.uint8, torch.int8])
                     CppGemmTemplate.add_choices(
                         choices,
                         layout,
