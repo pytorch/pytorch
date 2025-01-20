@@ -61,6 +61,16 @@ _global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 
+class _RequiredParameter:
+    """Singleton class representing a required parameter for an Optimizer."""
+
+    def __repr__(self) -> str:
+        return "<required parameter>"
+
+
+required = _RequiredParameter()
+
+
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         import torch._dynamo
@@ -1061,7 +1071,12 @@ class Optimizer:
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():
-            param_group.setdefault(name, default)
+            if default is required and name not in param_group:
+                raise ValueError(
+                    f"parameter group didn't specify a value of required optimization parameter {name}"
+                )
+            else:
+                param_group.setdefault(name, default)
 
         params = param_group["params"]
         if len(params) != len(set(params)):

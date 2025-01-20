@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, List, Type, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -44,11 +44,11 @@ class InductorChoices:
 
     def triton_kernel_kwargs(
         self,
-        kernel_cls: Type[TritonKernel],
+        kernel_cls: type[TritonKernel],
         features: SIMDKernelFeatures,
-        kernel_args: List[Dict[str, sympy.Expr]],
-        kernel_kwargs: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        kernel_args: list[dict[str, sympy.Expr]],
+        kernel_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         (groups,) = kernel_args
         device = V.graph.get_current_device_or_throw()
@@ -78,10 +78,10 @@ class InductorChoices:
     def _contiguous_reduction_fixed_config(
         self,
         features: SIMDKernelFeatures,
-        kernel_kwargs: Dict[str, Any],
+        kernel_kwargs: dict[str, Any],
         mstats: MemoryStats,
         device: torch.device,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         pstats = mstats.persistent
         lstats = mstats.looped
         xhint = next_power_of_2(
