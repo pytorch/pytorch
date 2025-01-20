@@ -394,6 +394,7 @@ class OpDatabase:
             "add": ElementwiseBinaryOp(),
             "sub": ElementwiseBinaryOp(),
             "mul": ElementwiseBinaryOp(),
+            "div": ElementwiseBinaryOp(),
             # Contraction / Reduction operations
             "mm": MatmulOp(),
             "bmm": BmmOp(),
@@ -413,6 +414,10 @@ class OpDatabase:
             "unbind": NoOp(),
             "_to_copy": NoOp(),
             "copy_": NoOp(),
+            "mean": NoOp(),
+            "t": NoOp(),
+            "sum": NoOp(),
+            "pow": NoOp(),
         }
 
     def get_op(self, opname):

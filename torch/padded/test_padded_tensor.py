@@ -9,8 +9,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from padded_tensor import *
 from utils import *
 
+from transformer_model import *
 
-class TransformerModel(nn.Module):
+
+class AttentionTest(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -129,8 +131,7 @@ class TransformerModel(nn.Module):
 
         q, k, v = self.f_1(x)
         q, k, v = self.f_2(q, k, v, bsz, seqlen)
-        o = self.f_3(q, k, v, freqs_cis)
-        return o
+        q, k, v = self.f_3(q, k, v, freqs_cis)
         k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
         (y,) = self.f_5(q, k, v, mask)
         (y,) = self.f_6(y, bsz, seqlen)
@@ -139,16 +140,24 @@ class TransformerModel(nn.Module):
         return (y,)
 
 
-class TestAttention(TestCase):
+class PaddedTensorTestCase(TestCase):
     def setUp(self):
         super().setUp()
 
     def are_equal(self, outputs, outputs_p):
+        outputs = [outputs] if not isinstance(outputs, list) else outputs
+        outputs_p = [outputs_p] if not isinstance(outputs_p, list) else outputs_p
+
         for x, x_p in zip(outputs, outputs_p):
             x_p = x_p.tensor if isinstance(x_p, PaddedTensor) else x_p
 
             slice_idx = [slice(0, s) for s in x.shape]
             self.assertEqual(x, x_p[tuple(slice_idx)])
+
+
+class TestAttention(PaddedTensorTestCase):
+    def setUp(self):
+        super().setUp()
 
     def run_unpadded_padded(self, fn, inputs, inputs_p):
         # Run the function on unpadded and padded inputs
@@ -368,12 +377,47 @@ class TestAttention(TestCase):
             inputs_p = self.pad_inputs(model, inputs, 16, 16, 1024)
             time_compiled_padded, outputs_compiled_padded = bench(fn_compiled, inputs_p)
 
+            print(outputs_compiled_padded[0].shape)
+            print(outputs_compiled_padded[0].orig_shape)
+
             # # Report results
             print(f"Unpadded time (eager): {time_eager}")
             print(f"Unpadded time (compiled): {time_compiled}")
             print(f"Padded time (compiled): {time_compiled_padded}")
 
             self.are_equal(outputs_eager, outputs_compiled_padded)
+
+
+class TransformerModelTest(PaddedTensorTestCase):
+    def test_transformer_model(self):
+        with torch.no_grad():
+            with torch.device("cuda"):
+                pad = 4
+                bsz, seqlen = 4, 2 + pad
+
+                # Set up transformer
+                args = ModelArgs.from_name("stories15M")
+                transformer = Transformer(args)
+                transformer.setup_caches(bsz, seqlen)
+
+                # Set up inputs
+                inputs = (
+                    torch.randint(0, 3, (bsz, seqlen - pad)).to(device="cuda"),
+                    torch.randint(0, 3, (seqlen - pad,)).to(device="cuda"),
+                )
+
+                inputs_p = [
+                    PaddedTensor(inputs[0], [bsz, seqlen], None),
+                    PaddedTensor(inputs[1], [seqlen], None, -1),
+                ]
+
+                # Run
+                out = transformer(*inputs)
+
+                transformer = torch.compile(transformer, mode="reduce-overhead")
+                out_p = transformer(*inputs_p)
+
+                self.are_equal(out, out_p)
 
 
 if __name__ == "__main__":
