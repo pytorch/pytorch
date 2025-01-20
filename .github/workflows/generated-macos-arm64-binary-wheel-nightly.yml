@@ -105,7 +105,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -125,7 +125,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -228,7 +228,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -248,7 +248,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -351,7 +351,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -371,7 +371,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -474,7 +474,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -494,7 +494,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -597,7 +597,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -617,7 +617,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -720,7 +720,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091,SC2086
+          # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
@@ -740,7 +740,7 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
