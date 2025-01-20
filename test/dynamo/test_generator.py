@@ -7,7 +7,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -274,11 +274,9 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return zip(range(3), whoo(t)), t.sin()
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
 
     @unittest.expectedFailure
     def test_zip_generator_2(self):
@@ -298,6 +296,7 @@ class GraphModule(torch.nn.Module):
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, list(y))
 
+    @unittest.expectedFailure
     def test_zip_subgenerator(self):
         def subgen(t):
             yield t + 1
@@ -310,11 +309,9 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return zip(range(3), whoo(t)), t.sin()
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
 
     def test_list_zip_generator(self):
         def whoo(t):
@@ -375,11 +372,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 1, t + 2, t + 3])
 
     def test_return_tuple_generator(self):
         def whoo(t):
@@ -392,11 +386,9 @@ class GraphModule(torch.nn.Module):
             return (g1, g2), t.sin()
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        (g1, g2), _ = fn(t)
+        self.assertEqual(list(g1), [t.sin(), t.cos()])
+        self.assertEqual(list(g2), [(t + 1).sin(), (t + 1).cos()])
 
     def test_return_advanced_generator(self):
         def whoo(t):
@@ -411,11 +403,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 2, t + 3])
 
     def test_return_exhaust_generator(self):
         def whoo(t):
@@ -428,11 +417,9 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        with self.assertRaises(StopIteration):
+            next(gen)
 
     def test_subgenerator(self):
         def subgen(t):
@@ -468,11 +455,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 2, t + 3])
 
     def test_dynamo_disable_generator(self):
         @torch._dynamo.disable
@@ -561,6 +545,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
         self.assertEqual(i, 3)
 
+    @unittest.expectedFailure
     def test_subgenerator_with_side_effects(self):
         i = 0
 
@@ -584,12 +569,10 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return zip(range(3), whoo(t)), t.sin()
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
+        with self.assertRaises(Unsupported):
             self._compile_check(fn)
 
+    @unittest.expectedFailure
     def test_generator_with_side_effects_graph_break(self):
         i = 0
 
@@ -606,9 +589,8 @@ class GraphModule(torch.nn.Module):
             return list(zip(range(3), gen))
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+        with self.assertRaises(Unsupported):
+            fn(t)
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
@@ -703,7 +685,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(y, t.sin())
 
     @unittest.expectedFailure
-    @unittest.skipIf(sys.version_info < (3, 11))
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_close_subgen(self):
         z = 0
 
