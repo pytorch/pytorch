@@ -267,6 +267,10 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             SHM_OPTS=
             JENKINS_USER=
+            # ensure that docker container cleanly exits in 12 hours
+            # if for some reason cleanup action doesn't stop container
+            # when job is cancelled
+            DOCKER_SHELL_CMD="sleep 12h"
 
             # since some steps are skipped on s390x, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -274,11 +278,12 @@ jobs:
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
+            DOCKER_SHELL_CMD=
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG, SHM_OPTS and JENKINS_USER since that doesn't play nice
+          # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -336,7 +341,8 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
+            "${DOCKER_IMAGE}" \
+            ${DOCKER_SHELL_CMD}
           )
           # Propagate download.pytorch.org IP to container
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
@@ -491,6 +497,5 @@ jobs:
         shell: bash
         run: |
           # on s390x stop the container for clean worker stop
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
+          docker stop -a || true
+          docker kill -a || true
