@@ -1750,6 +1750,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float)
+    # aten/src/ATen/native/mps/OperationUtils.mm: TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!"); on MPS
+    @expectedFailureMPS
     def test_ConvTranspose_output_channels_0(self, device, dtype):
         class Model(nn.Module):
             def __init__(self, operator, dim):
