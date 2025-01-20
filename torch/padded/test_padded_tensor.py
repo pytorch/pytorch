@@ -3,6 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 
 from padded_tensor import *
@@ -34,9 +35,7 @@ class TransformerModel(nn.Module):
             device="cuda", dtype=self.dtype
         )
 
-    def create_kv_cache(self):
-        max_batch_size = 15
-        max_seq_length = 1024
+    def create_kv_cache(self, max_batch_size, max_seq_length):
         cache_shape = (
             max_batch_size,
             self.n_local_heads,
@@ -114,10 +113,7 @@ class TransformerModel(nn.Module):
         return k, v
 
     def f_5(self, q, k, v, mask):
-        outs = torch.ops.aten._scaled_dot_product_flash_attention(
-            q, k, v, dropout_p=0.0
-        )
-        y = outs[0]
+        y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
         return (y,)
 
     def f_6(self, y, bsz, seqlen):
@@ -133,7 +129,8 @@ class TransformerModel(nn.Module):
 
         q, k, v = self.f_1(x)
         q, k, v = self.f_2(q, k, v, bsz, seqlen)
-        q, k, v = self.f_3(q, k, v, freqs_cis)
+        o = self.f_3(q, k, v, freqs_cis)
+        return o
         k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
         (y,) = self.f_5(q, k, v, mask)
         (y,) = self.f_6(y, bsz, seqlen)
@@ -292,50 +289,91 @@ class TestAttention(TestCase):
 
         self.run_unpadded_padded(model.f_7, inputs, inputs_p)
 
-    def gen_rand_inputs(self, model, batchsize, seqlen):
-        x = torch.randint(0, 128256, (batchsize, seqlen)).to(device="cuda")
+    def gen_rand_inputs(self, model, bsz, seqlen):
+        x = torch.randint(0, 128256, (bsz, seqlen)).to(device="cuda")
         freqs_cis = torch.randn(seqlen, 64, 2).to(device="cuda", dtype=model.dtype)
-        mask = torch.ones([batchsize, 1, seqlen, 15], device="cuda")
+        mask = torch.ones([bsz, 1, 1, seqlen], dtype=torch.bool, device="cuda")
         input_pos = torch.arange(0, seqlen, dtype=torch.int32, device="cuda")
 
-        model.create_kv_cache()
+        model.create_kv_cache(bsz, seqlen)
 
         inputs = [x, freqs_cis, mask, input_pos, model.k_cache, model.v_cache]
 
         return inputs
 
-    def pad_inputs(self, inputs, N):
+    def pad_inputs(self, model, inputs, N, bsz, seqlen):
+        model.reset_kv_cache()
+        model.create_kv_cache(bsz, seqlen)
+
         x, freqs_cis, mask, input_pos, k_cache, v_cache = inputs
 
         inputs_p = [
             PaddedTensor(x, [N, N], None),
-            PaddedTensor(freqs_cis, [1, N, 1], None),
-            mask,
-            PaddedTensor(input_pos, [1, 1, N], None),
-            PaddedTensor(k_cache, [1, 1, N], None),
-            PaddedTensor(v_cache, [1, 1, N], None),
+            PaddedTensor(freqs_cis, [N, 1, 1], None),
+            PaddedTensor(mask, [N, 1, 1, N], None, False),
+            PaddedTensor(input_pos, [N], None, -1),
+            PaddedTensor(k_cache, [N, 1, N, 1], None),
+            PaddedTensor(v_cache, [N, 1, N, 1], None),
         ]
 
         return inputs_p
 
-    def test_attention_all(self):
-        model = TransformerModel()
-
-        inputs = self.gen_rand_inputs(model, 15, 1023)
-        inputs_p = self.pad_inputs(inputs, 16)
-
-        self.run_unpadded_padded(model.f_attention, inputs, inputs_p)
-
     def test_attention_bench(self):
         model = TransformerModel()
+        fn = model.f_attention
 
         with torch.no_grad():
             inputs = self.gen_rand_inputs(model, 15, 1023)
-            inputs_p = self.pad_inputs(inputs, 16)
 
-            self.run_unpadded_padded_bench(
-                model, model.f_attention, inputs, inputs_p, None
-            )
+            def median(x):
+                return sorted(x)[len(x) // 2]
+
+            def bench(fn, inputs, n_warmup=5, n_iter=10):
+                times = []
+                outputs = None
+
+                # Warmup
+                inps = pytree.tree_map(lambda x: x.clone(), inputs)
+                for _ in range(n_warmup):
+                    fn(*inps)
+
+                for _ in range(n_iter):
+                    model.reset_kv_cache()
+                    inps = pytree.tree_map(lambda x: x.clone(), inputs)
+
+                    t = benchmarker.benchmark_gpu(lambda: fn(*inps))
+                    torch.cuda.synchronize()
+
+                    # start = time.time()
+                    # outputs = fn(*inps)
+                    # t = time.time() - start
+
+                    times.append(t)
+                torch._dynamo.reset()
+
+                outputs = fn(*inps)
+                outputs = pytree.tree_map(lambda x: x.clone(), outputs)
+                return median(times), outputs
+
+            # Run unpadded
+            time_eager, outputs_eager = bench(fn, inputs, n_warmup=1, n_iter=1)
+
+            # self.are_equal(outputs_eager, outputs_eager_padded)
+
+            # Run unpadded and padded compiled
+            fn_compiled = torch.compile(fn, mode="reduce-overhead")
+
+            time_compiled, outputs_compiled = bench(fn_compiled, inputs)
+
+            inputs_p = self.pad_inputs(model, inputs, 16, 16, 1024)
+            time_compiled_padded, outputs_compiled_padded = bench(fn_compiled, inputs_p)
+
+            # # Report results
+            print(f"Unpadded time (eager): {time_eager}")
+            print(f"Unpadded time (compiled): {time_compiled}")
+            print(f"Padded time (compiled): {time_compiled_padded}")
+
+            self.are_equal(outputs_eager, outputs_compiled_padded)
 
 
 if __name__ == "__main__":

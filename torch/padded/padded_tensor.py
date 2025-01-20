@@ -1,5 +1,6 @@
 import itertools
 import math
+from operator import mul
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -46,60 +47,12 @@ def slice_nd(
     return input
 
 
-def extract_tensors_from_padded(
-    args: Tuple, kwargs: Dict
-) -> Tuple[List[torch.Tensor], Dict]:
-    if kwargs is None:
-        kwargs = {}
-    tensor_args, tensor_kwargs = pytree.tree_map_only(
-        PaddedTensor, lambda x: x.tensor, (args, kwargs)
-    )
-    tensor_args = list(tensor_args)
-
-    return tensor_args, tensor_kwargs
-
-
 class RegularOp:
     def __init__(self) -> None:
         super().__init__()
 
     def infer_shape(self, input_shapes, args, kwargs):
         raise NotImplementedError
-
-    def modify_out_shape(self, out, args, kwargs):
-        return out
-
-    def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
-
-        return args, kwargs, tensor_args, tensor_kwargs
-
-
-class SliceRunRepadOp(RegularOp):
-    def __init__(self) -> None:
-        pass
-
-    def infer_shape(self, input_shapes, args, kwargs):
-        raise NotImplementedError
-
-    def modify_args(self, args, kwargs):
-        def fn(padded_tensor):
-            tensor = slice_nd(
-                padded_tensor.tensor,
-                [0] * len(padded_tensor.orig_shape),
-                padded_tensor.orig_shape,
-            )
-
-            return tensor
-
-        if kwargs is None:
-            kwargs = {}
-        tensor_args, tensor_kwargs = pytree.tree_map_only(
-            PaddedTensor, fn, (args, kwargs)
-        )
-        tensor_args = list(tensor_args)
-
-        return args, kwargs, tensor_args, tensor_kwargs
 
 
 class OnesLikeOp(RegularOp):
@@ -111,7 +64,7 @@ class OnesLikeOp(RegularOp):
         return [input_shape]
 
 
-class ViewOp(SliceRunRepadOp):
+class ViewOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -178,68 +131,8 @@ class ViewOp(SliceRunRepadOp):
 
         return [torch.Size(orig_output_shape)]
 
-    def modify_out_shape(self, out, args, kwargs):
-        return [torch.Size(args[1])]
 
-    def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
-        inp, shape = tensor_args
-
-        def infer_minus_1_shape(input_shape: torch.Size, output_shape: List[int]):
-            input_shape_prod = math.prod(input_shape)
-            output_shape_prod = math.prod(output_shape) * -1
-
-            for idx, output_dim in enumerate(output_shape):
-                if output_dim == -1:
-                    output_shape[idx] = input_shape_prod // output_shape_prod
-                    break
-            return output_shape
-
-        if len(args[0].shape) > len(args[1]):
-            prefix = strip_common_suffix(args[0].orig_shape, args[1])
-            args[0].view_shape_stack.append(prefix)
-            log("Adding to view stack %s" % (prefix))
-
-        # If the shapes are not compatible, we need to slice the input tensor to the orig shape
-        if len(args[0].shape) < len(args[1]):
-            log("Applying view stack from %s" % (shape))
-            log("View stack", args[0].view_shape_stack)
-
-            if len(args[0].view_shape_stack) > 0:
-                b = args[0].view_shape_stack[-1]
-            else:
-                # TODO: Remove this hard-coded hack.
-                b = [1023]
-
-            # Find the first non-1 dim
-            idx = 0
-            for dim in shape:
-                if dim != 1:
-                    break
-                idx += 1
-
-            shape[idx : idx + len(b)] = b
-
-            if -1 in shape:
-                shape = infer_minus_1_shape(args[0].orig_shape, shape)
-
-            log("Result", shape)
-        else:
-            shape = self.infer_shape([args[0].orig_shape], args, kwargs)[0]
-
-        # if math.prod(inp.shape) != math.prod(shape):
-        inp = slice_nd(inp, [0] * len(args[0].orig_shape), args[0].orig_shape)
-
-        # Ensure that the input tensor is contiguous
-        if not inp.is_contiguous():
-            inp = inp.contiguous()
-
-        args = (args[0], shape)
-
-        return args, kwargs, (inp, shape), tensor_kwargs
-
-
-class ViewAsRealOp(SliceRunRepadOp):
+class ViewAsRealOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -292,6 +185,17 @@ class TransposeOp(RegularOp):
         return [torch.Size(input_shape)]
 
 
+class ExpandOp(RegularOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shape(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
+        shape = args[1]
+
+        return [torch.Size(shape)]
+
+
 class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -318,45 +222,6 @@ class ElementwiseBinaryOp(RegularOp):
 
         return [torch.Size(reversed(new_shape))]
 
-    # def modify_args(self, args, kwargs):
-    #    tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
-
-    #    def is_broadcastable(shape1, shape2):
-    #        # Broadcastable means that at each dimension, either the shapes are equal or one of them is 1
-    #        num_unequal_and_1 = 0
-    #        for s1, s2 in zip(shape1, shape2):
-    #            if s1 != s2 and s2 == 1:
-    #                num_unequal_and_1 += 1
-
-    #        return num_unequal_and_1 > 0
-
-    #    def get_broadcast_dims(shape1, shape2):
-    #        # Get the broadcast dims for two shapes
-    #        # This are the dism where the two shapes are not equal and one of them is 1
-    #        broadcast_dims = []
-    #        for dim_idx, (s1, s2) in reversed(list(enumerate(zip(shape1, shape2)))):
-    #            if s1 != s2 and s1 == 1:
-    #                broadcast_dims.append((dim_idx, 0))
-    #            if s1 != s2 and s2 == 1:
-    #                broadcast_dims.append((dim_idx, 1))
-    #        return broadcast_dims
-
-    #    # Handle broadcasting. Broadcasting will fail on padded tensors,
-    #    # so we need to slice the padded tensor to a broadcastable shape.
-    #    if type(args[0]) is PaddedTensor and type(args[1]) is PaddedTensor:
-    #        if is_broadcastable(args[0].orig_shape, args[1].orig_shape):
-    #            broadcast_dims = get_broadcast_dims(
-    #                args[0].orig_shape, args[1].orig_shape
-    #            )
-    #            # For each broadcast dim, slice the padded tensor to the correct shape.
-    #            for broadcast_dim, arg_idx in broadcast_dims:
-    #                other_arg_idx = abs(arg_idx - 1)
-    #                tensor_args[arg_idx] = torch.ops.aten.slice(
-    #                    tensor_args[arg_idx], broadcast_dim, 0, 1
-    #                )
-
-    #    return args, kwargs, tensor_args, tensor_kwargs
-
 
 class MatmulOp(RegularOp):
     def __init__(self) -> None:
@@ -380,7 +245,7 @@ class BmmOp(RegularOp):
         return [torch.Size([b1, n1, p2])]
 
 
-class ScaledDotProductAttentionOp(SliceRunRepadOp):
+class ScaledDotProductAttentionOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -389,25 +254,6 @@ class ScaledDotProductAttentionOp(SliceRunRepadOp):
 
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
-
-    # def modify_args(self, args, kwargs):
-    #    def fn(padded_tensor):
-    #        tensor = slice_nd(
-    #            padded_tensor.tensor,
-    #            [0] * len(padded_tensor.orig_shape),
-    #            padded_tensor.orig_shape,
-    #        )
-
-    #        return tensor
-
-    #    if kwargs is None:
-    #        kwargs = {}
-    #    tensor_args, tensor_kwargs = pytree.tree_map_only(
-    #        PaddedTensor, fn, (args, kwargs)
-    #    )
-    #    tensor_args = list(tensor_args)
-
-    #    return args, kwargs, tensor_args, tensor_kwargs
 
 
 class IndexOp(RegularOp):
@@ -450,7 +296,7 @@ class SelectOp(RegularOp):
         return [input_shape[:dim] + input_shape[dim + 1 :]]
 
 
-class IndexPutOp(SliceRunRepadOp):
+class IndexPutOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -459,7 +305,7 @@ class IndexPutOp(SliceRunRepadOp):
         return [torch.Size(input_shape)]
 
 
-class SplitWithSizesOp(SliceRunRepadOp):
+class SplitWithSizesOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -477,21 +323,6 @@ class SplitWithSizesOp(SliceRunRepadOp):
             + list(input_shape[dim + 1 :])
             for i in range(len(indices_or_sections))
         ]
-
-    # def modify_args(self, args, kwargs):
-    #    _, _, dim = args
-
-    #    if dim < 0:
-    #        dim += len(args[0].orig_shape)
-
-    #    tensor_args, tensor_kwargs = extract_tensors_from_padded(args, kwargs)
-
-    #    # Slice the input tensor to the correct shape
-    #    tensor_args[0] = torch.ops.aten.slice(
-    #        tensor_args[0], dim, 0, sum(tensor_args[1])
-    #    )
-
-    #    return args, kwargs, tensor_args, tensor_kwargs
 
 
 class StackOp(RegularOp):
@@ -552,6 +383,7 @@ class OpDatabase:
             "polar": PolarOp(),
             "transpose": TransposeOp(),
             "clone": ElementwiseUnaryOp(),
+            "expand": ExpandOp(),
             # Elementwise operations
             "where": ElementwiseUnaryOp(),
             "tril": ElementwiseUnaryOp(),
@@ -566,6 +398,7 @@ class OpDatabase:
             "mm": MatmulOp(),
             "bmm": BmmOp(),
             "_scaled_dot_product_flash_attention": ScaledDotProductAttentionOp(),
+            "_scaled_dot_product_efficient_attention": ScaledDotProductAttentionOp(),
             # Indexing operations
             "index": IndexOp(),
             "select": SelectOp(),
@@ -587,9 +420,6 @@ class OpDatabase:
             return self.ops[opname]
         else:
             raise NotImplementedError(f"Op '{opname}' not supported")
-
-            # log("WARNING: Op", opname, "not supported. Using NoOp")
-            # return NoOp()
 
 
 OP_DATABASE = OpDatabase()
@@ -682,34 +512,56 @@ def get_pad(shape: torch.Size, multipliers: List[int]) -> Tuple[int, ...]:
     return tuple(pad[::-1])
 
 
-def get_multipliers(args):
-    for arg in pytree.tree_leaves(args):
-        if type(arg) is PaddedTensor:
-            return arg.multipliers
-    return [1] * 10
+def convert_tensor_args(args: List[object]) -> Tuple[object]:
+    args_padded = []
+    for arg in args:
+        if (
+            type(arg) is torch.Tensor
+            or type(arg) is torch.nn.Parameter
+            or type(arg) is FakeTensor
+            or type(arg) is FunctionalTensor
+        ):
+            multipliers = [1] * len(arg.shape)
+            args_padded.append(PaddedTensor(arg, multipliers))
+            log(
+                "Encountered tensor with shape",
+                arg.shape,
+                "and converted to padded tensor",
+            )
+        else:
+            args_padded.append(arg)
+    return tuple(args_padded)
 
 
-def strip_common_suffix(list1: List[int], list2: List[int]) -> List[int]:
-    list1, list2 = list(list1), list(list2)
+def convert_tensor_results(out, orig_out_shapes):
+    out_flat, spec = pytree.tree_flatten(out)
+    out_flat_padded = []
+    for idx, out_tensor in enumerate(out_flat):
+        if type(out_tensor) in [
+            torch.Tensor,
+            FakeTensor,
+            FunctionalTensor,
+        ] and idx < len(orig_out_shapes):
+            s = orig_out_shapes[idx]
+            multipliers = [1] * len(out_tensor.shape)
+            out_flat_padded.append(PaddedTensor(out_tensor, multipliers, s))
+        else:
+            out_flat_padded.append(out_tensor)
+    out = pytree.tree_unflatten(out_flat_padded, spec)
+    return out
 
-    def f(list1, list2):
-        i, j = len(list1) - 1, len(list2) - 1
 
-        prod = 1
-        while i >= 0 and j >= 0:
-            if prod == list1[i]:
-                i -= 1
-                prod = 1
-            else:
-                prod *= list2[j]
-                j -= 1
+def get_tensors_from_padded(
+    args: Tuple, kwargs: Dict
+) -> Tuple[List[torch.Tensor], Dict]:
+    if kwargs is None:
+        kwargs = {}
+    tensor_args, tensor_kwargs = pytree.tree_map_only(
+        PaddedTensor, lambda x: x.tensor, (args, kwargs)
+    )
+    tensor_args = list(tensor_args)
 
-        return list1[: i + 1]
-
-    cand1 = f(list1, list2)
-    cand2 = f(list2, list1)
-
-    return cand1
+    return tensor_args, tensor_kwargs
 
 
 class PaddedTensor(torch.Tensor):
@@ -719,7 +571,7 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
-        view_shape_stack: Optional[list] = None,
+        neutral_element=0,
     ):
         assert type(multipliers) is list
 
@@ -731,7 +583,7 @@ class PaddedTensor(torch.Tensor):
         kwargs = {}
         # TODO: Improve kwargs. Support different strides, storage_offset, etc.
         kwargs["strides"] = get_strides(padded_shape)
-        kwargs["storage_offset"] = 0
+        kwargs["storage_offset"] = tensor.storage_offset()
         kwargs["device"] = tensor.device
         kwargs["layout"] = tensor.layout
         kwargs["requires_grad"] = tensor.requires_grad
@@ -754,16 +606,18 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
-        view_shape_stack: Optional[list] = None,
+        neutral_element=0,
     ):
         if multipliers is None:
             multipliers = []
         self.multipliers = multipliers
         self.orig_shape = tensor.shape if orig_shape is None else orig_shape
-        self.view_shape_stack = view_shape_stack if view_shape_stack is not None else []
+        self.neutral_element = neutral_element
         if tensor.shape != self.shape:
             pad = get_pad(tensor.shape, multipliers)
-            self.tensor = F.pad(input=tensor, pad=pad, mode="constant", value=0)
+            self.tensor = F.pad(
+                input=tensor, pad=pad, mode="constant", value=neutral_element
+            )
         else:
             self.tensor = tensor
 
@@ -774,7 +628,7 @@ class PaddedTensor(torch.Tensor):
         return ["tensor"], {
             "multipliers": self.multipliers,
             "orig_shape": self.orig_shape,
-            "view_shape_stack": self.view_shape_stack,
+            "neutral_element": self.neutral_element,
         }
 
     @staticmethod
@@ -783,7 +637,7 @@ class PaddedTensor(torch.Tensor):
             inner_tensors["tensor"],
             meta["multipliers"],
             meta["orig_shape"],
-            meta["view_shape_stack"],
+            meta["neutral_element"],
         )
 
     @classmethod
@@ -793,64 +647,24 @@ class PaddedTensor(torch.Tensor):
         log("-" * 40)
 
         op = OP_DATABASE.get_op(func._opname)
-        multipliers = get_multipliers(args)
 
-        # Convert args and kwargs to padded tensors
-        args_new = []
-        for arg in args:
-            if (
-                type(arg) is torch.Tensor
-                or type(arg) is torch.nn.Parameter
-                or type(arg) is FakeTensor
-                or type(arg) is FunctionalTensor
-            ):
-                args_new.append(PaddedTensor(arg, multipliers))
-                log(
-                    "Encountered tensor with shape",
-                    arg.shape,
-                    "and converted to padded tensor",
-                )
-            else:
-                args_new.append(arg)
-        args = tuple(args_new)
+        # Convert arg tensors to padded tensors
+        args = convert_tensor_args(args)
 
-        # Infer shape
+        # Infer original shape
         orig_in_shapes = pytree.tree_map_only(
             PaddedTensor, lambda x: x.orig_shape, args
         )
+        orig_out_shapes = op.infer_shape(orig_in_shapes, args, kwargs)
 
-        orig_out_shape = op.infer_shape(orig_in_shapes, args, kwargs)
-        # log_function_with_shapes(func, args, args, orig_shape)
-
-        # Modify args and shape
-        args, kwargs, tensor_args, tensor_kwargs = op.modify_args(args, kwargs)
-        orig_out_shape = op.modify_out_shape(orig_out_shape, args, kwargs)
+        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
 
         # Run function
         out = func(*tensor_args, **tensor_kwargs)
 
-        log_function_with_shapes(func, args, tensor_args, out, orig_out_shape)
+        log_function_with_shapes(func, args, tensor_args, out, orig_out_shapes)
 
-        # Merge arguments view_shape_stacks
-        view_shape_stack = list(
-            itertools.chain.from_iterable(
-                [arg.view_shape_stack for arg in args if type(arg) is PaddedTensor]
-            )
-        )
+        # Convert results tensors to padded tensors
+        out = convert_tensor_results(out, orig_out_shapes)
 
-        out_flat, spec = pytree.tree_flatten(out)
-
-        out_flat_padded = []
-        for idx, t in enumerate(out_flat):
-            if type(t) in [torch.Tensor, FakeTensor, FunctionalTensor] and idx < len(
-                orig_out_shape
-            ):
-                s = orig_out_shape[idx]
-                out_flat_padded.append(
-                    PaddedTensor(t, multipliers, s, view_shape_stack)
-                )
-            else:
-                out_flat_padded.append(t)
-
-        out = pytree.tree_unflatten(out_flat_padded, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
