@@ -7,7 +7,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -274,11 +274,9 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return zip(range(3), whoo(t)), t.sin()
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
 
     @unittest.expectedFailure
     def test_zip_generator_2(self):
@@ -310,11 +308,9 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             return zip(range(3), whoo(t)), t.sin()
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            self._compile_check(fn)
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
 
     def test_list_zip_generator(self):
         def whoo(t):
@@ -375,11 +371,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 1, t + 2, t + 3])
 
     def test_return_tuple_generator(self):
         def whoo(t):
@@ -392,11 +385,9 @@ class GraphModule(torch.nn.Module):
             return (g1, g2), t.sin()
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(
-            Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        (g1, g2), _ = fn(t)
+        self.assertEqual(list(g1), [t.sin(), t.cos()])
+        self.assertEqual(list(g2), [(t + 1).sin(), (t + 1).cos()])
 
     def test_return_advanced_generator(self):
         def whoo(t):
@@ -411,11 +402,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 2, t + 3])
 
     def test_return_exhaust_generator(self):
         def whoo(t):
@@ -428,11 +416,9 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.tensor([1.0])
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        with self.assertRaises(StopIteration):
+            next(gen)
 
     def test_subgenerator(self):
         def subgen(t):
@@ -468,11 +454,8 @@ class GraphModule(torch.nn.Module):
             return gen
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(
-            InternalTorchDynamoError,
-            "NYI: Returning a generator object from a torch.compile function",
-        ):
-            fn(t)
+        gen = fn(t)
+        self.assertEqual(list(gen), [t + 2, t + 3])
 
     def test_dynamo_disable_generator(self):
         @torch._dynamo.disable
@@ -542,7 +525,6 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
 
-    @unittest.expectedFailure
     def test_generator_with_side_effects(self):
         i = 0
 
@@ -553,13 +535,12 @@ class GraphModule(torch.nn.Module):
                 yield t + j
 
         def fn(t):
-            return zip(range(3), whoo(t))
+            return whoo(t), t.sin()
 
-        t = torch.randn(2)
-        y = self._compile_check(fn, args=(t,), fullgraph=False)
-        self.assertEqual(i, 0)
-        self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
-        self.assertEqual(i, 3)
+        with self.assertRaisesRegex(
+            Unsupported, "Generator: Mutating a variable not in the current scope"
+        ):
+            self._compile_check(fn)
 
     def test_subgenerator_with_side_effects(self):
         i = 0
@@ -582,11 +563,11 @@ class GraphModule(torch.nn.Module):
             yield t + 4
 
         def fn(t):
-            return zip(range(3), whoo(t)), t.sin()
+            return whoo(t), t.sin()
 
         with self.assertRaisesRegex(
             Unsupported,
-            "NYI: Returning a generator object from a torch.compile function",
+            "Generator: Mutating a variable not in the current scope",
         ):
             self._compile_check(fn)
 
@@ -599,16 +580,18 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
-        @torch.compile(backend="eager", fullgraph=False)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             torch._dynamo.graph_break()
-            return list(zip(range(3), gen))
+            next(gen)
+            return gen, t.sin()
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+        fn(t)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
@@ -620,15 +603,16 @@ class GraphModule(torch.nn.Module):
                 yield t + j
                 torch._dynamo.graph_break()
 
-        @torch.compile(backend="eager", fullgraph=False)
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
         def fn(t):
             gen = whoo(t)
             return list(zip(range(3), gen))
 
         t = torch.randn(2)
-        y = fn(t)
-        self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+        fn(t)
+        self.assertEqual(len(eager.graphs), 0)
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
     @unittest.expectedFailure

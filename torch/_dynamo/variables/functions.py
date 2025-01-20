@@ -18,6 +18,7 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     handle_observed_exception,
     InfiniteGeneratorError,
+    MutationError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
@@ -367,22 +368,23 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen):
-        raise unimplemented(
-            "NYI: Returning a generator object from a torch.compile function"
-        )
+        from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    #     from torch._dynamo.symbolic_convert import InstructionTranslator
+        from ..side_effects import disallow_side_effects_under_generator
 
-    #     tx = InstructionTranslator.current_tx()
-    #     tracer = self._get_inline_tracer(tx)
-    #     try:
-    #         prev = tx.output.should_exit
-    #         tx.output.should_exit = False
-    #         if not tracer.generator_exhausted:
-    #             self.remaining_items = self.force_unpack_var_sequence(tx)
-    #         variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
-    #     finally:
-    #         tx.output.should_exit = prev
+        tx = InstructionTranslator.current_tx()
+        with disallow_side_effects_under_generator(tx):
+            tracer = self._get_inline_tracer(tx)
+            try:
+                prev = tx.output.should_exit
+                tx.output.should_exit = False
+                if not tracer.generator_exhausted:
+                    self.remaining_items = self.force_unpack_var_sequence(tx)
+                variables.ListIteratorVariable(self.remaining_items).reconstruct(
+                    codegen
+                )
+            finally:
+                tx.output.should_exit = prev
 
     def bind_args(self, tx, args, kwargs):
         return self.fn.bind_args(tx, args, kwargs)
@@ -416,6 +418,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
+            raise
+        except MutationError:
             raise
         except Unsupported as e:
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
@@ -650,6 +654,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             f_globals,
             inline_tracer,
             source=self.source,
+            mutation_type=ValueMutationNew(),
         )
 
 
