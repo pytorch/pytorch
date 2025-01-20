@@ -3,7 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +13,7 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 from .nested_tensor import NestedTensor
 
 
-__all__: List[Any] = []
+__all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
@@ -973,7 +973,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
+    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
         # This torch._check and torch._check_is_size are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,

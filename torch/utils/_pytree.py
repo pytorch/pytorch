@@ -29,7 +29,6 @@ from collections import (
     deque,
     namedtuple,
     OrderedDict,
-    OrderedDict as GenericOrderedDict,
 )
 from collections.abc import Hashable, Iterable, Mapping, Sequence
 from enum import Enum
@@ -39,7 +38,6 @@ from typing import (
     cast,
     Generic,
     List,
-    NamedTuple,
     Optional,
     overload,
     Protocol,
@@ -47,7 +45,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, NamedTuple
 
 
 __all__ = [
@@ -118,7 +116,7 @@ class EnumEncoder(json.JSONEncoder):
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
@@ -445,46 +443,46 @@ class GetAttrKey:
         return getattr(obj, self.name)
 
 
-def _tuple_flatten(d: tuple[Any, ...]) -> tuple[list[Any], Context]:
+def _tuple_flatten(d: tuple[T, ...]) -> tuple[list[T], Context]:
     return list(d), None
 
 
 def _tuple_flatten_with_keys(
-    d: tuple[Any, ...]
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: tuple[T, ...]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _tuple_unflatten(values: Iterable[Any], context: Context) -> tuple[Any, ...]:
+def _tuple_unflatten(values: Iterable[T], context: Context) -> tuple[T, ...]:
     return tuple(values)
 
 
-def _list_flatten(d: list[Any]) -> tuple[list[Any], Context]:
+def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
     return d, None
 
 
-def _list_flatten_with_keys(d: list[Any]) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _list_unflatten(values: Iterable[Any], context: Context) -> list[Any]:
+def _list_unflatten(values: Iterable[T], context: Context) -> list[T]:
     return list(values)
 
 
-def _dict_flatten(d: dict[Any, Any]) -> tuple[list[Any], Context]:
+def _dict_flatten(d: dict[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: dict[Any, Any]
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: dict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
-def _dict_unflatten(values: Iterable[Any], context: Context) -> dict[Any, Any]:
+def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
     return dict(zip(context, values))
 
 
@@ -502,7 +500,7 @@ def _namedtuple_flatten_with_keys(
     )
 
 
-def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple:
+def _namedtuple_unflatten(values: Iterable[T], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
 
@@ -537,21 +535,21 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return typ
 
 
-def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> tuple[list[Any], Context]:
+def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _ordereddict_flatten_with_keys(
-    d: GenericOrderedDict[Any, Any]
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: OrderedDict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
 def _ordereddict_unflatten(
-    values: Iterable[Any],
+    values: Iterable[T],
     context: Context,
-) -> GenericOrderedDict[Any, Any]:
+) -> OrderedDict[Any, T]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
@@ -559,23 +557,23 @@ _odict_flatten = _ordereddict_flatten
 _odict_unflatten = _ordereddict_unflatten
 
 
-def _defaultdict_flatten(d: defaultdict[Any, Any]) -> tuple[list[Any], Context]:
+def _defaultdict_flatten(d: defaultdict[Any, T]) -> tuple[list[T], Context]:
     values, dict_context = _dict_flatten(d)
     return values, [d.default_factory, dict_context]
 
 
 def _defaultdict_flatten_with_keys(
-    d: defaultdict[Any, Any]
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: defaultdict[Any, T]
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
 def _defaultdict_unflatten(
-    values: Iterable[Any],
+    values: Iterable[T],
     context: Context,
-) -> defaultdict[Any, Any]:
+) -> defaultdict[Any, T]:
     default_factory, dict_context = context
     return defaultdict(default_factory, _dict_unflatten(values, dict_context))
 
@@ -609,18 +607,18 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     return [default_factory, dict_context]
 
 
-def _deque_flatten(d: deque[Any]) -> tuple[list[Any], Context]:
+def _deque_flatten(d: deque[T]) -> tuple[list[T], Context]:
     return list(d), d.maxlen
 
 
 def _deque_flatten_with_keys(
-    d: deque[Any],
-) -> tuple[list[tuple[KeyEntry, Any]], Context]:
+    d: deque[T],
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _deque_unflatten(values: Iterable[Any], context: Context) -> deque[Any]:
+def _deque_unflatten(values: Iterable[T], context: Context) -> deque[T]:
     return deque(values, maxlen=context)
 
 
@@ -755,7 +753,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
-        def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
+        def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(tree)
                 return
