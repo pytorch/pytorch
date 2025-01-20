@@ -3,8 +3,9 @@
 import functools
 import logging
 import sys
+from collections.abc import Sequence
 from importlib.metadata import EntryPoint
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import Callable, Optional, Protocol
 
 import torch
 from torch import fx
@@ -14,14 +15,14 @@ log = logging.getLogger(__name__)
 
 
 class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+    def __call__(self, *args: torch.Tensor) -> tuple[torch.Tensor, ...]:
         ...
 
 
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
-_BACKENDS: Dict[str, Optional[EntryPoint]] = {}
-_COMPILER_FNS: Dict[str, CompilerFn] = {}
+_BACKENDS: dict[str, Optional[EntryPoint]] = {}
+_COMPILER_FNS: dict[str, CompilerFn] = {}
 
 
 def register_backend(
@@ -76,7 +77,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to:
 
