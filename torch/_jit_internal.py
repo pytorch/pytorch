@@ -1125,7 +1125,7 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann) -> bool:
-    if ann is tuple:
+    if ann is Tuple:
         raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -1135,11 +1135,11 @@ def is_tuple(ann) -> bool:
     ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
         return True
-    return ann.__module__ == "typing" and (ann_origin is tuple or ann_origin is tuple)
+    return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
 
 
 def is_list(ann) -> bool:
-    if ann is list:
+    if ann is List:
         raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, "__module__"):
@@ -1148,7 +1148,7 @@ def is_list(ann) -> bool:
     ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
         return True
-    return ann.__module__ == "typing" and (ann_origin is list or ann_origin is list)
+    return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
 
 
 def is_dict(ann) -> bool:
