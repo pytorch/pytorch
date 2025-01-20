@@ -2537,6 +2537,9 @@ class ExpandView(BaseView):
     @classmethod
     def create(cls, x, new_size):  # type: ignore[no-untyped-def]
         new_size = cls._normalize_size(x, new_size)
+        expand_num = sympy_product(new_size) / x.get_numel()
+        if isinstance(expand_num, sympy.Number) and expand_num > 100:
+            x.realize()
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
