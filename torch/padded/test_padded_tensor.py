@@ -416,8 +416,61 @@ class TransformerModelTest(PaddedTensorTestCase):
 
                 transformer = torch.compile(transformer, mode="reduce-overhead")
                 out_p = transformer(*inputs_p)
+                out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
 
                 self.are_equal(out, out_p)
+
+                is_out_equal = pytree.tree_map(
+                    lambda o, p: torch.allclose(o, p, atol=1e-5), out, out_p
+                )
+                self.assertTrue(is_out_equal)
+
+
+class OperationTests(PaddedTensorTestCase):
+    def setUp(self):
+        super().setUp()
+
+    def test_view_collapse(self):
+        # Collapse start
+        x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
+        z = x.view(24, 7)
+        self.assertEqual(z.unpad().shape, torch.Size([15, 7]))
+
+        # Collapse end
+        x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
+        z = x.view(4, 42)
+        self.assertEqual(z.unpad().shape, torch.Size([3, 35]))
+
+        # Collapse middle
+        x = PaddedTensor(torch.randn(3, 5, 7, 9), [4, 6, 1, 1])
+        z = x.view(4, 42, 9)
+        self.assertEqual(z.unpad().shape, torch.Size([3, 35, 9]))
+
+        # Collapse multiple
+        x = PaddedTensor(torch.randn(3, 5, 7, 9, 11), [4, 6, 1, 1, 1])
+        z = x.view(24, 7, 99)
+        self.assertEqual(z.unpad().shape, torch.Size([15, 7, 99]))
+
+    def test_view_expand(self):
+        # Expand start
+        x = PaddedTensor(torch.randn(3, 5, 7), [1, 6, 1])
+        z = x.view(18, 7)
+        self.assertEqual(z.unpad().shape, torch.Size([15, 7]))
+
+        # Expand end
+        x = PaddedTensor(torch.randn(3, 5, 7), [1, 6, 1])
+        z = x.view(3, 42)
+        self.assertEqual(z.unpad().shape, torch.Size([3, 35]))
+
+        # Test that unpad throws an exception, when we can't infer the dim.
+        x = PaddedTensor(torch.randn(15, 7), [4, 1, 1])
+        z = x.view(4, 4, 7)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "PaddedTensor couldn't figure out a shape, likely due to an expansion.",
+        ):
+            z.unpad()
 
 
 if __name__ == "__main__":

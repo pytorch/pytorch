@@ -1,7 +1,4 @@
-import itertools
 import math
-from operator import is_, mul
-from tokenize import maybe
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -15,31 +12,7 @@ from utils import *
 
 
 OP_COUNTER = 0
-
-
-# def strip_common_suffix(
-#    list1: List[int], list2: List[int]
-# ) -> Tuple[List[int], List[int]]:
-#    list1, list2 = list(list1), list(list2)
-#
-#    def f(list1, list2):
-#        i, j = len(list1) - 1, len(list2) - 1
-#
-#        prod = 1
-#        while i >= 0 and j >= 0:
-#            if prod == list1[i]:
-#                i -= 1
-#                prod = 1
-#            else:
-#                prod *= list2[j]
-#                j -= 1
-#
-#        return list1[: i + 1]
-#
-#    cand1 = f(list1, list2)
-#    cand2 = f(list2, list1)
-#
-#    return cand1, cand2
+INVALID_DIM = -1337
 
 
 def strip_common_suffix(
@@ -60,8 +33,14 @@ def strip_common_suffix(
 def strip_common_prefix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
-    suffix1, suffix2 = strip_common_suffix(list(reversed(list1)), list(reversed(list2)))
-    return list(reversed(suffix1)), list(reversed(suffix2))
+    if len(list1) == 0 or len(list2) == 0:
+        return list1, list2
+
+    idx = 0
+    while list1[idx] == list2[idx]:
+        idx += 1
+
+    return list1[idx:], list2[idx:]
 
 
 def slice_nd(
@@ -220,8 +199,6 @@ class ViewOp(RegularOp):
                 orig_output_shape = list(orig_input_shape[:offset]) + suffix_out
 
             if is_suffix_equal:
-                # return [torch.Size([-1337] * len(output_shape))]
-
                 # We strip the common suffix. Then attach the prefix of the output shape to the orig input shape
                 prefix_in, prefix_out = strip_common_suffix(input_shape, output_shape)
 
@@ -246,7 +223,7 @@ class ViewOp(RegularOp):
                 math.prod(orig_input_shape) == math.prod(orig_output_shape)
                 or -1 in orig_output_shape
             ):
-                return [torch.Size([-1337] * len(output_shape))]
+                return [torch.Size([INVALID_DIM] * len(output_shape))]
 
             return [torch.Size(orig_output_shape)]
 
@@ -765,6 +742,27 @@ class PaddedTensor(torch.Tensor):
         )
 
     @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        with torch._C.DisableTorchFunctionSubclass():
+            out = func(*args, **kwargs)
+
+        if func.__name__ == "linear":
+            in_shape_1 = args[0].orig_shape
+            in_shape_2 = args[1].shape
+
+            prefix1, prefix2 = strip_common_suffix(in_shape_1, in_shape_2)
+            out_shape = prefix1 + prefix2
+
+            print("setting linear", in_shape_1, in_shape_2, out_shape)
+
+            out.orig_shape = torch.Size(out_shape)
+
+        return out
+
+    @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         global OP_COUNTER
         log()
@@ -795,23 +793,12 @@ class PaddedTensor(torch.Tensor):
 
         return return_and_correct_aliasing(func, args, kwargs, out)
 
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
+    def unpad(self) -> torch.Tensor:
+        if INVALID_DIM in self.orig_shape:
+            raise Exception(
+                "PaddedTensor couldn't figure out a shape, likely due to an expansion."
+            )
 
-        with torch._C.DisableTorchFunctionSubclass():
-            out = func(*args, **kwargs)
-
-        if func.__name__ == "linear":
-            in_shape_1 = args[0].orig_shape
-            in_shape_2 = args[1].shape
-
-            prefix1, prefix2 = strip_common_suffix(in_shape_1, in_shape_2)
-            out_shape = prefix1 + prefix2
-
-            print("setting linear", in_shape_1, in_shape_2, out_shape)
-
-            out.orig_shape = torch.Size(out_shape)
-
-        return out
+        start_idxs = [0] * len(self.orig_shape)
+        end_idxs = list(self.orig_shape)
+        return slice_nd(self.tensor, start_idxs, end_idxs)
