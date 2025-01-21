@@ -225,6 +225,7 @@ from .user_defined import (
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
 )
+from .builtin import BuiltinVariable
 
 
 try:
@@ -2981,6 +2982,8 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
+        elif isinstance(value, types.GenericAlias):
+            return BuiltinVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
