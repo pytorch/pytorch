@@ -8123,16 +8123,6 @@ class TestMPS(TestCaseMPS):
         endEvent.record()
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
-    
-    def test_astream_context_manager(self):
-        prev_stream = torch.accelerator.current_stream()
-        print(prev_stream)
-        s = torch.Stream()
-        print(s)
-        print("call __enter__")
-        s.__enter__()
-        print("call __exit__")
-        s.__exit__()
 
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
