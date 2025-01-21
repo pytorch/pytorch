@@ -1,11 +1,12 @@
 name: post-test-dispatch
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
         name:
           description: 'Your name'
-          required: true
-
+          required: False
+          default: "default"
 jobs:
   post-process:
     runs-on: ubuntu-latest
