@@ -2646,7 +2646,6 @@ make_fallback(aten._linalg_check_errors)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.triangular_solve)
-make_fallback(aten.linalg_cholesky)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
@@ -3034,6 +3033,13 @@ def _assert_scalar(data, msg):
     # Not sure if we are guaranteed to be able to serve out truth from the
     # deferred_runtime_asserts, TODO: try this assert out
     # assert bool(data.scalar), data
+    return None
+
+
+@register_lowering(aten._assert_tensor_metadata)
+def _assert_tensor_metadata(
+    a, size=None, stride=None, dtype=None, *, device=None, layout=None
+):
     return None
 
 
