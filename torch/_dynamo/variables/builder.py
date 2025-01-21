@@ -116,6 +116,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -225,7 +226,6 @@ from .user_defined import (
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
 )
-from .builtin import BuiltinVariable
 
 
 try:
