@@ -24,12 +24,7 @@ import sys
 import threading
 import types
 import warnings
-from collections import (
-    defaultdict,
-    deque,
-    namedtuple,
-    OrderedDict,
-)
+from collections import defaultdict, deque, namedtuple, OrderedDict
 from collections.abc import Hashable, Iterable, Mapping, Sequence
 from enum import Enum
 from typing import (
@@ -41,7 +36,6 @@ from typing import (
     Optional,
     overload,
     Protocol,
-    Tuple,
     TypeVar,
     Union,
 )
