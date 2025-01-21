@@ -27,7 +27,7 @@ def copy_(in1, in2):
 
 
 ######
-## Benchmark ops performance for inplace add + sub + mul + copy
+# Benchmark ops performance for inplace add + sub + mul + copy
 ######
 binary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
@@ -84,7 +84,7 @@ op_bench.generate_pt_tests_from_op_list(
 
 
 ######
-## Benchmark ops performance for inplace div
+# Benchmark ops performance for inplace div
 ######
 # Performing division inplace benchmarks separately, as data needs to be float
 binary_ops_list = op_bench.op_list(

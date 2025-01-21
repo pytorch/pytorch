@@ -103,7 +103,7 @@ op_bench.generate_pt_tests_from_op_list(
 
 
 ######
-## Benchmark ops performance for boolean dtype
+# Benchmark ops performance for boolean dtype
 ######
 
 
