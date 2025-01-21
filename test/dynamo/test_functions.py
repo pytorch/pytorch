@@ -11,7 +11,7 @@ import random
 import sys
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generic, List, TypeVar
+from typing import Any, Generic, TypeVar
 from typing_extensions import NamedTuple
 from unittest.mock import patch
 
@@ -3896,8 +3896,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         @dataclass
         class Output:
             scalar: int = 2
-            named_tensors: Dict[str, torch.Tensor] = field(default_factory=dict)
-            lists: List[torch.Tensor] = field(default_factory=list)
+            named_tensors: dict[str, torch.Tensor] = field(default_factory=dict)
+            lists: list[torch.Tensor] = field(default_factory=list)
 
             def scale(self):
                 return self.scalar * 2

@@ -3,7 +3,7 @@
 
 import functools
 from collections import namedtuple
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
@@ -645,7 +645,7 @@ class TestFlexDecoding(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        head_dims: Tuple[int, int],
+        head_dims: tuple[int, int],
         page_size: int,
     ):
         Hq, Hkv = head_dims
@@ -681,7 +681,7 @@ class TestFlexDecoding(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, Tuple[int, int]],
+        BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
         block_mask = create_block_mask(noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE)
         self.run_test(score_mod, dtype, block_mask=block_mask)
@@ -763,8 +763,8 @@ class TestFlexDecoding(InductorTestCase):
     def test_kv_batch_broadcast(
         self,
         dtype: torch.dtype,
-        head_dims: Tuple[int, int],
-        batch_dims: Tuple[int, int],
+        head_dims: tuple[int, int],
+        batch_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims

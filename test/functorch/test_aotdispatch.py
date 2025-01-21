@@ -12,7 +12,7 @@ import unittest
 import warnings
 from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
@@ -319,8 +319,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -358,11 +358,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -6748,8 +6748,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6880,8 +6880,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6904,11 +6904,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

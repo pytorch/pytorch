@@ -52,7 +52,7 @@ from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
-from typing import Any, Callable, Dict, NamedTuple, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, NamedTuple, Optional, Union, Tuple, List
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
@@ -366,7 +366,7 @@ class TestFX(JitTestCase):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            args : tuple[Argument, ...], kwargs : dict[str, Any], name : Optional[str] = None,
                             type_expr : Optional[Any] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
@@ -521,7 +521,7 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        val_map : Dict[Node, Node] = {}
+        val_map : dict[Node, Node] = {}
         output_val = new_g.graph_copy(g, val_map)
         t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
@@ -635,13 +635,13 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        val_map : Dict[Node, Node] = {}
+        val_map : dict[Node, Node] = {}
         output_val = new_g.graph_copy(g, val_map)
         t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
-        seen_names : Set[str] = set()
+        seen_names : set[str] = set()
         for node in gm.graph.nodes:
             assert node.name not in seen_names
             seen_names.add(node.name)
@@ -716,9 +716,9 @@ class TestFX(JitTestCase):
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         graph2 = torch.fx.Graph()
-        val_map : Dict[Node, Node] = {}
+        val_map : dict[Node, Node] = {}
         graph2.graph_copy(graph, val_map)
-        seen_names : Set[str] = set()
+        seen_names : set[str] = set()
         for node in graph2.nodes:
             assert node.name not in seen_names
             seen_names.add(node.name)
@@ -930,7 +930,7 @@ class TestFX(JitTestCase):
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            args : tuple[Argument, ...], kwargs : dict[str, Any], name : Optional[str] = None,
                             type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = 'foo'
@@ -1079,7 +1079,7 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = torch.fx.Graph()
-            val_map : Dict[Node, Node] = {}
+            val_map : dict[Node, Node] = {}
             output_value = new_graph.graph_copy(traced.graph, val_map)
             relu_out = new_graph.create_node(
                 op='call_method', target='neg', args=(output_value,), kwargs={})
@@ -1235,7 +1235,7 @@ class TestFX(JitTestCase):
         self.assertEqual(traced_scripted(torch.rand(4)), 2)
 
     def test_tuple_no_subscript(self):
-        def foo(x : Tuple):
+        def foo(x : tuple):
             return x[0]
 
         traced = torch.fx.symbolic_trace(foo)
@@ -1551,7 +1551,7 @@ class TestFX(JitTestCase):
 
     def test_return_tuple(self):
         class M(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 return (x, x + x)
 
         original = M()
@@ -1696,7 +1696,7 @@ class TestFX(JitTestCase):
         # Make sure we're testing all opcodes
         opcodes = set()
         output_shape : Optional[torch.Shape] = None
-        output_stride : Optional[Tuple[int]] = None
+        output_stride : Optional[tuple[int]] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
@@ -1938,12 +1938,12 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(fn)
 
         class NegSigmSwapInterpreter(Interpreter):
-            def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+            def call_function(self, target : Target, args : tuple, kwargs : dict) -> Any:
                 if target == torch.sigmoid:
                     return torch.neg(*args, **kwargs)
                 return super().call_function(n)  # noqa: F821
 
-            def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+            def call_method(self, target : Target, args : tuple, kwargs : dict) -> Any:
                 if target == 'neg':
                     call_self, *args_tail = args
                     return call_self.sigmoid(*args_tail, **kwargs)
@@ -2053,12 +2053,12 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(fn)
 
         class NegSigmSwapXformer(Transformer):
-            def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+            def call_function(self, target : Target, args : tuple, kwargs : dict) -> Any:
                 if target == torch.sigmoid:
                     return torch.neg(*args, **kwargs)
                 return super().call_function(n)  # noqa: F821
 
-            def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+            def call_method(self, target : Target, args : tuple, kwargs : dict) -> Any:
                 if target == 'neg':
                     call_self, *args_tail = args
                     return call_self.sigmoid(*args_tail, **kwargs)
@@ -2090,7 +2090,7 @@ class TestFX(JitTestCase):
 
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
-            def forward(self, p : Pair, z : torch.Tensor, i : int) -> Dict[str, torch.Tensor]:
+            def forward(self, p : Pair, z : torch.Tensor, i : int) -> dict[str, torch.Tensor]:
                 return {'a': p.x + p.y + z + i}
 
         foo_scripted = torch.jit.script(Foo())
@@ -2101,7 +2101,7 @@ class TestFX(JitTestCase):
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_fn_type_annotation_empty(self):
-        def forward(a : List[torch.Tensor]):
+        def forward(a : list[torch.Tensor]):
             return a[0]
         torch.jit.script(symbolic_trace(forward))
 
@@ -2534,7 +2534,7 @@ class TestFX(JitTestCase):
 
     def test_trace_dict_int_keys(self):
         class ModWithDictArg(torch.nn.Module):
-            def forward(self, d : Dict[int, torch.Tensor]):
+            def forward(self, d : dict[int, torch.Tensor]):
                 return d[42]
 
         class CallsModWithDict(torch.nn.Module):
@@ -2553,7 +2553,7 @@ class TestFX(JitTestCase):
 
     def test_trace_dict_proxy_keys(self):
         class ModWithDictArg(torch.nn.Module):
-            def forward(self, d : Dict[torch.Tensor, torch.Tensor]):
+            def forward(self, d : dict[torch.Tensor, torch.Tensor]):
                 return d[42]
 
         class CallsModWithDict(torch.nn.Module):
@@ -2761,10 +2761,10 @@ class TestFX(JitTestCase):
 
     def test_return_type_exists(self):
         class ReturnTypeModule(torch.nn.Module):
-            def other(self, x: List[str]) -> List[str]:
+            def other(self, x: list[str]) -> list[str]:
                 return x
 
-            def forward(self, x: List[str]) -> List[str]:
+            def forward(self, x: list[str]) -> list[str]:
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
@@ -3530,7 +3530,7 @@ class TestFX(JitTestCase):
                 return torch.add(x, x)
 
         class M(torch.nn.Module):
-            def forward(self, x: List[torch.Tensor], a: A) -> torch.Tensor:
+            def forward(self, x: list[torch.Tensor], a: A) -> torch.Tensor:
                 return a(x[0])
 
         self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
@@ -3541,7 +3541,7 @@ class TestFX(JitTestCase):
                 return torch.add(x, x)
 
         class M(torch.nn.Module):
-            def forward(self, x: List['torch.Tensor'], a: A) -> 'torch.Tensor':
+            def forward(self, x: list['torch.Tensor'], a: A) -> 'torch.Tensor':
                 return a(x)[0]
 
         self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
@@ -3708,10 +3708,10 @@ class TestFX(JitTestCase):
         # will be split into two separate nodes with the names
         # "batch_1" and "batch_2", referring to the keys
         # "f1" and "f2" respectively in the dict.
-        def f_dict(a: Dict[str, str]) -> bool:
+        def f_dict(a: dict[str, str]) -> bool:
             return a["f1"] == a["f2"]
 
-        def verify_metadata(gm: GraphModule, arg_names: List[str], metadata: List[str]):
+        def verify_metadata(gm: GraphModule, arg_names: list[str], metadata: list[str]):
             for node in gm.graph.nodes:
                 if node.op == "placeholder":
                     self.assertTrue(node.name in arg_names)
@@ -3737,7 +3737,7 @@ class TestFX(JitTestCase):
         # Ensures that tags on nodes are NOT overwritten by PH attributes with same attr name (tag)
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            args : tuple[Argument, ...], kwargs : dict[str, Any], name : Optional[str] = None,
                             type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = "foo"
@@ -3764,7 +3764,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return lst_unpack
 
             def additional_globals(self):
-                return [('List', typing.List)]
+                return [('List', list)]
 
             def process_inputs(self, *inputs):
                 assert len(inputs) == 1
@@ -3799,7 +3799,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return lst_unpack
 
             def additional_globals(self):
-                return [('List', typing.List)]
+                return [('List', list)]
 
             def process_inputs(self, *inputs):
                 assert len(inputs) == 1
@@ -3828,7 +3828,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return lst_unpack
 
             def additional_globals(self):
-                return [('List', typing.List)]
+                return [('List', list)]
 
             def process_inputs(self, *inputs):
                 assert len(inputs) == 1
@@ -4142,7 +4142,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             # Unbound types don't have `__origin__` in some Python versions, so fix that up here.
             origin = t if t in self._UNBOUND_TYPES else origin
 
-        if origin in {tuple, typing.Tuple}:
+        if origin in {tuple, tuple}:
             return f'Tuple{contained_type_str}'
         if origin in {typing.Union}:
             # Annoying hack to detect Optional
@@ -4150,11 +4150,11 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 not_none_param = contained[0] if contained[0] is not type(None) else contained[1]
                 return f'Optional[{self._annotation_type_to_stable_str(not_none_param, sig_str, True)}]'
             return f'Union{contained_type_str}'
-        if origin in {dict, typing.Dict}:
+        if origin in {dict, dict}:
             return f'Dict{contained_type_str}'
-        if origin in {list, typing.List}:
+        if origin in {list, list}:
             return f'List{contained_type_str}'
-        if origin in {type, typing.Type}:
+        if origin in {type, type}:
             return f'Type{contained_type_str}'
         if isinstance(t, typing.Callable):
             if len(contained) > 0 and contained[0] is not Ellipsis:
