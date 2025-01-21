@@ -2,8 +2,9 @@
 import collections
 import itertools
 import logging
+from collections.abc import Iterable, Sequence
 from copy import copy
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Optional
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import _get_qualified_name, Node
@@ -52,10 +53,10 @@ class _DependencyViewer:
                 self.downstreams[node].add(output_node)
                 self.downstreams[node].update(self.downstreams[output_node])
 
-    def downstreams_of(self, node: Node) -> Set[Node]:
+    def downstreams_of(self, node: Node) -> set[Node]:
         return self.downstreams[node]
 
-    def upstreams_of(self, node: Node) -> Set[Node]:
+    def upstreams_of(self, node: Node) -> set[Node]:
         return self.upstreams[node]
 
 
@@ -84,21 +85,21 @@ class CapabilityBasedPartitioner:
             dict(self.graph_module.named_modules()), node
         )
 
-    def propose_partitions(self) -> List[Partition]:
+    def propose_partitions(self) -> list[Partition]:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
-        partition_map: Dict[int, Set] = collections.defaultdict(set)
+        partition_map: dict[int, set] = collections.defaultdict(set)
 
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}  # mapping from node to partition_id
-        partitions_by_id: Dict[
+        assignment: dict[Node, int] = {}  # mapping from node to partition_id
+        partitions_by_id: dict[
             int, Partition
         ] = {}  # mapping from partition_id to partition
-        nodes_order: Dict[
+        nodes_order: dict[
             Node, int
         ] = {}  # mapping from nodes to reversed topological order
-        partitions_order: Dict[
+        partitions_order: dict[
             int, int
         ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
         new_partition_id = itertools.count()
@@ -111,7 +112,7 @@ class CapabilityBasedPartitioner:
             merged_nodes = copy(partitions_by_id[self_id].nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
-            def dfs_iter_find_cycle(all_user_nodes: Set[Node]):
+            def dfs_iter_find_cycle(all_user_nodes: set[Node]):
                 for user_node in all_user_nodes:
                     visited_partition_ids = set()
 
@@ -210,7 +211,7 @@ class CapabilityBasedPartitioner:
 
         for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
-            merge_candidates: Dict[int, None] = {}
+            merge_candidates: dict[int, None] = {}
 
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
@@ -241,7 +242,7 @@ class CapabilityBasedPartitioner:
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
-        nodes_reassignment: Dict[Node, int] = {}
+        nodes_reassignment: dict[Node, int] = {}
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
             for user in node.users:
@@ -266,7 +267,7 @@ class CapabilityBasedPartitioner:
             logger.debug("Filtering out single node partitions...")
             default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
             non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
-            partitions_to_remove: List[int] = []
+            partitions_to_remove: list[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
@@ -295,7 +296,7 @@ class CapabilityBasedPartitioner:
         ]
 
     def fuse_partitions(
-        self, partitions: List[Partition], prefix: str = "fused_"
+        self, partitions: list[Partition], prefix: str = "fused_"
     ) -> GraphModule:
         logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[Dict[Node, None]]: [ {node0 : None}, {node1 : None} ]
@@ -306,7 +307,7 @@ class CapabilityBasedPartitioner:
         )
 
     # remove non-compute-ops that sits at the boundary of a partition.
-    def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
+    def remove_bookend_non_compute_ops(self, partitions: list[Partition]):
         non_compute_ops = set(self.non_compute_ops)
 
         def is_non_compute_node(node: Node):
@@ -316,11 +317,11 @@ class CapabilityBasedPartitioner:
             )
 
         # cache transparent nodes
-        transparent_input_nodes: Dict[Node, bool] = {}
-        transparent_output_nodes: Dict[Node, bool] = {}
+        transparent_input_nodes: dict[Node, bool] = {}
+        transparent_output_nodes: dict[Node, bool] = {}
 
         def is_transparent_input_node(
-            node: Node, partition: Set[Node], removed_nodes: Set[Node]
+            node: Node, partition: set[Node], removed_nodes: set[Node]
         ):
             if (
                 node.op == "placeholder"
@@ -341,7 +342,7 @@ class CapabilityBasedPartitioner:
             return False
 
         def is_transparent_output_node(
-            node: Node, partition: Set[Node], removed_nodes: Set[Node]
+            node: Node, partition: set[Node], removed_nodes: set[Node]
         ):
             if (
                 node.op == "placeholder"
@@ -367,7 +368,7 @@ class CapabilityBasedPartitioner:
             # Note it's ok to use `set` here, since we are only query if a node
             # has been removed. We are NEVER going to iterate on nodes inside
             # the set.
-            remove_node: Set[Node] = set()
+            remove_node: set[Node] = set()
             for node in partition.nodes:
                 if is_non_compute_node(node) and (
                     is_transparent_input_node(node, set(partition.nodes), remove_node)
