@@ -858,7 +858,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            shutil.rmtree(inductor_cache_dir)
+            shutil.rmtree(inductor_cache_dir, ignore_errors=True)
     except Exception:
         if not _IS_WINDOWS:
             """
