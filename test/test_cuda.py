@@ -5441,6 +5441,7 @@ class TestCudaAutocast(TestAutocast):
             },
         )
 
+        # CI test
         with torch.autocast("cuda"):
             output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
