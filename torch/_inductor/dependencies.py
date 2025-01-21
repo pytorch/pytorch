@@ -4,18 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -35,10 +24,6 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import OpsHandler, ReductionType, V
-
-
-if TYPE_CHECKING:
-    from .loop_body import LoopBody  # noqa: TC004
 
 
 T = TypeVar("T")
@@ -642,7 +627,7 @@ def extract_read_writes(
 
 
 def extract_loop_body_with_args(
-    fn: LoopBody,
+    fn: Any,
     args: List[List[sympy.Expr]],
     var_ranges: VarRanges,
     normalize: bool = False,
