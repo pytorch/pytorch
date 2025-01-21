@@ -45,6 +45,7 @@ import itertools
 import logging
 import operator
 import os
+import sys
 import re
 import textwrap
 import typing
@@ -1601,9 +1602,17 @@ def gen_register_replacement(
         )
     else:
         pattern_name = search_fn.__name__
-        m = importlib.import_module(
-            f"torch._inductor.fx_passes.serialized_patterns.{pattern_name}"
-        )
+        if torch._inductor.config.serialized_pattern_path == "DEFAULT":
+            m = importlib.import_module(
+                f"torch._inductor.fx_passes.serialized_patterns.{pattern_name}"
+            )
+        else:
+            modu_path = SERIALIZED_PATTERN_PATH / f"{pattern_name}.py"
+            modu_spec = importlib.util.spec_from_file_location(pattern_name, modu_path)
+            m = importlib.util.module_from_spec(modu_spec)
+            sys.modules[pattern_name] = m
+            sys.loader.exec_module(m)
+
         if not m or not hasattr(m, unique_name):
             log.warning(
                 "Precompiled pattern %r not found. Run torchgen/fuse/gen_patterns.py.",
