@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import List
 
 import torch
 from torch import Tensor
@@ -77,7 +78,7 @@ class FloatFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.cat``"""
 
-    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
         r = torch.cat(x, dim=dim)
         r = self.activation_post_process(r)
         return r
@@ -143,7 +144,7 @@ class FXFloatFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.cat``"""
 
-    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
         r = torch.cat(x, dim=dim)
         return r
 
@@ -266,7 +267,7 @@ class QFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
 
-    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
         r = ops.quantized.cat(x, scale=self.scale, zero_point=self.zero_point, dim=dim)
         r = self.activation_post_process(r)
         return r

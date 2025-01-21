@@ -39,6 +39,7 @@ from typing import (
     Iterable,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
@@ -49,7 +50,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -447,46 +448,46 @@ class GetAttrKey:
         return getattr(obj, self.name)
 
 
-def _tuple_flatten(d: Tuple[T, ...]) -> Tuple[List[T], Context]:
+def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
     return list(d), None
 
 
 def _tuple_flatten_with_keys(
-    d: Tuple[T, ...]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: Tuple[Any, ...]
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _tuple_unflatten(values: Iterable[T], context: Context) -> Tuple[T, ...]:
+def _tuple_unflatten(values: Iterable[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
 
-def _list_flatten(d: List[T]) -> Tuple[List[T], Context]:
+def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
 
 
-def _list_flatten_with_keys(d: List[T]) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+def _list_flatten_with_keys(d: List[Any]) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _list_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _list_unflatten(values: Iterable[T], context: Context) -> List[T]:
+def _list_unflatten(values: Iterable[Any], context: Context) -> List[Any]:
     return list(values)
 
 
-def _dict_flatten(d: Dict[Any, T]) -> Tuple[List[T], Context]:
+def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _dict_flatten_with_keys(
-    d: Dict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: Dict[Any, Any]
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
-def _dict_unflatten(values: Iterable[T], context: Context) -> Dict[Any, T]:
+def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
     return dict(zip(context, values))
 
 
@@ -504,7 +505,7 @@ def _namedtuple_flatten_with_keys(
     )
 
 
-def _namedtuple_unflatten(values: Iterable[T], context: Context) -> NamedTuple:
+def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple:
     return cast(NamedTuple, context(*values))
 
 
@@ -539,21 +540,21 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return typ
 
 
-def _ordereddict_flatten(d: GenericOrderedDict[Any, T]) -> Tuple[List[T], Context]:
+def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _ordereddict_flatten_with_keys(
-    d: GenericOrderedDict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: GenericOrderedDict[Any, Any]
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
 def _ordereddict_unflatten(
-    values: Iterable[T],
+    values: Iterable[Any],
     context: Context,
-) -> GenericOrderedDict[Any, T]:
+) -> GenericOrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
@@ -561,23 +562,23 @@ _odict_flatten = _ordereddict_flatten
 _odict_unflatten = _ordereddict_unflatten
 
 
-def _defaultdict_flatten(d: DefaultDict[Any, T]) -> Tuple[List[T], Context]:
+def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
     values, dict_context = _dict_flatten(d)
     return values, [d.default_factory, dict_context]
 
 
 def _defaultdict_flatten_with_keys(
-    d: DefaultDict[Any, T]
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: DefaultDict[Any, Any]
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
 def _defaultdict_unflatten(
-    values: Iterable[T],
+    values: Iterable[Any],
     context: Context,
-) -> DefaultDict[Any, T]:
+) -> DefaultDict[Any, Any]:
     default_factory, dict_context = context
     return defaultdict(default_factory, _dict_unflatten(values, dict_context))
 
@@ -611,18 +612,18 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     return [default_factory, dict_context]
 
 
-def _deque_flatten(d: Deque[T]) -> Tuple[List[T], Context]:
+def _deque_flatten(d: Deque[Any]) -> Tuple[List[Any], Context]:
     return list(d), d.maxlen
 
 
 def _deque_flatten_with_keys(
-    d: Deque[T],
-) -> Tuple[List[Tuple[KeyEntry, T]], Context]:
+    d: Deque[Any],
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _deque_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
-def _deque_unflatten(values: Iterable[T], context: Context) -> Deque[T]:
+def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
     return deque(values, maxlen=context)
 
 

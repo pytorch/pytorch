@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -42,8 +42,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            list[Union[torch.Tensor, int, torch.SymInt]],
-            tuple[Union[torch.Tensor, int, torch.SymInt]],
+            List[Union[torch.Tensor, int, torch.SymInt]],
+            Tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(

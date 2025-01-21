@@ -3,6 +3,7 @@
 import unittest
 from collections.abc import Sequence
 from functools import partial
+from typing import List
 
 import numpy as np
 
@@ -423,7 +424,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
             )
 
 
-op_db: list[OpInfo] = [
+op_db: List[OpInfo] = [
     ReductionOpInfo(
         "masked.sum",
         ref=reference_reduction_numpy(np.sum),

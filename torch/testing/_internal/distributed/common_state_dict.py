@@ -4,7 +4,7 @@
 
 import copy
 from itertools import chain
-from typing import Any
+from typing import Any, Dict
 
 import torch
 import torch.nn as nn
@@ -32,8 +32,8 @@ class VerifyStateDictMixin:
 
     def _verify_msd(
         self,
-        msd: dict[str, Any],
-        dist_msd: dict[str, Any],
+        msd: Dict[str, Any],
+        dist_msd: Dict[str, Any],
         options: StateDictOptions = StateDictOptions(),
         offload_to_cpu=False,
     ) -> None:
@@ -56,8 +56,8 @@ class VerifyStateDictMixin:
         self,
         model: nn.Module,
         optim: torch.optim.Optimizer,
-        osd: dict[str, Any],
-        dist_osd: dict[str, Any],
+        osd: Dict[str, Any],
+        dist_osd: Dict[str, Any],
     ) -> None:
         params = list(chain.from_iterable(g["params"] for g in optim.param_groups))
         param_pid_mapping = dict(zip(params, range(len(params))))
@@ -110,7 +110,7 @@ class VerifyStateDictMixin:
         model: nn.Module,
         optim: torch.optim.Optimizer,
         new_optim: torch.optim.Optimizer,
-        dist_osd: dict[str, Any],
+        dist_osd: Dict[str, Any],
     ) -> None:
         new_dist_osd = _gather_state_dict(dist_osd)
         set_state_dict(

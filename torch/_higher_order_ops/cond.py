@@ -3,7 +3,7 @@
 import contextlib
 import logging
 import warnings
-from typing import Any, Callable, Union
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -71,7 +71,7 @@ def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
     false_fn: Callable,
-    operands: Union[tuple, list] = (),
+    operands: Union[Tuple, List] = (),
 ) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
