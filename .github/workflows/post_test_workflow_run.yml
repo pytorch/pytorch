@@ -1,7 +1,7 @@
 name: post-test-workflow-run
 on:
   workflow_run:
-    workflows: [post-use-trigger-workflow]
+    workflows: [post-trigger-workflow]
     types:
       - completed
 
