@@ -54,7 +54,7 @@ macro(custom_protobuf_find)
 
   # Check if protobuf exists in third_party directory
   if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake")
-    message(FATAL_ERROR 
+    message(FATAL_ERROR
       "Protobuf directory not found in third_party. "
       "Please run git submodule update --init --recursive to fetch dependencies.")
   endif()
