@@ -905,10 +905,10 @@ class TestGeneratorClose(GeneratorTestsBase):
             z = -123
             gen.close()
             L.append(456)
-            return i
+            return i, t.sin()
 
         t = torch.randn(2)
-        y = fn(t)
+        y, _ = fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(L, [10, 456])
         self.assertEqual(z, -123)
