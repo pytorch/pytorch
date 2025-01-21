@@ -3,8 +3,18 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-from collections.abc import Collection, Sequence
-from typing import Any, Callable, NoReturn, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    NoReturn,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+)
 from typing_extensions import deprecated
 
 import torch
@@ -23,7 +33,7 @@ class ErrorMeta(Exception):
     """Internal testing exception that makes that carries error metadata."""
 
     def __init__(
-        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
+        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> None:
         super().__init__(
             "If you are a user and see this message during normal operation "
@@ -72,7 +82,7 @@ _DTYPE_PRECISIONS.update(
 
 def default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[dict[torch.dtype, tuple[float, float]]] = None,
+    dtype_precisions: Optional[Dict[torch.dtype, tuple[float, float]]] = None,
 ) -> tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
@@ -331,13 +341,13 @@ class Pair(abc.ABC):
         raise UnsupportedInputs
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[type, tuple[type, ...]]):
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, tuple[Type, ...]]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
 
     def _fail(
-        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
+        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
@@ -441,8 +451,8 @@ class BooleanPair(Pair):
         super().__init__(actual, expected, **other_parameters)
 
     @property
-    def _supported_types(self) -> tuple[type, ...]:
-        cls: list[type] = [bool]
+    def _supported_types(self) -> tuple[Type, ...]:
+        cls: List[Type] = [bool]
         if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
@@ -535,7 +545,7 @@ class NumberPair(Pair):
         self.check_dtype = check_dtype
 
     @property
-    def _supported_types(self) -> tuple[type, ...]:
+    def _supported_types(self) -> tuple[Type, ...]:
         cls = list(self._NUMBER_TYPES)
         if HAS_NUMPY:
             cls.append(np.number)
@@ -1042,12 +1052,12 @@ def originate_pairs(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[type[Pair]],
-    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
-    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
+    pair_types: Sequence[Type[Pair]],
+    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
     id: tuple[Any, ...] = (),
     **options: Any,
-) -> list[Pair]:
+) -> List[Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1082,8 +1092,8 @@ def originate_pairs(
         and isinstance(expected, sequence_types)
         and not isinstance(expected, str)
     ):
-        actual_len = len(actual)  # type: ignore[arg-type]
-        expected_len = len(expected)  # type: ignore[arg-type]
+        actual_len = len(actual)
+        expected_len = len(expected)
         if actual_len != expected_len:
             raise ErrorMeta(
                 AssertionError,
@@ -1095,8 +1105,8 @@ def originate_pairs(
         for idx in range(actual_len):
             pairs.extend(
                 originate_pairs(
-                    actual[idx],  # type: ignore[index]
-                    expected[idx],  # type: ignore[index]
+                    actual[idx],
+                    expected[idx],
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1107,8 +1117,8 @@ def originate_pairs(
         return pairs
 
     elif isinstance(actual, mapping_types) and isinstance(expected, mapping_types):
-        actual_keys = set(actual.keys())  # type: ignore[attr-defined]
-        expected_keys = set(expected.keys())  # type: ignore[attr-defined]
+        actual_keys = set(actual.keys())
+        expected_keys = set(expected.keys())
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
@@ -1131,8 +1141,8 @@ def originate_pairs(
         for key in keys:
             pairs.extend(
                 originate_pairs(
-                    actual[key],  # type: ignore[index]
-                    expected[key],  # type: ignore[index]
+                    actual[key],
+                    expected[key],
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1180,11 +1190,11 @@ def not_close_error_metas(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[type[Pair]] = (ObjectPair,),
-    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
-    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
+    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
+    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
-) -> list[ErrorMeta]:
+) -> List[ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1215,7 +1225,7 @@ def not_close_error_metas(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None  # noqa: RSE102
 
-    error_metas: list[ErrorMeta] = []
+    error_metas: List[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()

@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import warnings
-from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import torch.cuda
 

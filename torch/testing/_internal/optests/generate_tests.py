@@ -10,8 +10,7 @@ import re
 import tempfile
 import threading
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch._dynamo
@@ -47,7 +46,7 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 def safe_schema_check(
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
 ) -> Any:
@@ -63,7 +62,7 @@ def safe_schema_check(
 def safe_autograd_registration_check(
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
 ) -> None:
@@ -82,7 +81,7 @@ def safe_autograd_registration_check(
 def safe_fake_check(
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    kwargs: Dict[str, Any],
     *,
     copy_inputs: bool = True,
 ) -> None:
@@ -96,7 +95,7 @@ def safe_fake_check(
 def safe_aot_autograd_check(
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    kwargs: Dict[str, Any],
     dynamic: bool,
     *,
     copy_inputs: bool = True,
@@ -156,10 +155,10 @@ DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
 
 def generate_opcheck_tests(
     testcase: Any,
-    namespaces: list[str],
+    namespaces: List[str],
     failures_dict_path: Optional[str] = None,
-    additional_decorators: Optional[dict[str, Callable]] = None,
-    test_utils: list[str] = DEFAULT_TEST_UTILS,
+    additional_decorators: Optional[Dict[str, Callable]] = None,
+    test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -362,7 +361,7 @@ def validate_failures_dict_formatting(failures_dict_path: str) -> None:
 
 
 def validate_failures_dict_structure(
-    failure_dict: "FailuresDict", test_utils: list[str], testcase: Any
+    failure_dict: "FailuresDict", test_utils: List[str], testcase: Any
 ) -> None:
     """Validates the failures dict.
 
@@ -448,7 +447,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def __init__(
         self,
-        namespaces: list[str],
+        namespaces: List[str],
         test_util_name: str,
         test_util: Callable,
         failures_dict: "FailuresDict",
@@ -620,11 +619,11 @@ def should_print_better_repro() -> None:
 def opcheck(
     op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """See torch.library.opcheck for docstring"""
 
     if kwargs is None:
@@ -674,7 +673,7 @@ def generate_repro(
     test: str,
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    kwargs: Dict[str, Any],
     *,
     save_data: bool,
     dry_run: bool = False,
@@ -739,7 +738,7 @@ def resolve_unique_overload_or_throw(
 DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
 
 
-FailuresDictData = dict[str, dict[str, dict[str, str]]]
+FailuresDictData = Dict[str, Dict[str, Dict[str, str]]]
 
 
 VERSION = 1

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import hashlib
 import json
+from typing import Dict, Tuple
 
 import coremltools as ct  # type: ignore[import]
 from coremltools.converters.mil.input_types import TensorType  # type: ignore[import]
@@ -82,7 +83,7 @@ def _convert_to_mil_type(shape, dtype, name: str):
     return ml_type
 
 
-def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tuple]):
+def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tuple]):
     spec = compile_spec["forward"]
     (
         input_specs,

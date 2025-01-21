@@ -1,5 +1,5 @@
 import enum
-from typing import Any, Callable, NamedTuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Union
 
 from torch.fx.graph import Node
 
@@ -43,7 +43,7 @@ class NSSubgraph(NamedTuple):
 #   # string representation of qconfig responsible for creating this logger
 #   'qconfig_str': 'QConfig(...)',
 # }
-NSSingleResultType = dict[str, Any]
+NSSingleResultType = Dict[str, Any]
 
 # {
 #   'layer_name_1': {  # subgraph name
@@ -56,7 +56,7 @@ NSSingleResultType = dict[str, Any]
 #   },
 # }
 #
-NSResultsType = dict[str, dict[str, dict[str, list[NSSingleResultType]]]]
+NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
 
 # Defines the underlying target type of a node, for example:
 # `F.conv1d` for a `call_function` conv node

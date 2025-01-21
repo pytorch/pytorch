@@ -10,10 +10,13 @@ from typing import (
     Any,
     Callable,
     cast,
+    Dict,
+    Iterator,
+    List,
+    Sequence,
     TypeVar,
     Union,
 )
-from collections.abc import Iterator, Sequence
 
 import torch
 import torch.distributed as dist
@@ -388,7 +391,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+            self, *args: tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
             if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
@@ -434,7 +437,7 @@ class DTensorConverter:
         self,
         mesh: DeviceMesh,
         args: tuple[object, ...],
-        kwargs: dict[str, object],
+        kwargs: Dict[str, object],
     ) -> None:
         self.hit = 0
         self.miss = 0
@@ -444,9 +447,9 @@ class DTensorConverter:
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
-        self.flatten_args: list[object] = flatten_args
+        self.flatten_args: List[object] = flatten_args
         self.flatten_args_spec: TreeSpec = flatten_args_spec
-        self.flatten_kwargs: list[object] = flatten_kwargs
+        self.flatten_kwargs: List[object] = flatten_kwargs
         self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
 
         choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
@@ -487,7 +490,7 @@ class DTensorConverter:
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
         mesh_size = self.mesh.size()
-        sharding_choices: list[Placement] = [Replicate()]
+        sharding_choices: List[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
         # for bool tensor we treat it as replicated
         if arg.dtype != torch.bool:
@@ -507,12 +510,12 @@ class DTensorConverter:
     def __iter__(self) -> "DTensorConverter":
         return self
 
-    def __next__(self) -> tuple[tuple[object, ...], dict[str, object]]:
+    def __next__(self) -> tuple[tuple[object, ...], Dict[str, object]]:
         try:
             next_sharding_choices = next(self.sharding_combs)
             idx = 0
 
-            new_args: list[object] = []
+            new_args: List[object] = []
             for arg in self.flatten_args:
                 if isinstance(arg, torch.Tensor):
                     new_args.append(
@@ -524,7 +527,7 @@ class DTensorConverter:
                 else:
                     new_args.append(arg)
 
-            new_kwargs: list[object] = []
+            new_kwargs: List[object] = []
             for arg in self.flatten_kwargs:
                 if isinstance(arg, torch.Tensor):
                     new_kwargs.append(
@@ -544,7 +547,7 @@ class DTensorConverter:
             raise StopIteration from e
 
     def to_dist_tensor(
-        self, t: torch.Tensor, mesh: DeviceMesh, placements: list[Placement]
+        self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
     ) -> torch.Tensor:
         if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):

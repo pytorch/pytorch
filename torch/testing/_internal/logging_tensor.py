@@ -2,8 +2,7 @@
 
 import torch
 from torch.utils._pytree import tree_map
-from typing import Optional
-from collections.abc import Iterator
+from typing import Iterator, List, Optional
 import logging
 import contextlib
 import itertools
@@ -102,8 +101,8 @@ class LoggingTensorReentrant(LoggingTensor):
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
     def __init__(
-            self, log_list: list[str], use_shortid_for_all_tensors: bool,
-            with_type: bool, tracebacks_list: Optional[list]) -> None:
+            self, log_list: List[str], use_shortid_for_all_tensors: bool,
+            with_type: bool, tracebacks_list: Optional[List]) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
@@ -155,10 +154,10 @@ class GatherTraceback(logging.Filter):
         return True
 
 @contextlib.contextmanager
-def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[list[str]]:
+def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[List[str]]:
     collect_traceback = python_tb or script_tb or cpp_tb
-    log_list: list[str] = []
-    tracebacks_list: list[str] = []
+    log_list: List[str] = []
+    tracebacks_list: List[str] = []
     handler = LoggingTensorHandler(
         log_list,
         with_type=True,
