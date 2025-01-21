@@ -20,7 +20,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, Type, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -1272,7 +1272,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
-        pytype: Type
+        pytype: type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
         # returns a float while both arguments are ints: 2**(-1). Also, max and
@@ -1335,7 +1335,7 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
-        pytype: Type
+        pytype: type
         if method in always_int_magic_methods:
             pytype = int
         elif method in always_bool_magic_methods:
@@ -1485,7 +1485,7 @@ def _make_node_sizes_strides(method, func):
                 out_hint = op(size_hints, stride_hints)
 
         # NB: This is the indicator function, not the actual bool!
-        pytype: Type
+        pytype: type
         if method.endswith("_indicator"):
             pytype = int
         else:
