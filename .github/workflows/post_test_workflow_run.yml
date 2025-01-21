@@ -9,6 +9,8 @@ jobs:
   post-process:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Version Branch
+        uses: actions/checkout@v3
       - name: Testing
         run: |
           echo "Workflow post-test-workflow-run: ${{ github.workflow }}"
