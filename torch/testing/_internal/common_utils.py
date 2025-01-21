@@ -3180,15 +3180,17 @@ class TestCase(expecttest.TestCase):
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super_run)
-            elif TEST_WITH_AOT_EAGER:
+            if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
-                # Assume eager-generated GraphModules will not error out.
-                # If we do, this is probably a Dynamo bug!
-                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+                if TEST_WITH_TORCHINDUCTOR:
+                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                else:
+                    # Assume eager-generated GraphModules will not error out.
+                    # If we do, this is probably a Dynamo bug!
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
                 from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
