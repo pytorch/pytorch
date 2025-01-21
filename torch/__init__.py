@@ -1660,8 +1660,9 @@ def _check_is_size(i, message=None, *, max=None):
 
     When max is not None, this specifies an upper bound equivalent to
     ``_check(i <= max)``.  This bound is also subject to alternate semantics:
-    in ``guard_size_oblivious`` tests, we assume that the max bound is treated
-    equivalently to all other values.
+    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
+    treated equivalently to all other values.  Symbolic max bounds are not yet
+    supported.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
@@ -2275,10 +2276,13 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
+        from torch._inductor.compiler_bisector import CompilerBisector
+
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
+        self.apply_options(CompilerBisector.get_config_change("inductor"))
 
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
@@ -2296,26 +2300,12 @@ class _TorchCompileInductorWrapper:
         )
 
     def apply_mode(self, mode: _Optional[str]):
-        if mode is None or mode == "default":
-            pass
-        elif mode in {"reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"}:
+        if mode and mode != "default":
             from torch._inductor import list_mode_options
 
             self.apply_options(list_mode_options(mode, self.dynamic))
-        else:
-            raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
-            )
 
     def apply_options(self, options: _Optional[dict[str, _Any]]):
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        if bisect_changes := CompilerBisector.get_config_change("inductor"):
-            options = {} if options is None else options
-            options = (
-                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
-            )
-
         if not options:
             return
 
