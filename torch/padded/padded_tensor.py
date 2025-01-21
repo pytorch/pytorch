@@ -343,6 +343,14 @@ class ElementwiseBinaryOp(RegularOp):
         return [torch.Size(reversed(new_shape))]
 
 
+class AddMmOp(RegularOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
+
+
 class MatmulOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -516,6 +524,7 @@ class OpDatabase:
             "mul": ElementwiseBinaryOp(),
             "div": ElementwiseBinaryOp(),
             # Contraction / Reduction operations
+            "addmm": AddMmOp(),
             "mm": MatmulOp(),
             "bmm": BmmOp(),
             "_scaled_dot_product_flash_attention": ScaledDotProductAttentionOp(),
@@ -813,10 +822,6 @@ class PaddedTensor(torch.Tensor):
         orig_in_shapes = pytree.tree_map_only(
             PaddedTensor, lambda x: x.orig_shape, args
         )
-        # print("5555555555")
-        # for ori in orig_in_shapes:
-        #    print([type(i) for i in ori])
-        # print("--")
         orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
 
         tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
