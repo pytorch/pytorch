@@ -8,8 +8,6 @@ on:
 jobs:
   post-process:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
       - name: Testing
         run: |
