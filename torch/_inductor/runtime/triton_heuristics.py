@@ -994,8 +994,8 @@ class TritonCompileResult:
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
         if triton_version_uses_attrs_dict():
-            call_args = self.fn.arg_names
-            def_args = self.fn.arg_names
+            call_args = fn.arg_names
+            def_args = fn.arg_names
         else:
             call_args = [
                 arg
