@@ -4,7 +4,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -94,14 +94,14 @@ class ReadItem:
 
 @dataclass(frozen=True)
 class SavePlan:
-    items: List[WriteItem]
+    items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
 
 
 @dataclass
 class LoadPlan:
-    items: List[ReadItem]
+    items: list[ReadItem]
     storage_data: Any = None
     planner_data: Any = None
 
@@ -231,8 +231,8 @@ class SavePlanner(abc.ABC):
 
     @abc.abstractmethod
     def create_global_plan(
-        self, all_plans: List[SavePlan]
-    ) -> Tuple[List[SavePlan], Metadata]:
+        self, all_plans: list[SavePlan]
+    ) -> tuple[list[SavePlan], Metadata]:
         """
         Compute the global checkpoint plan and return the local plan of each rank.
 
@@ -364,7 +364,7 @@ class LoadPlanner:
         """
 
     @abc.abstractmethod
-    def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
+    def create_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
         """
         Compute the global load plan and return plans for each rank.
 
