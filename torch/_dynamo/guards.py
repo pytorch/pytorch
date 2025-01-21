@@ -1540,6 +1540,7 @@ class GuardBuilder(GuardBuilderBase):
                 types.BuiltinFunctionType,
                 types.MethodDescriptorType,
                 types.MethodType,
+                types.MethodWrapperType,
                 types.WrapperDescriptorType,
                 torch.Size,
                 *np_types,
