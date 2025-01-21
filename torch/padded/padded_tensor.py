@@ -125,6 +125,9 @@ class PaddedOp:
     def infer_shapes(self, input_shapes, args, kwargs):
         raise NotImplementedError
 
+    def validate(self, args, kwargs):
+        pass
+
 
 @register_padded_op(["ones_like"])
 class OnesLikeOp(PaddedOp):
@@ -375,6 +378,14 @@ class MatmulOp(PaddedOp):
 
     def infer_shapes(self, input_shapes, args, kwargs):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
+
+    def validate(self, args, kwargs):
+        # Don't allow contraction on padded dimensions
+        if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
+            args[1].orig_shape[0], Dimension
+        ):
+            assert args[0].orig_shape[1].is_padded is False
+            assert args[1].orig_shape[0].is_padded is False
 
 
 @register_padded_op(["bmm"])
@@ -790,15 +801,17 @@ class PaddedTensor(torch.Tensor):
         # Convert arg tensors to padded tensors
         args = convert_tensor_args(args)
 
+        # Validate
+        op.validate(args, kwargs)
+
         # Infer original shape
         orig_in_shapes = pytree.tree_map_only(
             PaddedTensor, lambda x: x.orig_shape, args
         )
         orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
 
-        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
-
         # Run function
+        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
         out = func(*tensor_args, **tensor_kwargs)
 
         log_function_with_shapes(func, args, tensor_args, out, orig_out_shapes)
