@@ -225,6 +225,23 @@ class TestInductorConfig(TestCase):
             torch._dynamo.reset()
             self.assertEqual(call_count, 1)
 
+    def test_options_dosomething(self):
+        def fn(x):
+            return x + 1
+
+        torch.compile(fn, options={"save_args":False})
+        fn(torch.randn(2,3))
+        self.assertFalse(os.path.exists("/tmp/inductor_saved_args")
+
+        def fn(x):
+            return x + 1
+
+        torch.compile(fn, options={"save_args":True})
+        fn(torch.randn(2,3))
+        self.assertTrue(os.path.exists("/tmp/inductor_saved_args")
+    
+        
+
 
 if __name__ == "__main__":
     run_tests()
