@@ -596,7 +596,9 @@ def check_input_alias_and_mutation(
         out_alias_map = {
             i: out_storage_map[_tensor_storage(out)]
             for i, out in enumerate(outputs)
-            if isinstance(out, torch.Tensor) and _tensor_storage(out) in out_storage_map
+            if isinstance(out, torch.Tensor)
+            and _tensor_storage(out) in out_storage_map
+            and out_storage_map[_tensor_storage(out)] != i
         }
         inp_alias_map = {
             i: out_storage_map[_tensor_storage(inp)]
