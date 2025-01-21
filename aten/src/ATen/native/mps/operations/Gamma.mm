@@ -18,7 +18,8 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static id<MTLComputePipelineState> getCPLState(const Tensor& t1, const Tensor& t2, const std::string& fname) {
-  return lib.getPipelineStateForFunc(fmt::format("{}_{}_{}", fname, scalarToMetalTypeString(t1), scalarToMetalTypeString(t2)));
+  return lib.getPipelineStateForFunc(
+      fmt::format("{}_{}_{}", fname, scalarToMetalTypeString(t1), scalarToMetalTypeString(t2)));
 }
 
 } // namespace mps
