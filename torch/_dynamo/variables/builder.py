@@ -17,7 +17,6 @@ import re
 import types
 import warnings
 import weakref
-from collections.abc import MutableMapping
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -220,7 +219,6 @@ from .torch_function import (
 from .user_defined import (
     FrozenDataClassVariable,
     KeyedJaggedTensorVariable,
-    MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
@@ -1276,9 +1274,6 @@ class VariableBuilder:
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif issubclass(type(value), MutableMapping):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return MutableMappingVariable(value, source=self.source)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
@@ -3100,10 +3095,7 @@ class SourcelessUserDefinedObjectBuilder:
 
     @staticmethod
     def create(tx: "InstructionTranslator", value) -> VariableTracker:
-        value_type = type(value)
-        if issubclass(value_type, MutableMapping):
-            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
-        elif isinstance(value, torch.nn.Module):
+        if isinstance(value, torch.nn.Module):
             return UnspecializedNNModuleVariable(
                 value, mutation_type=ValueMutationNew()
             )

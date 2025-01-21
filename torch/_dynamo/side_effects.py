@@ -5,7 +5,6 @@ import functools
 import inspect
 import warnings
 import weakref
-from collections.abc import MutableMapping
 from types import CellType
 from typing import Any, Optional
 
@@ -296,8 +295,6 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, MutableMapping):
-            variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
         else:

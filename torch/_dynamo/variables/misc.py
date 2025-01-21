@@ -1024,19 +1024,13 @@ class GetAttrVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # TODO(anijain2305) - This should all be removed when we deprecate NNModuleVariable
         if (
             name in ("__getitem__", "get")
             and self.name == "__dict__"
             and not kwargs
             and args[0].is_python_constant()
-            and isinstance(
-                self.obj,
-                (
-                    variables.UserDefinedObjectVariable,
-                    variables.NNModuleVariable,
-                    variables.UserDefinedClassVariable,
-                ),
-            )
+            and isinstance(self.obj, variables.NNModuleVariable)
         ):
             obj = self.obj
             key = args[0].as_python_constant()
@@ -1050,21 +1044,13 @@ class GetAttrVariable(VariableTracker):
                     return args[1]
                 else:
                     return variables.ConstantVariable(None)
-
         elif (
             name == "__contains__"
             and self.name == "__dict__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
-            and isinstance(
-                self.obj,
-                (
-                    variables.UserDefinedObjectVariable,
-                    variables.NNModuleVariable,
-                    variables.UserDefinedClassVariable,
-                ),
-            )
+            and isinstance(self.obj, variables.NNModuleVariable)
         ):
             obj = self.obj
             key = args[0].as_python_constant()
@@ -1072,11 +1058,7 @@ class GetAttrVariable(VariableTracker):
                 return variables.ConstantVariable(True)
             else:
                 return variables.ConstantVariable(False)
-
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
-            if isinstance(self.obj, variables.UserDefinedObjectVariable):
-                # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)

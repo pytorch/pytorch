@@ -56,7 +56,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -105,6 +105,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+        self.generic_dict_vt = None
 
     def as_python_constant(self):
         return self.value
@@ -146,13 +147,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
-            return not isinstance(mutated_attr, variables.DeletedVariable)
-
-        return key in self.value.__dict__
-
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         from . import ConstantVariable, EnumVariable
 
@@ -162,9 +156,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
-        elif name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+
+        # Python handles object attributes via __dict__. Specially handle it.
+        if name == "__dict__":
+            if self.generic_dict_vt is None:
+                dict_source = self.source and AttrSource(self.source, "__dict__")
+                self.generic_dict_vt = VariableTracker.build(
+                    tx, self.value.__dict__, dict_source
+                )
+            return self.generic_dict_vt
+        elif self.generic_dict_vt is not None:
+            if out := self.generic_dict_vt.maybe_getitem_const(
+                variables.ConstantVariable(name)
+            ):
+                return out
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -688,6 +693,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         assert type(value) is self.value_type
         # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
         self.cls_source = cls_source
+        self.generic_dict_vt = None
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -805,15 +811,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+    def method_setattr_standard(self, tx: "InstructionTranslator", name_vt, value):
         try:
-            name = name.as_python_constant()
+            name = name_vt.as_python_constant()
         except NotImplementedError:
-            unimplemented(f"non-const setattr name: {name}")
+            unimplemented(f"non-const setattr name: {name_vt}")
         if not tx.output.side_effects.is_attribute_mutation(self):
-            unimplemented(f"setattr({self}, {name}, ...)")
+            unimplemented(f"setattr({self}, {name_vt}, ...)")
 
         tx.output.side_effects.store_attr(self, name, value)
+
+        # Update __dict__
+        if hasattr(self.value, "__dict__"):
+            if self.generic_dict_vt is None:
+                dict_source = self.source and AttrSource(self.source, "__dict__")
+                self.generic_dict_vt = VariableTracker.build(
+                    tx, self.value.__dict__, dict_source
+                )
+
+            # NB: We do not directly call_method here on ConstDictVariable
+            # because we do not want to track the mutations on __dict__ for
+            # setattr. Here, we just update the generic_dict_vt, so that later
+            # accesses to __dict__ are correct. The mutations are still applied
+            # via STORE_ATTR
+            Hashable = variables.ConstDictVariable._HashableTracker
+            if isinstance(value, variables.DeletedVariable):
+                self.generic_dict_vt.items.__delitem__(Hashable(name_vt))
+            else:
+                self.generic_dict_vt.items[Hashable(name_vt)] = value
+
         return variables.ConstantVariable(None)
 
     def needs_slow_setattr(self):
@@ -991,13 +1017,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return subobj
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
-            return not isinstance(mutated_attr, variables.DeletedVariable)
-
-        return key in self.value.__dict__
-
     def get_source_by_walking_mro(self, name):
         assert self.cls_source is not None
 
@@ -1038,9 +1057,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(AttributeError, tx)
             return result
 
+        # Python handles object attributes via __dict__. Specially handle it.
         if name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+            if self.generic_dict_vt is None:
+                dict_source = self.source and AttrSource(self.source, "__dict__")
+                self.generic_dict_vt = VariableTracker.build(
+                    tx, self.value.__dict__, dict_source
+                )
+            return self.generic_dict_vt
+        elif self.generic_dict_vt is not None:
+            if out := self.generic_dict_vt.maybe_getitem_const(
+                variables.ConstantVariable(name)
+            ):
+                return out
 
         # TODO(anijain2305) - Investigate if we need specialization for more
         # dunder attrs. inspect.getattr_static does not return correct value for
@@ -1433,40 +1462,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         ):
             return self._dict_vt.unpack_var_sequence(tx)
         raise NotImplementedError
-
-
-class MutableMappingVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting()
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        # A common pattern in the init code of MutableMapping objects is to
-        # update the __dict__ attribute. To prevent graph break, we directly
-        # return a ConstDictVariable for the __dict__attr.
-        #
-        # However, users can try to add a new attribute to the class using the
-        # __dict__ attribute. To catch this, we save the ConstDictVariable for
-        # the __dict__ and then lookup into this vt for each attr lookup.
-        if name == "get" and type(self.value).get in (
-            collections.abc.Mapping.get,
-            dict.get,
-        ):
-            return variables.UserMethodVariable(polyfills.mapping_get, self)
-        elif name == "__dict__" and self.source:
-            self.generic_dict_vt = variables.LazyVariableTracker.create(
-                self.value.__dict__, AttrSource(self.source, "__dict__")
-            )
-            return self.generic_dict_vt
-        elif out := self.generic_dict_vt.maybe_getitem_const(
-            variables.ConstantVariable(name)
-        ):
-            return out
-        else:
-            return super().var_getattr(tx, name)
 
 
 class RandomVariable(UserDefinedObjectVariable):
