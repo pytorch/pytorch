@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -45,20 +45,20 @@ def wrap_combine_fn_flat(
     return [*carry_flat, *combined_flat]
 
 
-def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
+def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
 def scan(
     combine_fn: Callable[
-        [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
+        [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
     ],
     init: pytree.PyTree,
     xs: pytree.PyTree,
     *,
     dim: int = 0,
     reverse: bool = False,
-) -> Tuple[pytree.PyTree, pytree.PyTree]:
+) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
 
@@ -331,11 +331,11 @@ def trace_scan(
     proxy_mode,
     func_overload,
     combine_fn: Callable,
-    init: List[torch.Tensor],
-    xs: List[torch.Tensor],
+    init: list[torch.Tensor],
+    xs: list[torch.Tensor],
     dim: int,
     reverse: bool,
-    additional_inputs: List[torch.Tensor],
+    additional_inputs: list[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
 
