@@ -1,16 +1,14 @@
-name: post-test-dispatch
+name: post-test-process
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
-        name:
-          description: 'Your name'
-          required: False
-          default: "default"
+        workflow_name:
+          description: 'workflow name'
+          required: True
 jobs:
   post-process:
     runs-on: ubuntu-latest
     steps:
       - name: Testing
         run: |
-          echo "Workflow post-test-dispatch: ${{ github.workflow }}"
+          echo "Workflow Name: ${github.event.inputs.workflow_name}"
