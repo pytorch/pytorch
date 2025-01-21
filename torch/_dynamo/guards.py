@@ -411,6 +411,7 @@ def _get_closure_vars():
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___mapping_contains": lambda a, b: a in b,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
@@ -1387,6 +1388,20 @@ class GuardBuilder(GuardBuilderBase):
             not invert, key, get_verbose_code_parts(code, guard)
         )
 
+    def MAPPING_CONTAINS(self, guard: Guard, key: str, invert: bool):
+        mapping_ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+
+        assert istype(val, types.MappingProxyType)
+
+        maybe_not = "not " if invert else ""
+        code = f"{maybe_not}___mapping_contains({key!r}, {mapping_ref})"
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_mapping_contains_guard(
+            not invert, key, get_verbose_code_parts(code, guard)
+        )
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
@@ -1762,6 +1777,26 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_on_dict_keys_and_order(value, guard)
         else:
             self.guard_on_dict_keys_and_ignore_order(value, guard)
+
+    def MAPPING_KEYS_MATCH(self, guard):
+        """Insert guard to check that the keys of a mapping are same"""
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+
+        assert isinstance(value, types.MappingProxyType)
+        original_keys = list(value.keys())
+
+        code = []
+        code.append(f"len({ref}) == {len(value)}")
+        code.append(f"list({ref}.keys()) == {original_keys!r}")
+        self._set_guard_export_info(guard, code)
+
+        self.get_guard_manager(guard).add_mapping_length_check_guard(
+            len(value), get_verbose_code_parts(code, guard)
+        )
+        self.get_guard_manager(guard).add_mapping_keys_match_guard(
+            original_keys, get_verbose_code_parts(code, guard)
+        )
 
     def EMPTY_NN_MODULE_HOOKS_DICT(self, guard):
         """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""

@@ -727,37 +727,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_mappingproxy(self):
         class Foo:
-            def __init__(self) -> None:
-                self.scalar = 10
+            pass
 
         d = Foo.__dict__
+        Foo.a = 3
 
         def fn(x):
-            if "scalar" in d:
-                return x * d["scalar"]
+            if "a" in d:
+                return x * d["a"]
             return x
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3, 3)
         self.assertEqual(fn(x), opt_fn(x))
 
+        Foo.a = 4
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_mappingproxy_iter(self):
         class Foo:
-            def __init__(self) -> None:
-                self.scalar = 10
+            pass
 
         d = Foo.__dict__
 
+        Foo.a = 3
+        Foo.b = 4
+
         def fn(x):
             for key in d:
-                if key == "scalar":
+                if key == "a":
                     x = x * d[key]
                 else:
                     x = x * 2
             return x
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        Foo.c = 4
         self.assertEqual(fn(x), opt_fn(x))
 
 

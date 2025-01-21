@@ -1619,6 +1619,21 @@ class DICT_LENGTH : public LeafGuard {
   Py_ssize_t _length;
 };
 
+class MAPPING_LENGTH : public LeafGuard {
+ public:
+  MAPPING_LENGTH(py::object value, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _length(py::cast<Py_ssize_t>(std::move(value))) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyMapping_Check(value) && PyMapping_Size(value) == _length;
+  }
+
+ private:
+  // Length of the guarded MappingProxyType
+  Py_ssize_t _length;
+};
+
 class NOT_NONE : public LeafGuard {
  public:
   NOT_NONE(py::object verbose_code_parts)
@@ -1769,6 +1784,47 @@ class DICT_CONTAINS : public LeafGuard {
  private:
   int _contains;
   py::object _key;
+};
+
+class MAPPING_CONTAINS : public LeafGuard {
+ public:
+  MAPPING_CONTAINS(bool contains, py::object key, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _contains(contains ? 1 : 0),
+        _key(std::move(key)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int result = PyMapping_Check(value) && PyMapping_HasKey(value, _key.ptr());
+    return result == _contains;
+  }
+
+ private:
+  int _contains;
+  py::object _key;
+};
+
+class MAPPING_KEYS_MATCH : public LeafGuard {
+ public:
+  MAPPING_KEYS_MATCH(py::object original_keys, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _original_keys(std::move(original_keys)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return true;
+    PyObject* new_keys = PyMapping_Keys(value); // new reference
+    if (new_keys == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+
+    int result =
+        PyObject_RichCompareBool(_original_keys.ptr(), new_keys, Py_EQ);
+    Py_DECREF(new_keys);
+    return result;
+  }
+
+ private:
+  py::object _original_keys;
 };
 
 /**
@@ -4862,6 +4918,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_LENGTH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DICT_LENGTH::check);
+  py::class_<MAPPING_LENGTH, LeafGuard, std::shared_ptr<MAPPING_LENGTH>>(
+      py_m, "MAPPING_LENGTH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &MAPPING_LENGTH::check);
   py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
@@ -4905,6 +4965,16 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_CONTAINS")
       .def(py::init<bool, py::object, py::list>())
       .def("__call__", &DICT_CONTAINS::check);
+  py::class_<MAPPING_CONTAINS, LeafGuard, std::shared_ptr<MAPPING_CONTAINS>>(
+      py_m, "MAPPING_CONTAINS")
+      .def(py::init<bool, py::object, py::list>())
+      .def("__call__", &MAPPING_CONTAINS::check);
+  py::class_<
+      MAPPING_KEYS_MATCH,
+      LeafGuard,
+      std::shared_ptr<MAPPING_KEYS_MATCH>>(py_m, "MAPPING_KEYS_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &MAPPING_KEYS_MATCH::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<py::set, py::list>())
@@ -5112,6 +5182,15 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(value), std::move(verbose_code_parts)));
           })
       .def(
+          "add_mapping_length_check_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("MAPPING_LENGTH");
+            self.add_leaf_guard(std::make_shared<MAPPING_LENGTH>(
+                std::move(value), std::move(verbose_code_parts)));
+          })
+      .def(
           "add_tuple_iterator_length_guard",
           [](GuardManager& self,
              py::object length,
@@ -5202,6 +5281,24 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 contains, std::move(key), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_mapping_contains_guard",
+          [](GuardManager& self,
+             bool contains,
+             py::object key,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<MAPPING_CONTAINS>(
+                contains, std::move(key), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_mapping_keys_match_guard",
+          [](GuardManager& self,
+             py::object original_keys,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("MAPPING_KEYS_MATCH");
+            self.add_leaf_guard(std::make_shared<MAPPING_KEYS_MATCH>(
+                std::move(original_keys), std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",

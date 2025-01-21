@@ -297,6 +297,9 @@ class ConstDictVariable(VariableTracker):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
+    def get_contains_guard_builder_type(self):
+        return GuardBuilder.DICT_CONTAINS
+
     def install_dict_contains_guard(self, tx, args):
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -324,7 +327,7 @@ class ConstDictVariable(VariableTracker):
             install_guard(
                 self.make_guard(
                     functools.partial(
-                        GuardBuilder.DICT_CONTAINS,
+                        self.get_contains_guard_builder_type(),
                         key=args[0].value,
                         invert=not contains,
                     )
@@ -520,7 +523,15 @@ class MappingProxyDictVariable(ConstDictVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def guard_on_key_order(self, tx):
-        unimplemented("MappingProxyType does not support key order guards")
+        # Guard on all the keys
+        self.install_dict_keys_match_guard()
+
+    def get_contains_guard_builder_type(self):
+        return GuardBuilder.MAPPING_CONTAINS
+
+    def install_dict_keys_match_guard(self):
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.MAPPING_KEYS_MATCH))
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -688,6 +699,10 @@ class SetVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(self, tx, args):
+        # Already EQUALS_MATCH guarded
+        pass
+
+    def guard_on_key_order(self, tx):
         # Already EQUALS_MATCH guarded
         pass
 

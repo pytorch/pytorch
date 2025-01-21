@@ -2310,15 +2310,13 @@ def builtin_dict_keys(d):
 
 def get_items_from_dict(obj):
     # Get items without calling the user defined __getitem__ or keys method.
-    assert isinstance(obj, dict) or istype(obj, types.MappingProxyType)
-    if istype(obj, (dict, OrderedDict, types.MappingProxyType)):
+    assert isinstance(obj, dict)
+    if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
-    elif isinstance(obj, dict):
-        return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
     else:
-        raise NotImplementedError(f"get_items_from_dict not supported for {type(obj)}")
+        return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls):

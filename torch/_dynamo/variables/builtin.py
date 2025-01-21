@@ -1292,14 +1292,10 @@ class BuiltinVariable(VariableTracker):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
+                elif isinstance(obj, ConstDictVariable):
+                    obj.guard_on_key_order(tx)
+                    obj.install_dict_keys_match_guard()
                 else:
-                    if (
-                        getattr(obj, "source", False)
-                        and isinstance(obj, ConstDictVariable)
-                        and not istype(obj, SetVariable)
-                    ):
-                        obj.guard_on_key_order(tx)
-
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
