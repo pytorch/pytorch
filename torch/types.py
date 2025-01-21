@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Number",
     "Device",
+    "DispatchKey",
     "Size",
     "SymBool",
     "SymFloat",
