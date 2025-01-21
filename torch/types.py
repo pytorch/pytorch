@@ -12,10 +12,10 @@ from builtins import (  # noqa: F401
 )
 from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing_extensions import Self, TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
-from torch import (
+from torch import (  # noqa: F401
     device as _device,
     DispatchKey,
     dtype as _dtype,
@@ -31,6 +31,7 @@ from torch import (
 
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
+
 
 __all__ = [
     "Number",
@@ -87,10 +88,10 @@ class Storage:
     dtype: _dtype
     _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> "Storage":
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
         raise NotImplementedError
 
-    def _new_shared(self, size: int) -> "Storage":
+    def _new_shared(self, size: int) -> Self:
         raise NotImplementedError
 
     def _write_file(
@@ -108,13 +109,13 @@ class Storage:
     def is_shared(self) -> bool:
         raise NotImplementedError
 
-    def share_memory_(self) -> "Storage":
+    def share_memory_(self) -> Self:
         raise NotImplementedError
 
     def nbytes(self) -> int:
         raise NotImplementedError
 
-    def cpu(self) -> "Storage":
+    def cpu(self) -> Self:
         raise NotImplementedError
 
     def data_ptr(self) -> int:
@@ -125,12 +126,12 @@ class Storage:
         filename: str,
         shared: bool = False,
         nbytes: int = 0,
-    ) -> "Storage":
+    ) -> Self:
         raise NotImplementedError
 
     def _new_with_file(
         self,
         f: Any,
         element_size: int,
-    ) -> "Storage":
+    ) -> Self:
         raise NotImplementedError
