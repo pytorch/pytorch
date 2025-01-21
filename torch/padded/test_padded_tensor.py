@@ -433,20 +433,33 @@ class AtenOpTests(PaddedTensorTestCase):
     def setUp(self):
         super().setUp()
 
+    def assert_padded_dims(self, z: PaddedTensor, padded_dim_idxs: List[int]):
+        padded_dim_idxs_set = set(padded_dim_idxs)
+
+        for dim_idx in range(len(z.shape)):
+            if dim_idx in padded_dim_idxs_set:
+                self.assertTrue(z.orig_shape[dim_idx].is_padded)
+            else:
+                self.assertFalse(z.orig_shape[dim_idx].is_padded)
+
     def test_elementwise_unary(self):
         for op in [aten.tril, aten.sin, aten.rsqrt, aten.silu]:
             a = PaddedTensor(torch.randn(3, 3), [4, 4])
             z = op(a)
+
             self.assertEqual(z.shape, torch.Size([4, 4]))
             self.assertEqual(z.unpad().shape, torch.Size([3, 3]))
+            self.assert_padded_dims(z, [0, 1])
 
     def test_elementwise_binary(self):
         for op in [aten.add, aten.sub, aten.mul, aten.div]:
             a = PaddedTensor(torch.randn(3, 5), [4, 6])
             b = PaddedTensor(torch.randn(3, 5), [4, 6])
             z = op(a, b)
+
             self.assertEqual(z.shape, torch.Size([4, 6]))
             self.assertEqual(z.unpad().shape, torch.Size([3, 5]))
+            self.assert_padded_dims(z, [0, 1])
 
     def test_view(self):
         # Collapse
@@ -454,34 +467,45 @@ class AtenOpTests(PaddedTensorTestCase):
         # Collapse start
         x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
         z = aten.view(x, [24, 7])
+
         self.assertEqual(z.unpad().shape, torch.Size([15, 7]))
+        self.assert_padded_dims(z, [0])
 
         # Collapse end
         x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
         z = aten.view(x, [4, 42])
+
         self.assertEqual(z.unpad().shape, torch.Size([3, 35]))
+        self.assert_padded_dims(z, [0, 1])
 
         # Collapse middle
         x = PaddedTensor(torch.randn(3, 5, 7, 9), [4, 6, 1, 1])
         z = aten.view(x, [4, 42, 9])
+
         self.assertEqual(z.unpad().shape, torch.Size([3, 35, 9]))
+        self.assert_padded_dims(z, [0, 1])
 
         # Collapse multiple
         x = PaddedTensor(torch.randn(3, 5, 7, 9, 11), [4, 6, 1, 1, 1])
         z = aten.view(x, [24, 7, 99])
+
         self.assertEqual(z.unpad().shape, torch.Size([15, 7, 99]))
+        self.assert_padded_dims(z, [0])
 
         # Expand
         # ############
         # Expand start
         x = PaddedTensor(torch.randn(3, 5, 7), [1, 6, 1])
         z = aten.view(x, [18, 7])
+
         self.assertEqual(z.unpad().shape, torch.Size([15, 7]))
+        self.assert_padded_dims(z, [0])
 
         # Expand end
         x = PaddedTensor(torch.randn(3, 5, 7), [1, 6, 1])
         z = aten.view(x, [3, 42])
         self.assertEqual(z.unpad().shape, torch.Size([3, 35]))
+        self.assert_padded_dims(z, [1])
 
         # Test that unpad throws an exception, when we can't infer the dim.
         x = PaddedTensor(torch.randn(15, 7), [4, 1, 1])

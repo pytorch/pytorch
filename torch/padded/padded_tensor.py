@@ -14,6 +14,31 @@ from utils import *
 INVALID_ID = -1337
 
 
+class Dim(int):
+    def __new__(cls, value, is_padded=None, *args, **kwargs):
+        ret = super(cls, cls).__new__(cls, value)
+        ret.is_padded = is_padded
+        return ret
+
+    def __add__(self, other):
+        res = super(Dim, self).__add__(other)
+        return self.__class__(res, self.is_padded or other.is_padded)
+
+    def __sub__(self, other):
+        res = super(Dim, self).__sub__(other)
+        return self.__class__(res, self.is_padded or other.is_padded)
+
+    def __mul__(self, other):
+        res = super(Dim, self).__mul__(other)
+        return self.__class__(res, self.is_padded or other.is_padded)
+
+    def __repr__(self) -> str:
+        if self.is_padded:
+            return super().__repr__() + "(P)"
+        else:
+            return super().__repr__()
+
+
 def strip_common_suffix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
@@ -125,9 +150,9 @@ class ViewOp(RegularOp):
             output_shape = []
 
             for current_mapping in mapping:
-                output_dim = 1
+                output_dim = Dim(1, False)
                 for index in current_mapping:
-                    output_dim *= input_shape[index]
+                    output_dim = input_shape[index] * output_dim
 
                 output_shape.append(output_dim)
 
@@ -664,6 +689,14 @@ def get_tensors_from_padded(
     return tensor_args, tensor_kwargs
 
 
+def create_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[Dim]:
+    shape_new = []
+    for dim_idx, dim in enumerate(tensor.shape):
+        is_padded = multipliers[dim_idx] != 1
+        shape_new.append(Dim(dim, is_padded))
+    return shape_new
+
+
 class PaddedTensor(torch.Tensor):
     @staticmethod
     def __new__(
@@ -711,7 +744,12 @@ class PaddedTensor(torch.Tensor):
         if multipliers is None:
             multipliers = []
         self.multipliers = multipliers
-        self.orig_shape = tensor.shape if orig_shape is None else orig_shape
+
+        if orig_shape is None:
+            self.orig_shape = torch.Size(create_padded_dims(tensor, multipliers))
+        else:
+            self.orig_shape = orig_shape
+
         self.neutral_element = neutral_element
         if tensor.shape != self.shape:
             pad = get_pad(tensor.shape, multipliers)
@@ -775,6 +813,10 @@ class PaddedTensor(torch.Tensor):
         orig_in_shapes = pytree.tree_map_only(
             PaddedTensor, lambda x: x.orig_shape, args
         )
+        # print("5555555555")
+        # for ori in orig_in_shapes:
+        #    print([type(i) for i in ori])
+        # print("--")
         orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
 
         tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
