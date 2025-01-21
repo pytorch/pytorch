@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Iterable
-from typing import Union
+from typing import Iterable, List, Union
 
 import torch
 from torch import Tensor
@@ -30,7 +29,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "xpu") -> Tensor:
     return default_generator.get_state()
 
 
-def get_rng_state_all() -> list[Tensor]:
+def get_rng_state_all() -> List[Tensor]:
     r"""Return a list of ByteTensor representing the random number states of all devices."""
     results = [get_rng_state(i) for i in range(device_count())]
     return results

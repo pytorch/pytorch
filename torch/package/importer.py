@@ -7,7 +7,7 @@ from pickle import (  # type: ignore[attr-defined]
     whichmodule as _pickle_whichmodule,
 )
 from types import ModuleType
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -44,7 +44,7 @@ class Importer(ABC):
         assert obj1 is obj2
     """
 
-    modules: dict[str, ModuleType]
+    modules: Dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -53,7 +53,7 @@ class Importer(ABC):
         The contract is the same as for importlib.import_module.
         """
 
-    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
+    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
         """Given an object, return a name that can be used to retrieve the
         object from this environment.
 
@@ -184,7 +184,7 @@ class OrderedImporter(Importer):
     """
 
     def __init__(self, *args):
-        self._importers: list[Importer] = list(args)
+        self._importers: List[Importer] = list(args)
 
     def _is_torchpackage_dummy(self, module):
         """Returns true iff this module is an empty PackageNode in a torch.package.
