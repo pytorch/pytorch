@@ -12,6 +12,8 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Checkout Version Branch
+        uses: actions/checkout@v3
       - name: Testing
         run: |
           echo "Workflow post-test-dispatch: ${{ github.workflow }}"
