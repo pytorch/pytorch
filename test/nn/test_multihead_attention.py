@@ -466,7 +466,7 @@ class TestMultiheadAttentionNN(NNTestCase):
             dropout=0.1,
             bias=False,
             add_bias_kv=True,
-            batch_first=True
+            batch_first=True,
         )
         expected_repr = (
             "embed_dim=32, num_heads=4, dropout=0.1, bias=False, "
