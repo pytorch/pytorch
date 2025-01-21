@@ -178,6 +178,7 @@ function install_torchrec_and_fbgemm() {
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    pip_install install patchelf
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout ${fbgemm_commit}
