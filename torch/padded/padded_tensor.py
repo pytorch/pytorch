@@ -118,7 +118,7 @@ def slice_nd(
     return input
 
 
-class RegularOp:
+class PaddedOp:
     def __init__(self) -> None:
         super().__init__()
 
@@ -127,7 +127,7 @@ class RegularOp:
 
 
 @register_padded_op(["ones_like"])
-class OnesLikeOp(RegularOp):
+class OnesLikeOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -137,7 +137,7 @@ class OnesLikeOp(RegularOp):
 
 
 @register_padded_op(["view", "_unsafe_view", "view_as_real"])
-class ViewOp(RegularOp):
+class ViewOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -272,7 +272,7 @@ class ViewOp(RegularOp):
 
 
 @register_padded_op(["unsqueeze"])
-class UnsqueezeOp(RegularOp):
+class UnsqueezeOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -287,7 +287,7 @@ class UnsqueezeOp(RegularOp):
 
 
 @register_padded_op(["polar"])
-class PolarOp(RegularOp):
+class PolarOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -297,7 +297,7 @@ class PolarOp(RegularOp):
 
 
 @register_padded_op(["transpose"])
-class TransposeOp(RegularOp):
+class TransposeOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -319,7 +319,7 @@ class TransposeOp(RegularOp):
 
 
 @register_padded_op(["expand"])
-class ExpandOp(RegularOp):
+class ExpandOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -331,7 +331,7 @@ class ExpandOp(RegularOp):
 
 
 @register_padded_op(["clone", "where", "tril", "sin", "rsqrt", "silu"])
-class ElementwiseUnaryOp(RegularOp):
+class ElementwiseUnaryOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -341,7 +341,7 @@ class ElementwiseUnaryOp(RegularOp):
 
 
 @register_padded_op(["add", "sub", "mul", "div"])
-class ElementwiseBinaryOp(RegularOp):
+class ElementwiseBinaryOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -360,7 +360,7 @@ class ElementwiseBinaryOp(RegularOp):
 
 
 @register_padded_op(["addmm"])
-class AddMmOp(RegularOp):
+class AddMmOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -369,7 +369,7 @@ class AddMmOp(RegularOp):
 
 
 @register_padded_op(["mm"])
-class MatmulOp(RegularOp):
+class MatmulOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -378,7 +378,7 @@ class MatmulOp(RegularOp):
 
 
 @register_padded_op(["bmm"])
-class BmmOp(RegularOp):
+class BmmOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -395,7 +395,7 @@ class BmmOp(RegularOp):
 @register_padded_op(
     ["_scaled_dot_product_flash_attention", "_scaled_dot_product_efficient_attention"]
 )
-class ScaledDotProductAttentionOp(RegularOp):
+class ScaledDotProductAttentionOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -407,7 +407,7 @@ class ScaledDotProductAttentionOp(RegularOp):
 
 
 @register_padded_op(["index"])
-class IndexOp(RegularOp):
+class IndexOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -431,7 +431,7 @@ class IndexOp(RegularOp):
 
 
 @register_padded_op(["select"])
-class SelectOp(RegularOp):
+class SelectOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -449,7 +449,7 @@ class SelectOp(RegularOp):
 
 
 @register_padded_op(["index_put_"])
-class IndexPutOp(RegularOp):
+class IndexPutOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -459,7 +459,7 @@ class IndexPutOp(RegularOp):
 
 
 @register_padded_op(["split_with_sizes"])
-class SplitWithSizesOp(RegularOp):
+class SplitWithSizesOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -480,7 +480,7 @@ class SplitWithSizesOp(RegularOp):
 
 
 @register_padded_op(["stack"])
-class StackOp(RegularOp):
+class StackOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -495,7 +495,7 @@ class StackOp(RegularOp):
 
 
 @register_padded_op(["detach"])
-class DetachOp(RegularOp):
+class DetachOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -505,7 +505,7 @@ class DetachOp(RegularOp):
 
 
 @register_padded_op(["embedding"])
-class EmbeddingOp(RegularOp):
+class EmbeddingOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -520,7 +520,7 @@ class EmbeddingOp(RegularOp):
 
 
 @register_padded_op(["slice", "unbind", "_to_copy", "copy_", "mean", "t", "sum", "pow"])
-class NoOp(RegularOp):
+class NoOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
 
