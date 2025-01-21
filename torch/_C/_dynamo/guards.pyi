@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 import torch
 
@@ -18,6 +18,13 @@ class GuardManager:
     def globals_dict_manager(
         self,
         f_globals: dict[str, Any],
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def framelocals_manager(
+        self,
+        key: tuple[str, int],
         source,
         example_value,
         guard_manager_enum,
@@ -114,7 +121,7 @@ def install_storage_overlapping_guard(
 ): ...
 def profile_guard_manager(
     guard_manager: GuardManager,
-    f_locals: Dict[str, Any],
+    f_locals: dict[str, Any],
 ) -> float: ...
 
 class TensorGuards:

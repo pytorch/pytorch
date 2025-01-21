@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# ruff: noqa: F841
 
 import functools
 import math
@@ -50,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -1006,7 +1007,7 @@ terrible spacing
         Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
-        for test_params in module_tests + new_module_tests:
+        for test_params in module_tests + get_new_module_tests():
             if "constructor" not in test_params:
                 constructor = getattr(torch.nn, test_params["module_name"])
             else:
@@ -1199,7 +1200,30 @@ class {test_classname}(torch.nn.Module):
                 inp3_y = inp3.y
                 return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
 
+        class MyModule2(torch.nn.Module):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
         my_module = MyModule()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+
+        my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
 
         # by default, fx transform loses type annotation of getitem nodes.
@@ -1500,6 +1524,29 @@ class {test_classname}(torch.nn.Module):
             (int, type(torch.float)),
             (Union[int, float], int),
             (Union[int, float], float),
+            (list[int], int),
+            (list[int], create_type_hint([int, int])),
+            (list[int], create_type_hint((int, int))),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (
+                list[torch.Tensor],
+                create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
+            ),
+            (torch.Tensor, torch.nn.Parameter),
+            (list[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (
+                list[torch.Tensor],
+                create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
+            ),
+            (torch.Tensor, torch.nn.Parameter),
+            (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),
+            (Optional[list[int]], list[int]),
+        ] + [
+            # pre-PEP585 signatures
             (List[int], int),
             (List[int], create_type_hint([int, int])),
             (List[int], create_type_hint((int, int))),
@@ -1508,7 +1555,6 @@ class {test_classname}(torch.nn.Module):
                 List[torch.Tensor],
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
-            (torch.Tensor, torch.nn.Parameter),
             (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
             (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
             (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
@@ -1516,18 +1562,21 @@ class {test_classname}(torch.nn.Module):
                 List[torch.Tensor],
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
-            (torch.Tensor, torch.nn.Parameter),
             (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
             (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
             (Optional[List[torch.Tensor]], List[torch.Tensor]),
             (Optional[List[int]], List[int]),
         ]
+
         for sig_type, arg_type in should_be_equal:
             self.assertTrue(type_matches(sig_type, arg_type))
 
         should_fail = [
             (int, float),
             (Union[int, float], str),
+            (list[torch.Tensor], List[int]),
+        ] + [
+            # pre-PEP585 signatures
             (List[torch.Tensor], List[int]),
         ]
 
