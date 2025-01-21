@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from copy import deepcopy
 from enum import Enum, IntEnum
 from functools import wraps
-from typing import Any, Dict, List, Literal, Tuple, TypedDict
+from typing import Any, Literal, TypedDict
 from unittest import mock
 
 import numpy as np
@@ -712,7 +712,7 @@ def create_rand_mask_from_inputs(
 class SequentialAppendList(torch.nn.Sequential):
     """from timm/models/vovnet.py"""
 
-    def forward(self, x: torch.Tensor, concat_list: List[torch.Tensor]) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, concat_list: list[torch.Tensor]) -> torch.Tensor:
         for i, module in enumerate(self):
             if i == 0:
                 concat_list.append(module(x))
@@ -4108,7 +4108,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
-            if torch.jit.isinstance(x, List[str]):
+            if torch.jit.isinstance(x, list[str]):
                 return x * 2
             return x
 
@@ -4819,14 +4819,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     def test_detectron2_instances_cat(self):
         class Instances:
-            def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
+            def __init__(self, image_size: tuple[int, int], **kwargs: Any):
                 self._image_size = image_size
-                self._fields: Dict[str, Any] = {}
+                self._fields: dict[str, Any] = {}
                 for k, v in kwargs.items():
                     self.set(k, v)
 
             @property
-            def image_size(self) -> Tuple[int, int]:
+            def image_size(self) -> tuple[int, int]:
                 return self._image_size
 
             def __setattr__(self, name: str, val: Any) -> None:
@@ -4861,7 +4861,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return self._fields[name]
 
             @staticmethod
-            def cat(instance_lists: List["Instances"]) -> "Instances":
+            def cat(instance_lists: list["Instances"]) -> "Instances":
                 assert all(isinstance(i, Instances) for i in instance_lists)
                 assert len(instance_lists) > 0
                 if len(instance_lists) == 1:
@@ -5997,7 +5997,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return val * 2, val * 2
 
         x = torch.randn(2, requires_grad=True)
@@ -6016,7 +6016,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/114344
     def test_return_value_duplication_mixed_grad(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             with torch.no_grad():
                 out0 = val + 1
             out1 = val + 1
@@ -6033,7 +6033,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/pull/134726#discussion_r1738774371
     def test_return_value_duplication_scalar(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             x, y = val * 2, val * 2
             return x[0], y[0]
 
