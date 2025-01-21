@@ -61,10 +61,9 @@ import random
 import re
 import sys
 from argparse import ArgumentParser
-from collections.abc import Iterable
-from functools import cache
+from functools import lru_cache
 from logging import LogRecord
-from typing import Any, NamedTuple
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Set, Tuple
 from urllib.request import Request, urlopen
 
 import yaml
@@ -106,7 +105,7 @@ class Settings(NamedTuple):
     Settings for the experiments that can be opted into.
     """
 
-    experiments: dict[str, Experiment] = {}
+    experiments: Dict[str, Experiment] = {}
 
 
 class ColorFormatter(logging.Formatter):
@@ -151,7 +150,7 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
-def _str_comma_separated_to_set(value: str) -> frozenset[str]:
+def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
     return frozenset(
         filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
     )
@@ -209,12 +208,12 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def get_gh_client(github_token: str) -> Github:  # type: ignore[no-any-unimported]
+def get_gh_client(github_token: str) -> Github:
     auth = Auth.Token(github_token)
     return Github(auth=auth)
 
 
-def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:  # type: ignore[no-any-unimported]
+def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:
     repo = gh.get_repo(repo)
     return repo.get_issue(number=issue_num)
 
@@ -243,7 +242,7 @@ def get_potential_pr_author(
                 raise Exception(  # noqa: TRY002
                     f"issue with pull request {pr_number} from repo {repository}"
                 ) from e
-            return pull.user.login  # type: ignore[no-any-return]
+            return pull.user.login
     # In all other cases, return the original input username
     return username
 
@@ -264,7 +263,7 @@ def load_yaml(yaml_text: str) -> Any:
         raise
 
 
-def extract_settings_user_opt_in_from_text(rollout_state: str) -> tuple[str, str]:
+def extract_settings_user_opt_in_from_text(rollout_state: str) -> Tuple[str, str]:
     """
     Extracts the text with settings, if any, and the opted in users from the rollout state.
 
@@ -280,7 +279,7 @@ def extract_settings_user_opt_in_from_text(rollout_state: str) -> tuple[str, str
         return "", rollout_state
 
 
-class UserOptins(dict[str, list[str]]):
+class UserOptins(Dict[str, List[str]]):
     """
     Dictionary of users with a list of features they have opted into
     """
@@ -421,7 +420,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    eligible_experiments: frozenset[str] = frozenset(),
+    eligible_experiments: FrozenSet[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -520,7 +519,7 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
     return str(issue.get_comments()[0].body.strip("\n\t "))
 
 
-def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> Any:
+def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> Any:
     for _ in range(num_retries):
         try:
             req = Request(url=url, headers=headers)
@@ -533,8 +532,8 @@ def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> An
     return {}
 
 
-@cache
-def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> dict[str, Any]:
+@lru_cache(maxsize=None)
+def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str, Any]:
     """
     Dynamically get PR information
     """
@@ -543,7 +542,7 @@ def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> dict[str
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {github_token}",
     }
-    json_response: dict[str, Any] = download_json(
+    json_response: Dict[str, Any] = download_json(
         url=f"{github_api}/issues/{pr_number}",
         headers=headers,
     )
@@ -555,7 +554,7 @@ def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> dict[str
     return json_response
 
 
-def get_labels(github_repo: str, github_token: str, pr_number: int) -> set[str]:
+def get_labels(github_repo: str, github_token: str, pr_number: int) -> Set[str]:
     """
     Dynamically get the latest list of labels from the pull request
     """

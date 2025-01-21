@@ -2,10 +2,9 @@
 
 import os
 import sys
-from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Dict, Iterable, List, Literal, Set
 from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
@@ -28,7 +27,7 @@ LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries_wheel"
 class CIFlowConfig:
     # For use to enable workflows to run on pytorch/pytorch-canary
     run_on_canary: bool = False
-    labels: set[str] = field(default_factory=set)
+    labels: Set[str] = field(default_factory=set)
     # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
     isolated_workflow: bool = False
     unstable: bool = False
@@ -49,7 +48,7 @@ class Config(TypedDict):
 @dataclass
 class BinaryBuildWorkflow:
     os: str
-    build_configs: list[dict[str, str]]
+    build_configs: List[Dict[str, str]]
     package_type: str
 
     # Optional fields

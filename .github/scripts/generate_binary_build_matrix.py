@@ -12,7 +12,7 @@ architectures:
 """
 
 import os
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
@@ -181,7 +181,7 @@ CXX11_ABI = "cxx11-abi"
 RELEASE = "release"
 DEBUG = "debug"
 
-LIBTORCH_CONTAINER_IMAGES: dict[tuple[str, str], str] = {
+LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
         (
             gpu_arch,
@@ -223,16 +223,16 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     }.get(gpu_arch_type, gpu_arch_version)
 
 
-def list_without(in_list: list[str], without: list[str]) -> list[str]:
+def list_without(in_list: List[str], without: List[str]) -> List[str]:
     return [item for item in in_list if item not in without]
 
 
 def generate_libtorch_matrix(
     os: str,
     abi_version: str,
-    arches: Optional[list[str]] = None,
-    libtorch_variants: Optional[list[str]] = None,
-) -> list[dict[str, str]]:
+    arches: Optional[List[str]] = None,
+    libtorch_variants: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
@@ -248,7 +248,7 @@ def generate_libtorch_matrix(
             "static-without-deps",
         ]
 
-    ret: list[dict[str, str]] = []
+    ret: List[Dict[str, str]] = []
     for arch_version in arches:
         for libtorch_variant in libtorch_variants:
             # one of the values in the following list must be exactly
@@ -287,10 +287,10 @@ def generate_libtorch_matrix(
 
 def generate_wheels_matrix(
     os: str,
-    arches: Optional[list[str]] = None,
-    python_versions: Optional[list[str]] = None,
+    arches: Optional[List[str]] = None,
+    python_versions: Optional[List[str]] = None,
     use_split_build: bool = False,
-) -> list[dict[str, str]]:
+) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
         # NOTE: We only build manywheel packages for x86_64 and aarch64 and s390x linux
@@ -315,7 +315,7 @@ def generate_wheels_matrix(
             # uses different build/test scripts
             arches = ["cpu-s390x"]
 
-    ret: list[dict[str, str]] = []
+    ret: List[Dict[str, str]] = []
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
