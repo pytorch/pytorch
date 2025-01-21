@@ -1510,6 +1510,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
+        "inplace_padding": False,
     }
 
 

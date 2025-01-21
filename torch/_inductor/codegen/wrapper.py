@@ -71,13 +71,14 @@ BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
+    storage_size = V.graph.get_allocation_storage_size(node)
     return (
         node.get_device_or_error(),
         node.get_dtype(),
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.get_layout().storage_size())),
+        sympy_str(V.graph.sizevars.simplify(storage_size)),
     )
 
 
@@ -90,8 +91,12 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
     if input_buf.get_dtype() != output_buf.get_dtype():
         return False
 
-    input_size = V.graph.sizevars.simplify(input_buf.get_layout().storage_size())
-    output_size = V.graph.sizevars.simplify(output_buf.get_layout().storage_size())
+    input_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(input_buf)
+    )
+    output_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(output_buf)
+    )
 
     if (
         # NB: this is symbolic so that we don't try to reuse a buffer
@@ -2113,25 +2118,43 @@ class PythonWrapperCodegen(CodeGen):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
+        allocation_shape = tuple(V.graph.get_allocation_size(buffer))
         stride = tuple(buffer.get_stride())
-        return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
+        return self.make_allocation(
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape
+        )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, allocation_shape=None
+    ):
+        if allocation_shape is None:
+            allocation_shape = shape
+
+        codegen_shape_tuple = self.codegen_python_shape_tuple(shape)
+        codegen_allocation_shape_tuple = self.codegen_python_shape_tuple(
+            allocation_shape
+        )
+        codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
         if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            return (
+            out = (
                 f"{name} = empty_strided_{device.type}("
-                f"{self.codegen_python_shape_tuple(shape)}, "
-                f"{self.codegen_python_shape_tuple(stride)}, "
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
         # all other devices:
-        return (
-            f"{name} = empty_strided("
-            f"{self.codegen_python_shape_tuple(shape)}, "
-            f"{self.codegen_python_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
-        )
+        else:
+            out = (
+                f"{name} = empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+        if codegen_shape_tuple != codegen_allocation_shape_tuple:
+            # need an extra as_strided call
+            out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
+        return out
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
