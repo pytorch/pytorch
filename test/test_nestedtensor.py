@@ -8305,13 +8305,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
-    # matmul(): unimplemented backward
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="aten.matmul_backward.default",
-        op_match_fn=lambda device, op: (op.full_name == "matmul"),
-        name="broken_matmul_backward",
-    ),
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=RuntimeError,
