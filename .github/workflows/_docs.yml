@@ -141,8 +141,8 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            docs/source/.sphinx-cache
-
+            docs/build
+            build/
           key: ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-${{ hashFiles('docs/source/**') }}
           restore-keys: |
            ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-
