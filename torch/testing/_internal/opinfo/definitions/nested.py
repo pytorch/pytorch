@@ -4,7 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -41,7 +41,7 @@ class ExtraOpData:
     # each is simply "dim". Its entry should be: [["dim"], ["dim..."]].
     #
     # If no overload of the op accepts dim-related args, this should be None.
-    dim_args: List[List[str]] = None
+    dim_args: list[list[str]] = None
 
     # Helper function to extract names of dim-related args.
     # Returns: tuple of (single dim argname if available, dim list argname if available)
