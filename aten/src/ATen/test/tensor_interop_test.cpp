@@ -148,9 +148,9 @@ TEST(PytorchToCaffe2, Op) {
   auto at_tensor_c = at::ones({5, 5}, at::dtype(at::kFloat));
 
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
+  [[maybe_unused]] auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  [[maybe_unused]] auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
 
   // Test Alias
   {
@@ -187,9 +187,9 @@ TEST(PytorchToCaffe2, SharedStorageRead) {
   auto at_tensor_b = at_tensor_a.view({5, 5});
 
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
+  [[maybe_unused]] auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  [[maybe_unused]] auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
 
   {
     auto op = net.add_op();

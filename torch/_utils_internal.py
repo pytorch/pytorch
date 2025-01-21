@@ -167,10 +167,6 @@ def log_torch_jit_trace_exportability(
     return
 
 
-def capture_pre_autograd_graph_using_training_ir() -> bool:
-    return False
-
-
 def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
