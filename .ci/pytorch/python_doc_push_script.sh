@@ -51,6 +51,9 @@ echo "install_path: $install_path  version: $version"
 build_docs () {
   set +e
   set -o pipefail
+ 
+  export SPHINX_CACHE_DEBUG=1
+ 
   make "$1" 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
@@ -82,9 +85,6 @@ rm -rf pytorch || true
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
 pushd docs
-
-mkdir -p /var/lib/jenkins/.sphinx-cache
-export SPHINX_CACHE_PATH=/var/lib/jenkins/.sphinx-cache
 
 # Build the docs
 if [ "$is_main_doc" = true ]; then

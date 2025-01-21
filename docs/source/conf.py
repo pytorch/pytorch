@@ -69,19 +69,10 @@ extensions = [
 ]
 
 # Configure sphinx-cache
-cache_path = os.getenv('SPHINX_CACHE_PATH', '.sphinx-cache')
-cache_config = {
-    'cache_path': cache_path,
-    'cache_version': 1,
-    'cached_folders': [
-        'build',
-        'generated',
-        '_modules',
-    ],
-    # Specify files to always rebuild
-    # 'excluded_files': []
-}
+cache_path = '.sphinx-cache'
 
+parallel_write_safe = True
+parallel_read_safe = True
 
 # build the templated autosummary files
 autosummary_generate = True
