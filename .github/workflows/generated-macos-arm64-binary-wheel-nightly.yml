@@ -125,7 +125,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -248,7 +249,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -371,7 +373,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -494,7 +497,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -617,7 +621,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -740,7 +745,8 @@ jobs:
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly "${SMOKE_TEST_PARAMS}"
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
