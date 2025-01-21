@@ -130,6 +130,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyDictVariable,
     SetVariable,
 )
 from .distributed import (
@@ -566,7 +567,15 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+        elif istype(
+            value,
+            (
+                dict,
+                collections.defaultdict,
+                collections.OrderedDict,
+                types.MappingProxyType,
+            ),
+        ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
@@ -591,6 +600,11 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
+
+                if istype(value, types.MappingProxyType):
+                    unimplemented(
+                        "Key order guarding not supported for MappingProxyType"
+                    )
                 self.tx.output.guard_on_key_order.add(self.source.name())
 
             # We need all the keys to be hashable. We do this within the
@@ -625,6 +639,12 @@ class VariableBuilder:
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
+                    source=self.source,
+                )
+            elif istype(value, types.MappingProxyType):
+                result = MappingProxyDictVariable(
+                    result,
+                    type(value),
                     source=self.source,
                 )
             else:

@@ -725,6 +725,41 @@ class DictTests(torch._dynamo.test_case.TestCase):
         foo.scalar = 12
         self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
+    def test_mappingproxy(self):
+        class Foo:
+            def __init__(self) -> None:
+                self.scalar = 10
+
+        d = Foo.__dict__
+
+        def fn(x):
+            if "scalar" in d:
+                return x * d["scalar"]
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_mappingproxy_iter(self):
+        class Foo:
+            def __init__(self) -> None:
+                self.scalar = 10
+
+        d = Foo.__dict__
+
+        def fn(x):
+            for key in d:
+                if key == "scalar":
+                    x = x * d[key]
+                else:
+                    x = x * 2
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

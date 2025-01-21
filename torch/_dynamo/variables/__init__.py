@@ -26,6 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyDictVariable,
     NNModuleHooksDictVariable,
     SetVariable,
 )
