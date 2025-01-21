@@ -119,9 +119,6 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
 }
 
 static void THPStream_dealloc(THPStream* self) {
-  if (self->context) {
-    Py_DECREF(self->context);
-  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
