@@ -30,6 +30,14 @@ from torch import (
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
+__all__ = [
+    "Number",
+    "Device",
+    "Storage",
+    "IntLikeType",
+    "FloatLikeType",
+    "BoolLikeType",
+]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -118,13 +126,3 @@ class Storage:
         element_size: int,
     ) -> "Storage":
         raise NotImplementedError
-
-
-__all__ = [
-    "Number",
-    "Device",
-    "Storage",
-    "IntLikeType",
-    "FloatLikeType",
-    "BoolLikeType",
-]
