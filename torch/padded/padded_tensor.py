@@ -574,6 +574,8 @@ class NoOp(PaddedOp):
 
 
 def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=None):
+    """Logs the function name and the shapes of its arguments and outputs."""
+
     def to_shape_str(arg):
         if (
             isinstance(arg, torch.Tensor)
@@ -628,6 +630,7 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
 
 
 def get_strides(shape: torch.Size) -> List[int]:
+    """Calculate the strides for a given tensor shape."""
     if len(shape) == 0:
         return []
 
@@ -638,6 +641,7 @@ def get_strides(shape: torch.Size) -> List[int]:
 
 
 def get_padded_shape(shape: torch.Size, multipliers: List[int]) -> torch.Size:
+    """Calculate the padded shape for a given tensor shape and multipliers."""
     padded_shape = list(shape)
     for dim, multiplier in enumerate(multipliers):
         if dim >= len(padded_shape):
@@ -649,6 +653,7 @@ def get_padded_shape(shape: torch.Size, multipliers: List[int]) -> torch.Size:
 
 
 def get_pad(shape: torch.Size, multipliers: List[int]) -> Tuple[int, ...]:
+    """Calculate the padding required for each dimension of a tensor shape."""
     pad = [0] * (len(shape) * 2)
     for dim, multiplier in enumerate(multipliers):
         if dim >= len(shape):
@@ -661,6 +666,7 @@ def get_pad(shape: torch.Size, multipliers: List[int]) -> Tuple[int, ...]:
 
 
 def convert_tensor_args(args: List[object]) -> Tuple[object]:
+    """Converts all tensors of a given list into padded tensors."""
     args_padded = []
     for arg in args:
         if (
@@ -682,6 +688,7 @@ def convert_tensor_args(args: List[object]) -> Tuple[object]:
 
 
 def convert_tensor_results(out, orig_out_shapes):
+    """Converts all tensors of a given list into padded tensors, incl. the original shape."""
     out_flat, spec = pytree.tree_flatten(out)
     out_flat_padded = []
     for idx, out_tensor in enumerate(out_flat):
@@ -702,6 +709,7 @@ def convert_tensor_results(out, orig_out_shapes):
 def get_tensors_from_padded(
     args: Tuple, kwargs: Dict
 ) -> Tuple[List[torch.Tensor], Dict]:
+    """Extracts the tensors from PaddedTensor objects from a given list of tensors."""
     if kwargs is None:
         kwargs = {}
     tensor_args, tensor_kwargs = pytree.tree_map_only(
@@ -712,7 +720,13 @@ def get_tensors_from_padded(
     return tensor_args, tensor_kwargs
 
 
-def create_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[Dimension]:
+def convert_to_padded_dims(
+    tensor: torch.Tensor, multipliers: List[int]
+) -> List[Dimension]:
+    """
+    Converts the dimensions of a tensor into a list of Dimension objects, indicating whether each
+    dimension is padded based on the given multipliers.
+    """
     shape_new = []
     for dim_idx, dim in enumerate(tensor.shape):
         is_padded = multipliers[dim_idx] != 1
@@ -781,7 +795,7 @@ class PaddedTensor(torch.Tensor):
         self.multipliers = multipliers
 
         if orig_shape is None:
-            self.orig_shape = torch.Size(create_padded_dims(tensor, multipliers))
+            self.orig_shape = torch.Size(convert_to_padded_dims(tensor, multipliers))
         else:
             self.orig_shape = orig_shape
 
