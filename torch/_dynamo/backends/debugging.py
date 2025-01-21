@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import logging
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -294,15 +294,15 @@ class ExplainOutput:
     There is no reason to create this class directly.
     """
 
-    graphs: List[torch.fx.GraphModule]
+    graphs: list[torch.fx.GraphModule]
     graph_count: int
     graph_break_count: int
-    break_reasons: List[
+    break_reasons: list[
         Any
     ]  # Type is GraphCompileReason but doesn't matter for this purpose
     op_count: int
-    ops_per_graph: Optional[List[torch.fx.Node]] = None
-    out_guards: Optional[List[_guards.Guard]] = None
+    ops_per_graph: Optional[list[torch.fx.Node]] = None
+    out_guards: Optional[list[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
     def __str__(self) -> str:
@@ -312,7 +312,7 @@ class ExplainOutput:
 
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
+            output += f"  Break Reason {idx + 1}:\n"
             output += f"    Reason: {break_reason.reason}\n"
             output += "    User Stack:\n"
             for frame_summary in break_reason.user_stack:
@@ -321,14 +321,14 @@ class ExplainOutput:
         if self.ops_per_graph is not None:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
-                output += f"  Ops {idx+1}:\n"
+                output += f"  Ops {idx + 1}:\n"
                 for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
             output += "Out Guards:\n"
             for i, guard in enumerate(self.out_guards):
-                output += f"  Guard {i+1}:\n"
+                output += f"  Guard {i + 1}:\n"
                 output += f"    {str(guard)}"
 
         if self.compile_times is not None:

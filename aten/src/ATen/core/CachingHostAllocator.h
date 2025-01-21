@@ -1,13 +1,11 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/thread_pool.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
 #include <optional>
 
 #include <deque>
 #include <mutex>
-#include <set>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
@@ -147,15 +145,15 @@ struct CachingHostAllocatorImpl {
       }
 
       // Launch the background thread and process events in a loop.
-      static c10::once_flag background_thread_flag;
-      c10::call_once(background_thread_flag, [this] {
+      static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
           while (true) {
             process_events();
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
         });
-      });
+        return true;
+      }();
     }
 
     // Slow path: if we can't allocate from the cached free list, we need
