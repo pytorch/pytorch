@@ -87,9 +87,7 @@ class AtenOpTests(PaddedTensorTestCase):
             self.assertEqual(z.unpad().shape, torch.Size([3, 5]))
             self.assert_padded_dims(z, [0, 1])
 
-    def test_view(self):
-        # Collapse
-        # ############
+    def test_view_collapse(self):
         # Collapse start
         x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
         z = aten.view(x, [24, 7])
@@ -118,8 +116,7 @@ class AtenOpTests(PaddedTensorTestCase):
         self.assertEqual(z.unpad().shape, torch.Size([15, 7, 99]))
         self.assert_padded_dims(z, [0])
 
-        # Expand
-        # ############
+    def test_view_expand(self):
         # Expand start
         x = PaddedTensor(torch.randn(3, 5, 7), [1, 6, 1])
         z = aten.view(x, [18, 7])
