@@ -30,16 +30,6 @@ jobs:
           test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-      - name: update-triton-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        with:
-          repo-owner: openai
-          repo-name: triton
-          branch: main
-          pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
-          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-slow-tests:
     if: github.repository_owner == 'pytorch'
