@@ -21,3 +21,9 @@ jobs:
       - name: Testing
         run: |
           echo "Workflow post-use-trigger-workflow: ${{ github.workflow }}"
+  test-dispatch:
+      - name: Invoke workflow with inputs
+      uses: benc-uk/workflow-dispatch@v1
+      with:
+        workflow: post_test_dispatch.yml
+        inputs: '{ "name": "blah blah"}'

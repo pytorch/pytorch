@@ -1,6 +1,10 @@
 name: post-test-dispatch
 on:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+        name:
+          description: 'Your name'
+          required: true
 
 jobs:
   post-process:
@@ -11,3 +15,4 @@ jobs:
       - name: Testing
         run: |
           echo "Workflow post-test-dispatch: ${{ github.workflow }}"
+          echo "Name: ${github.event.inputs.name}"
