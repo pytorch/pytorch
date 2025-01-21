@@ -33,9 +33,6 @@ docset: html
 	cp $(SPHINXPROJ).docset/icon.png $(SPHINXPROJ).docset/icon@2x.png
 	convert $(SPHINXPROJ).docset/icon@2x.png -resize 16x16 $(SPHINXPROJ).docset/icon.png
 
-html:
-	$(SPHINXBUILD) $(SPHINXOPTS) "$(SOURCEDIR)" "$(BUILDDIR)/html"
-
 html-stable:
 	# stable differs from `make html` in two ways:
 	# 1) The stable logo is used instead of the unstable logo

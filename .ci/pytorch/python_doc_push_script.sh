@@ -51,9 +51,6 @@ echo "install_path: $install_path  version: $version"
 build_docs () {
   set +e
   set -o pipefail
- 
-  export SPHINX_CACHE_DEBUG=1
- 
   make "$1" 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
