@@ -11,7 +11,7 @@ import sympy
 import tempfile
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, NamedTuple, Optional, Union
+from typing import Callable, NamedTuple, Optional, Union, List
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -1545,13 +1545,38 @@ class {test_classname}(torch.nn.Module):
             (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
             (Optional[list[torch.Tensor]], list[torch.Tensor]),
             (Optional[list[int]], list[int]),
+        ] + [
+            # pre-PEP585 signatures
+            (list[int], int),
+            (list[int], create_type_hint([int, int])),
+            (list[int], create_type_hint((int, int))),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (
+                list[torch.Tensor],
+                create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
+            ),
+            (list[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (
+                list[torch.Tensor],
+                create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
+            ),
+            (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),
+            (Optional[list[int]], list[int]),
         ]
+
         for sig_type, arg_type in should_be_equal:
             self.assertTrue(type_matches(sig_type, arg_type))
 
         should_fail = [
             (int, float),
             (Union[int, float], str),
+            (list[torch.Tensor], List[int]),
+        ] + [
+            # pre-PEP585 signatures
             (list[torch.Tensor], list[int]),
         ]
 
