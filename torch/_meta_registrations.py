@@ -2429,7 +2429,7 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8]
+        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
         out = out.to(memory_format=torch.channels_last)
         return out
@@ -2596,6 +2596,10 @@ def meta_avg_pool2d(
     torch._check(
         len(stride) in [0, 1, 2],
         lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    torch._check(
+        input.dtype not in [torch.uint8, torch.uint16, torch.uint32, torch.uint64],
+        lambda: f""""avg_pool2d" not implemented for '{input.dtype.__str__()}'""",
     )
     if len(stride) == 0:
         dH, dW = kH, kW
@@ -2790,6 +2794,10 @@ def meta_avg_pool3d(
     torch._check(
         not stride or len(stride) in (1, 3),
         lambda: "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints",
+    )
+    torch._check(
+        input.dtype not in [torch.uint8, torch.uint16, torch.uint32, torch.uint64],
+        lambda: f""""avg_pool3d" not implemented for '{input.dtype.__str__()}'""",
     )
     dT = kT if not stride else stride[0]
     dH = kH if not stride else (dT if len(stride) == 1 else stride[1])
