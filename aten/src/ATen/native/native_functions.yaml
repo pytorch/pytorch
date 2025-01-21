@@ -3866,6 +3866,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: value_selecting_reduction_backward_symint
+    NestedTensorCPU, NestedTensorCUDA: value_selecting_reduction_backward_nested_symint
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method

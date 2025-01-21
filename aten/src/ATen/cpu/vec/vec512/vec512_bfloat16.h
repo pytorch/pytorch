@@ -12,8 +12,8 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -1670,4 +1670,4 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
-}}}
+}}
