@@ -89,6 +89,22 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of three tensors.
     return bmm_flop(a_shape, b_shape)
 
+@register_flop_formula(aten._scaled_mm)
+def _scaled_mm_flop(
+    a_shape,
+    b_shape,
+    scale_a_shape,
+    scale_b_shape,
+    bias_shape=None,
+    scale_result_shape=None,
+    out_dtype=None,
+    use_fast_accum=False,
+    out_shape=None,
+    **kwargs,
+) -> int:
+    """Count flops for _scaled_mm."""
+    return mm_flop(a_shape, b_shape)
+
 
 def conv_flop_count(
     x_shape: List[int],
@@ -541,6 +557,7 @@ flop_registry = {
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
     aten.baddbmm: baddbmm_flop,
+    aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
