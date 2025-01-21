@@ -19,6 +19,8 @@ from torch import (
     device as _device,
     DispatchKey,
     dtype as _dtype,
+    layout as _layout,
+    qscheme as _qscheme,
     Size,
     SymBool,
     SymFloat,
