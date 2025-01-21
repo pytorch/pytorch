@@ -10,12 +10,9 @@ concurrency:
 permissions: read-all
 
 jobs:
-  test:
-    name: test dispatch
-    runs-on: ubuntu-latest
-    steps:
-      - name: Invoke workflow with inputs
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          workflow: post_test_dispatch.yml
-          inputs: '{ "name": "blah blah"}'
+  test-post:
+    name: test-post
+    uses: ./.github/workflows/post-use-trigger-workflow.yml
+    with:
+      build-environment: linux
+    secrets: inherit
