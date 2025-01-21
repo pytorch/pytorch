@@ -125,6 +125,7 @@ class device:
     def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
 # Defined in torch/csrc/Stream.cpp
+@runtime_checkable
 class Stream(Protocol):
     stream_id: _int  # Stream id
     device_index: _int
@@ -149,6 +150,7 @@ class Stream(Protocol):
 
 
 # Defined in torch/csrc/Event.cpp
+@runtime_checkable
 class Event(Protocol):
 
     device: _device  # The device of the Event
