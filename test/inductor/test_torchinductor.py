@@ -16,12 +16,10 @@ import subprocess
 import sys
 import threading
 import time
-import typing
 import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
-from typing import Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -8552,7 +8550,7 @@ class CommonTemplate:
             compiled_f = compile_fx_inner(mod, cloned_args)
 
         @torch.library.custom_op("mylib::sin_out", mutates_args={"outs"})
-        def sin_out(x: torch.Tensor, outs: typing.List[torch.Tensor]) -> None:
+        def sin_out(x: torch.Tensor, outs: list[torch.Tensor]) -> None:
             x_np = x.numpy()
             assert len(outs) == 2
             out_np0 = out[0].numpy()
@@ -12363,7 +12361,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str, ...]
+    suffixes: tuple[str, ...]
     is_skip: bool = False
     __test__: bool = False
 
@@ -12446,7 +12444,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def noop_backend(
                 self,
                 model_: torch.fx.GraphModule,
-                example_inputs_: typing.List[torch.Tensor],
+                example_inputs_: list[torch.Tensor],
             ):
                 """
                 The Noop backend does not compile the fx graph it is given.
@@ -12472,7 +12470,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.example_args = fake_flat_tensor_args
                 return lambda x: example_inputs_
 
-        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+        def get_kernels(self, fn, args) -> list[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
