@@ -5788,6 +5788,8 @@ Done""",
         for fast_mode, masked in product(*[(True, False)] * 2):
             check(fast_mode=fast_mode, masked=masked)
 
+    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/145231")
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
             @staticmethod

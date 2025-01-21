@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -155,7 +155,7 @@ prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses: Set[Type[Any]] = set()
+traceable_tensor_subclasses: set[type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -178,7 +178,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
+skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -492,13 +492,13 @@ log_compilation_metrics = True
 # allowing dynamo to construct larget graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
-reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
 # A set of methods that will be ignored while tracing,
 # to prevent graph breaks.
 # Add logging.Logger.<method> to ignore all calls for method,
 # or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: Set[Callable[..., Any]] = set()
+ignore_logger_methods: set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -530,7 +530,7 @@ fake_tensor_cache_crosscheck_enabled = (
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
-compiled_autograd_kwargs_override: Dict[str, Any] = {}
+compiled_autograd_kwargs_override: dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
