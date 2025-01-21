@@ -353,6 +353,12 @@ kernel void polygamma(
   trigamma(                                                                   \
       device DTYPE0* input [[buffer(0)]],                                     \
       device DTYPE1* output [[buffer(1)]],                                    \
+      uint id [[thread_position_in_grid]]);                                   \
+  template [[host_name("polygamma_" #DTYPE0 "_" #DTYPE1)]] kernel void        \
+  polygamma(                                                                  \
+      device DTYPE0* input [[buffer(0)]],                                     \
+      device DTYPE1* output [[buffer(1)]],                                    \
+      constant int64_t& order [[buffer(2)]],                                  \
       uint id [[thread_position_in_grid]]);
 
 #if __METAL_VERSION__ >= 310
