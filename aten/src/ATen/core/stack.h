@@ -103,7 +103,7 @@ inline void drop(Stack* stack, size_t n) {
   drop(*stack, n);
 }
 inline IValue pop(Stack& stack) {
-  TORCH_CHECK(not stack.empty(), "pop() called on empty stack");
+  TORCH_CHECK(!stack.empty(), "pop() called on empty stack");
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;
