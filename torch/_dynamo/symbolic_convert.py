@@ -291,6 +291,34 @@ def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
 
+@contextlib.contextmanager
+def save_and_restart_speculation_log(tx: "InstructionTranslatorBase"):
+    # When reconstructing a generator after a graph break, we advance it until
+    # it is fully exhausted. This process adds new entries to the speculation
+    # log that were not previously observed. Without temporarily clearing the
+    # speculation log, this could lead to a divergence error.
+
+    entries = tx.speculation_log.entries
+    index = tx.speculation_log.index
+    try:
+        tx.speculation_log.entries = []
+        tx.speculation_log.index = 0
+        yield
+    finally:
+        tx.speculation_log.entries = entries
+        tx.speculation_log.index = index
+
+
+@contextlib.contextmanager
+def temporarely_allow_writes_to_output_graph(tx: "InstructionTranslatorBase"):
+    try:
+        tmp = tx.output.should_exit
+        tx.output.should_exit = False
+        yield
+    finally:
+        tx.output.should_exit = tmp
+
+
 @dataclasses.dataclass
 class BlockStackEntry:
     # Current instruction that pushes something to block_stack

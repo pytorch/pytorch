@@ -172,6 +172,46 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_graph_break_and_reconstruct_generator(self):
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+            yield t.tan()
+
+        def g(t):
+            torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)
+            g(t)
+            return t.sin(), list(gen)
+
+        t = torch.randn(2)
+        fn(t)
+
+    def test_graph_break_in_generator_while_reconstructing(self):
+        def whoo():
+            yield 1
+            torch._dynamo.graph_break()
+            yield 2
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=False)
+        def fn(t):
+            gen = whoo()
+            s = next(gen)
+            torch._dynamo.graph_break()
+            s += next(gen)
+            return t + s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 3)
+        self.assertEqual(len(eager.graphs), 0)
+
     def test_generator_as_argument(self):
         # The inline tracer needs to be kept in sync if an already advanced generator
         # is given to a compiled function.
@@ -419,6 +459,19 @@ class GraphModule(torch.nn.Module):
         gen = fn(t)
         with self.assertRaises(StopIteration):
             next(gen)
+
+    @unittest.expectedFailure
+    def test_reconstruct_generator_mutate_tensor(self):
+        def whoo(t):
+            yield t.sin_()
+            yield t.cos_()
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaises(Unsupported):
+            self._compile_check(fn)
 
     def test_subgenerator(self):
         def subgen(t):
