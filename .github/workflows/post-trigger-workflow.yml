@@ -16,6 +16,7 @@ jobs:
     steps:
       - name: Checkout Version Branch
         uses: actions/checkout@v3
+        
       - name: test-post
         uses: ./.github/workflows/post-use-trigger-workflow.yml
         with:
