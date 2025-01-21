@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Functional interface."""
 import math
-from typing import List
 
 from torch import Tensor
 
@@ -22,11 +21,11 @@ from .sgd import sgd  # type: ignore[attr-defined]  # noqa: F401
 
 
 def sparse_adam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    state_steps: List[int],
+    params: list[Tensor],
+    grads: list[Tensor],
+    exp_avgs: list[Tensor],
+    exp_avg_sqs: list[Tensor],
+    state_steps: list[int],
     *,
     eps: float,
     beta1: float,
