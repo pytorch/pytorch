@@ -1,23 +1,23 @@
 from dataclasses import dataclass
+from dataclasses_json import dataclass_json
 from typing import Optional
-
-from dataclasses_json import DataClassJsonMixin
 
 
 _DATA_MODEL_VERSION = 1.0
 
 
-# the db schema related to this is:
-# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 # data model for test log usage
+
 @dataclass
+@dataclass_json
 class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
 
 
 @dataclass
-class UtilizationMetadata(DataClassJsonMixin):
+@dataclass_json
+class UtilizationMetadata:
     level: Optional[str] = None
     workflow_id: Optional[str] = None
     job_id: Optional[str] = None
@@ -31,23 +31,25 @@ class UtilizationMetadata(DataClassJsonMixin):
     start_at: Optional[float] = None
     error: Optional[str] = None
 
-
 @dataclass
-class GpuUsage(DataClassJsonMixin):
+@dataclass_json
+class GpuUsage:
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
 
 
 @dataclass
-class RecordData(DataClassJsonMixin):
+@dataclass_json
+class RecordData:
     cpu: Optional[UtilizationStats] = None
     memory: Optional[UtilizationStats] = None
     gpu_usage: Optional[list[GpuUsage]] = None
 
 
 @dataclass
-class UtilizationRecord(DataClassJsonMixin):
+@dataclass_json
+class UtilizationRecord:
     level: Optional[str] = None
     timestamp: Optional[float] = None
     data: Optional[RecordData] = None
