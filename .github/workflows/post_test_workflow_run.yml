@@ -1,0 +1,16 @@
+name: post-test-workflow-run
+on:
+  workflow_run:
+    workflows: [post-use-trigger-workflow]
+    types:
+      - completed
+
+jobs:
+  post-process:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Testing
+        run: |
+          echo "Workflow post-test-workflow-run: ${{ github.workflow }}"

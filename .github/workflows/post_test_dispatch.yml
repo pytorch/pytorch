@@ -1,4 +1,4 @@
-name: Post Test Process
+name: post-test-dispatch
 on:
   pull_request:
 
@@ -10,4 +10,4 @@ jobs:
     steps:
       - name: Testing
         run: |
-          echo "Workflow: ${{ github.workflow }}"
+          echo "Workflow post-test-dispatch: ${{ github.workflow }}"
