@@ -631,7 +631,7 @@ def register_onednn_fusion_ops():
                 )
 
             bias_dtype = None if bias is None else bias.get_dtype()
-            choices: List[ChoiceCaller] = []
+            choices: list[ChoiceCaller] = []
 
             if use_max_autotune():
                 *_, layout, x, packed_weight = mm_args(
