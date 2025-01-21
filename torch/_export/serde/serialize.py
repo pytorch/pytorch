@@ -1185,7 +1185,7 @@ class GraphModuleSerializer(metaclass=Final):
         )
 
     def serialize_module_call_graph(
-        self, module_call_graph: List[ep.ModuleCallEntry]
+        self, module_call_graph: list[ep.ModuleCallEntry]
     ) -> list[ModuleCallEntry]:
         log.debug("\n[serialize_module_call_graph]")
         return [
@@ -2479,7 +2479,7 @@ class GraphModuleDeserializer(metaclass=Final):
         )
 
     def deserialize_module_call_graph(
-        self, module_call_graph: List[ModuleCallEntry]
+        self, module_call_graph: list[ModuleCallEntry]
     ) -> list[ep.ModuleCallEntry]:
         log.debug("\n[deserialize_module_call_graph]")
         return [
@@ -2506,8 +2506,8 @@ class ExportedProgramDeserializer(metaclass=Final):
 
     def deserialize_range_constraints(
         self,
-        symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
-        symbol_name_to_symbol: Dict[str, sympy.Symbol],
+        symbol_name_to_range: dict[str, symbolic_shapes.ValueRanges],
+        symbol_name_to_symbol: dict[str, sympy.Symbol],
     ) -> dict[sympy.Symbol, ValueRanges]:
         log.debug("\n[deserialize_range_constraints]")
         range_constraints = {}
