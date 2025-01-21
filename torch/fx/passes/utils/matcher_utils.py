@@ -4,7 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, Union
 
 import torch
 from torch.fx import Graph, Node
@@ -37,19 +37,19 @@ logger = _init_logger()
 @dataclass
 class InternalMatch:
     # Nodes from which the match was found
-    anchors: List[Node]
+    anchors: list[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
-    nodes_map: Dict[Node, Node] = field(default_factory=dict)
+    nodes_map: dict[Node, Node] = field(default_factory=dict)
 
     # nodes in target graph that are matched placeholder in pattern
-    placeholder_nodes: List[Node] = field(default_factory=list)
+    placeholder_nodes: list[Node] = field(default_factory=list)
 
     # nodes in matched subgraph returned by output
-    returning_nodes: List[Node] = field(default_factory=list)
+    returning_nodes: list[Node] = field(default_factory=list)
 
     # map from a string name to a node in the target graph
     # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
-    name_node_map: Dict[str, Node] = field(default_factory=dict)
+    name_node_map: dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(
@@ -107,9 +107,9 @@ class SubgraphMatcher:
         ]
         output_node = next(iter(reversed(pattern.nodes)))
         # nodes returned by outputs
-        self.pattern_returning_nodes: List[Node] = output_node.all_input_nodes
+        self.pattern_returning_nodes: list[Node] = output_node.all_input_nodes
 
-        self.pattern_anchors: List[Node] = []
+        self.pattern_anchors: list[Node] = []
         if match_output:
             self.pattern_anchors = [output_node]
         else:
@@ -150,12 +150,12 @@ class SubgraphMatcher:
             return pn.target == gn.target
         return False
 
-    def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
+    def _is_contained(self, nodes_map: dict[Node, Node]) -> bool:
         # `lookup` represents all the nodes in `original_graph`
         # that are part of `pattern`
 
         # Placeholders can be used by other nodes in the graphs
-        lookup: Dict[Node, Node] = {
+        lookup: dict[Node, Node] = {
             gn: pn for pn, gn in nodes_map.items() if pn.op != "placeholder"
         }
 
@@ -172,10 +172,10 @@ class SubgraphMatcher:
         return True
 
     def _remove_overlapping_matches(
-        self, matches: List[InternalMatch]
-    ) -> List[InternalMatch]:
-        non_overlapping_matches: List[InternalMatch] = []
-        nodes_matched: Set[Node] = set()
+        self, matches: list[InternalMatch]
+    ) -> list[InternalMatch]:
+        non_overlapping_matches: list[InternalMatch] = []
+        nodes_matched: set[Node] = set()
 
         for match in matches:
             found_overlap = False
@@ -244,7 +244,7 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        def _match_args(args1: Union[List, Tuple], args2: Union[List, Tuple]) -> bool:
+        def _match_args(args1: Union[list, tuple], args2: Union[list, tuple]) -> bool:
             if len(args1) != len(args2):
                 return False
 
@@ -313,7 +313,7 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> List[InternalMatch]:
+    def match(self, graph: Graph) -> list[InternalMatch]:
         """
         Returns:
             The matched subgraphs.
@@ -352,7 +352,7 @@ class SubgraphMatcher:
         from torch.fx.passes.utils.fuser_utils import validate_partition
 
         # find candidate nodes to match with pattern anchors
-        match_candidates: Dict[Node, List[Node]] = defaultdict(list)
+        match_candidates: dict[Node, list[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
                 if self._nodes_are_equal(pattern_anchor, node):
@@ -361,7 +361,7 @@ class SubgraphMatcher:
 
         logger.info("Initial match_candidates_list: %s\n", match_candidates_list)
 
-        matches: List[InternalMatch] = []
+        matches: list[InternalMatch] = []
 
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):

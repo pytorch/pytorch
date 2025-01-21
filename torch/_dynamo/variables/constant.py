@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import operator
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -110,6 +110,8 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -119,8 +121,8 @@ its type to `common_constant_types`.
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
@@ -220,6 +222,8 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
