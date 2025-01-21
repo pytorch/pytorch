@@ -69,11 +69,7 @@ FloatLikeType: TypeAlias = Union[float, SymFloat]
 # bool or SymBool
 BoolLikeType: TypeAlias = Union[bool, SymBool]
 
-py_sym_types: tuple[
-    type[SymInt],
-    type[SymFloat],
-    type[SymBool],
-] = (SymInt, SymFloat, SymBool)
+py_sym_types = (SymInt, SymFloat, SymBool)  # left un-annotated intentionally
 PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
