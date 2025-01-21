@@ -137,11 +137,16 @@ jobs:
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
+      - name: Install dependencies
+        run: |
+          pip install sphinx-cache
+
       - name: Cache Sphinx Build
         uses: actions/cache@v3
         with:
           path: |
             docs/source/.sphinx-cache
+
           key: ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-${{ hashFiles('docs/source/**') }}
           restore-keys: |
            ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-
@@ -168,6 +173,8 @@ jobs:
             target="main"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
+          mkdir -p "${GITHUB_WORKSPACE}/.sphinx-cache"
+
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -176,7 +183,8 @@ jobs:
             -e DOCS_TYPE \
             -e RUN_DOXYGEN \
             -e WITH_PUSH \
-             -e SPHINX_CACHE_DEBUG=1 \
+            -e SPHINX_CACHE_DEBUG=1 \
+            -e SPHINX_CACHE_PATH="/var/lib/jenkins/workspace/.sphinx-cache" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -185,6 +193,7 @@ jobs:
             --user jenkins \
             -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}/.sphinx-cache:/var/lib/jenkins/workspace/.sphinx-cache" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )

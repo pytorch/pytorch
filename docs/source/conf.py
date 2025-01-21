@@ -69,10 +69,11 @@ extensions = [
 ]
 
 # Configure sphinx-cache
-cache_path = '.sphinx-cache'
-
+cache_path = os.environ.get('SPHINX_CACHE_PATH', '.sphinx-cache')
+cache_enabled = True
 parallel_write_safe = True
 parallel_read_safe = True
+
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -86,11 +87,6 @@ panels_add_bootstrap_css = False
 # duplicated section names that are in different documents.
 autosectionlabel_prefix_document = True
 
-# Enable Sphinx parallel build
-
-parallel_write_safe = True
-parallel_read_safe = True
-numfig = True
 
 # katex options
 #
