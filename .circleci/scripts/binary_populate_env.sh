@@ -30,9 +30,7 @@ fi
 # Pick docker image
 export DOCKER_IMAGE=${DOCKER_IMAGE:-}
 if [[ -z "$DOCKER_IMAGE" ]]; then
-  if [[ "$PACKAGE_TYPE" == conda ]]; then
-    export DOCKER_IMAGE="pytorch/conda-cuda"
-  elif [[ "$DESIRED_CUDA" == cpu ]]; then
+  if [[ "$DESIRED_CUDA" == cpu ]]; then
     export DOCKER_IMAGE="pytorch/manylinux:cpu"
   else
     export DOCKER_IMAGE="pytorch/manylinux-builder:${DESIRED_CUDA:2}"
@@ -63,7 +61,7 @@ if tagged_version >/dev/null; then
   # Turns tag v1.6.0-rc1 -> v1.6.0
   BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+if [[ "$(uname)" == 'Darwin' ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
@@ -149,8 +147,6 @@ export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
 
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
-export ANACONDA_USER='pytorch'
 
 export USE_FBGEMM=1
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
