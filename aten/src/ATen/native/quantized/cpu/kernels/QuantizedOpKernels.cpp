@@ -21,6 +21,7 @@
 #else
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/resize_native.h>
 #endif
 
 #include <cmath>
@@ -34,7 +35,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <arm_neon.h>
 #endif
-
 
 // NOLINTBEGIN(*-c-arrays)
 namespace at::native {
@@ -4245,6 +4245,420 @@ void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size
     }, /*serial_execution=*/is_deterministic);
   });
 }
+
+template <typename IndexType, typename OffsetType>
+at::Tensor& _qembedding_lookup_byte_kernel(
+    at::Tensor& output,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const at::Tensor& weight,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset,
+    bool is_embedding_op,
+    bool pruned) {
+  TORCH_CHECK(weight.scalar_type() == at::kByte);
+  TORCH_CHECK(weight.dim() == 2);
+  TORCH_CHECK(offsets.dim() == 1);
+  auto offsets_data = offsets.data_ptr<OffsetType>();
+
+  const auto weight_sizes = weight.sizes();
+  const int64_t weight_size = weight_sizes[1];
+  // NB: -8 to account for scale and bias
+  const int64_t block_size = weight_size - 8;
+  const int64_t M = offsets.sizes()[0];
+
+  int64_t output_size = M - 1;
+  std::vector<OffsetType> offsets_include_last_val;
+
+  if (!include_last_offset) {
+    output_size = M;
+    offsets_include_last_val.resize(M + 1);
+    // Avoid `null pointer passed as argument 2` ASAN violation when offsets
+    // tensor is empty.
+    if (M > 0) {
+      std::memcpy(
+          offsets_include_last_val.data(),
+          offsets_data,
+          sizeof(OffsetType) * M);
+    }
+    offsets_include_last_val[M] = indices.numel();
+    offsets_data = offsets_include_last_val.data();
+  }
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<int64_t, 3> shape_arr;
+    c10::IntArrayRef shape;
+    if (indices.dim() == 2 && is_embedding_op) {
+      const auto indices_sizes = indices.sizes();
+      shape_arr[0] = indices_sizes[0];
+      shape_arr[1] = indices_sizes[1];
+      shape_arr[2] = block_size;
+      shape = shape_arr;
+    } else {
+      shape_arr[0] = output_size;
+      shape_arr[1] = block_size;
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
+    }
+    at::native::resize_(output, shape, std::nullopt);
+  }
+
+  auto* output_data = output.data_ptr<float>();
+  const int index_size = indices.numel();
+  auto accessor = offsets.accessor<OffsetType, 1>();
+  std::vector<OffsetType> lengths_data;
+
+  const auto weight_data = weight.data_ptr<uint8_t>();
+  // IndexType
+  const auto indices_data = indices.data_ptr<IndexType>();
+
+  int64_t lower = accessor[0];
+  for (const auto i : c10::irange(1, offsets.numel())) {
+    lengths_data.push_back(accessor[i] - lower);
+    lower = accessor[i];
+  }
+  if (!include_last_offset) {
+    lengths_data.push_back(indices.numel() - lower);
+  }
+
+  int64_t current = 0;
+
+#if defined(CPU_CAPABILITY_SVE256) && \
+    (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+  // Helper lambda to upcast to FP32 and do the fused multiply-add
+  auto sve_fma = [](const uint8_t* weight_ptr,
+                    const float scale,
+                    svfloat32_t& output,
+                    const svbool_t p) {
+    auto wei_u32 = svld1ub_u32(p, weight_ptr);
+    auto quantized = svcvt_f32_u32_x(p, wei_u32);
+    output = svmla_n_f32_z(p, output, quantized, scale);
+    return;
+  };
+
+  uint32_t lanes = svcntw();
+  auto p_32 = svptrue_b32();
+  for (const auto m : c10::irange(output_size)) {
+    memset(output_data, 0, block_size * sizeof(float));
+    TORCH_CHECK(
+        current + lengths_data[m] <= index_size,
+        "Expect the lengths data to be less than indices size");
+
+    int i = 0;
+    while (i + 7 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current + 1] * weight_size;
+      auto wei_ptr3 = weight_data + indices_data[current + 2] * weight_size;
+      auto wei_ptr4 = weight_data + indices_data[current + 3] * weight_size;
+      auto wei_ptr5 = weight_data + indices_data[current + 4] * weight_size;
+      auto wei_ptr6 = weight_data + indices_data[current + 5] * weight_size;
+      auto wei_ptr7 = weight_data + indices_data[current + 6] * weight_size;
+      auto wei_ptr8 = weight_data + indices_data[current + 7] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float scale_3 = *(float*)(wei_ptr3 + weight_size - 2 * sizeof(float));
+      float scale_4 = *(float*)(wei_ptr4 + weight_size - 2 * sizeof(float));
+      float scale_5 = *(float*)(wei_ptr5 + weight_size - 2 * sizeof(float));
+      float scale_6 = *(float*)(wei_ptr6 + weight_size - 2 * sizeof(float));
+      float scale_7 = *(float*)(wei_ptr7 + weight_size - 2 * sizeof(float));
+      float scale_8 = *(float*)(wei_ptr8 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr3 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr4 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr5 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr6 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr7 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr8 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+        auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32);
+        sve_fma(wei_ptr3 + j, scale_3, output, p_32);
+        sve_fma(wei_ptr4 + j, scale_4, output, p_32);
+        sve_fma(wei_ptr5 + j, scale_5, output, p_32);
+        sve_fma(wei_ptr6 + j, scale_6, output, p_32);
+        sve_fma(wei_ptr7 + j, scale_7, output, p_32);
+        sve_fma(wei_ptr8 + j, scale_8, output, p_32);
+
+        svst1_f32(p_32, &output_data[j], output);
+        j += lanes;
+      }
+
+      if (j < block_size) {
+        auto p_32_n = svwhilelt_b32_u32(j, block_size);
+        auto output = svld1_f32(p_32_n, &output_data[j]);
+        output = svadd_n_f32_x(p_32_n, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32_n);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32_n);
+        sve_fma(wei_ptr3 + j, scale_3, output, p_32_n);
+        sve_fma(wei_ptr4 + j, scale_4, output, p_32_n);
+        sve_fma(wei_ptr5 + j, scale_5, output, p_32_n);
+        sve_fma(wei_ptr6 + j, scale_6, output, p_32_n);
+        sve_fma(wei_ptr7 + j, scale_7, output, p_32_n);
+        sve_fma(wei_ptr8 + j, scale_8, output, p_32_n);
+
+        svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i += 8;
+      current += 8;
+    }
+
+    while (i + 3 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current + 1] * weight_size;
+      auto wei_ptr3 = weight_data + indices_data[current + 2] * weight_size;
+      auto wei_ptr4 = weight_data + indices_data[current + 3] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float scale_3 = *(float*)(wei_ptr3 + weight_size - 2 * sizeof(float));
+      float scale_4 = *(float*)(wei_ptr4 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr3 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr4 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+        auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32);
+        sve_fma(wei_ptr3 + j, scale_3, output, p_32);
+        sve_fma(wei_ptr4 + j, scale_4, output, p_32);
+
+        svst1_f32(p_32, &output_data[j], output);
+        j += lanes;
+      }
+
+      if (j < block_size) {
+        auto p_32_n = svwhilelt_b32_u32(j, block_size);
+        auto output = svld1_f32(p_32_n, &output_data[j]);
+        output = svadd_n_f32_x(p_32_n, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32_n);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32_n);
+        sve_fma(wei_ptr3 + j, scale_3, output, p_32_n);
+        sve_fma(wei_ptr4 + j, scale_4, output, p_32_n);
+
+        svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i += 4;
+      current += 4;
+    }
+
+    while (i + 1 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current + 1] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+        auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32);
+
+        svst1_f32(p_32, &output_data[j], output);
+        j += lanes;
+      }
+
+      if (j < block_size) {
+        auto p_32_n = svwhilelt_b32_u32(j, block_size);
+        auto output = svld1_f32(p_32_n, &output_data[j]);
+        output = svadd_n_f32_x(p_32_n, output, bias);
+
+        sve_fma(wei_ptr1 + j, scale_1, output, p_32_n);
+        sve_fma(wei_ptr2 + j, scale_2, output, p_32_n);
+
+        svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i += 2;
+      current += 2;
+    }
+
+    while (i < lengths_data[m]) {
+      auto wei_ptr = weight_data + indices_data[current] * weight_size;
+      float scale = *(float*)(wei_ptr + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+        auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+        sve_fma(wei_ptr + j, scale, output, p_32);
+
+        svst1_f32(p_32, &output_data[j], output);
+        j += lanes;
+      }
+
+      if (j < block_size) {
+        auto p_32_n = svwhilelt_b32_u32(j, block_size);
+        auto output = svld1_f32(p_32_n, &output_data[j]);
+        output = svadd_n_f32_x(p_32_n, output, bias);
+
+        sve_fma(wei_ptr + j, scale, output, p_32_n);
+
+        svst1_f32(p_32_n, &output_data[j], output);
+      }
+      ++i;
+      ++current;
+    }
+    output_data += block_size;
+  } // for each m
+  return output;
+#endif
+
+  float* per_sample_weights_data = nullptr;
+  int32_t* compressed_indices_mapping_data = nullptr;
+  if (per_sample_weights_.has_value()) {
+    per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
+  }
+  for (const auto m : c10::irange(output_size)) {
+    memset(output_data, 0, block_size * sizeof(float));
+    TORCH_CHECK(
+        current + lengths_data[m] <= index_size,
+        "Expect the lengths data to be less than indices size");
+
+    for (int i = 0; i < lengths_data[m]; ++i, ++current) {
+      int64_t idx = -1;
+      if (!pruned) {
+        idx = indices_data[current];
+        TORCH_CHECK(
+            (idx >= 0 && idx < weight_sizes[0]), "Invalid indices data");
+      } else {
+        int64_t uncompressed_idx = indices_data[current];
+        int compressed_index_size = compressed_indices_mapping.value().numel();
+        compressed_indices_mapping_data =
+            compressed_indices_mapping.value().data_ptr<int32_t>();
+        TORCH_CHECK(
+            uncompressed_idx >= 0 && uncompressed_idx < compressed_index_size,
+            "Invalid indices data for Sparse Op.")
+        idx = compressed_indices_mapping_data[uncompressed_idx];
+        if (idx == -1) {
+          continue;
+        }
+      }
+
+      float weight_val = 1.0f;
+      if (per_sample_weights_.has_value()) {
+        weight_val = per_sample_weights_data[current];
+      }
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      float scale, bias;
+      const uint8_t* scale_bias =
+          weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
+      uint32_t scale_val_int32 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      scale_val_int32 = scale_val_int32 | (scale_bias[0]) |
+          (scale_bias[1] << 8) | (scale_bias[2] << 16) | (scale_bias[3] << 24);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      scale_val_int32 = scale_val_int32 | (scale_bias[3]) |
+          (scale_bias[2] << 8) | (scale_bias[1] << 16) | (scale_bias[0] << 24);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+      float scale_val = (reinterpret_cast<float*>(&scale_val_int32))[0];
+      uint32_t bias_val_int32 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      bias_val_int32 = bias_val_int32 | (scale_bias[4]) | (scale_bias[5] << 8) |
+          (scale_bias[6] << 16) | (scale_bias[7] << 24);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      bias_val_int32 = bias_val_int32 | (scale_bias[7]) | (scale_bias[6] << 8) |
+          (scale_bias[5] << 16) | (scale_bias[4] << 24);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+      float bias_val = (reinterpret_cast<float*>(&bias_val_int32))[0];
+      scale = weight_val * scale_val;
+      bias = weight_val * bias_val;
+
+      for (const auto j : c10::irange(block_size)) {
+        uint8_t quantized = weight_data[idx * weight_size + j];
+        quantized &= (1 << 8) - 1;
+
+        output_data[j] = fma(scale, quantized, output_data[j] + bias);
+      }
+    } // for each i
+    output_data += block_size;
+  } // for each m
+
+  return output;
+}
+
+// This function allows us to expose a non-templated stub while calling
+// templated implementations internally.
+at::Tensor& qembedding_lookup_byte_kernel(
+    at::Tensor& output,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const at::Tensor& weight,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset,
+    bool is_embedding_op,
+    bool pruned) {
+  if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
+    return _qembedding_lookup_byte_kernel<int, int>(
+        output,
+        indices,
+        offsets,
+        weight,
+        compressed_indices_mapping,
+        per_sample_weights_,
+        include_last_offset,
+        is_embedding_op,
+        pruned);
+  } else if (
+      indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
+    return _qembedding_lookup_byte_kernel<int, int64_t>(
+        output,
+        indices,
+        offsets,
+        weight,
+        compressed_indices_mapping,
+        per_sample_weights_,
+        include_last_offset,
+        is_embedding_op,
+        pruned);
+  } else if (
+      indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
+    return _qembedding_lookup_byte_kernel<int64_t, int>(
+        output,
+        indices,
+        offsets,
+        weight,
+        compressed_indices_mapping,
+        per_sample_weights_,
+        include_last_offset,
+        is_embedding_op,
+        pruned);
+  }
+
+  // default case
+  return _qembedding_lookup_byte_kernel<int64_t, int64_t>(
+      output,
+      indices,
+      offsets,
+      weight,
+      compressed_indices_mapping,
+      per_sample_weights_,
+      include_last_offset,
+      is_embedding_op,
+      pruned);
+}
+
 } // anonymous namespace
 
 // Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
@@ -4343,5 +4757,6 @@ REGISTER_DISPATCH(
     &index_put_kernel_quantized_cpu)
 REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel)
 REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel)
+ALSO_REGISTER_SVE256_DISPATCH(qembedding_lookup_byte_stub, &qembedding_lookup_byte_kernel)
 } // namespace at::native
 // NOLINTEND(*-c-arrays)
