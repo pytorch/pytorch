@@ -14,10 +14,6 @@ jobs:
     name: test dispatch
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Version Branch
-        id: checkout
-        uses: actions/checkout@v3
-
       - name: Invoke workflow with inputs
         uses: benc-uk/workflow-dispatch@v1
         with:
