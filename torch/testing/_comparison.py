@@ -12,7 +12,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Tuple,
     Type,
     Union,
 )
@@ -34,7 +33,7 @@ class ErrorMeta(Exception):
     """Internal testing exception that makes that carries error metadata."""
 
     def __init__(
-        self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
+        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> None:
         super().__init__(
             "If you are a user and see this message during normal operation "
@@ -83,8 +82,8 @@ _DTYPE_PRECISIONS.update(
 
 def default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[Dict[torch.dtype, Tuple[float, float]]] = None,
-) -> Tuple[float, float]:
+    dtype_precisions: Optional[Dict[torch.dtype, tuple[float, float]]] = None,
+) -> tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
     See :func:`assert_close` for a table of the default tolerance for each dtype.
@@ -111,8 +110,8 @@ def get_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
     rtol: Optional[float],
     atol: Optional[float],
-    id: Tuple[Any, ...] = (),
-) -> Tuple[float, float]:
+    id: tuple[Any, ...] = (),
+) -> tuple[float, float]:
     """Gets absolute and relative to be used for numeric comparisons.
 
     If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
@@ -145,10 +144,10 @@ def _make_mismatch_msg(
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
     extra: Optional[str] = None,
     abs_diff: float,
-    abs_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
+    abs_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
     atol: float,
     rel_diff: float,
-    rel_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
+    rel_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
     rtol: float,
 ) -> str:
     """Makes a mismatch error message for numeric values.
@@ -174,7 +173,7 @@ def _make_mismatch_msg(
         *,
         type: str,
         diff: float,
-        idx: Optional[Union[int, Tuple[int, ...]]],
+        idx: Optional[Union[int, tuple[int, ...]]],
         tol: float,
     ) -> str:
         if idx is None:
@@ -256,7 +255,7 @@ def make_tensor_mismatch_msg(
             Defaults to "Tensor-likes".
     """
 
-    def unravel_flat_index(flat_index: int) -> Tuple[int, ...]:
+    def unravel_flat_index(flat_index: int) -> tuple[int, ...]:
         if not matches.shape:
             return ()
 
@@ -329,7 +328,7 @@ class Pair(abc.ABC):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         **unknown_parameters: Any,
     ) -> None:
         self.actual = actual
@@ -342,13 +341,13 @@ class Pair(abc.ABC):
         raise UnsupportedInputs
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, tuple[Type, ...]]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
 
     def _fail(
-        self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
+        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
@@ -363,7 +362,7 @@ class Pair(abc.ABC):
     def compare(self) -> None:
         """Compares the inputs and raises an :class`ErrorMeta` in case they mismatch."""
 
-    def extra_repr(self) -> Sequence[Union[str, Tuple[str, Any]]]:
+    def extra_repr(self) -> Sequence[Union[str, tuple[str, Any]]]:
         """Returns extra information that will be included in the representation.
 
         Should be overwritten by all subclasses that use additional options. The representation of the object will only
@@ -445,29 +444,29 @@ class BooleanPair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...],
+        id: tuple[Any, ...],
         **other_parameters: Any,
     ) -> None:
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
     @property
-    def _supported_types(self) -> Tuple[Type, ...]:
+    def _supported_types(self) -> tuple[Type, ...]:
         cls: List[Type] = [bool]
         if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
-    ) -> Tuple[bool, bool]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...]
+    ) -> tuple[bool, bool]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = (
             self._to_bool(bool_like, id=id) for bool_like in (actual, expected)
         )
         return actual, expected
 
-    def _to_bool(self, bool_like: Any, *, id: Tuple[Any, ...]) -> bool:
+    def _to_bool(self, bool_like: Any, *, id: tuple[Any, ...]) -> bool:
         if isinstance(bool_like, bool):
             return bool_like
         elif isinstance(bool_like, np.bool_):
@@ -526,7 +525,7 @@ class NumberPair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         rtol: Optional[float] = None,
         atol: Optional[float] = None,
         equal_nan: bool = False,
@@ -546,15 +545,15 @@ class NumberPair(Pair):
         self.check_dtype = check_dtype
 
     @property
-    def _supported_types(self) -> Tuple[Type, ...]:
+    def _supported_types(self) -> tuple[Type, ...]:
         cls = list(self._NUMBER_TYPES)
         if HAS_NUMPY:
             cls.append(np.number)
         return tuple(cls)
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
-    ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...]
+    ) -> tuple[Union[int, float, complex], Union[int, float, complex]]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = (
             self._to_number(number_like, id=id) for number_like in (actual, expected)
@@ -562,7 +561,7 @@ class NumberPair(Pair):
         return actual, expected
 
     def _to_number(
-        self, number_like: Any, *, id: Tuple[Any, ...]
+        self, number_like: Any, *, id: tuple[Any, ...]
     ) -> Union[int, float, complex]:
         if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
@@ -635,7 +634,7 @@ class TensorLikePair(Pair):
         actual: Any,
         expected: Any,
         *,
-        id: Tuple[Any, ...] = (),
+        id: tuple[Any, ...] = (),
         allow_subclasses: bool = True,
         rtol: Optional[float] = None,
         atol: Optional[float] = None,
@@ -661,8 +660,8 @@ class TensorLikePair(Pair):
         self.check_stride = check_stride
 
     def _process_inputs(
-        self, actual: Any, expected: Any, *, id: Tuple[Any, ...], allow_subclasses: bool
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         directly_related = isinstance(actual, type(expected)) or isinstance(
             expected, type(actual)
         )
@@ -686,7 +685,7 @@ class TensorLikePair(Pair):
         except Exception:
             self._inputs_not_supported()
 
-    def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
+    def _check_supported(self, tensor: torch.Tensor, *, id: tuple[Any, ...]) -> None:
         if tensor.layout not in {
             torch.strided,
             torch.jagged,
@@ -769,7 +768,7 @@ class TensorLikePair(Pair):
 
     def _equalize_attributes(
         self, actual: torch.Tensor, expected: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Equalizes some attributes of two tensors for value comparison.
 
         If ``actual`` and ``expected`` are ...
@@ -1054,9 +1053,9 @@ def originate_pairs(
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]],
-    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
-    id: Tuple[Any, ...] = (),
+    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
+    id: tuple[Any, ...] = (),
     **options: Any,
 ) -> List[Pair]:
     """Originates pairs from the individual inputs.
@@ -1192,8 +1191,8 @@ def not_close_error_metas(
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]] = (ObjectPair,),
-    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
+    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
 ) -> List[ErrorMeta]:
     """Asserts that inputs are equal.

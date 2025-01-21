@@ -280,7 +280,7 @@ def main(args: list[str]) -> None:
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm, selector=selector)
 
     if options.output_dependencies:
-        depfile_path = Path(options.output_dependencies).absolute()
+        depfile_path = Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 

@@ -85,6 +85,13 @@ STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedSto
 
 IS_WINDOWS = sys.platform == "win32"
 
+UNSAFE_MESSAGE = (
+    "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+    "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+    "but it can result in arbitrary code execution. Do it only if you got the file from a "
+    "trusted source."
+)
+
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
@@ -1341,12 +1348,6 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
-    UNSAFE_MESSAGE = (
-        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
-        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
-        "but it can result in arbitrary code execution. Do it only if you got the file from a "
-        "trusted source."
-    )
     DOCS_MESSAGE = (
         "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
         "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
@@ -1611,6 +1612,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         with closing(
             tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
         ) as tar, mkdtemp() as tmpdir:
+            if pickle_module is _weights_only_unpickler:
+                raise RuntimeError(
+                    "Cannot use ``weights_only=True`` with files saved in the "
+                    "legacy .tar format. " + UNSAFE_MESSAGE
+                )
             tar.extract("storages", path=tmpdir)
             with open(os.path.join(tmpdir, "storages"), "rb", 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
@@ -1891,6 +1897,32 @@ def _load(
     current_offset = None
     data_descriptor_size64 = 24
     data_descriptor_size32 = 16
+    offsets = dict()
+
+    def _get_offset(key, name, numel):
+        nonlocal current_offset
+        if current_offset is None:
+            assert key == "0"
+            current_offset = zip_file.get_record_offset(name)
+            storage_offset = current_offset
+        else:
+            storage_offset = zip_file.get_record_offset_no_read(
+                current_offset, name, numel
+            )
+        nonlocal offsets
+        offsets[name] = storage_offset
+        return storage_offset
+    
+    def _update_current_offset(storage_offset, numel):
+        nonlocal current_offset
+        # offset of next zipfile header
+        local_header_offset = current_offset
+        current_offset = storage_offset + numel
+        # add size of data descriptor after payload
+        if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
+            current_offset += data_descriptor_size64
+        else:
+            current_offset += data_descriptor_size32
 
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
@@ -1898,25 +1930,17 @@ def _load(
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            nonlocal current_offset
-            if current_offset is None:
-                assert key == "0"
-                current_offset = zip_file.get_record_offset(name)
-                storage_offset = current_offset
-            else:
-                storage_offset = zip_file.get_record_offset_no_read(
-                    current_offset, name, numel
-                )
-            local_header_offset = current_offset
+            storage_offset = _get_offset(key, name, numel)
             storage = overall_storage[storage_offset : storage_offset + numel]
-            # offset of next zipfile header
-            current_offset = storage_offset + numel
-            # add size of data descriptor after payload
-            if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
-                current_offset += data_descriptor_size64
-            else:
-                current_offset += data_descriptor_size32
+            _update_current_offset(storage_offset, numel)
         else:
+            if True:  # FIXME: update this to debug var to be set in CI
+                if name in offsets:
+                    storage_offset = offsets[name]
+                else:
+                    storage_offset = _get_offset(key, name, numel)
+                    assert storage_offset == zip_file.get_record_offset(name), f"{name}, {storage_offset}, {zip_file.get_record_offset(name)}"
+                    _update_current_offset(storage_offset, numel)
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
                 ._typed_storage()

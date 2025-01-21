@@ -9,7 +9,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -17,6 +17,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     minifier_dir,
@@ -45,7 +46,7 @@ class AOTIMinifierError(Exception):
 def dump_to_minify(
     exported_program: ExportedProgram,
     compiler_name: str,
-    options: Optional[Dict[str, Any]] = None,
+    options: Optional[dict[str, Any]] = None,
 ):
     out = io.StringIO()
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -88,8 +89,8 @@ def save_graph_repro_ep(
     *,
     exported_program: Optional[ExportedProgram] = None,
     gm: Optional[torch.nn.Module] = None,
-    args: Optional[Tuple[Any]] = None,
-    config_patches: Optional[Dict[str, str]] = None,
+    args: Optional[tuple[Any]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
     command="run",
@@ -187,12 +188,13 @@ def dump_compiler_graph_state(
 def generate_compiler_repro_exported_program(
     exported_program,
     *,
-    options: Optional[Dict[str, str]] = None,
+    options: Optional[dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
 ):
     model_str = textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 import torch._inductor.inductor_prims
 
@@ -400,7 +402,7 @@ def repro_minify(options, exported_program, config_patches):
 def run_repro(
     exported_program,
     *,
-    config_patches: Optional[Dict[str, str]] = None,
+    config_patches: Optional[dict[str, str]] = None,
     command="run",
     accuracy: Union[bool, str] = "",
     save_dir=None,
@@ -455,7 +457,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify,analyze}", required=True
+        dest="command", metavar="{run,minify}", required=True
     )
 
     parser_run = subparsers.add_parser(
