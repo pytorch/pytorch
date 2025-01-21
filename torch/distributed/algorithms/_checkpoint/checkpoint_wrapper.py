@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 import torch
 import torch.nn as nn
@@ -70,10 +69,10 @@ class ActivationWrapper(torch.nn.Module, ABC):
     @staticmethod
     def _post_state_dict_hook(
         module: nn.Module,
-        state_dict: dict[str, Any],
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         _post_state_dict_hook() is called after the state_dict() of this FSDP module is executed.
 
@@ -88,7 +87,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
     @staticmethod
     def _pre_load_state_dict_hook(
         module: nn.Module,
-        state_dict: dict[str, Any],
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
     ) -> None:

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
@@ -9,7 +9,7 @@ from torch.distributed.optim._deprecation_warning import (
 )
 
 
-__all__: list[str] = []
+__all__: List[str] = []
 
 
 # Define a TorchScript compatible Functional Adamax Optimizer
@@ -25,7 +25,7 @@ __all__: list[str] = []
 class _FunctionalAdamax:
     def __init__(
         self,
-        params: list[Tensor],
+        params: List[Tensor],
         lr: float = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
@@ -55,7 +55,7 @@ class _FunctionalAdamax:
         }
         self.foreach = foreach
         self.maximize = maximize
-        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -64,13 +64,13 @@ class _FunctionalAdamax:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
         exp_avgs = []
         exp_infs = []
-        state_steps: list[Tensor] = []
+        state_steps: List[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(
