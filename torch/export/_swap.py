@@ -2,7 +2,7 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -19,7 +19,7 @@ from torch.fx.passes.utils.fuser_utils import erase_nodes, fuse_as_graphmodule
 log = logging.getLogger(__name__)
 
 
-def _get_getitem_users(node: torch.fx.Node) -> Set[torch.fx.Node]:
+def _get_getitem_users(node: torch.fx.Node) -> set[torch.fx.Node]:
     node_users = list(node.users.keys())
     getitem_users = set()
     for user in node_users:
@@ -172,9 +172,9 @@ def _remove_extraneous_pytrees(gm: torch.fx.GraphModule) -> None:
 def _construct_inputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
-    node_name_map: Dict[str, torch.fx.Node],
-) -> Tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
-    tree_unflatten_args: List[Optional[torch.fx.Node]] = []
+    node_name_map: dict[str, torch.fx.Node],
+) -> tuple[list[torch.fx.Node], dict[str, torch.fx.Node]]:
+    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used
@@ -213,8 +213,8 @@ def _construct_inputs(
 
 def _insert_call_module(
     gm: torch.fx.GraphModule,
-    args_nodes: List[torch.fx.Node],
-    kwargs_nodes: Dict[str, torch.fx.Node],
+    args_nodes: list[torch.fx.Node],
+    kwargs_nodes: dict[str, torch.fx.Node],
     module_to_swap: torch.nn.Module,
     name: str,
 ) -> torch.fx.Node:
@@ -229,8 +229,8 @@ def _deconstruct_outputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
     module_node: torch.fx.Node,
-    node_name_map: Dict[str, torch.fx.Node],
-    orig_outputs: Tuple[torch.fx.Node, ...],
+    node_name_map: dict[str, torch.fx.Node],
+    orig_outputs: tuple[torch.fx.Node, ...],
 ) -> None:
     from .unflatten import _generate_flatten_spec
 
@@ -246,17 +246,17 @@ def _deconstruct_outputs(
 
 def _swap_module_helper(
     gm: torch.fx.GraphModule,
-    modules_to_swap: Dict[str, torch.nn.Module],
-    module_call_graph: Dict[str, ModuleCallSignature],
+    modules_to_swap: dict[str, torch.nn.Module],
+    module_call_graph: dict[str, ModuleCallSignature],
 ) -> torch.fx.GraphModule:
     log.debug("Starting graph:")
     log.debug(gm.graph)
 
     legalize_graph(gm)
 
-    partitions: Dict[str, NodeList] = defaultdict(list)
+    partitions: dict[str, NodeList] = defaultdict(list)
 
-    node_name_map: Dict[str, torch.fx.Node] = {
+    node_name_map: dict[str, torch.fx.Node] = {
         node.name: node for node in gm.graph.nodes
     }
 
@@ -399,7 +399,7 @@ def _fix_input_output_signature(
 
 
 def _swap_modules(
-    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
+    ep: ExportedProgram, modules_to_swap: dict[str, torch.nn.Module]
 ) -> torch.fx.GraphModule:
     """
     Unlifts the given ExportedProgram into a fx.GraphModule, and then swaps
