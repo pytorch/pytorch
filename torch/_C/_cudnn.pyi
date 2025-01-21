@@ -1,9 +1,7 @@
 from enum import Enum
 
-from torch.types import _bool
-
 # Defined in torch/csrc/cuda/shared/cudnn.cpp
-is_cuda: _bool
+is_cuda: bool
 
 def getRuntimeVersion() -> tuple[int, int, int]: ...
 def getCompileVersion() -> tuple[int, int, int]: ...
