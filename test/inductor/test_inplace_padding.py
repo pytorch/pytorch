@@ -106,6 +106,23 @@ class InplacePaddingTest(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
         self.assertEqual(num_inplace_padding(), 1)
 
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_pad_non_zero_cpp_wrapper(self):
+        def f(x):
+            x = x + 1
+            x = aten.constant_pad_nd(x, (0, 1, 0, 0), 12345.0)
+
+            return x @ x
+
+        # 'odd' shape on purpose to pad intermediate buffer's strides
+        x = torch.randn(2048, 2047, device=GPU_TYPE)
+
+        ref = f(x)
+        act, (code,) = run_and_get_code(torch.compile(f), x)
+
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        self.assertEqual(num_inplace_padding(), 0)
+
     def test_pad_too_large(self):
         def f(x, y):
             x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
