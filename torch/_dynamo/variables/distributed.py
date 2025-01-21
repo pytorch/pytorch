@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -122,8 +122,8 @@ class PlacementClassVariable(DistributedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
@@ -163,8 +163,8 @@ class PlacementVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
 
@@ -232,8 +232,8 @@ class DeviceMeshVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
@@ -274,8 +274,8 @@ class ProcessGroupVariable(DistributedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "rank":
             return variables.ConstantVariable.create(self.value.rank())
@@ -385,8 +385,8 @@ class BackwardHookVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("setup_input_hook", "setup_output_hook"):
             return self._setup_hook(tx, name, *args, **kwargs)

@@ -4,7 +4,7 @@ import collections
 import inspect
 import operator
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -56,13 +56,13 @@ class BaseListVariable(VariableTracker):
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
-        self.items: List[VariableTracker] = items
+        self.items: list[VariableTracker] = items
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -113,8 +113,8 @@ class BaseListVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
             from .tensor import TensorVariable
@@ -318,8 +318,8 @@ class CommonListMethodsVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
@@ -408,8 +408,8 @@ class ListVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
@@ -535,8 +535,8 @@ class DequeVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
@@ -614,8 +614,8 @@ class TupleVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -645,7 +645,7 @@ class SizeVariable(TupleVariable):
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
     ) -> None:
@@ -748,8 +748,8 @@ class SizeVariable(TupleVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -850,8 +850,8 @@ class NamedTupleVariable(TupleVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
             assert len(args) == 2
@@ -983,8 +983,8 @@ class ListIteratorVariable(IteratorVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         if name == "__contains__":
             assert len(args) == 1
@@ -1004,7 +1004,7 @@ class ListIteratorVariable(IteratorVariable):
     def unpack_var_sequence(self, tx):
         return list(self.items[self.index :])
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1121,8 +1121,8 @@ class RestrictedListSubclassVariable(ListVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name in self.user_cls.__dict__:
             method = self.user_cls.__dict__[name]
@@ -1140,7 +1140,7 @@ class RestrictedListSubclassVariable(ListVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.call_method(tx, "__call__", args, kwargs)
