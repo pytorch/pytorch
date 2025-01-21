@@ -4,8 +4,7 @@ import dataclasses
 import enum
 import itertools as it
 import logging
-from collections.abc import Iterator
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, DefaultDict, Dict, Iterator, List, Optional, Set, Union
 from typing_extensions import Literal
 
 import torch
@@ -227,7 +226,7 @@ class SchemaMatcher:
         overload. If we cannot find any valid schema then we must be
         conservative and assume all inputs are mutable.
         """
-        mutable: Optional[list[bool]] = None
+        mutable: Optional[List[bool]] = None
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
@@ -328,7 +327,7 @@ class OpTree:
 
 class SizeMap:
     def __init__(self, op_tree: OpTree) -> None:
-        self._values: dict[TensorKey, int] = {}
+        self._values: Dict[TensorKey, int] = {}
 
         for node in op_tree.sorted_nodes:
             if node.typed[0] == _EventType.TorchOp:
@@ -350,7 +349,7 @@ class SizeMap:
                         for _, t in state:
                             self._update_values(t)
 
-        allocations: dict[TensorKey, int] = {}
+        allocations: Dict[TensorKey, int] = {}
         for node in op_tree.sorted_nodes:
             if node.typed[0] == _EventType.Allocation:
                 alloc_fields = node.typed[1]
@@ -411,7 +410,7 @@ class DataFlowNode:
     def __init__(self, event: _ProfilerEvent, graph: "DataFlowGraph") -> None:
         self._event = event
         self._graph = graph
-        self._edges: dict[TensorKey, DataFlowEdge] = self._determine_edges()
+        self._edges: Dict[TensorKey, DataFlowEdge] = self._determine_edges()
 
         for key, edge in self._edges.items():
             if edge.mutated and not edge.is_allocation:
@@ -421,11 +420,11 @@ class DataFlowNode:
         versions = {k: (v, self._graph.lookup(k)) for k, v in self.outputs.items()}
         assert all(i == j for i, j in versions.values()), f"{versions}, {self._edges}"
 
-    def _determine_edges(self) -> dict[TensorKey, DataFlowEdge]:
+    def _determine_edges(self) -> Dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
         # Start by populating edges from op inputs and outputs.
-        mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
+        mutable_by_key: Dict[Optional[TensorKey], Set[Optional[bool]]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
                 op.inputs, SchemaMatcher.inputs_are_mutable(op)
@@ -441,7 +440,7 @@ class DataFlowNode:
                         key = TensorKey.from_tensor(op_input_i)
                         mutable_by_key.setdefault(key, set()).add(mutable)
 
-        edges: collections.defaultdict[Optional[TensorKey], DataFlowEdge]
+        edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
         for key, mutable_set in mutable_by_key.items():
             if key is not None:
@@ -473,7 +472,7 @@ class DataFlowNode:
         return dict(sorted((k, v) for k, v in edges.items() if k is not None))
 
     @property
-    def inputs(self) -> dict[TensorKey, tuple[bool, int]]:
+    def inputs(self) -> Dict[TensorKey, tuple[bool, int]]:
         return {
             # MyPy can't see through `is_allocation` to know that
             # `v.input_version` is not None.
@@ -483,7 +482,7 @@ class DataFlowNode:
         }
 
     @property
-    def outputs(self) -> dict[TensorKey, int]:
+    def outputs(self) -> Dict[TensorKey, int]:
         return {
             k: 0 if v.input_version is None else v.input_version + 1
             for k, v in self._edges.items()
@@ -505,7 +504,7 @@ class DataFlowGraph:
     def __init__(self, op_tree: OpTree) -> None:
         self._op_tree = op_tree
         self._leaf_events = self._extract_leaf_events(op_tree)
-        self._active_version: dict[TensorKey, Optional[int]] = {}
+        self._active_version: Dict[TensorKey, Optional[int]] = {}
         self._flow_nodes = [DataFlowNode(e, self) for e in self.leaf_events]
         self._flow_nodes.sort(key=lambda x: x.start_time)
         self.validate()
@@ -516,7 +515,7 @@ class DataFlowGraph:
 
     def validate(self):
         # Check that each (Tensor, version) pair has a unique creation node
-        outputs: set[tuple[TensorKey, int]] = set()
+        outputs: Set[tuple[TensorKey, int]] = set()
         for node in self.flow_nodes:
             node_outputs = set(node.outputs.items())
             duplicates = outputs & node_outputs
@@ -524,7 +523,7 @@ class DataFlowGraph:
             outputs |= node_outputs
 
         # And check that `self._nodes` forms a valid topologically sorted DAG.
-        tensor_versions: dict[TensorKey, int] = {}
+        tensor_versions: Dict[TensorKey, int] = {}
         for node in self.flow_nodes:
             for key, (_, version) in node.inputs.items():
                 expected = tensor_versions.get(key, 0)
@@ -572,7 +571,7 @@ class DataFlowGraph:
         form the logical nodes in our data flow graph.
         """
 
-        leaf_events: list[_ProfilerEvent] = []
+        leaf_events: List[_ProfilerEvent] = []
 
         def leaf_op(e: _ProfilerEvent) -> bool:
             return e.typed[0] == _EventType.TorchOp and (
@@ -610,17 +609,17 @@ class DataFlowGraph:
 @dataclasses.dataclass
 class CategoryElement:
     by_id: Optional[Category] = None
-    by_key: dict[TensorKey, Category] = dataclasses.field(default_factory=dict)
-    by_version: dict[TensorAndID, Category] = dataclasses.field(default_factory=dict)
+    by_key: Dict[TensorKey, Category] = dataclasses.field(default_factory=dict)
+    by_version: Dict[TensorAndID, Category] = dataclasses.field(default_factory=dict)
 
     # Used by unit tests to check internals. (And consequently by
     # MemoryProfile.lookup) This should not be used in any other capacity.
-    _by_id_keyset: set[TensorKey] = dataclasses.field(default_factory=set)
+    _by_id_keyset: Set[TensorKey] = dataclasses.field(default_factory=set)
 
 
 @dataclasses.dataclass
 class CategoryDict:
-    _values: collections.defaultdict[int, CategoryElement] = dataclasses.field(
+    _values: DefaultDict[int, CategoryElement] = dataclasses.field(
         default_factory=lambda: collections.defaultdict(CategoryElement)
     )
 
@@ -667,9 +666,9 @@ class MemoryProfile:
 
     @property
     def timeline(self) -> tuple[tuple[int, Action, KeyAndID, int], ...]:
-        output: list[tuple[int, Action, KeyAndID, int]] = []
-        allocation_times: dict[tuple[TensorKey, bool], int] = {}
-        live_unknown: dict[tuple[int, torch.device], Literal[True]] = {}
+        output: List[tuple[int, Action, KeyAndID, int]] = []
+        allocation_times: Dict[tuple[TensorKey, bool], int] = {}
+        live_unknown: Dict[tuple[int, torch.device], Literal[True]] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -702,7 +701,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
         last_version = dict(sorted(snapshot.keys()))
 
-        events: list[tuple[int, Action, TensorAndID]] = [
+        events: List[tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
             for key, version in snapshot.keys()
             if (key, True) not in allocation_times and version == 0
@@ -735,8 +734,8 @@ class MemoryProfile:
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
 
-    def _category_snapshot(self) -> dict[TensorAndID, Optional[Category]]:
-        all_tensor_versions: set[TensorAndID] = set()
+    def _category_snapshot(self) -> Dict[TensorAndID, Optional[Category]]:
+        all_tensor_versions: Set[TensorAndID] = set()
 
         for node in self._data_flow_graph.flow_nodes:
             all_tensor_versions.update(((k, v) for k, (_, v) in node.inputs.items()))
@@ -751,7 +750,7 @@ class MemoryProfile:
             for key, version in sorted(all_tensor_versions)
         }
 
-    def _any_version_depends_on_gradient(self) -> set[int]:
+    def _any_version_depends_on_gradient(self) -> Set[int]:
         """Extract IDs of Tensors which depend or will depend on a gradient.
 
         Note that this weakened definition of "depends" requires us to loop
@@ -762,7 +761,7 @@ class MemoryProfile:
         acyclic data flow graph into a cyclic graph and we are attempting to
         partition cycles involving a gradient from the rest of the graph.
         """
-        depends_on_gradient: set[int] = set()
+        depends_on_gradient: Set[int] = set()
         while True:
             start_size = len(depends_on_gradient)
             for node in self._data_flow_graph.flow_nodes:
@@ -838,7 +837,7 @@ class MemoryProfile:
 
         # We only want to annotate Tensors which actually contribute to the
         # model calculation.
-        produces_gradient: set[TensorAndID] = set()
+        produces_gradient: Set[TensorAndID] = set()
         for node in reversed(self._data_flow_graph.flow_nodes):
             tensors = {(key, version) for key, (_, version) in node.inputs.items()}
             tensors |= node.outputs.items()
@@ -895,8 +894,8 @@ class MemoryProfile:
         # data flow. Note this these are only candidates; we filter nodes that
         # we know are part of the backward pass but that doesn't guarantee that
         # they are part of the forward pass.
-        candidate_parameters: set[TensorAndID] = set()
-        candidate_fwd_tensors: set[TensorAndID] = {
+        candidate_parameters: Set[TensorAndID] = set()
+        candidate_fwd_tensors: Set[TensorAndID] = {
             i for i, category in snapshot.items() if category == Category.INPUT
         }
 
@@ -915,7 +914,7 @@ class MemoryProfile:
                 candidate_parameters |= inputs.difference(candidate_fwd_tensors)
 
         # Require that each parameter eventually contributes to the value of a gradient
-        used_for_gradient: set[TensorAndID] = set()
+        used_for_gradient: Set[TensorAndID] = set()
         for node in reversed(self._data_flow_graph.flow_nodes):
             if any(
                 self._is_gradient(*i) or i in used_for_gradient
@@ -994,8 +993,8 @@ class MemoryProfileTimeline:
         Output: [timestamps, sizes by category]
         """
         device = torch.device(device_str)
-        times: list[int] = []
-        sizes: list[list[int]] = []
+        times: List[int] = []
+        sizes: List[List[int]] = []
 
         def update(key, version, delta):
             category = (
@@ -1062,7 +1061,7 @@ class MemoryProfileTimeline:
         as a JSON formatted file to the given path for the given
         device."""
         device = torch.device(device_str)
-        raw_events: list[tuple[int, int, int, int]] = []
+        raw_events: List[tuple[int, int, int, int]] = []
 
         def get_category_index(key, version):
             category = (

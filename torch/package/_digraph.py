@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import deque
+from typing import List, Set
 
 
 class DiGraph:
@@ -89,7 +90,7 @@ class DiGraph:
         except TypeError:
             return False
 
-    def forward_transitive_closure(self, src: str) -> set[str]:
+    def forward_transitive_closure(self, src: str) -> Set[str]:
         """Returns a set of nodes that are reachable from src"""
 
         result = set(src)
@@ -102,7 +103,7 @@ class DiGraph:
                     working_set.append(n)
         return result
 
-    def backward_transitive_closure(self, src: str) -> set[str]:
+    def backward_transitive_closure(self, src: str) -> Set[str]:
         """Returns a set of nodes that are reachable from src in reverse direction"""
 
         result = set(src)
@@ -139,7 +140,7 @@ class DiGraph:
 
         return result_graph.to_dot()
 
-    def first_path(self, dst: str) -> list[str]:
+    def first_path(self, dst: str) -> List[str]:
         """Returns a list of nodes that show the first path that resulted in dst being added to the graph."""
         path = []
 
