@@ -17,8 +17,6 @@ permissions: read-all
 jobs:
   test-process:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
       - name: Testing
         run: |
