@@ -3082,7 +3082,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
-    def raise_if_return_is_generator(self):
+    def replace_tos_if_return_is_generator(self):
         if (
             len(self.stack)
             and (tos := self.stack[-1])
@@ -3094,7 +3094,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
     def _return(self, inst):
-        self.raise_if_return_is_generator()
+        self.replace_tos_if_return_is_generator()
 
         if (
             self.output.count_calls() == 0
