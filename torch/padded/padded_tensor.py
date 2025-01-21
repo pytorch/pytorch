@@ -1,5 +1,7 @@
+import functools
 import math
-from typing import Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -12,6 +14,21 @@ from utils import *
 
 
 INVALID_ID = -1337
+PADDED_OP_TABLE: Dict[Any, Any] = {}
+
+
+def register_func(table: Dict[Any, Any], aten_ops: List[str]):
+    assert isinstance(aten_ops, list)
+    assert all(isinstance(op, str) for op in aten_ops)
+
+    def wrapper(cls):
+        for aten_op in aten_ops:
+            table[aten_op] = cls()
+
+    return wrapper
+
+
+register_padded_op = functools.partial(register_func, PADDED_OP_TABLE)
 
 
 class Dim(int):
@@ -109,6 +126,7 @@ class RegularOp:
         raise NotImplementedError
 
 
+@register_padded_op(["ones_like"])
 class OnesLikeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -118,6 +136,7 @@ class OnesLikeOp(RegularOp):
         return [input_shape]
 
 
+@register_padded_op(["view", "_unsafe_view", "view_as_real"])
 class ViewOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -252,15 +271,7 @@ class ViewOp(RegularOp):
             return [torch.Size(orig_output_shape)]
 
 
-class ViewAsRealOp(RegularOp):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def infer_shapes(self, input_shapes, args, kwargs):
-        input_shape = input_shapes[0]
-        return [input_shape + (2,)]
-
-
+@register_padded_op(["unsqueeze"])
 class UnsqueezeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -275,6 +286,7 @@ class UnsqueezeOp(RegularOp):
         return [input_shape[:dim] + (1,) + input_shape[dim:]]
 
 
+@register_padded_op(["polar"])
 class PolarOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -284,6 +296,7 @@ class PolarOp(RegularOp):
         return [input_shape]
 
 
+@register_padded_op(["transpose"])
 class TransposeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -305,6 +318,7 @@ class TransposeOp(RegularOp):
         return [torch.Size(input_shape)]
 
 
+@register_padded_op(["expand"])
 class ExpandOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -316,6 +330,7 @@ class ExpandOp(RegularOp):
         return [torch.Size(shape)]
 
 
+@register_padded_op(["clone", "where", "tril", "sin", "rsqrt", "silu"])
 class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -325,6 +340,7 @@ class ElementwiseUnaryOp(RegularOp):
         return [input_shape]
 
 
+@register_padded_op(["add", "sub", "mul", "div"])
 class ElementwiseBinaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -343,6 +359,7 @@ class ElementwiseBinaryOp(RegularOp):
         return [torch.Size(reversed(new_shape))]
 
 
+@register_padded_op(["addmm"])
 class AddMmOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -351,6 +368,7 @@ class AddMmOp(RegularOp):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
 
+@register_padded_op(["mm"])
 class MatmulOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -359,6 +377,7 @@ class MatmulOp(RegularOp):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
 
+@register_padded_op(["bmm"])
 class BmmOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -373,6 +392,9 @@ class BmmOp(RegularOp):
         return [torch.Size([b1, n1, p2])]
 
 
+@register_padded_op(
+    ["_scaled_dot_product_flash_attention", "_scaled_dot_product_efficient_attention"]
+)
 class ScaledDotProductAttentionOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -384,6 +406,7 @@ class ScaledDotProductAttentionOp(RegularOp):
         return [input_shape, attn_shape]
 
 
+@register_padded_op(["index"])
 class IndexOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -407,6 +430,7 @@ class IndexOp(RegularOp):
         return [torch.Size(input_shape_mod)]
 
 
+@register_padded_op(["select"])
 class SelectOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -424,6 +448,7 @@ class SelectOp(RegularOp):
         return [input_shape[:dim] + input_shape[dim + 1 :]]
 
 
+@register_padded_op(["index_put_"])
 class IndexPutOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -433,6 +458,7 @@ class IndexPutOp(RegularOp):
         return [torch.Size(input_shape)]
 
 
+@register_padded_op(["split_with_sizes"])
 class SplitWithSizesOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -453,6 +479,7 @@ class SplitWithSizesOp(RegularOp):
         ]
 
 
+@register_padded_op(["stack"])
 class StackOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -467,6 +494,7 @@ class StackOp(RegularOp):
         return [input[0].orig_shape[:dim] + (len(input),) + input[0].orig_shape[dim:]]
 
 
+@register_padded_op(["detach"])
 class DetachOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -476,6 +504,7 @@ class DetachOp(RegularOp):
         return [input_shape]
 
 
+@register_padded_op(["embedding"])
 class EmbeddingOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -490,6 +519,7 @@ class EmbeddingOp(RegularOp):
         return [torch.Size(out_shape)]
 
 
+@register_padded_op(["slice", "unbind", "_to_copy", "copy_", "mean", "t", "sum", "pow"])
 class NoOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
@@ -497,66 +527,6 @@ class NoOp(RegularOp):
     def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
-
-
-class OpDatabase:
-    def __init__(self):
-        self.ops = {
-            # Tensor creation and manipulation
-            "ones_like": OnesLikeOp(),
-            "view": ViewOp(),
-            "_unsafe_view": ViewOp(),
-            "view_as_real": ViewOp(),
-            "unsqueeze": UnsqueezeOp(),
-            "polar": PolarOp(),
-            "transpose": TransposeOp(),
-            "clone": ElementwiseUnaryOp(),
-            "expand": ExpandOp(),
-            # Elementwise operations
-            "where": ElementwiseUnaryOp(),
-            "tril": ElementwiseUnaryOp(),
-            "sin": ElementwiseUnaryOp(),
-            "rsqrt": ElementwiseUnaryOp(),
-            "silu": ElementwiseUnaryOp(),
-            # Elementwise binary operations
-            "add": ElementwiseBinaryOp(),
-            "sub": ElementwiseBinaryOp(),
-            "mul": ElementwiseBinaryOp(),
-            "div": ElementwiseBinaryOp(),
-            # Contraction / Reduction operations
-            "addmm": AddMmOp(),
-            "mm": MatmulOp(),
-            "bmm": BmmOp(),
-            "_scaled_dot_product_flash_attention": ScaledDotProductAttentionOp(),
-            "_scaled_dot_product_efficient_attention": ScaledDotProductAttentionOp(),
-            # Indexing operations
-            "index": IndexOp(),
-            "select": SelectOp(),
-            "index_put_": IndexPutOp(),
-            # Splitting / Stacking
-            "split_with_sizes": SplitWithSizesOp(),
-            "stack": StackOp(),
-            # Other
-            "detach": DetachOp(),
-            "embedding": EmbeddingOp(),
-            "slice": NoOp(),
-            "unbind": NoOp(),
-            "_to_copy": NoOp(),
-            "copy_": NoOp(),
-            "mean": NoOp(),
-            "t": NoOp(),
-            "sum": NoOp(),
-            "pow": NoOp(),
-        }
-
-    def get_op(self, opname):
-        if opname in self.ops:
-            return self.ops[opname]
-        else:
-            raise NotImplementedError(f"Op '{opname}' not supported")
-
-
-OP_DATABASE = OpDatabase()
 
 
 def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=None):
@@ -813,7 +783,11 @@ class PaddedTensor(torch.Tensor):
         log("Dispatching %s" % func._overloadpacket.__name__)
         log("-" * 40)
 
-        op = OP_DATABASE.get_op(func._opname)
+        if func._opname not in PADDED_OP_TABLE:
+            raise NotImplementedError(
+                f"Function '{func._opname}' is not implemented for PaddedTensor"
+            )
+        op = PADDED_OP_TABLE[func._opname]
 
         # Convert arg tensors to padded tensors
         args = convert_tensor_args(args)
