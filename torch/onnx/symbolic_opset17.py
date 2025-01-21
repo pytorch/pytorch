@@ -98,7 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "s", "b", "b", "b")
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "s", "b", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -111,6 +111,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
+    align_to_window: Optional[bool] = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.
@@ -144,6 +145,12 @@ def stft(
             msg='STFT does not currently support center = True or pad_mode != "reflect"',
             value=input,
         )  # TODO(#145943): add center functionality and tests.
+
+    if align_to_window is not None:
+        raise errors.SymbolicValueError(
+            msg="Onnx stft does not currently support the align_to_window option",
+            value=input,
+        )  # TODO(<add-issue-#>): add compatibility with align_to_window option.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
