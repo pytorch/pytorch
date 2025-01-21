@@ -147,7 +147,7 @@ at::Tensor miopen_convolution_relu(
 #include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
-#include <c10/hip/HIPCachingAllocator.h>
+#include <ATen/native/miopen/Utils_miopen.h>
 
 #include <functional>
 #include <iterator>
@@ -289,23 +289,6 @@ BenchmarkCache<size_t> fwd_wssizes;
 BenchmarkCache<size_t> bwd_data_wssizes;
 BenchmarkCache<size_t> bwd_filter_wssizes;
 
-struct Workspace {
-  Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
-  }
-  Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
-  ~Workspace() {
-    if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(data);
-    }
-  }
-
-  size_t size;
-  void* data;
-};
-
 template<typename algo_t>
 struct algorithm_search {
 };
@@ -368,7 +351,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-    Workspace ws(max_ws_size);
+    GPUWorkspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
         args.idesc.desc(), args.input.const_data_ptr(),
@@ -441,7 +424,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-    Workspace ws(max_ws_size);
+    GPUWorkspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
         args.handle,
         args.odesc.desc(), args.output.const_data_ptr(),
@@ -514,7 +497,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
     int perf_count;
     perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-    Workspace ws(max_ws_size);
+    GPUWorkspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
         args.odesc.desc(), args.output.const_data_ptr(),
@@ -606,7 +589,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
 }
 
 template<typename algo_t>
-Workspace chooseAlgorithm(
+GPUWorkspace chooseAlgorithm(
     const ConvolutionArgs& args,
     bool benchmark,
     algo_t* algo)
@@ -617,7 +600,7 @@ Workspace chooseAlgorithm(
   size_t workspace_size;
   search::wsscache().find(args.params, &workspace_size);
   try {
-    return Workspace(workspace_size);
+    return GPUWorkspace(workspace_size);
   } catch (const std::exception& e) {
     hipGetLastError(); // clear OOM error
 
@@ -627,25 +610,25 @@ Workspace chooseAlgorithm(
     workspace_size = getWorkspaceSize(args, *algo);
     search::cache().insert(args.params, *algo);
     search::wsscache().insert(args.params, workspace_size);
-    return Workspace(workspace_size);
+    return GPUWorkspace(workspace_size);
   }
 }
 
 template<typename algo_t>
-Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
+GPUWorkspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
 {
   using search = algorithm_search<algo_t>;
   miopenConvSolution_t solution = search::getSolution(args, false);
   try {
     *solution_id = solution.solution_id;
-    return Workspace(solution.workspace_size);
+    return GPUWorkspace(solution.workspace_size);
   } catch (const std::exception& e) {
     hipGetLastError(); // clear OOM error
 
     // switch to default algorithm
     solution = search::getSolution(args, true);
     *solution_id = solution.solution_id;
-    return Workspace(solution.workspace_size);
+    return GPUWorkspace(solution.workspace_size);
   }
 }
 
@@ -726,7 +709,7 @@ void raw_miopen_convolution_forward_out(
 
   if (benchmark) {
       miopenConvFwdAlgorithm_t fwdAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -740,7 +723,7 @@ void raw_miopen_convolution_forward_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
@@ -834,7 +817,7 @@ void raw_miopen_depthwise_convolution_forward_out(
 
   if (benchmark) {
       miopenConvFwdAlgorithm_t fwdAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -848,7 +831,7 @@ void raw_miopen_depthwise_convolution_forward_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
@@ -989,7 +972,7 @@ void raw_miopen_convolution_backward_weight_out(
 
   if (benchmark) {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -1003,7 +986,7 @@ void raw_miopen_convolution_backward_weight_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
           args.handle,
@@ -1033,7 +1016,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
 
   if (benchmark) {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -1047,7 +1030,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionBackwardWeightsImmediate(
           args.handle,
@@ -1238,7 +1221,7 @@ void raw_miopen_convolution_backward_input_out(
 
   if (benchmark) {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -1252,7 +1235,7 @@ void raw_miopen_convolution_backward_input_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
           args.handle,
@@ -1347,7 +1330,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
 
   if (benchmark) {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
-      Workspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
+      GPUWorkspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
@@ -1361,7 +1344,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   }
   else {
       uint64_t solution_id;
-      Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
+      GPUWorkspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
       MIOPEN_CHECK(miopenConvolutionBackwardDataImmediate(
           args.handle,
@@ -1700,6 +1683,6 @@ REGISTER_CUDA_DISPATCH(miopen_convolution_backward_stub, &miopen_convolution_bac
 REGISTER_CUDA_DISPATCH(miopen_convolution_transpose_backward_stub, &miopen_convolution_transpose_backward)
 REGISTER_CUDA_DISPATCH(miopen_depthwise_convolution_backward_stub, &miopen_depthwise_convolution_backward)
 
-}}  // namespace
+}}  // namespace native
 
 #endif

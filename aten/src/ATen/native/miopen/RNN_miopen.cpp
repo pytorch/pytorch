@@ -57,6 +57,10 @@ namespace at::native {
 
 #include <ATen/TensorUtils.h>
 
+#include <ATen/native/miopen/Utils_miopen.h>
+
+#include <rocrand/rocrand_xorwow.h>
+
 #include <functional>
 #include <iterator>
 #include <sstream>
@@ -65,8 +69,6 @@ namespace at::native {
 #include <mutex>
 #include <stdint.h>
 #include <unordered_map>
-
-#include <rocrand/rocrand_xorwow.h>
 
 namespace at { namespace native {
 
@@ -225,7 +227,7 @@ struct RNNParams {
 struct RNNDescriptors {
     RNNDescriptor rnn_desc;
     DropoutDescriptor dropout_desc;
-    std::unique_ptr<GPUMem> dropout_states;
+    std::unique_ptr<GPUWorkspace> dropout_states;
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
     TensorDescriptor hx_desc;
@@ -241,11 +243,11 @@ struct RNNDescriptors {
             miopenDropoutGetStatesSize(handle, &statesSizeInBytes);
             size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
 
-            dropout_states = std::unique_ptr<GPUMem>(new GPUMem(states_size, sizeof(rocrand_state_xorwow)));
+            dropout_states = std::unique_ptr<GPUWorkspace>(new GPUWorkspace(states_size * sizeof(rocrand_state_xorwow)));
             dropout_desc.set(handle,
                              fn.rnn.dropout_rate,
-                             dropout_states->GetMem(),
-                             dropout_states->GetSize(),
+                             dropout_states->data,
+                             dropout_states->size,
                              fn.rnn.dropout_seed,
                              false,
                              false,
@@ -950,6 +952,6 @@ REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
-}} //namespace native.
+}} // namespace native
 
 #endif
