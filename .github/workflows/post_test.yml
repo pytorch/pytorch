@@ -10,4 +10,4 @@ jobs:
     steps:
       - name: Testing
         run: |
-          echo "Workflow: ${GITHUB_WORKFLOW}"
+          echo "Workflow: ${{ github.workflow }}"
