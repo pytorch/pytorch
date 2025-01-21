@@ -31,22 +31,22 @@ def register_func(table: Dict[Any, Any], aten_ops: List[str]):
 register_padded_op = functools.partial(register_func, PADDED_OP_TABLE)
 
 
-class Dim(int):
+class Dimension(int):
     def __new__(cls, value, is_padded=None, *args, **kwargs):
         ret = super(cls, cls).__new__(cls, value)
         ret.is_padded = is_padded
         return ret
 
     def __add__(self, other):
-        res = super(Dim, self).__add__(other)
+        res = super(Dimension, self).__add__(other)
         return self.__class__(res, self.is_padded or other.is_padded)
 
     def __sub__(self, other):
-        res = super(Dim, self).__sub__(other)
+        res = super(Dimension, self).__sub__(other)
         return self.__class__(res, self.is_padded or other.is_padded)
 
     def __mul__(self, other):
-        res = super(Dim, self).__mul__(other)
+        res = super(Dimension, self).__mul__(other)
         return self.__class__(res, self.is_padded or other.is_padded)
 
     def __repr__(self) -> str:
@@ -169,7 +169,7 @@ class ViewOp(RegularOp):
             output_shape = []
 
             for current_mapping in mapping:
-                output_dim = Dim(1, False)
+                output_dim = Dimension(1, False)
                 for index in current_mapping:
                     output_dim = input_shape[index] * output_dim
 
@@ -668,11 +668,11 @@ def get_tensors_from_padded(
     return tensor_args, tensor_kwargs
 
 
-def create_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[Dim]:
+def create_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[Dimension]:
     shape_new = []
     for dim_idx, dim in enumerate(tensor.shape):
         is_padded = multipliers[dim_idx] != 1
-        shape_new.append(Dim(dim, is_padded))
+        shape_new.append(Dimension(dim, is_padded))
     return shape_new
 
 
@@ -771,8 +771,6 @@ class PaddedTensor(torch.Tensor):
 
             prefix1, prefix2 = strip_common_suffix(in_shape_1, in_shape_2)
             out_shape = prefix1 + prefix2
-
-            print("setting linear", in_shape_1, in_shape_2, out_shape)
 
             out.orig_shape = torch.Size(out_shape)
 
