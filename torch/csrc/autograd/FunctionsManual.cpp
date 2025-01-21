@@ -7558,13 +7558,13 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_modified_lentz_method(
       x.scalar_type(),
       "__betainc_modified_lentz_method_eps_tiny",
       [&]() -> std::tuple<Tensor, Tensor> {
-        Tensor eps = at::scalar_to_tensor(
+        Tensor eps = at::scalar_tensor(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::epsilon(),
-            x.device());
-        Tensor tiny = at::scalar_to_tensor(
+            x.options());
+        Tensor tiny = at::scalar_tensor(
             std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(),
-            x.device()); // min == lowest, tiny == min
+            x.options()); // min == lowest, tiny == min
         return std::make_tuple(std::move(eps), std::move(tiny));
       });
 
@@ -7783,20 +7783,21 @@ static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
       x.scalar_type(),
       "__betainc_der_power_series_eps",
       [&]() -> Tensor {
-        return at::scalar_to_tensor(
+        return at::scalar_tensor(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::epsilon(),
-            x.device());
+            x.options());
       });
   auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
   const Tensor one = at::scalar_tensor(1.0, options);
+  const Tensor half = at::scalar_tensor(0.5, options);
   const Tensor _true = at::scalar_tensor(true, x.device());
 
   // Avoid returning NaN or infinity when the input does not satisfy either C1
   // or C2.
-  Tensor safe_a = at::where(use_power_series, a, 0.5);
-  Tensor safe_b = at::where(use_power_series, b, 0.5);
-  Tensor safe_x = at::where(use_power_series, x, 0.5);
+  Tensor safe_a = at::where(use_power_series, a, half);
+  Tensor safe_b = at::where(use_power_series, b, half);
+  Tensor safe_x = at::where(use_power_series, x, half);
 
   /* When x >= a / (a + b), we must apply the symmetry relation given here:
    * https://dlmf.nist.gov/8.17.E4
@@ -7956,12 +7957,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
       x.scalar_type(),
-      "__betainc_der_power_series_eps",
+      "__betainc_partials_nan",
       [&]() -> Tensor {
-        return at::scalar_to_tensor(
+        return at::scalar_tensor(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::quiet_NaN(),
-            grad_x.device());
+            x.options());
       });
 
   grad_a = at::where(result_is_nan, nan, grad_a);

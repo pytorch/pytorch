@@ -193,9 +193,9 @@ static Tensor _betaincinv_initial_approx(const Tensor& a, const Tensor& b, const
         dtype,
         "_betaincinv_eps_tiny_maxexp",
         [&]() -> std::tuple<Tensor, Tensor, Tensor> {
-    Tensor eps = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), y.device());
-    Tensor tiny = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), y.device()); //min == lowest, tiny == min
-    Tensor maxexp = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max_exponent, y.device());
+    Tensor eps = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), y.options());
+    Tensor tiny = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), y.options()); //min == lowest, tiny == min
+    Tensor maxexp = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max_exponent, y.options());
     return std::make_tuple(std::move(eps), std::move(tiny), std::move(maxexp));
   });
   auto options = at::TensorOptions().dtype(dtype).device(y.device());
@@ -286,9 +286,9 @@ static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Te
         dtype,
         "_betaincinv_computation_eps_tiny",
         [&]() -> std::tuple<Tensor, Tensor, Tensor> {
-    Tensor eps = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), _y.device());
-    Tensor tiny = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), _y.device()); //min == lowest, tiny == min
-    Tensor nan = at::scalar_to_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::quiet_NaN(), _y.device());
+    Tensor eps = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), _y.options());
+    Tensor tiny = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), _y.options()); //min == lowest, tiny == min
+    Tensor nan = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::quiet_NaN(), _y.options());
     return std::make_tuple(std::move(eps), std::move(tiny), std::move(nan));
   });
   auto options = at::TensorOptions().dtype(dtype).device(_y.device());
