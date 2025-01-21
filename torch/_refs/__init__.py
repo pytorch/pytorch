@@ -3192,15 +3192,15 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    input_acc = _maybe_convert_to_dtype(input, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
     reduction_dims = [2, 3]
     input_reshaped = torch.reshape(
-        input,
+        input_acc,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
-    computation_dtype = utils.get_computation_dtype(input_reshaped.dtype)
-    input_reshaped = _maybe_convert_to_dtype(input_reshaped, computation_dtype)
     biased_var, mean = torch.var_mean(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
@@ -3220,8 +3220,16 @@ def native_group_norm(
         )
         b = b + bias_reshaped
 
-    out = input_reshaped * w + b
-    out = out.view(input.shape)
+    if weight is not None:
+        w = w.as_strided([batch_size, num_channels], [num_channels, 1])
+        b = b.as_strided([batch_size, num_channels], [num_channels, 1])
+        broadcast_dims = list(range(2, input.ndim))
+        unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
+        unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
+        out = input_acc * unsqueeze_w + unsqueeze_b
+    else:
+        out = input_reshaped * w + b
+        out = out.view(input.shape)
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
