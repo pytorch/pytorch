@@ -1667,6 +1667,7 @@ class AotCodeCompiler:
             compile_cmd = object_builder.get_command_line()
             output_o = object_builder.get_target_file_path()
 
+            # breakpoint()
             log.debug("aot compilation command: %s", compile_cmd)
             if config.aot_inductor.package_cpp_only:
                 # Not doing the actual compilation here

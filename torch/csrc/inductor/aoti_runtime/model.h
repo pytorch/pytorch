@@ -84,7 +84,13 @@ enum ConstantType : uint8_t {
   FoldedConstant = 4,
 };
 
+// ConstantMap is a map that holds a RAIIAtenTensorHandle, which is an
+// unique_ptr owned by the container, and basically immutable and controlled
+// within the model. FreeConstantMap is a map that holds AtenTensorHandle, we
+// use "free" here because the legacy ConstantMap is RAII controlled and owned
+// by the framework.
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
+using FreeConstantMap = std::unordered_map<std::string, AtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
@@ -260,6 +266,7 @@ class AOTInductorModelBase {
   void load_constants() {
     size_t num_constants = this->num_constants();
     constants_map_->reserve(num_constants);
+    constants_holder_->reserve(num_constants);
 
     std::vector<size_t> constants_internal_offset(num_constants);
     if (device_type_ != aoti_torch_device_type_cpu()) {
@@ -335,7 +342,11 @@ class AOTInductorModelBase {
           opaque_metadata_ptr,
           opaque_metadata_size));
 #endif // AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
-      constants_map_->emplace(std::move(name), tensor_handle);
+      // We move the tensor_handle to constants_holder_ first. This would wrap
+      // it into a RAIIAtenTensorHandle. Users will call realease() if they
+      // decide to manage the lifetime of the tensors.
+      constants_map_->emplace(name, tensor_handle);
+      constants_holder_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
       this->update_constants_array_from_map();
@@ -514,7 +525,40 @@ class AOTInductorModelBase {
   void update_constants_map(
       std::shared_ptr<ConstantMap> constants_map,
       bool remap_constants_array = true) {
+    // If a ConstantMap (i.e. RAII) is used to update constant map, we hold it
+    // with constants_holder_ instead, and make a free-version of it into
+    // constants_map_.
+    constants_holder_ = std::move(constants_map);
+
+    if (!constants_map_) {
+      constants_map_ = std::make_shared<FreeConstantMap>();
+    }
+    for (const auto& [key, val] : *constants_holder_) {
+      (*constants_map_)[key] = val;
+    }
+
+    if (remap_constants_array) {
+      update_constants_array_from_map();
+    }
+  }
+
+  void update_constants_map(
+      std::shared_ptr<FreeConstantMap> constants_map,
+      bool remap_constants_array = true) {
     constants_map_ = std::move(constants_map);
+
+    if (remap_constants_array) {
+      update_constants_array_from_map();
+    }
+  }
+
+  void update_constants_map(
+      std::shared_ptr<FreeConstantMap> constants_map,
+      std::shared_ptr<ConstantMap> constants_holder,
+      bool remap_constants_array = true) {
+    constants_map_ = std::move(constants_map);
+    constants_holder_ = std::move(constants_holder);
+
     if (remap_constants_array) {
       update_constants_array_from_map();
     }
@@ -640,7 +684,10 @@ class AOTInductorModelBase {
   std::string in_spec_;
   std::string out_spec_;
 
-  std::shared_ptr<ConstantMap> constants_map_;
+  std::shared_ptr<FreeConstantMap> constants_map_;
+  // We create a map which holds the ref counts so to make sure the Tensors in
+  // use do not get freed prematurely.
+  std::shared_ptr<ConstantMap> constants_holder_;
   std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -684,7 +731,8 @@ class AOTInductorModelKernelsBase {
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel(
-      std::shared_ptr<ConstantMap> constants_map,
+      std::shared_ptr<FreeConstantMap> constants_map,
+      std::shared_ptr<ConstantMap> constants_holder,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
       std::optional<std::string> cubin_dir,
@@ -718,12 +766,14 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       AOTIProxyExecutorHandle proxy_executor);
 
   static std::unique_ptr<AOTInductorModel> Create(
-      std::shared_ptr<ConstantMap> constants_map,
+      std::shared_ptr<FreeConstantMap> constants_map,
+      std::shared_ptr<ConstantMap> constants_holder,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
       std::optional<std::string> cubin_dir) {
     return std::make_unique<AOTInductorModel>(
         std::move(constants_map),
+        std::move(constants_holder),
         std::move(constants_array),
         device_str,
         std::move(cubin_dir));

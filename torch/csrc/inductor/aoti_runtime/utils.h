@@ -226,6 +226,47 @@ inline const ConstantHandle& unwrap_raii_handle_if_needed(
   return handle;
 }
 
+class ConstantAtenTensorHandle {
+ public:
+  ConstantAtenTensorHandle() : handle_(nullptr), is_raii_(false) {}
+
+  // Pass through RAIIAtenTensorHandle. Behaves as if using RAIIAtenTensorHandle
+  // directly. This actually just "unwraps" the RAII Handle, memory is still
+  // owned by the original tensor handle.
+  ConstantAtenTensorHandle(const RAIIAtenTensorHandle& handle)
+      : handle_(handle), is_raii_(true) {}
+  // Make sure we don't take the ownership.
+  ConstantAtenTensorHandle(RAIIAtenTensorHandle&& handle) = delete;
+  ConstantAtenTensorHandle& operator=(RAIIAtenTensorHandle&& handle) = delete;
+
+  ConstantAtenTensorHandle(const AtenTensorHandle& handle)
+      : handle_(handle), is_raii_(false) {}
+
+  operator AtenTensorHandle() const {
+    return handle_;
+  }
+
+  operator RAIIAtenTensorHandle() const {
+    if (is_raii_) {
+      throw std::runtime_error("Constant handle a RAII tensor already.");
+    }
+    // Note the ownership get stolen if it's being returned as a RAIIAtenTensor.
+    return RAIIAtenTensorHandle(handle_);
+  }
+
+  AtenTensorHandle tensor() const {
+    return handle_;
+  }
+
+  AtenTensorHandle get() const {
+    return handle_;
+  }
+
+ private:
+  AtenTensorHandle handle_{};
+  bool is_raii_{};
+};
+
 // Shouldn't be called.
 inline AtenTensorHandle wrap_with_raii_handle_if_needed(
     const ConstantHandle& handle) = delete;

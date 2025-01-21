@@ -617,7 +617,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<FreeConstantMap> constants_map,
+                                               std::shared_ptr<ConstantMap> constants_holder,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
                                                std::optional<std::string> cubin_dir,
@@ -721,7 +722,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline(
                     f"""constants_info_[{idx}].original_fqn = "{original_fqn}";"""
                 )
-            self.prefix.writeline("update_constants_map(std::move(constants_map));")
+            self.prefix.writeline(
+                "update_constants_map(std::move(constants_map), std::move(constants_holder));"
+            )
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
             def escape_string(x):
