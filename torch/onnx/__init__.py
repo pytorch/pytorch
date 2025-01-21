@@ -48,7 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -107,6 +107,7 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
@@ -480,29 +481,20 @@ def dynamo_export(
             )
 
         if export_options is not None and export_options.dynamic_shapes:
-            # Make all shapes dynamic
-            def _to_dynamic_shapes_mapper():
-                arg_order = 0
-
-                def _to_dynamic_shape(x):
-                    nonlocal arg_order
-                    if isinstance(x, torch.Tensor):
-                        rank = len(x.shape)
-                        dynamic_shape = {}
-                        for i in range(rank):
-                            dynamic_shape[i] = torch.export.Dim(
-                                f"arg_{arg_order}_dim_{i}"
-                            )
-                        arg_order += 1
-                        return dynamic_shape
-                    else:
-                        return None
-
-                return _to_dynamic_shape
+            # Make all shapes dynamic if it's possible
+            def _to_dynamic_shape(x):
+                if isinstance(x, torch.Tensor):
+                    rank = len(x.shape)
+                    dynamic_shape = {}
+                    for i in range(rank):
+                        dynamic_shape[i] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                    return dynamic_shape
+                else:
+                    return None
 
             # model_args could be nested
             dynamic_shapes = _pytree.tree_map(
-                _to_dynamic_shapes_mapper(),
+                _to_dynamic_shape,
                 model_args,
             )
         else:

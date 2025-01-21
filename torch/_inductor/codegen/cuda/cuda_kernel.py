@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr
 
@@ -76,9 +66,9 @@ class CUDAKernel(Kernel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.layout_args: Dict[str, LayoutArg] = {}
+        self.layout_args: dict[str, LayoutArg] = {}
         # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
+        self.named_nodes: dict[str, IRNode] = {}
 
     def find_symbol(
         self, node: IRNode, attr: ValidLayoutAttrs, dim: int
@@ -110,20 +100,20 @@ class CUDAKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
         self.add_layout_arg("M", X, "size", mdim)
-        self.add_layout_arg("N", X, "size", ndim)
+        self.add_layout_arg("N", W, "size", ndim)
         self.add_layout_arg("K", X, "size", kdim)
 
         lda_dim = self.find_ld_idx(X)
         ldb_dim = self.find_ld_idx(W)
-        ldc_dim = self.find_ld_idx(Y)
-        ldd_dim = self.find_ld_idx(Bias) if Bias else None
+        ldc_dim = self.find_ld_idx(Bias) if Bias else None
+        ldd_dim = self.find_ld_idx(Y)
         self.add_layout_arg("lda", X, "stride", lda_dim)
         self.add_layout_arg("ldb", W, "stride", ldb_dim)
-        self.add_layout_arg("ldc", Y, "stride", ldc_dim)
-        if Bias and ldd_dim:
-            self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
+        if Bias is not None and ldc_dim is not None:
+            self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
+        self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
@@ -141,8 +131,8 @@ class CUDAKernel(Kernel):
         K = X.get_size()[kdim]
         LDA = get_ld(X)
         LDB = get_ld(W)
-        LDC = get_ld(Y)
-        LDD = get_ld(Bias) if Bias else 0
+        LDC = get_ld(Bias) if Bias else 0
+        LDD = get_ld(Y)
         return (M, N, K, LDA, LDB, LDC, LDD)
 
     @staticmethod
@@ -216,10 +206,10 @@ class CUDATemplateKernel(CUDAKernel):
 
     def def_kernel(
         self,
-        inputs: List[IRNode],
-        outputs: List[IRNode],
+        inputs: list[IRNode],
+        outputs: list[IRNode],
         names_str: str = "",
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -324,9 +314,11 @@ class CUDATemplateKernel(CUDAKernel):
                 outer_name=WorkspaceArg.unique_name(),
             )
             wrapper.generate_workspace_allocation(ws)
-            data_ptr = f"{ws.outer_name}.data_ptr()"
+            workspace = str(ws.outer_name)
             call_args.append(
-                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+                workspace
+                if V.graph.cpp_wrapper
+                else f"c_void_p({workspace}.data_ptr())"
             )
         else:
             ws = None
@@ -486,12 +478,12 @@ class CUDATemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
+        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -525,7 +517,7 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]

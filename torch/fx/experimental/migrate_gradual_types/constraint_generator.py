@@ -1,8 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from typing import Callable, Dict, Iterable
+from typing import Callable, Dict, Iterable, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch.fx._symbolic_trace import _assert_is_none
@@ -54,13 +54,66 @@ from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 MAX_TENSOR_RANK = 4
 
+__all__ = [
+    "ConstraintGenerator",
+    "adaptive_inference_rule",
+    "add_layer_norm_constraints",
+    "add_linear_constraints",
+    "arange_inference_rule",
+    "assert_inference_rule",
+    "batchnorm_inference_rule",
+    "bmm_inference_rule",
+    "broadcasting_inference_rule",
+    "conv2d_inference_rule",
+    "cumsum_inference_rule",
+    "embedding_inference_rule",
+    "embedding_inference_rule_functional",
+    "eq_inference_rule",
+    "equality_inference_rule",
+    "expand_inference_rule",
+    "flatten_inference_rule",
+    "full_inference_rule",
+    "gen_broadcasting_constraints",
+    "gen_embedding_rules",
+    "gen_layer_norm_constraints",
+    "generate_flatten_constraints",
+    "get_attr_inference_rule",
+    "getitem_inference_rule",
+    "gt_inference_rule",
+    "index_select_inference_rule",
+    "layer_norm_functional",
+    "layer_norm_inference_rule",
+    "linear_constraints",
+    "linear_inference_rule",
+    "lt_inference_rule",
+    "masked_fill_inference_rule",
+    "maxpool_inference_rule",
+    "neq_inference_rule",
+    "range_check",
+    "register_inference_rule",
+    "relu_inference_rule",
+    "reshape_inference_rule",
+    "size_inference_rule",
+    "tensor_inference_rule",
+    "torch_dim_inference_rule",
+    "torch_linear_inference_rule",
+    "transpose_inference_rule",
+    "type_inference_rule",
+    "view_inference_rule",
+]
 
-def register_inference_rule(call_target):
-    def register(fn):
+
+def register_inference_rule(
+    call_target: Target,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def register(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         if call_target in _INFERENCE_RULES:
             raise RuntimeError(f"Inference rule already registered for {call_target}!")
         _INFERENCE_RULES[call_target] = fn
@@ -1174,7 +1227,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     )
 
 
-@register_inference_rule("dim")  # type: ignore[attr-defined]
+@register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
@@ -1200,7 +1253,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
 
 
-@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+@register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
