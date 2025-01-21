@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 # In some cases, these basic types are shadowed by corresponding
 # top-level values.  The underscore variants let us refer to these
 # types.  See https://github.com/python/mypy/issues/4146 for why these
@@ -17,25 +15,21 @@ from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
-from torch import (  # noqa: F401
+from torch import (
     device as _device,
-    DispatchKey as DispatchKey,
+    DispatchKey,
     dtype as _dtype,
-    layout as _layout,
-    qscheme as _qscheme,
-    Size as Size,
-    SymBool as SymBool,
-    SymFloat as SymFloat,
-    SymInt as SymInt,
-    Tensor as Tensor,
+    Size,
+    SymBool,
+    SymFloat,
+    SymInt,
+    Tensor,
 )
 
 
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
-
-__all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -58,7 +52,7 @@ FloatLikeType: TypeAlias = Union[float, SymFloat]
 # bool or SymBool
 BoolLikeType: TypeAlias = Union[bool, SymBool]
 
-py_sym_types = (SymInt, SymFloat, SymBool)
+py_sym_types: tuple = (SymInt, SymFloat, SymBool)
 PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
@@ -124,3 +118,13 @@ class Storage:
         element_size: int,
     ) -> "Storage":
         raise NotImplementedError
+
+
+__all__ = [
+    "Number",
+    "Device",
+    "Storage",
+    "IntLikeType",
+    "FloatLikeType",
+    "BoolLikeType",
+]
