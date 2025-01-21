@@ -7,9 +7,10 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Optional
 
 import torch
 
@@ -85,7 +86,7 @@ def synchronize(
     world_size: int,
     key_prefix: str,
     timeout: float = 300,
-) -> List[bytes]:
+) -> list[bytes]:
     """
     Synchronizes ``world_size`` agents between each other using the underlying c10d store.
     The ``data`` will be available on each of the agents.

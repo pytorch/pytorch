@@ -25,6 +25,7 @@ import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
+from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
@@ -231,10 +232,15 @@ class _PipelineSchedule(ABC):
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
+        scale_grads: bool = True,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
         self._loss_fn = loss_fn
+
+        # See documentation in `PipelineScheduleSingle` / `PipelineScheduleMulti`
+        self.scale_grads = scale_grads
+
         # Chunking specification for positional inputs. (default: `None`)
         self._args_chunk_spec = args_chunk_spec
         # Chunking specification for keyword inputs. (default: `None`)
@@ -443,6 +449,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
     Base class for single-stage schedules.
     Implements the `step` method.
     Derived classes should implement `_step_microbatches`.
+
+    Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
+    should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
+    or sum losses (scale_grads=False).
     """
 
     def __init__(
@@ -462,6 +472,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         # Self attributes
         self._stage = stage
@@ -469,7 +480,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
         self._stage_initialized = False
-        self.scale_grads = scale_grads
 
         if n_microbatches < self._num_stages:
             raise ValueError(
@@ -1090,6 +1100,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
     Implements the `step` method.
+
+    Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
+    should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
+    or sum losses (scale_grads=False).
     """
 
     def __init__(
@@ -1111,6 +1125,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            scale_grads=scale_grads,
         )
         # Self attributes
         self._stages = stages
@@ -1140,7 +1155,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Deprecation warning: 'use_full_backward' is no longer supported. "
                 "Simply stop passing it, and everything should still work fine."
             )
-        self.scale_grads = scale_grads
 
     def _initialize_stages(self, args: tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
@@ -1739,7 +1753,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         self,
         stages: List[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Callable] = None,
+        loss_fn: Optional[Union[Callable, _Loss]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
