@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_S390X,
+    IS_ARM64,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1088,13 +1089,18 @@ class TestTensorCreation(TestCase):
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
-        refs = 0
-        if dtype == torch.bool:
-            refs = True
-        elif dtype in (torch.int32, torch.int64):
-            refs = torch.iinfo(dtype).min
 
-        self._float_to_int_conversion_helper(vals, device, dtype, (refs, ) * 3)
+        if dtype == torch.bool:
+            refs = (True, True, True)
+        elif IS_ARM64:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0 )
+            if dtype in (torch.int8, torch.int16):
+                refs = (0, -1, 0)
+        else:
+            refs = (0, 0, 0)
+            if dtype in (torch.int32, torch.int64):
+                refs = ( torch.iinfo(dtype).min, ) * 3
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
