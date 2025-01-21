@@ -1132,7 +1132,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.std: lambda input, dim=None: -1,
         torch.std_mean: lambda input, dim=None: -1,
         torch.stft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None, align_to_window=None: -1  # noqa: B950
         ),
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
