@@ -14,4 +14,3 @@ jobs:
       - name: Testing
         run: |
           echo "Workflow post-test-dispatch: ${{ github.workflow }}"
-          echo "Name: ${github.event.inputs.name}"
