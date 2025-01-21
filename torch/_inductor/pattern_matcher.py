@@ -1561,7 +1561,10 @@ def _serialize_pattern(
     return pattern
 
 
-SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
+if torch._inductor.config.serialized_pattern_path == "DEFAULT":
+    SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
+else:
+    SERIALIZED_PATTERN_PATH = Path(torch._inductor.config.serialized_pattern_path)
 
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
