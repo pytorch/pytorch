@@ -8997,7 +8997,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             )
             
     # For testing in64 support in upsample_nearest3d
-    @onlyCUDA
     def test_int64_upsample3d(self, device):
         x = torch.ones((1, 256, 16, 720, 1280), dtype=torch.bfloat16).cuda()
         try:
