@@ -2,7 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -52,22 +52,22 @@ class BaseSparsifier(abc.ABC):
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
 
-    def __init__(self, defaults: Optional[Dict[str, Any]] = None):
+    def __init__(self, defaults: Optional[dict[str, Any]] = None):
         super().__init__()
-        self.defaults: Dict[str, Any] = defaults or {}
+        self.defaults: dict[str, Any] = defaults or {}
 
-        self.state: Dict[str, Dict] = defaultdict(dict)
-        self.groups: List[Dict[str, Any]] = []
+        self.state: dict[str, dict] = defaultdict(dict)
+        self.groups: list[dict[str, Any]] = []
         self.enable_mask_update = True
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         return {
             "defaults": self.defaults,
             "state": self.state,
             "groups": self.groups,
         }
 
-    def __setstate__(self, state: Dict[str, Dict[str, Any]]) -> None:
+    def __setstate__(self, state: dict[str, dict[str, Any]]) -> None:
         self.__dict__.update(state)
 
     def __repr__(self):
@@ -84,7 +84,7 @@ class BaseSparsifier(abc.ABC):
         format_string += ")"
         return format_string
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         r"""Returns the state of the optimizer as a :class:`dict`.
 
         It contains:
@@ -95,7 +95,7 @@ class BaseSparsifier(abc.ABC):
         TODO: Need a clean way of loading the state of the "prepared" module
         """
 
-        groups: List[Dict[str, Any]] = [
+        groups: list[dict[str, Any]] = [
             dict(
                 filter(
                     lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT,
@@ -110,7 +110,7 @@ class BaseSparsifier(abc.ABC):
             "groups": groups,
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True):
         groups = copy.deepcopy(state_dict["groups"])
         states = state_dict["state"]
         for tensor_fqn, s in states.items():
@@ -140,7 +140,7 @@ class BaseSparsifier(abc.ABC):
     def make_config_from_model(
         self,
         model: nn.Module,
-        SUPPORTED_MODULES: Set[Type] = SUPPORTED_MODULES,
+        SUPPORTED_MODULES: set[type[nn.Linear]] = SUPPORTED_MODULES,
     ) -> None:
         self.config = []
         stack = [model]
@@ -176,7 +176,7 @@ class BaseSparsifier(abc.ABC):
                 "[{`tensor_fqn`: `foo.bar.weight`}, {`tensor_fqn`: ... }, ...]"
             )
 
-            assert isinstance(self.defaults, Dict)  # for mypy
+            assert isinstance(self.defaults, dict)  # for mypy
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
 
@@ -219,8 +219,8 @@ class BaseSparsifier(abc.ABC):
 
     def squash_mask(
         self,
-        params_to_keep: Optional[Tuple[str, ...]] = None,
-        params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
+        params_to_keep: Optional[tuple[str, ...]] = None,
+        params_to_keep_per_layer: Optional[dict[str, tuple[str, ...]]] = None,
         *args,
         **kwargs,
     ):
@@ -298,9 +298,9 @@ class BaseSparsifier(abc.ABC):
     def convert(
         self,
         module: nn.Module,
-        mapping: Optional[Dict[Type[nn.Module], Type[nn.Module]]] = None,
+        mapping: Optional[dict[type[nn.Module], type[nn.Module]]] = None,
         inplace: bool = False,
-        parameterization: Type[nn.Module] = FakeSparsity,
+        parameterization: type[nn.Module] = FakeSparsity,
     ):
         r"""Converts submodules in input module to a different module according to `mapping`
         by calling `from_dense` method on the target module class

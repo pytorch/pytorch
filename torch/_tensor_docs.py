@@ -57,9 +57,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 .. warning::
 
     When data is a tensor `x`, :func:`new_tensor()` reads out 'the data' from whatever it is passed,
-    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.clone().detach()``
-    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
-    The equivalents using ``clone()`` and ``detach()`` are recommended.
+    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.detach().clone()``
+    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.detach().clone().requires_grad_(True)``.
+    The equivalents using ``detach()`` and ``clone()`` are recommended.
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
@@ -1327,7 +1327,7 @@ cpu(memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in CPU memory.
 
-If this object is already in CPU memory and on the correct device,
+If this object is already in CPU memory,
 then no copy is performed and the original object is returned.
 
 Args:
@@ -2749,6 +2749,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -6465,6 +6466,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
