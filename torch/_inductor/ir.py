@@ -61,7 +61,11 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import (
+    BackendFeature,
+    get_scheduling_for_device,
+    index_prevent_reordering,
+)
 from .dependencies import (
     Dep,
     extract_free_unbacked_symbols,
@@ -342,12 +346,22 @@ def get_device_type(
 
 
 def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
-    device_type = get_device_type(x)
-    if is_gpu(device_type) and config.cuda_backend == "triton":
+    device = get_device_type(x)
+    # Special case cpu and cuda as using the method below
+    # to determine if the scheduler is a triton scheduler subclass
+    # requires instantiating a scheduler for them
+    if device in ["cpu", "cuda"] and getattr(config, f"{device}_backend") == "triton":
         return True
-    if is_cpu(device_type) and config.cpu_backend == "triton":
-        return True
-    return False
+    if (
+        device is None
+        or (device_scheduling := get_scheduling_for_device(device)) is None
+    ):
+        return False
+    from .codegen.triton import TritonScheduling
+
+    assert isinstance(device_scheduling, type)
+    return issubclass(device_scheduling, TritonScheduling)
+
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
