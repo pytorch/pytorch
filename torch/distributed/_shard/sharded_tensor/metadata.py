@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import List
 
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
@@ -86,7 +87,7 @@ class ShardedTensorMetadata:
     """
 
     # Metadata about each shard of the Tensor
-    shards_metadata: list[ShardMetadata] = field(default_factory=list)
+    shards_metadata: List[ShardMetadata] = field(default_factory=list)
 
     # Size of each dim of the overall Tensor.
     size: torch.Size = field(default=torch.Size([]))

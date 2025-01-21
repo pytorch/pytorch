@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional
+from typing import Callable, Optional, Set
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -48,7 +48,7 @@ class ModTracker:
 
     """
 
-    parents: set[str]
+    parents: Set[str]
     """
     A Set containing the fqn for each module currently running their forward
     """
