@@ -65,12 +65,21 @@ extensions = [
     "sphinx_panels",
     "myst_parser",
     "sphinx.ext.linkcode",
-    "sphinx_cache.extension",
 ]
 
-# Configure sphinx-cache
-cache_path = os.environ.get('SPHINX_CACHE_PATH', '.sphinx-cache')
-cache_enabled = True
+# Configure cache
+
+doctree_path = os.environ.get('SPHINX_DOCTREE_DIR', '.doctrees')
+doctree_cache_dir = os.path.abspath(doctree_path)
+
+# Enable caching
+html_use_opensearch = False
+html_cache_dir = '_cache'
+html_cache_timestamp = True
+
+# Additional cache settings
+nitpicky = True  # More strict reference checking
+keep_warnings = True
 parallel_write_safe = True
 parallel_read_safe = True
 
