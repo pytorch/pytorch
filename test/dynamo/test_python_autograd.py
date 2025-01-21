@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable, NamedTuple, Optional, List
+from typing import Callable, List, NamedTuple, Optional
 
 import torch
 import torch._dynamo
