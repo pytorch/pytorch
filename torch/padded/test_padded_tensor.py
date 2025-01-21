@@ -141,6 +141,9 @@ class AtenOpTests(PaddedTensorTestCase):
 
 
 class ModelTests(PaddedTensorTestCase):
+    def setUp(self):
+        super().setUp()
+
     def test_transformer_model(self):
         with torch.no_grad():
             with torch.device("cuda"):
