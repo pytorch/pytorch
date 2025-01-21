@@ -37,27 +37,27 @@ def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 def _parse_to(
     device: _device,
     dtype: _dtype,
-    non_blocking: _bool,
-    copy: _bool,
+    non_blocking: bool,
+    copy: bool,
     *,
     memory_format: memory_format,
-) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+) -> Tuple[_device, _dtype, bool, memory_format]: ...
 @overload
 def _parse_to(
     dtype: _dtype,
-    non_blocking: _bool,
-    copy: _bool,
+    non_blocking: bool,
+    copy: bool,
     *,
     memory_format: memory_format,
-) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+) -> Tuple[_device, _dtype, bool, memory_format]: ...
 @overload
 def _parse_to(
     tensor: Tensor,
-    non_blocking: _bool,
-    copy: _bool,
+    non_blocking: bool,
+    copy: bool,
     *,
     memory_format: memory_format,
-) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+) -> Tuple[_device, _dtype, bool, memory_format]: ...
 
 # Defined in aten/src/ATen/native/PackedSequence.cpp
 def pad_sequence(

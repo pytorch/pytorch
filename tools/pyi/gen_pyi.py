@@ -85,7 +85,7 @@ def get_py_torch_functions(
 # the stubs to read on the human eye.
 
 DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
-FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: bool = False, pin_memory: bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
@@ -126,7 +126,7 @@ FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad
 # )
 
 # NOTE: ellipsis is equal to type[Ellipsis] in stub files.
-_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_leaf_types = "Union[None, bool, int, slice, ellipsis, Tensor]"  # not SupportsIndex!
 _index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
 INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
@@ -251,14 +251,14 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
         ]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Union[Tensor, bool]) -> Tensor: ..."]
     elif name in shift_ops:
-        return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Union[Tensor, int]) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
         return [
             # unsafe override https://github.com/python/mypy/issues/5704
             f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
-            f"def {opname}(self, other: Any) -> _bool: ...",
+            f"def {opname}(self, other: Any) -> bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
         return [
@@ -346,11 +346,11 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
 
 def gen_nn_functional(fm: FileManager) -> None:
     INPUT = "input: Tensor"
-    KERNEL_SIZE = "kernel_size: Union[_int, _size]"
+    KERNEL_SIZE = "kernel_size: Union[int, _size]"
     STRIDE_PADDING = ", ".join(
         [
-            "stride: Optional[Union[_int, _size]] = None",
-            "padding: Union[_int, _size] = 0",
+            "stride: Optional[Union[int, _size]] = None",
+            "padding: Union[int, _size] = 0",
         ]
     )
 
@@ -380,7 +380,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                             [
                                 f"{INPUT}",
                                 f"{KERNEL_SIZE}",
-                                "output_size: Union[_int, _size]",
+                                "output_size: Union[int, _size]",
                                 "_random_samples: Tensor",
                             ]
                         ),
@@ -389,7 +389,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 ],
                 f"adaptive_max_pool{d}d": [
                     f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
-                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
+                        ", ".join([f"{INPUT}", "output_size: Union[int, _size]"]),
                         "tuple[Tensor, Tensor]",
                     )
                 ],
@@ -565,7 +565,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     f"{INPUT}",
                     f"{KERNEL_SIZE}",
                     f"{STRIDE_PADDING}",
-                    "dilation: Union[_int, _size] = 1",
+                    "dilation: Union[int, _size] = 1",
                     "ceil_mode: bool = False",
                     "{return_indices}",
                 ],
@@ -575,7 +575,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 [
                     f"{INPUT}",
                     f"{KERNEL_SIZE}",
-                    "output_size: Optional[Union[_int, _size]] = None",
+                    "output_size: Optional[Union[int, _size]] = None",
                     "output_ratio: Optional[_ratio_any_t] = None",
                     "{return_indices}",
                     "_random_samples: Optional[Tensor] = None",
@@ -583,7 +583,7 @@ def gen_nn_functional(fm: FileManager) -> None:
             ),
             **get_max_pool_dispatch(
                 f"adaptive_max_pool{d}d",
-                [f"{INPUT}", "output_size: Union[_int, _size]", "{return_indices}"],
+                [f"{INPUT}", "output_size: Union[int, _size]", "{return_indices}"],
             ),
         )
 
@@ -701,8 +701,8 @@ def gen_pyi(
                                 "*",
                                 "dtype: Optional[_dtype] = None",
                                 "device: Optional[DeviceLikeType] = None",
-                                "requires_grad: _bool = False",
-                                "check_invariants: Optional[_bool] = None",
+                                "requires_grad: bool = False",
+                                "check_invariants: Optional[bool] = None",
                             ]
                         ),
                     )
@@ -712,7 +712,7 @@ def gen_pyi(
 
     unsorted_function_hints.update(
         {
-            "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
+            "set_flush_denormal": ["def set_flush_denormal(mode: bool) -> bool: ..."],
             "get_default_dtype": ["def get_default_dtype() -> _dtype: ..."],
             "asarray": [
                 "def asarray({}) -> Tensor: ...".format(
@@ -722,8 +722,8 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "device: Optional[DeviceLikeType] = None",
-                            "copy: Optional[_bool] = None",
-                            "requires_grad: _bool = False",
+                            "copy: Optional[bool] = None",
+                            "requires_grad: bool = False",
                         ]
                     )
                 )
@@ -738,12 +738,12 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "requires_grad: _bool = False",
+                            "requires_grad: bool = False",
                         ]
                     )
                 )
             ],
-            "numel": ["def numel(self: Tensor) -> _int: ..."],
+            "numel": ["def numel(self: Tensor) -> int: ..."],
             "as_tensor": [
                 "def as_tensor({}) -> Tensor: ...".format(
                     ", ".join(
@@ -755,12 +755,12 @@ def gen_pyi(
                     )
                 )
             ],
-            "get_num_threads": ["def get_num_threads() -> _int: ..."],
-            "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
+            "get_num_threads": ["def get_num_threads() -> int: ..."],
+            "set_num_threads": ["def set_num_threads(num: int) -> None: ..."],
             "init_num_threads": ["def init_num_threads() -> None: ..."],
-            "get_num_interop_threads": ["def get_num_interop_threads() -> _int: ..."],
+            "get_num_interop_threads": ["def get_num_interop_threads() -> int: ..."],
             "set_num_interop_threads": [
-                "def set_num_interop_threads(num: _int) -> None: ..."
+                "def set_num_interop_threads(num: int) -> None: ..."
             ],
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
@@ -776,9 +776,9 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "device: Optional[DeviceLikeType] = None",
-                            "requires_grad: _bool = False",
-                            "check_invariants: Optional[_bool] = None",
-                            "is_coalesced: Optional[_bool] = None",
+                            "requires_grad: bool = False",
+                            "check_invariants: Optional[bool] = None",
+                            "is_coalesced: Optional[bool] = None",
                         ]
                     )
                 )
@@ -795,18 +795,18 @@ def gen_pyi(
                             "dtype: Optional[_dtype] = None",
                             "layout: Optional[_layout] = None",
                             "device: Optional[DeviceLikeType] = None",
-                            "requires_grad: _bool = False",
-                            "check_invariants: Optional[_bool] = None",
+                            "requires_grad: bool = False",
+                            "check_invariants: Optional[bool] = None",
                         ]
                     )
                 )
             ],
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
-                "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+                "def _is_functional_tensor(t: Tensor) -> bool: ..."
             ],
             "_is_functional_tensor_base": [
-                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
+                "def _is_functional_tensor_base(t: Tensor) -> bool: ..."
             ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
@@ -827,32 +827,32 @@ def gen_pyi(
                 "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
             ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
-                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> bool: ..."
             ],
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
-                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> bool: ..."
             ],
             "_functionalize_was_inductor_storage_resized": [
-                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> _bool: ..."
+                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> bool: ..."
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
-                "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+                "def _functionalize_was_storage_changed(tensor: Tensor) -> bool: ..."
             ],
             "_functionalize_set_storage_changed": [
-                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
-                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
+                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> bool: ..."
             ],
             "_functionalize_apply_view_metas": [
                 "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
             ],
             "_functionalize_is_symbolic": [
-                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
+                "def _functionalize_is_symbolic(tensor: Tensor) -> bool: ..."
             ],
             "_enable_functionalization": [
-                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+                "def _enable_functionalization(*, reapply_views: bool = False): ..."
             ],
             "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
@@ -910,7 +910,7 @@ def gen_pyi(
                         [
                             "start: Number",
                             "end: Number",
-                            "steps: Optional[_int] = None",
+                            "steps: Optional[int] = None",
                             "*",
                             "out: Optional[Tensor] = None",
                             FACTORY_PARAMS,
@@ -924,7 +924,7 @@ def gen_pyi(
                         [
                             "start: Number",
                             "end: Number",
-                            "steps: Optional[_int] = None",
+                            "steps: Optional[int] = None",
                             "base: _float = 10.0",
                             "*",
                             "out: Optional[Tensor] = None",
@@ -937,8 +937,8 @@ def gen_pyi(
                 "def randint({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            "low: _int",
-                            "high: _int",
+                            "low: int",
+                            "high: int",
                             "size: _size",
                             "*",
                             "generator: Optional[Generator] = None",
@@ -949,7 +949,7 @@ def gen_pyi(
                 "def randint({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            "high: _int",
+                            "high: int",
                             "size: _size",
                             "*",
                             "generator: Optional[Generator] = None",
@@ -984,9 +984,9 @@ def gen_pyi(
                     )
                 ),
             ],
-            "is_grad_enabled": ["def is_grad_enabled() -> _bool: ..."],
+            "is_grad_enabled": ["def is_grad_enabled() -> bool: ..."],
             "is_inference_mode_enabled": [
-                "def is_inference_mode_enabled() -> _bool: ..."
+                "def is_inference_mode_enabled() -> bool: ..."
             ],
             "nonzero": [
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
@@ -1088,11 +1088,11 @@ def gen_pyi(
         {
             "size": [
                 "def size(self, dim: None = None) -> Size: ...",
-                "def size(self, dim: _int) -> _int: ...",
+                "def size(self, dim: int) -> int: ...",
             ],
             "stride": [
-                "def stride(self, dim: None = None) -> tuple[_int, ...]: ...",
-                "def stride(self, dim: _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> tuple[int, ...]: ...",
+                "def stride(self, dim: int) -> int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
@@ -1122,40 +1122,40 @@ def gen_pyi(
                         [
                             "cls: _Type[S]",
                             "data: Tensor",
-                            "require_grad: _bool = False",
-                            "dispatch_strides: _bool = False",
-                            "dispatch_device: _bool = False",
+                            "require_grad: bool = False",
+                            "dispatch_strides: bool = False",
+                            "dispatch_device: bool = False",
                             "device_for_backend_keys: Optional[_device] = None",
                         ]
                     )
                 )
             ],
-            "__contains__": ["def __contains__(self, other: Any, /) -> _bool: ..."],
+            "__contains__": ["def __contains__(self, other: Any, /) -> bool: ..."],
             "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
             "tolist": ["def tolist(self) -> list: ..."],
             "requires_grad_": [
-                "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
+                "def requires_grad_(self, mode: bool = True) -> Tensor: ..."
             ],
-            "element_size": ["def element_size(self) -> _int: ..."],
-            "data_ptr": ["def data_ptr(self) -> _int: ..."],
-            "dim": ["def dim(self) -> _int: ..."],
+            "element_size": ["def element_size(self) -> int: ..."],
+            "data_ptr": ["def data_ptr(self) -> int: ..."],
+            "dim": ["def dim(self) -> int: ..."],
             "nonzero": [
                 "def nonzero(self, *, as_tuple: Literal[False] = False) -> Tensor: ...",
                 "def nonzero(self, *, as_tuple: Literal[True]) -> tuple[Tensor, ...]: ...",
             ],
-            "numel": ["def numel(self) -> _int: ..."],
-            "ndimension": ["def ndimension(self) -> _int: ..."],
-            "nelement": ["def nelement(self) -> _int: ..."],
+            "numel": ["def numel(self) -> int: ..."],
+            "ndimension": ["def ndimension(self) -> int: ..."],
+            "nelement": ["def nelement(self) -> int: ..."],
             "cuda": [
                 "def cuda({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "self",
-                            "device: Optional[Union[_device, _int, str]] = None",
-                            "non_blocking: _bool = False",
+                            "device: Optional[Union[_device, int, str]] = None",
+                            "non_blocking: bool = False",
                             "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
@@ -1166,8 +1166,8 @@ def gen_pyi(
                     ", ".join(
                         [
                             "self",
-                            "device: Optional[Union[_device, _int, str]] = None",
-                            "non_blocking: _bool = False",
+                            "device: Optional[Union[_device, int, str]] = None",
+                            "non_blocking: bool = False",
                             "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
@@ -1176,7 +1176,7 @@ def gen_pyi(
             "cpu": [
                 "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
-            "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
+            "numpy": ["def numpy(self, *, force: bool = False) -> numpy.ndarray: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
@@ -1187,37 +1187,37 @@ def gen_pyi(
             "storage": ["def untyped_storage(self) -> UntypedStorage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
-                "def type(self, dtype: None = None, non_blocking: _bool = False) -> str: ...",
-                "def type(self, dtype: Union[str, _dtype], non_blocking: _bool = False) -> Tensor: ...",
+                "def type(self, dtype: None = None, non_blocking: bool = False) -> str: ...",
+                "def type(self, dtype: Union[str, _dtype], non_blocking: bool = False) -> Tensor: ...",
             ],
-            "get_device": ["def get_device(self) -> _int: ..."],
+            "get_device": ["def get_device(self) -> int: ..."],
             "contiguous": [
                 "def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ..."
             ],
-            "has_names": ["def has_names(self) -> _bool: ..."],
+            "has_names": ["def has_names(self) -> bool: ..."],
             "is_contiguous": [
-                "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
+                "def is_contiguous(self, memory_format=torch.contiguous_format) -> bool: ..."
             ],
-            "_is_view": ["def _is_view(self) -> _bool: ..."],
-            "is_cpu": ["is_cpu: _bool"],
-            "is_cuda": ["is_cuda: _bool"],
-            "is_xpu": ["is_xpu: _bool"],
-            "is_leaf": ["is_leaf: _bool"],
-            "is_nested": ["is_nested: _bool"],
-            "is_sparse": ["is_sparse: _bool"],
-            "is_sparse_csr": ["is_sparse_csr: _bool"],
-            "is_quantized": ["is_quantized: _bool"],
-            "is_meta": ["is_meta: _bool"],
-            "is_mps": ["is_mps: _bool"],
-            "is_mtia": ["is_mtia: _bool"],
-            "is_maia": ["is_maia: _bool"],
-            "is_mkldnn": ["is_mkldnn: _bool"],
-            "is_vulkan": ["is_vulkan: _bool"],
-            "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": ["def storage_offset(self) -> Union[_int, SymInt]: ..."],
+            "_is_view": ["def _is_view(self) -> bool: ..."],
+            "is_cpu": ["is_cpu: bool"],
+            "is_cuda": ["is_cuda: bool"],
+            "is_xpu": ["is_xpu: bool"],
+            "is_leaf": ["is_leaf: bool"],
+            "is_nested": ["is_nested: bool"],
+            "is_sparse": ["is_sparse: bool"],
+            "is_sparse_csr": ["is_sparse_csr: bool"],
+            "is_quantized": ["is_quantized: bool"],
+            "is_meta": ["is_meta: bool"],
+            "is_mps": ["is_mps: bool"],
+            "is_mtia": ["is_mtia: bool"],
+            "is_maia": ["is_maia: bool"],
+            "is_mkldnn": ["is_mkldnn: bool"],
+            "is_vulkan": ["is_vulkan: bool"],
+            "is_ipu": ["is_ipu: bool"],
+            "storage_offset": ["def storage_offset(self) -> Union[int, SymInt]: ..."],
             "to": [
                 (
-                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    f"def to(self, {args}, non_blocking: bool = False, copy: bool = False, *, "
                     "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
                 )
                 for args in [
@@ -1228,7 +1228,7 @@ def gen_pyi(
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
-                "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
+                "def copy_(self, src: Tensor, non_blocking: bool = False) -> Tensor: ..."
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
@@ -1236,8 +1236,8 @@ def gen_pyi(
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
-                "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
-                "def split(self, split_size: tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: int, dim: int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: tuple[int, ...], dim: int = 0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
@@ -1433,7 +1433,7 @@ def gen_pyi(
 
     tag_names = sorted(parse_tags_yaml(tags_yaml_path))
     tag_attributes = "\n".join(
-        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+        f"{name}: int = {index}" for index, name in enumerate(tag_names)
     )
 
     # Write out the stub
