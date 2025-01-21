@@ -282,7 +282,7 @@ float calc_zeta(float x, float q) {
 
 template <typename T0, typename T1>
 kernel void lgamma(
-    device T0* input [[buffer(0)]],
+    constant T0* input [[buffer(0)]],
     device T1* output [[buffer(1)]],
     uint id [[thread_position_in_grid]]) {
   output[id] = static_cast<T1>(LogGamma(static_cast<float>(input[id])));
@@ -290,7 +290,7 @@ kernel void lgamma(
 
 template <typename T0, typename T1>
 kernel void digamma(
-    device T0* input [[buffer(0)]],
+    constant T0* input [[buffer(0)]],
     device T1* output [[buffer(1)]],
     uint id [[thread_position_in_grid]]) {
   float x = input[id];
@@ -320,7 +320,7 @@ kernel void digamma(
 
 template <typename T0, typename T1>
 kernel void trigamma(
-    device T0* input [[buffer(0)]],
+    constant T0* input [[buffer(0)]],
     device T1* output [[buffer(1)]],
     uint id [[thread_position_in_grid]]) {
   float x = input[id];
@@ -329,7 +329,7 @@ kernel void trigamma(
 
 template <typename T0, typename T1>
 kernel void polygamma(
-    device T0* input [[buffer(0)]],
+    constant T0* input [[buffer(0)]],
     device T1* output [[buffer(1)]],
     constant int64_t& order [[buffer(2)]],
     uint id [[thread_position_in_grid]]) {
@@ -342,21 +342,21 @@ kernel void polygamma(
 
 #define INSTANTIATE_GAMMA_KERNELS(DTYPE0, DTYPE1)                             \
   template [[host_name("lgamma_" #DTYPE0 "_" #DTYPE1)]] kernel void lgamma(   \
-      device DTYPE0* input [[buffer(0)]],                                     \
+      constant DTYPE0* input [[buffer(0)]],                                   \
       device DTYPE1* output [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                   \
   template [[host_name("digamma_" #DTYPE0 "_" #DTYPE1)]] kernel void digamma( \
-      device DTYPE0* input [[buffer(0)]],                                     \
+      constant DTYPE0* input [[buffer(0)]],                                   \
       device DTYPE1* output [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                   \
   template [[host_name("trigamma_" #DTYPE0 "_" #DTYPE1)]] kernel void         \
   trigamma(                                                                   \
-      device DTYPE0* input [[buffer(0)]],                                     \
+      constant DTYPE0* input [[buffer(0)]],                                   \
       device DTYPE1* output [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);                                   \
   template [[host_name("polygamma_" #DTYPE0 "_" #DTYPE1)]] kernel void        \
   polygamma(                                                                  \
-      device DTYPE0* input [[buffer(0)]],                                     \
+      constant DTYPE0* input [[buffer(0)]],                                   \
       device DTYPE1* output [[buffer(1)]],                                    \
       constant int64_t& order [[buffer(2)]],                                  \
       uint id [[thread_position_in_grid]]);
