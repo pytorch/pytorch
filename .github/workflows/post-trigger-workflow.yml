@@ -15,13 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Version Branch
+        id: checkout
         uses: actions/checkout@v3
-        
-      - name: test-post
-        uses: ./.github/workflows/post-use-trigger-workflow.yml
-        with:
-          build-environment: linux
-          secrets: inherit
 
       - name: Invoke workflow with inputs
         uses: benc-uk/workflow-dispatch@v1
