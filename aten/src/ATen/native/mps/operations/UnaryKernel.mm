@@ -2,7 +2,6 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/UnaryConstants.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -15,7 +14,12 @@
 #include <fmt/format.h>
 
 namespace at::native {
-static mps::MetalShaderLibrary lib(UNARY_KERNEL_TEMPLATE, 2);
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/UnaryKernel_metallib.h>
+#endif
 
 static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const std::string& name) {
   Tensor inputTensor = self.contiguous();

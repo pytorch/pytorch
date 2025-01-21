@@ -1,6 +1,3 @@
-#pragma once
-
-const char* UNARY_KERNEL_TEMPLATE = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -77,4 +74,3 @@ kernel void tanh_complex_kernel( device {0}2 *output [[buffer(0)]],
   auto tan_y = {0}(precise::tan(input[index].y));
   output[index] = complex_div({0}2(tanh_x, tan_y), {0}2({0}(1), tanh_x * tan_y));
 }}
-)METAL";
