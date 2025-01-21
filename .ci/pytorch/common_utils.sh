@@ -181,7 +181,7 @@ function install_torchrec_and_fbgemm() {
     pip_install patchelf
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
-    git checkout ${fbgemm_commit}
+    git checkout "${fbgemm_commit}"
     python setup.py install \
       --package_variant=rocm \
       -DHIP_ROOT_DIR="${ROCM_PATH}" \
