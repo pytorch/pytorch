@@ -96,11 +96,22 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          fetch-depth: 2 
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Cache Sphinx builds
+        uses: actions/cache@v3
+        with:
+          path: |
+            .sphinx-cache
+          key: ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-${{ hashFiles('docs/source/**') }}-${{ steps.date.outputs.date }}
+          restore-keys: |
+            ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-
 
       - name: configure aws credentials
         if : ${{ inputs.aws-role-to-assume != '' }}
@@ -168,6 +179,7 @@ jobs:
             -e DOCS_TYPE \
             -e RUN_DOXYGEN \
             -e WITH_PUSH \
+            -e SPHINX_CACHE_PATH=/var/lib/jenkins/.sphinx-cache \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -175,7 +187,7 @@ jobs:
             --detach \
             --user jenkins \
             -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}/.sphinx-cache:/var/lib/jenkins/.sphinx-cache" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )

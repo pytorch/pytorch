@@ -47,48 +47,11 @@ fi
 
 echo "install_path: $install_path  version: $version"
 
+
 build_docs () {
   set +e
   set -o pipefail
-  
-  echo "=== Build Start Time: $(date) ==="
-  
-  # Change to the docs directory first
-  pushd "$pt_checkout/docs"
-  
-  # Source the Makefile variables
-  eval $(make -f Makefile -p | grep -E '^SPHINX(OPTS|BUILD|PROJ|DIR)|^(SOURCE|BUILD)DIR|^PYCMD')
-  
-  # Create cache directory if it doesn't exist
-  mkdir -p "${BUILDDIR}/doctrees"
-  
-  # Check if this is a fresh build or if source files changed
-  if [ ! -f "${BUILDDIR}/.buildinfo" ]; then
-    echo "Fresh build detected, doing full build..."
-    FULL_BUILD=1
-  else
-    # Check if any source files changed in this commit
-    changed_files=$(git diff --name-only HEAD^ HEAD | grep -E "docs/source/.*\.(rst|py)$" || true)
-    if [ -n "$changed_files" ]; then
-      echo "Changed documentation files detected:"
-      echo "$changed_files"
-      echo "Doing incremental build..."
-    else
-      echo "No documentation changes detected, doing quick incremental build..."
-    fi
-  fi
-
-  # Always use incremental build, Sphinx will handle what needs rebuilding
-  ${SPHINXBUILD} -b html \
-    ${SPHINXOPTS} \
-    -d ${BUILDDIR}/doctrees \
-    ${SOURCEDIR} \
-    ${BUILDDIR}/html \
-    2>&1 | tee /tmp/docs_build.txt
-    
-  # Return to original directory
-  popd
-  
+  make "$1" 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
     set +x
@@ -100,12 +63,10 @@ build_docs () {
     echo "(tried to echo the WARNINGS above the ==== line)"
     echo =========================
   fi
-  
-  echo "=== Build End Time: $(date) ==="
-  
   set -ex -o pipefail
   return $code
 }
+
 
 git clone https://github.com/pytorch/docs pytorch_docs -b "$branch" --depth 1
 pushd pytorch_docs
@@ -121,6 +82,9 @@ rm -rf pytorch || true
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
 pushd docs
+
+mkdir -p /var/lib/jenkins/.sphinx-cache
+export SPHINX_CACHE_PATH=/var/lib/jenkins/.sphinx-cache
 
 # Build the docs
 if [ "$is_main_doc" = true ]; then

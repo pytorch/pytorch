@@ -65,7 +65,23 @@ extensions = [
     "sphinx_panels",
     "myst_parser",
     "sphinx.ext.linkcode",
+    "sphinx_cache.extension",
 ]
+
+# Configure sphinx-cache
+cache_path = os.getenv('SPHINX_CACHE_PATH', '.sphinx-cache')
+cache_config = {
+    'cache_path': cache_path,
+    'cache_version': 1,
+    'cached_folders': [
+        'build',
+        'generated',
+        '_modules',
+    ],
+    # Specify files to always rebuild
+    # 'excluded_files': []
+}
+
 
 # build the templated autosummary files
 autosummary_generate = True
