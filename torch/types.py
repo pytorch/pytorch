@@ -33,6 +33,11 @@ if TYPE_CHECKING:
 __all__ = [
     "Number",
     "Device",
+    "Size",
+    "SymBool",
+    "SymFloat",
+    "SymInt",
+    "Tensor",
     "Storage",
     "IntLikeType",
     "FloatLikeType",
