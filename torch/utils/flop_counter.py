@@ -1,18 +1,19 @@
 # mypy: allow-untyped-defs
-# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
+from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
 from functools import wraps
 import warnings
 
-
-
 __all__ = ["FlopCounterMode", "register_flop_formula"]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
@@ -30,8 +31,8 @@ def shape_wrapper(f):
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
-def register_flop_formula(targets, get_raw=False):
-    def register_fun(flop_formula):
+def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
@@ -87,6 +88,22 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs should be a list of length 3.
     # Inputs contains the shapes of three tensors.
     return bmm_flop(a_shape, b_shape)
+
+@register_flop_formula(aten._scaled_mm)
+def _scaled_mm_flop(
+    a_shape,
+    b_shape,
+    scale_a_shape,
+    scale_b_shape,
+    bias_shape=None,
+    scale_result_shape=None,
+    out_dtype=None,
+    use_fast_accum=False,
+    out_shape=None,
+    **kwargs,
+) -> int:
+    """Count flops for _scaled_mm."""
+    return mm_flop(a_shape, b_shape)
 
 
 def conv_flop_count(
@@ -540,6 +557,7 @@ flop_registry = {
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
     aten.baddbmm: baddbmm_flop,
+    aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
