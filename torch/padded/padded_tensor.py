@@ -1,6 +1,7 @@
 import itertools
 import math
-from operator import mul
+from operator import is_, mul
+from tokenize import maybe
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -11,6 +12,56 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 from utils import *
+
+
+OP_COUNTER = 0
+
+
+# def strip_common_suffix(
+#    list1: List[int], list2: List[int]
+# ) -> Tuple[List[int], List[int]]:
+#    list1, list2 = list(list1), list(list2)
+#
+#    def f(list1, list2):
+#        i, j = len(list1) - 1, len(list2) - 1
+#
+#        prod = 1
+#        while i >= 0 and j >= 0:
+#            if prod == list1[i]:
+#                i -= 1
+#                prod = 1
+#            else:
+#                prod *= list2[j]
+#                j -= 1
+#
+#        return list1[: i + 1]
+#
+#    cand1 = f(list1, list2)
+#    cand2 = f(list2, list1)
+#
+#    return cand1, cand2
+
+
+def strip_common_suffix(
+    list1: List[int], list2: List[int]
+) -> Tuple[List[int], List[int]]:
+    list1, list2 = list(list1), list(list2)
+
+    if len(list1) == 0 or len(list2) == 0:
+        return list1, list2
+
+    idx = 0
+    while list1[len(list1) - idx - 1] == list2[len(list2) - idx - 1]:
+        idx += 1
+
+    return list1[: len(list1) - idx], list2[: len(list2) - idx]
+
+
+def strip_common_prefix(
+    list1: List[int], list2: List[int]
+) -> Tuple[List[int], List[int]]:
+    suffix1, suffix2 = strip_common_suffix(list(reversed(list1)), list(reversed(list2)))
+    return list(reversed(suffix1)), list(reversed(suffix2))
 
 
 def slice_nd(
@@ -69,7 +120,7 @@ class ViewOp(RegularOp):
         super().__init__()
 
     def infer_shape(self, input_shapes, args, kwargs) -> List[torch.Size]:
-        def find_mapping(input_shape: torch.Size, output_shape: List[int]):
+        def find_mapping(input_shape: List[int], output_shape: List[int]):
             mapping = []
             input_index = 0
 
@@ -104,32 +155,100 @@ class ViewOp(RegularOp):
 
             return output_shape
 
-        input_shape = input_shapes[0]
-        padded_input_shape = args[0].shape
-        output_shape = list(args[1])
-
-        # If the shapes are compatible, we can just return the orig output shape.
-        if math.prod(input_shape) == math.prod(output_shape):
-            return [torch.Size(output_shape)]
-
-        # Does the output shape contain -1? If so, we need to infer the value of -1
-        if -1 in output_shape:
-            input_shape_prod = math.prod(padded_input_shape)
+        def maybe_infer_minus_1_dims(input_shape: List[int], output_shape: List[int]):
+            input_shape_prod = math.prod(input_shape)
             output_shape_prod = math.prod(output_shape) * -1
 
             for idx, output_dim in enumerate(output_shape):
                 if output_dim == -1:
                     output_shape[idx] = input_shape_prod // output_shape_prod
                     break
+            return output_shape
+
+        def maybe_insert_1_dims(input_shape: List[int], output_shape: List[int]):
+            # Check if it applies. Bail out if not
+            if 1 not in output_shape:
+                return output_shape
+
+            orig_output_shape_new = []
+            idx = 0
+            for dim in output_shape:
+                if dim == 1:
+                    orig_output_shape_new.append(1)
+                else:
+                    orig_output_shape_new.append(input_shape[idx])
+                    idx += 1
+            return orig_output_shape_new
+
+        orig_input_shape = input_shapes[0]
+        input_shape = list(args[0].shape)
+        output_shape = list(args[1])
+
+        is_equal = len(input_shape) == len(output_shape)
+        is_expanding = len(input_shape) < len(output_shape)
+        is_collapsing = len(input_shape) > len(output_shape)
+
+        if is_equal:
             return [torch.Size(output_shape)]
 
-        # Then apply this mapping to the orig input shape, to find the orig output shape.
-        # E.g. input_shape = [32, 32, 32], output_shape = [1024, 32]
-        # The mapping is: [[0, 1], [2]]
-        mapping = find_mapping(padded_input_shape, output_shape)
-        orig_output_shape = apply_mapping(input_shape, mapping)
+        if is_collapsing:
+            # Find the mapping from input_shape to output_shape, then apply this mapping to the orig input shape, to find the orig output shape.
+            # E.g. if the input_shape is [32, 32, 32], the output_shape [1024, 32]
+            # The mapping is: [[0, 1], [2]]
+            # For an orig input shape [16, 16, 16], the mapped orig output shape is [256, 16]
+            mapping = find_mapping(input_shape, output_shape)
+            orig_output_shape = apply_mapping(orig_input_shape, mapping)
 
-        return [torch.Size(orig_output_shape)]
+            return [torch.Size(orig_output_shape)]
+
+        if is_expanding:
+            is_prefix_equal = input_shape[0] == output_shape[0]
+            is_suffix_equal = input_shape[-1] == output_shape[-1]
+            is_no_equal = not is_prefix_equal and not is_suffix_equal
+
+            if is_no_equal:
+                raise NotImplementedError(
+                    "ViewOp with collapsing and no equal dimensions is not supported"
+                )
+
+            orig_output_shape = None
+            if is_prefix_equal:
+                # We strip the common prefix. Then attach the suffix of the output shape to the orig input shape
+                suffix_in, suffix_out = strip_common_prefix(input_shape, output_shape)
+
+                offset = len(orig_input_shape) - len(suffix_in)
+                orig_output_shape = list(orig_input_shape[:offset]) + suffix_out
+
+            if is_suffix_equal:
+                # return [torch.Size([-1337] * len(output_shape))]
+
+                # We strip the common suffix. Then attach the prefix of the output shape to the orig input shape
+                prefix_in, prefix_out = strip_common_suffix(input_shape, output_shape)
+
+                offset = len(prefix_in)
+                orig_output_shape = prefix_out + list(orig_input_shape[offset:])
+
+            # Infer -1 dimensions if any
+            orig_output_shape = maybe_infer_minus_1_dims(
+                orig_input_shape, orig_output_shape
+            )
+
+            # In case original input and output shapes don't multiply to the same value, we try some heuristics
+            if not (
+                math.prod(orig_input_shape) == math.prod(orig_output_shape)
+                or -1 in orig_output_shape
+            ):
+                # Check if there are any added 1 dimensions. If so, we can apply them to the original input shape
+                orig_output_shape = maybe_insert_1_dims(orig_input_shape, output_shape)
+
+            # If we still can't find a valid output shape, we return a dummy one
+            if not (
+                math.prod(orig_input_shape) == math.prod(orig_output_shape)
+                or -1 in orig_output_shape
+            ):
+                return [torch.Size([-1337] * len(output_shape))]
+
+            return [torch.Size(orig_output_shape)]
 
 
 class ViewAsRealOp(RegularOp):
@@ -647,9 +766,11 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
+        global OP_COUNTER
         log()
-        log("Dispatching", func._opname)
+        log("%d: Dispatching %s" % (OP_COUNTER, func._overloadpacket.__name__))
         log("-" * 40)
+        OP_COUNTER += 1
 
         op = OP_DATABASE.get_op(func._opname)
 
@@ -673,3 +794,24 @@ class PaddedTensor(torch.Tensor):
         out = convert_tensor_results(out, orig_out_shapes)
 
         return return_and_correct_aliasing(func, args, kwargs, out)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        with torch._C.DisableTorchFunctionSubclass():
+            out = func(*args, **kwargs)
+
+        if func.__name__ == "linear":
+            in_shape_1 = args[0].orig_shape
+            in_shape_2 = args[1].shape
+
+            prefix1, prefix2 = strip_common_suffix(in_shape_1, in_shape_2)
+            out_shape = prefix1 + prefix2
+
+            print("setting linear", in_shape_1, in_shape_2, out_shape)
+
+            out.orig_shape = torch.Size(out_shape)
+
+        return out
