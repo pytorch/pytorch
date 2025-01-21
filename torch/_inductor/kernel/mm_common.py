@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence, Tuple
+from typing import Any, cast, Dict, Sequence
 
 import sympy
 
@@ -41,7 +41,7 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: Sequence[Tuple[int, int, int, int, int]],
+    configs: Sequence[tuple[int, int, int, int, int]],
     has_int8_tensor=False,
     scale=1,
     exclude=lambda m, n, k: False,
@@ -352,37 +352,37 @@ scaled_persistent_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
     if config["cond"]
 )
 extra_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in extra_mm_kernel_configs
     if config["cond"]
 )
 int8_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
 mixed_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
 persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in persistent_mm_kernel_configs
     if config["cond"]
 )
 scaled_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_mm_kernel_configs
     if config["cond"]
 )
 scaled_persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_persistent_mm_kernel_configs
     if config["cond"]
 )
@@ -540,7 +540,7 @@ def addmm_epilogue(dtype, alpha, beta):
     return epilogue
 
 
-def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
+def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
 

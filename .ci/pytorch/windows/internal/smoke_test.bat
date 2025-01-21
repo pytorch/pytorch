@@ -27,7 +27,6 @@ for /F "delims=" %%i in ('wmic path win32_VideoController get name') do (
 endlocal & set NVIDIA_GPU_EXISTS=%NVIDIA_GPU_EXISTS%
 
 if "%PACKAGE_TYPE%" == "wheel" goto wheel
-if "%PACKAGE_TYPE%" == "conda" goto conda
 if "%PACKAGE_TYPE%" == "libtorch" goto libtorch
 
 echo "unknown package type"
@@ -73,60 +72,6 @@ for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do 
 if errorlevel 1 exit /b 1
 
 goto smoke_test
-
-:conda
-echo "install conda package"
-
-:: Install Miniconda3
-set "CONDA_HOME=%CD%\conda"
-set "tmp_conda=%CONDA_HOME%"
-set "miniconda_exe=%CD%\miniconda.exe"
-set "CONDA_EXTRA_ARGS=cpuonly -c pytorch-nightly"
-if "%CUDA_VERSION%" == "118" (
-    set "CONDA_EXTRA_ARGS=pytorch-cuda=11.8 -c nvidia -c pytorch-nightly"
-)
-if "%CUDA_VERSION%" == "121" (
-    set "CONDA_EXTRA_ARGS=pytorch-cuda=12.1 -c nvidia -c pytorch-nightly"
-)
-if "%CUDA_VERSION%" == "124" (
-    set "CONDA_EXTRA_ARGS=pytorch-cuda=12.4 -c nvidia -c pytorch-nightly"
-)
-if "%CUDA_VERSION%" == "126" (
-    set "CONDA_EXTRA_ARGS=pytorch-cuda=12.6 -c nvidia -c pytorch-nightly"
-)
-
-rmdir /s /q conda
-del miniconda.exe
-curl -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe -o "%miniconda_exe%"
-start /wait "" "%miniconda_exe%" /S /InstallationType=JustMe /RegisterPython=0 /AddToPath=0 /D=%tmp_conda%
-if ERRORLEVEL 1 exit /b 1
-
-set "PATH=%CONDA_HOME%;%CONDA_HOME%\scripts;%CONDA_HOME%\Library\bin;%PATH%"
-
-conda create -qyn testenv python=%DESIRED_PYTHON%
-if errorlevel 1 exit /b 1
-call conda install -yq conda-build
-if errorlevel 1 exit /b 1
-call %CONDA_HOME%\condabin\activate.bat testenv
-if errorlevel 1 exit /b 1
-set "NO_ARCH_PATH=%PYTORCH_FINAL_PACKAGE_DIR:/=\%\noarch"
-mkdir %NO_ARCH_PATH%
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *') do xcopy "%%i" %NO_ARCH_PATH% /Y
-if ERRORLEVEL 1 exit /b 1
-call conda index %PYTORCH_FINAL_PACKAGE_DIR%
-if errorlevel 1 exit /b 1
-call conda install -yq -c "file:///%PYTORCH_FINAL_PACKAGE_DIR%" pytorch==%PYTORCH_BUILD_VERSION% -c pytorch -c numba/label/dev -c nvidia
-if ERRORLEVEL 1 exit /b 1
-call conda install -yq numpy
-if ERRORLEVEL 1 exit /b 1
-
-set /a CUDA_VER=%CUDA_VERSION%
-set CUDA_VER_MAJOR=%CUDA_VERSION:~0,-1%
-set CUDA_VER_MINOR=%CUDA_VERSION:~-1,1%
-set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
-
-:: Install package we just build
-
 
 :smoke_test
 python -c "import torch"
