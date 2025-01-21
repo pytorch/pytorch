@@ -7,6 +7,9 @@ from unittest.mock import patch
 os.environ["ENV_TRUE"] = "1"
 os.environ["ENV_FALSE"] = "0"
 
+os.environ["ENV_ONE"] = "1"
+os.environ["ENV_TWO"] = "2"
+
 from typing import Optional
 
 from torch.testing._internal import (
@@ -99,6 +102,10 @@ class TestConfigModule(TestCase):
         self.assertFalse(config.e_env_default)
         config.e_env_force = False
         self.assertTrue(config.e_env_force)
+
+    def test_multi_env(self):
+        self.assertEqual(config2.e_env_default_multi, 1)
+        self.assertEqual(config2.e_env_force_multi, 2)
 
     def test_save_config(self):
         p = config.save_config()
