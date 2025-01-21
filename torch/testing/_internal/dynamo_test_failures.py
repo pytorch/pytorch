@@ -78,7 +78,6 @@ FIXME_inductor_non_strict = {
 # we will remove the list.
 FIXME_inductor_dont_reset_dynamo = {
     "test_modules",
-    "test_ops",
     "test_ops_gradients",
 }
 
