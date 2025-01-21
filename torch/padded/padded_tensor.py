@@ -17,7 +17,10 @@ INVALID_ID = -1337
 PADDED_OP_TABLE: Dict[Any, Any] = {}
 
 
-def register_func(table: Dict[Any, Any], aten_ops: List[str]):
+def register_op(table: Dict[Any, Any], aten_ops: List[str]):
+    """
+    Adds an operation class, used handle a padded operation, to the given lookup table.
+    """
     assert isinstance(aten_ops, list)
     assert all(isinstance(op, str) for op in aten_ops)
 
@@ -28,10 +31,15 @@ def register_func(table: Dict[Any, Any], aten_ops: List[str]):
     return wrapper
 
 
-register_padded_op = functools.partial(register_func, PADDED_OP_TABLE)
+register_padded_op = functools.partial(register_op, PADDED_OP_TABLE)
 
 
 class Dimension(int):
+    """
+    A class representing a dimension with padding information. This allows
+    propagating the padding information of dimensions across the ops.
+    """
+
     def __new__(cls, value, is_padded=None, *args, **kwargs):
         ret = super(cls, cls).__new__(cls, value)
         ret.is_padded = is_padded
@@ -59,6 +67,9 @@ class Dimension(int):
 def strip_common_suffix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
+    """
+    Strip common suffix from two lists of integers, and return the remaining lists.
+    """
     list1, list2 = list(list1), list(list2)
 
     if len(list1) == 0 or len(list2) == 0:
@@ -74,6 +85,9 @@ def strip_common_suffix(
 def strip_common_prefix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
+    """
+    Strip common prefix from two lists of integers, and return the remaining lists.
+    """
     if len(list1) == 0 or len(list2) == 0:
         return list1, list2
 
@@ -87,10 +101,12 @@ def strip_common_prefix(
 def slice_nd(
     input: torch.Tensor, start_idxs: List[int], end_idxs: List[int]
 ) -> torch.Tensor:
+    """
+    Slice a tensor along multiple dimensions. This is a generalization of torch.slice,
+    which only supports slicing along one dimension.
+    """
     log("Slicing tensor with shape %s to %s" % (input.shape, end_idxs))
 
-    # Slice a tensor along multiple dimensions
-    # This is a generalization of torch.slice, which only supports slicing along one dimension
     assert len(start_idxs) == len(end_idxs)
 
     # Check if input.shape and end_idx are identical. Skip slicing if so.
@@ -119,13 +135,24 @@ def slice_nd(
 
 
 class PaddedOp:
+    """
+    Base class for padded operations, which can be specialized to handle different
+    types of operations.
+    """
+
     def __init__(self) -> None:
         super().__init__()
 
     def infer_shapes(self, input_shapes, args, kwargs):
+        """
+        Infer the output shape of the operation, given the input shapes and the arguments.
+        """
         raise NotImplementedError
 
     def validate(self, args, kwargs):
+        """
+        Validate conditions on the arguments of the operation.
+        """
         pass
 
 
@@ -217,7 +244,9 @@ class ViewOp(PaddedOp):
             return [torch.Size(output_shape)]
 
         if is_collapsing:
-            # Find the mapping from input_shape to output_shape, then apply this mapping to the orig input shape, to find the orig output shape.
+            # Find the mapping from input_shape to output_shape, then apply this mapping to the orig
+            # input shape, to find the orig output shape.
+            #
             # E.g. if the input_shape is [32, 32, 32], the output_shape [1024, 32]
             # The mapping is: [[0, 1], [2]]
             # For an orig input shape [16, 16, 16], the mapped orig output shape is [256, 16]
@@ -238,14 +267,16 @@ class ViewOp(PaddedOp):
 
             orig_output_shape = None
             if is_prefix_equal:
-                # We strip the common prefix. Then attach the suffix of the output shape to the orig input shape
+                # We strip the common prefix. Then attach the suffix of the output shape to the orig
+                # input shape
                 suffix_in, suffix_out = strip_common_prefix(input_shape, output_shape)
 
                 offset = len(orig_input_shape) - len(suffix_in)
                 orig_output_shape = list(orig_input_shape[:offset]) + suffix_out
 
             if is_suffix_equal:
-                # We strip the common suffix. Then attach the prefix of the output shape to the orig input shape
+                # We strip the common suffix. Then attach the prefix of the output shape to the orig
+                # input shape
                 prefix_in, prefix_out = strip_common_suffix(input_shape, output_shape)
 
                 offset = len(prefix_in)
@@ -256,12 +287,14 @@ class ViewOp(PaddedOp):
                 orig_input_shape, orig_output_shape
             )
 
-            # In case original input and output shapes don't multiply to the same value, we try some heuristics
+            # In case original input and output shapes don't multiply to the same value, we try to
+            # handle some more cases
             if not (
                 math.prod(orig_input_shape) == math.prod(orig_output_shape)
                 or -1 in orig_output_shape
             ):
-                # Check if there are any added 1 dimensions. If so, we can apply them to the original input shape
+                # Check if there are any added 1 dimensions. If so, we can apply them to the
+                # original input shape
                 orig_output_shape = maybe_insert_1_dims(orig_input_shape, output_shape)
 
             # If we still can't find a valid output shape, we return a dummy one
@@ -688,6 +721,18 @@ def create_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[Dim
 
 
 class PaddedTensor(torch.Tensor):
+    """
+    PaddedTensor enables computation benefits by padding tensors to given sizes.
+
+    The computation benefits include:
+    - Kernel-friendly shapes: Padded tensors can be processed more efficiently by kernels, leading to improved performance.
+    - Reduced graph recompilations: By padding tensors to consistent shapes, we can minimize the need for backend graph recompilations when shapes change.
+
+    The PaddedTensor class provides the following features:
+    - Original shape tracking: We keep track of the original tensor shape, allowing for easy unpadding later.
+    - Padded shape validation: We validate padded shapes across the graph to ensure consistency and correctness.
+    """
+
     @staticmethod
     def __new__(
         cls,
@@ -801,7 +846,7 @@ class PaddedTensor(torch.Tensor):
         # Convert arg tensors to padded tensors
         args = convert_tensor_args(args)
 
-        # Validate
+        # Validate arguments
         op.validate(args, kwargs)
 
         # Infer original shape
