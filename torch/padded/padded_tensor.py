@@ -11,8 +11,7 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 from utils import *
 
 
-OP_COUNTER = 0
-INVALID_DIM = -1337
+INVALID_ID = -1337
 
 
 def strip_common_suffix(
@@ -81,7 +80,7 @@ class RegularOp:
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         raise NotImplementedError
 
 
@@ -89,7 +88,7 @@ class OnesLikeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
 
@@ -98,7 +97,7 @@ class ViewOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs) -> List[torch.Size]:
+    def infer_shapes(self, input_shapes, args, kwargs) -> List[torch.Size]:
         def find_mapping(input_shape: List[int], output_shape: List[int]):
             mapping = []
             input_index = 0
@@ -223,7 +222,7 @@ class ViewOp(RegularOp):
                 math.prod(orig_input_shape) == math.prod(orig_output_shape)
                 or -1 in orig_output_shape
             ):
-                return [torch.Size([INVALID_DIM] * len(output_shape))]
+                return [torch.Size([INVALID_ID] * len(output_shape))]
 
             return [torch.Size(orig_output_shape)]
 
@@ -232,7 +231,7 @@ class ViewAsRealOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape + (2,)]
 
@@ -241,7 +240,7 @@ class UnsqueezeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         dim = args[1]
 
@@ -255,7 +254,7 @@ class PolarOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
 
@@ -264,7 +263,7 @@ class TransposeOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         dim0 = args[1]
         dim1 = args[2]
@@ -285,7 +284,7 @@ class ExpandOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         shape = args[1]
 
@@ -296,7 +295,7 @@ class ElementwiseUnaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
 
@@ -305,7 +304,7 @@ class ElementwiseBinaryOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         # Broadcasting
         lhs_shape = args[0].orig_shape if type(args[0]) is PaddedTensor else [1]
         rhs_shape = args[1].orig_shape if type(args[1]) is PaddedTensor else [1]
@@ -323,7 +322,7 @@ class MatmulOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
 
@@ -331,7 +330,7 @@ class BmmOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         b1, n1, m1 = args[0].orig_shape
         b2, m2, p2 = args[1].orig_shape
 
@@ -345,7 +344,7 @@ class ScaledDotProductAttentionOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
 
         attn_shape = input_shape[:-1]
@@ -356,7 +355,7 @@ class IndexOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         input_shape_mod = list(input_shape)
         dims = args[1]
@@ -379,7 +378,7 @@ class SelectOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = args[0].orig_shape
         dim = args[1]
         index = args[2]
@@ -396,7 +395,7 @@ class IndexPutOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [torch.Size(input_shape)]
 
@@ -405,7 +404,7 @@ class SplitWithSizesOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         indices_or_sections = args[1]
         dim = args[2]
@@ -425,7 +424,7 @@ class StackOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input = args[0]
         dim = args[1]
 
@@ -439,7 +438,7 @@ class DetachOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
 
@@ -448,7 +447,7 @@ class EmbeddingOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         # Embedding is a special case, where we don't do any padding
         input_shape = input_shapes[0]
         indices = args[1]
@@ -462,7 +461,7 @@ class NoOp(RegularOp):
     def __init__(self) -> None:
         super().__init__()
 
-    def infer_shape(self, input_shapes, args, kwargs):
+    def infer_shapes(self, input_shapes, args, kwargs):
         input_shape = input_shapes[0]
         return [input_shape]
 
@@ -764,11 +763,8 @@ class PaddedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        global OP_COUNTER
-        log()
-        log("%d: Dispatching %s" % (OP_COUNTER, func._overloadpacket.__name__))
+        log("Dispatching %s" % func._overloadpacket.__name__)
         log("-" * 40)
-        OP_COUNTER += 1
 
         op = OP_DATABASE.get_op(func._opname)
 
@@ -779,7 +775,7 @@ class PaddedTensor(torch.Tensor):
         orig_in_shapes = pytree.tree_map_only(
             PaddedTensor, lambda x: x.orig_shape, args
         )
-        orig_out_shapes = op.infer_shape(orig_in_shapes, args, kwargs)
+        orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
 
         tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
 
@@ -794,7 +790,7 @@ class PaddedTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
     def unpad(self) -> torch.Tensor:
-        if INVALID_DIM in self.orig_shape:
+        if INVALID_ID in self.orig_shape:
             raise Exception(
                 "PaddedTensor couldn't figure out a shape, likely due to an expansion."
             )
