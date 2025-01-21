@@ -439,7 +439,7 @@ class AOTInductorModelContainer {
   std::shared_ptr<FreeConstantMap> constants_map_secondary_;
 
   // The map that holds the constants' RAIIAtenTensorHandle (if needed,) this is
-  / used to retain ref counts and make sure the tensor don't get freed.
+  // used to retain ref counts and make sure the tensor don't get freed.
   std::shared_ptr<ConstantMap> constants_holder_;
   std::shared_ptr<ConstantMap> constants_holder_secondary_;
 
