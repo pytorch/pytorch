@@ -1664,8 +1664,9 @@ def _check_is_size(i, message=None, *, max=None):
 
     When max is not None, this specifies an upper bound equivalent to
     ``_check(i <= max)``.  This bound is also subject to alternate semantics:
-    in ``guard_size_oblivious`` tests, we assume that the max bound is treated
-    equivalently to all other values.
+    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
+    treated equivalently to all other values.  Symbolic max bounds are not yet
+    supported.
 
     NB: Do NOT use this in contexts where a -1 size would be valid (indicating
     to infer the size from context, or if you should wrap-around or truncate).
