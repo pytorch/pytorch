@@ -4524,6 +4524,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
     @parametrize('path_type', (str, Path))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_mmap_load_offset_calculation(self, path_type):
         m = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
 

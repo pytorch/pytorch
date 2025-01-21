@@ -1192,6 +1192,7 @@ def _save(
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
+    zip_file.write_record(".version", "1", len("1"))
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -1859,6 +1860,8 @@ def _load(
 
     loaded_storages = {}
 
+    version = zip_file.has_record(".version")
+
     # check if byteswapping is needed
     byteordername = "byteorder"
     byteorderdata = None
@@ -1934,7 +1937,7 @@ def _load(
             storage = overall_storage[storage_offset : storage_offset + numel]
             _update_current_offset(storage_offset, numel)
         else:
-            if True:  # FIXME: update this to debug var to be set in CI
+            if version:  # FIXME: update this to debug var to be set in CI
                 if name in offsets:
                     storage_offset = offsets[name]
                 else:
