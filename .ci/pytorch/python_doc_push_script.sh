@@ -47,34 +47,47 @@ fi
 
 echo "install_path: $install_path  version: $version"
 
-
 build_docs () {
   set +e
   set -o pipefail
   
   echo "=== Build Start Time: $(date) ==="
   
-  # Only rebuild files that changed since last commit
-  changed_files=$(git diff --name-only HEAD~1 HEAD | grep "docs/source.*\.rst$" || true)
-  if [ -n "$changed_files" ]; then
-    echo "Only rebuilding changed files: $changed_files"
-    SPHINXOPTS="-j auto -W --keep-going -n"
-    sphinx-build -b html \
-      ${SPHINXOPTS} \
-      --ignore-modified-after \
-      -d build/doctrees \
-      source \
-      build/html \
-      $changed_files 2>&1 | tee /tmp/docs_build.txt
+  # Change to the docs directory first
+  pushd "$pt_checkout/docs"
+  
+  # Source the Makefile variables
+  eval $(make -f Makefile -p | grep -E '^SPHINX(OPTS|BUILD|PROJ|DIR)|^(SOURCE|BUILD)DIR|^PYCMD')
+  
+  # Create cache directory if it doesn't exist
+  mkdir -p "${BUILDDIR}/doctrees"
+  
+  # Check if this is a fresh build or if source files changed
+  if [ ! -f "${BUILDDIR}/.buildinfo" ]; then
+    echo "Fresh build detected, doing full build..."
+    FULL_BUILD=1
   else
-    echo "No RST files changed, doing full build"
-    SPHINXOPTS="-j auto -W --keep-going -n"
-    sphinx-build -b html \
-      ${SPHINXOPTS} \
-      -d build/doctrees \
-      source \
-      build/html 2>&1 | tee /tmp/docs_build.txt
+    # Check if any source files changed in this commit
+    changed_files=$(git diff --name-only HEAD^ HEAD | grep -E "docs/source/.*\.(rst|py)$" || true)
+    if [ -n "$changed_files" ]; then
+      echo "Changed documentation files detected:"
+      echo "$changed_files"
+      echo "Doing incremental build..."
+    else
+      echo "No documentation changes detected, doing quick incremental build..."
+    fi
   fi
+
+  # Always use incremental build, Sphinx will handle what needs rebuilding
+  ${SPHINXBUILD} -b html \
+    ${SPHINXOPTS} \
+    -d ${BUILDDIR}/doctrees \
+    ${SOURCEDIR} \
+    ${BUILDDIR}/html \
+    2>&1 | tee /tmp/docs_build.txt
+    
+  # Return to original directory
+  popd
   
   code=$?
   if [ $code -ne 0 ]; then
