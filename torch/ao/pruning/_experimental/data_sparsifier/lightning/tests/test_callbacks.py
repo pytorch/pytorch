@@ -3,7 +3,6 @@ import importlib
 import math
 import unittest
 import warnings
-from typing import List
 
 import torch
 import torch.nn as nn
@@ -28,7 +27,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DummyModel(nn.Module):
-    def __init__(self, iC: int, oC: List[int]):
+    def __init__(self, iC: int, oC: list[int]):
         super().__init__()
         self.linears = nn.Sequential()
         i = iC
@@ -39,11 +38,11 @@ class DummyModel(nn.Module):
             i = c
 
 
-def _make_lightning_module(iC: int, oC: List[int]):
+def _make_lightning_module(iC: int, oC: list[int]):
     import pytorch_lightning as pl  # type: ignore[import]
 
     class DummyLightningModule(pl.LightningModule):
-        def __init__(self, ic: int, oC: List[int]):
+        def __init__(self, ic: int, oC: list[int]):
             super().__init__()
             self.model = DummyModel(iC, oC)
 

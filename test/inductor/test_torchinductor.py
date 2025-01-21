@@ -160,7 +160,7 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
-if SM80OrLater:
+if SM80OrLater or MACOS_VERSION >= 14.0:
     test_dtypes.append(torch.bfloat16)
 
 
@@ -335,6 +335,8 @@ class InputGen:
         return torch.randn((1,), device=self.device)
 
     def double(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("MPS does not support torch.float64")
         return torch.randn((self.n, self.n), device=self.device, dtype=torch.double)
 
     def int(self):
@@ -2792,6 +2794,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
     def test_logaddexp(self):
         self.common(
@@ -9268,7 +9271,7 @@ class CommonTemplate:
             # so we get only 1 kernel.
             from torch._inductor.utils import triton_version_uses_attrs_dict
 
-            expected_kernels = 2 if triton_version_uses_attrs_dict() else 1
+            expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
             self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
