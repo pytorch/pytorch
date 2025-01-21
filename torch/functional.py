@@ -550,6 +550,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -697,6 +698,7 @@ def stft(
             normalized=normalized,
             onesided=onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
     return _VF.stft(  # type: ignore[attr-defined]
         input,
@@ -709,6 +711,7 @@ def stft(
         normalized,
         onesided,
         return_complex,
+        align_to_window,
     )
 
 

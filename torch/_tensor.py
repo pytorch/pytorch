@@ -940,6 +940,7 @@ class Tensor(torch._C.TensorBase):
         normalized: bool = False,
         onesided: Optional[bool] = None,
         return_complex: Optional[bool] = None,
+        align_to_window: Optional[bool] = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -961,6 +962,7 @@ class Tensor(torch._C.TensorBase):
                 normalized=normalized,
                 onesided=onesided,
                 return_complex=return_complex,
+                align_to_window=align_to_window,
             )
         return torch.stft(
             self,
@@ -973,6 +975,7 @@ class Tensor(torch._C.TensorBase):
             normalized,
             onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
 
     def istft(
