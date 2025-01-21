@@ -1,0 +1,14 @@
+name: post-test-process
+on:
+  workflow_dispatch:
+    inputs:
+        workflow_name:
+          description: 'workflow name'
+          required: True
+jobs:
+  post-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testing
+        run: |
+          echo "Workflow Name: ${github.event.inputs.workflow_name}"
