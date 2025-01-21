@@ -1095,6 +1095,10 @@ class triton:
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
+    # Whether PyTorch will skip CUDA compute capability checks, allowing custom Triton
+    # builds for older hardware to be used.
+    skip_cc_checks = os.environ.get("TORCHINDUCTOR_SKIP_CC_CHECKS", "0") == "1"
+
 
 class aot_inductor:
     # AOTInductor output path
