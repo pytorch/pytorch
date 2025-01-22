@@ -8160,6 +8160,28 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
+    def test_avg_pool_negatives(self, device):
+        x = torch.randn(8, 2, 1, 1, device=device, dtype=torch.float32)
+        # Negative stride as in your repro snippet
+        with self.assertRaisesRegex(RuntimeError, r"stride must be a positive integer"):
+            sym_0 = (8, 2, 1, 1)
+            sym_1 = torch.float32
+            sym_3 = 0
+            sym_4 = True
+            sym_5 = (9223372036854775807, 5868783964474102731)
+            sym_6 = (-1, 3010182406857593769)
+            sym_7 = (0,)
+            sym_8 = True
+            sym_9 = True
+            sym_10 = 33554427
+
+            var_546 = torch.randn(size=sym_0, dtype=sym_1, device=device)
+            var_124 = torch.ops.aten.alias(var_546)
+            var_360 = torch.argmax(var_124, dim=sym_3, keepdim=sym_4)
+
+            torch.nn.functional.avg_pool2d(var_360, kernel_size=sym_5, stride=sym_6, padding=sym_7, ceil_mode=sym_8, count_include_pad=sym_9, divisor_override=sym_10)
+
+
     @onlyCUDA
     @largeTensorTest("60GB", "cpu")
     @largeTensorTest("16GB", "cuda")
