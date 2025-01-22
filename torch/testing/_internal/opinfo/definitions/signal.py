@@ -3,7 +3,7 @@
 import unittest
 from functools import partial
 from itertools import product
-from typing import Callable, List
+from typing import Callable
 
 import numpy
 
@@ -292,7 +292,6 @@ def make_signal_windows_opinfo(
         name=name,
         ref=ref if TEST_SCIPY else None,
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types(),
         sample_inputs_func=sample_inputs_func,
         reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,
@@ -346,7 +345,7 @@ def make_signal_windows_opinfo(
     )
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
         ref=reference_signal_window(scipy.signal.windows.hamming)
