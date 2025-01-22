@@ -597,6 +597,8 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            # serialize the symbol names of unbacked bindings;
+            # reconstruct the key paths to those symbols when deserializing
             ret["unbacked_bindings"] = ",".join(
                 u.name for u in unbacked_bindings.keys()
             )
@@ -1848,13 +1850,17 @@ class GraphModuleDeserializer(metaclass=Final):
         if "unbacked_bindings" in serialized_node.metadata:
             for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
                 u = self.symbol_name_to_symbol[u_name]
+                # these are pending fresh unbacked symbols, so update shape env
                 if symbol_is_type(u, SymT.UNBACKED_FLOAT):
-                    next(self.shape_env.unbacked_symfloat_counter)
+                    suffix = str(next(self.shape_env.unbacked_symfloat_counter))
+                    assert u.name.endswith(suffix)
                 elif symbol_is_type(u, SymT.UNBACKED_INT):
-                    next(self.shape_env.unbacked_symint_counter)
+                    suffix = str(next(self.shape_env.unbacked_symint_counter))
+                    assert u.name.endswith(suffix)
                 else:
                     raise AssertionError(f"Illegal unbacked symbol {u}")
                 self.shape_env.pending_fresh_unbacked_symbols.append(u)
+            # consume pending fresh unbacked symbols and reconstruct key paths to them
             unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
                 self.shape_env, fx_node.meta["val"]
             )
