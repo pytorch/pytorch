@@ -1030,6 +1030,34 @@ class TestFxGraphCache(TestCase):
         self.assertNotEqual(a, b)
 
     @config.patch({"fx_graph_cache": True})
+    def test_cache_guard_overspec(self):
+        b = torch.tensor([0, 2, 4, 6, 8])
+
+        @torch.compile
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.isin(x, b)
+
+        model = MyModel()
+
+        counters.clear()
+
+        for i in range(1, 5):
+            model(torch.arange(i))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        counters.clear()
+
+        for i in range(1, 5):
+            model(torch.arange(i))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+    @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
