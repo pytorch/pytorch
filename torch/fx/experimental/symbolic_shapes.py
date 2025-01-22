@@ -2253,7 +2253,7 @@ class ShapeGuardPrinter(ShapeGuardPythonPrinter):
 
 class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
     def __init__(self, *args: Any) -> None:
-        self.all_symbols: Set[str] = set()
+        self.all_symbols: set[str] = set()
         self.source_to_symbol: dict[Source, sympy.Symbol] = {}
         super().__init__(*args)
 
