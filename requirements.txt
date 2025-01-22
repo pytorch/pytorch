@@ -1,4 +1,4 @@
-# Public dependencies for PyTorch library
+# Python dependencies required for development
 astunparse
 cmake
 expecttest>=0.3.0
