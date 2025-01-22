@@ -49,18 +49,20 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
     // Generally, iGPUs share a unified memory subsystem with the host.
     return device.get_info<sycl::info::device::host_unified_memory>();
   };
+  auto is_dgpu = [](const sycl::device& device) {
+    return device.is_gpu() &&
+        !device.get_info<sycl::info::device::host_unified_memory>();
+  };
 
   // Case 1: Platform with dGPU found. Most platforms with dGPU only have dGPU
   // or a combination of dGPU and iGPU.
-  auto has_dgpu = [&is_igpu](const sycl::platform& platform) {
+  auto has_dgpu = [&is_dgpu](const sycl::platform& platform) {
     // Only consider platforms using the Level Zero backend.
     return platform.get_backend() == sycl::backend::ext_oneapi_level_zero &&
         std::any_of(
                platform.get_devices().begin(),
                platform.get_devices().end(),
-               [&is_igpu](const sycl::device& device) {
-                 return device.is_gpu() && !is_igpu(device);
-               });
+               is_dgpu);
   };
   // Find the first platform that contains at least one dGPU.
   auto platform_with_dgpu =
