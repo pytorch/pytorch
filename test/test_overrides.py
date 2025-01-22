@@ -393,6 +393,13 @@ class TestTorchFunctionOverride(TestCase):
     def tearDownClass(cls):
         cls._stack.close()
 
+    def test_dtype_override(self):
+        class MyDtype:
+            def __torch_function__(self, *args, **kwargs):
+                return 4
+
+        self.assertEqual(torch.empty(4).view(MyDtype()), 4)
+
     def test_mean_semantics(self):
         """Test that a function with one argument can be overridden"""
         t1 = DiagonalTensor(5, 2)
