@@ -288,6 +288,11 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
+bool PyNode::is_aot_backward() const {
+  py::handle handle(obj);
+  return py::hasattr(py::getattr(handle, "_forward_cls"), "_aot_id");
+}
+
 auto PyNode::compiled_autograd_should_lift() const -> bool {
   pybind11::gil_scoped_acquire gil;
   static PyObject* attr_name =

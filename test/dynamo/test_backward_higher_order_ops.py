@@ -121,23 +121,27 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            self.assertExpectedInline(
-                actual,
-                """\
+            if backend in ["aot_eager", "inductor"]:
+                self.assertExpectedInline(
+                    actual,
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list):
         l_inputs_ = L_inputs_
 
-        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[2]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad: "f32[s0]" = torch.clone(getitem)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem = None
+        getitem_3: "f32[2]" = validate_outputs[0];  validate_outputs = None
 
-        result: "f32[s0]" = getitem * getitem;  getitem = None
+        new_grad: "f32[2]" = torch.clone(getitem_3)
 
-        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
+        result: "f32[2]" = getitem_3 * getitem_3;  getitem_3 = None
+
+        new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
-            )
+                )
 
             graph = None
 
@@ -187,26 +191,30 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
             self.assertEqual(x.grad, grad_out + grad_out)
-            self.assertExpectedInline(
-                actual,
-                """\
+            if backend in ["aot_eager", "inductor"]:
+                self.assertExpectedInline(
+                    actual,
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s1)"):
         l_inputs_ = L_inputs_
         l_hooks_0_keywords_fn_keywords_obj_counter = L_hooks_0_keywords_fn_keywords_obj_counter
 
-        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[2]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad: "f32[s0]" = torch.clone(getitem)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [2], False)]);  getitem = None
+        getitem_3: "f32[2]" = validate_outputs[0];  validate_outputs = None
+
+        new_grad: "f32[2]" = torch.clone(getitem_3)
 
         add: "Sym(s1 + 1)" = l_hooks_0_keywords_fn_keywords_obj_counter + 1;  l_hooks_0_keywords_fn_keywords_obj_counter = None
 
-        result: "f32[s0]" = getitem * getitem;  getitem = None
+        result: "f32[2]" = getitem_3 * getitem_3;  getitem_3 = None
 
-        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
+        new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1, add)
 """,
-            )
+                )
 
             out = fn(x, y)
             out.backward(grad_out)
