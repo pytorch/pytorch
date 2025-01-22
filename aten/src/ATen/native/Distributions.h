@@ -405,7 +405,7 @@ C10_DEVICE inline scalar_t _beta_grad_beta_small(scalar_t x, scalar_t alpha, sca
     series += numer / (alpha + casted_i) * (dbetas + factor * betas);
   }
   const scalar_t result = -compat_pow(1 - x, 1 - beta) * series;
-  return isnan(result) ? static_cast<scalar_t>( 0.f ) : result;
+  return isnan(result) || std::isinf(result) ? static_cast<scalar_t>( 0.f ) : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.

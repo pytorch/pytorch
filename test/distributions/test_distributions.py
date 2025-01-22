@@ -4629,6 +4629,14 @@ class TestRsample(DistributionsTestCase):
                 ),
             )
 
+    def test_beta_wrt_alpha_large_alpha(self):
+        alpha = torch.as_tensor([2**16 + 10.0]).requires_grad_()
+        beta = torch.as_tensor([1.5])
+        size = 1024
+        z = Beta(alpha, beta).rsample((size,))
+        z.mean().backward()
+        self.assertFalse(torch.isinf(alpha.grad).item())
+
     def test_dirichlet_multivariate(self):
         alpha_crit = 0.25 * (5.0**0.5 - 1.0)
         num_samples = 100000
