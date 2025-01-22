@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import types
 import weakref
 import json
@@ -101,7 +101,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: dict[int, list[str]] = {}
+    references: Dict[int, List[str]] = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -258,7 +258,7 @@ class Node(NamedTuple):
     label: str
     context: Optional[str]
     root: bool
-    referrents: list[tuple[str, int]]
+    referrents: List[Tuple[str, int]]
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
@@ -267,7 +267,7 @@ def create_graph(objects, *, context=None, filter=None):
         filter = is_cuda_tensor
 
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers: list[list[int]] = [[] for obj in objects]
+    node_referrers: List[List[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -293,8 +293,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: dict[int, int] = {}
-    filtered: list[Any] = []
+    id_to_filtered_id: Dict[int, int] = {}
+    filtered: List[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)

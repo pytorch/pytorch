@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from typing import TYPE_CHECKING, TypeVar
+from typing import Generator, List, Type, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from _typeshed import DataclassInstance
 
 
@@ -19,10 +17,10 @@ __all__ = ["dataclass_slots"]
 _T = TypeVar("_T", bound="DataclassInstance")
 
 
-def dataclass_slots(cls: type[_T]) -> type[DataclassInstance]:
+def dataclass_slots(cls: Type[_T]) -> Type[DataclassInstance]:
     assert dataclasses.is_dataclass(cls), "Can only be used on dataclasses."
 
-    def _get_slots(cls: type[DataclassInstance]) -> Generator[str, None, None]:
+    def _get_slots(cls: Type[DataclassInstance]) -> Generator[str, None, None]:
         slots = cls.__dict__.get("__slots__")
         # `__dictoffset__` and `__weakrefoffset__` can tell us whether
         # the base type has dict/weakref slots, in a way that works correctly
@@ -45,8 +43,8 @@ def dataclass_slots(cls: type[_T]) -> type[DataclassInstance]:
             raise TypeError(f"Slots of '{cls.__name__}' cannot be determined")
 
     def _add_slots(
-        cls: type[DataclassInstance], is_frozen: bool, weakref_slot: bool
-    ) -> type[DataclassInstance]:
+        cls: Type[DataclassInstance], is_frozen: bool, weakref_slot: bool
+    ) -> Type[DataclassInstance]:
         # Need to create a new class, since we can't set __slots__
         #  after a class has been created.
 
@@ -96,7 +94,7 @@ def dataclass_slots(cls: type[_T]) -> type[DataclassInstance]:
             fields = dataclasses.fields(self)
             return [getattr(self, f.name) for f in fields]
 
-        def _dataclass_setstate(self: _T, state: list[object]) -> None:
+        def _dataclass_setstate(self: _T, state: List[object]) -> None:
             fields = dataclasses.fields(self)
             for field, value in zip(fields, state):
                 # use setattr because dataclass may be frozen

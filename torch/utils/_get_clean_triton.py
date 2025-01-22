@@ -3,6 +3,7 @@ import argparse
 import os
 import re
 from pathlib import Path
+from typing import Dict, List
 
 
 def remove_triton_function_declaration(source_code: str) -> str:
@@ -44,7 +45,7 @@ def rename_kernels(source_code: str) -> str:
     return source_code
 
 
-def merge_params(original_params: list[str], new_params: list[str]) -> list[str]:
+def merge_params(original_params: List[str], new_params: List[str]) -> List[str]:
     assert len(new_params) >= len(original_params)
     for idx in range(len(new_params)):
         if new_params[idx] == "T":
@@ -52,7 +53,7 @@ def merge_params(original_params: list[str], new_params: list[str]) -> list[str]
     return new_params
 
 
-def add_launch_params(original: str, kernel_to_params: dict[str, str]) -> str:
+def add_launch_params(original: str, kernel_to_params: Dict[str, str]) -> str:
     # Regex to match the function call in the original string
     pattern = r"(\w+)\.run\((.*), grid=(.*\)), [^)]*\)"
 
@@ -104,7 +105,7 @@ def process_file(input_filename: str, output_filename: str) -> str:
 
     split_params = [i.split("|") for i in launch_params_meta]
     strip_params = [[a.strip(), b.strip()] for a, b in split_params]
-    kernel_to_args: dict[str, str] = dict(strip_params)
+    kernel_to_args: Dict[str, str] = dict(strip_params)
     transformed_code = add_launch_params(transformed_code, kernel_to_args)
 
     with open(output_filename, "w") as file:

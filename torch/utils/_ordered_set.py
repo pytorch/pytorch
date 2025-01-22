@@ -1,7 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, MutableSet, Set as AbstractSet
-from typing import Any, cast, Generic, Optional, TypeVar
+from collections.abc import MutableSet, Set as AbstractSet
+from typing import (
+    Any,
+    cast,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
 
 
 T = TypeVar("T")
@@ -22,7 +34,7 @@ class OrderedSet(MutableSet, Generic[T]):
         self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod
-    def _from_dict(dict_inp: dict[T, None]) -> OrderedSet[T]:
+    def _from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
         s._dict = dict_inp
         return s
@@ -158,11 +170,11 @@ class OrderedSet(MutableSet, Generic[T]):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({list(self)})"
 
-    def __getstate__(self) -> list[T]:
+    def __getstate__(self) -> List[T]:
         return list(self._dict.keys())
 
-    def __setstate__(self, state: list[T]) -> None:
+    def __setstate__(self, state: List[T]) -> None:
         self._dict = dict.fromkeys(state, None)
 
-    def __reduce__(self) -> tuple[type[OrderedSet[T]], tuple[list[T]]]:
+    def __reduce__(self) -> Tuple[Type[OrderedSet[T]], Tuple[List[T]]]:
         return (OrderedSet, (list(self),))

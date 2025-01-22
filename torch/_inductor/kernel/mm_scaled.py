@@ -1,6 +1,5 @@
 import logging
-from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import sympy
 
@@ -429,7 +428,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -465,7 +464,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_b: StorageBox,
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -534,7 +533,7 @@ def tuned_scaled_mm(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices: list[ChoiceCaller] = []
+    choices: List[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 

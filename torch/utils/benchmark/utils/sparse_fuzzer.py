@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor
@@ -9,7 +9,7 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: tuple[Union[str, int], ...],
+        size: Tuple[Union[str, int], ...],
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
         dim_parameter: Optional[str] = None,

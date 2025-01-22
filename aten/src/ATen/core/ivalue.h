@@ -918,7 +918,7 @@ struct TORCH_API IValue final {
       return toSymFloat();
     else if (isSymBool())
       return toSymBool();
-    TORCH_CHECK(false, "IValue is not a Scalar");
+    throw std::runtime_error("IValue is not a Scalar");
   }
 
   // Device

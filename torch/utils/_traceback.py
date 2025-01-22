@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from types import TracebackType
-from typing import Optional
+from typing import List, Optional
 import tempfile
 import traceback
 import contextlib
@@ -228,7 +228,7 @@ class CapturedTraceback:
         import torch._C._profiler
 
         # Directly populate tracebacks that already have cached summaries
-        rs: list[Optional[list[str]]] = []
+        rs: List[Optional[List[str]]] = []
         delayed_idxs = []
         for i, tb in enumerate(tbs):
             if tb.tb is None:

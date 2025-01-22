@@ -12,9 +12,8 @@ You can occasionally test if prefixes have been hardcoded by renaming prefixes
 in this file and seeing what breaks.
 """
 
-from collections.abc import Iterable
 from enum import auto, Enum
-from typing import Union
+from typing import Iterable, Union
 
 import sympy
 

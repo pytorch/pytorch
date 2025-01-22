@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Iterator, Sequence
-from typing import Union
+from typing import Iterator, List, Sequence, Union
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -38,7 +37,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
     def __init__(
         self,
         root: Union[str, Sequence[str], IterDataPipe] = ".",
-        masks: Union[str, list[str]] = "",
+        masks: Union[str, List[str]] = "",
         *,
         recursive: bool = False,
         abspath: bool = False,
@@ -51,7 +50,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         if not isinstance(root, IterDataPipe):
             root = IterableWrapperIterDataPipe(root)
         self.datapipe: IterDataPipe = root
-        self.masks: Union[str, list[str]] = masks
+        self.masks: Union[str, List[str]] = masks
         self.recursive: bool = recursive
         self.abspath: bool = abspath
         self.non_deterministic: bool = non_deterministic
