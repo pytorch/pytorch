@@ -1531,17 +1531,16 @@ test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
-  CORES=$(lscpu | grep Core | awk '{print $4}')
-  end_core=$(( CORES-1 ))
+
+  test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
   python setup.py install
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  taskset -c 0-"$end_core" python -m benchmark_all_test --device "$1" --tag-filter "$2" \
+  $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
 
-  cd "${TEST_DIR}"/benchmarks/operator_benchmark
   pip_install pandas
   python check_perf_csv.py \
       --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
