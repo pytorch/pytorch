@@ -1,6 +1,7 @@
 import contextlib
 import threading
-from typing import Any, Callable, Generator, Iterable, Optional, Union
+from collections.abc import Generator, Iterable
+from typing import Any, Callable, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
@@ -60,7 +61,7 @@ def triton_op(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
-        >>> from torch._library import triton_op, wrap_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> import triton
         >>> from triton import language as tl

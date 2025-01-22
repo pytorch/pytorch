@@ -3,7 +3,7 @@ import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -335,7 +335,7 @@ def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     return B
 
 
-def prune_tensors(input_nodes: List[ir.IRNode], new_input_nodes: List[ir.IRNode]):
+def prune_tensors(input_nodes: list[ir.IRNode], new_input_nodes: list[ir.IRNode]):
     """
     Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
     """
@@ -407,12 +407,12 @@ def prune_tensors(input_nodes: List[ir.IRNode], new_input_nodes: List[ir.IRNode]
 def gen_2d_view_of_epilogue_buf(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
-    epilogue_nodes: List[ir.IRNode],
-    reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-    default_reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+    epilogue_nodes: list[ir.IRNode],
+    reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+    default_reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
 ) -> tuple[
     Union[ir.Buffer, ir.ReinterpretView],
-    List[Optional[Callable[[List[Any]], List[Any]]]],
+    list[Optional[Callable[[list[Any]], list[Any]]]],
 ]:
     """
     The dimension and the indexing could be different between the GEMM output, i.e. `template_buffer`, which is
@@ -1006,9 +1006,10 @@ class CppGemmTemplate(CppTemplate):
         def _is_int8_gemm(inputs):
             return (
                 isinstance(inputs[0], ir.IRNode)
-                and inputs[0].get_dtype() == torch.uint8
+                and inputs[0].get_dtype() in [torch.uint8, torch.int8]
             ) or (
-                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor)
+                and inputs[0].dtype in [torch.uint8, torch.int8]
             )
 
         if _is_int8_gemm(new_inputs):
@@ -1131,11 +1132,11 @@ class CppGemmTemplate(CppTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-    ) -> Dict[str, Any]:
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+    ) -> dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
-        int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
+        int8_gemm = self.input_nodes[0].get_dtype() in [torch.uint8, torch.int8]
         x_scale = None
         x_zp = None
         w_scale = None
@@ -1167,10 +1168,10 @@ class CppGemmTemplate(CppTemplate):
         template_buffer = Y
         gemm_output_buffer = template_buffer
 
-        epilogues: List[ir.IRNode] = []
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-        epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
-        fake_buffers: List[ir.Buffer] = []
+        epilogues: list[ir.IRNode] = []
+        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
+        epilogue_creators: list[Callable[[ir.Buffer], ir.Pointwise]] = []
+        fake_buffers: list[ir.Buffer] = []
         Y_aliases = OrderedSet[str]()
 
         use_local_acc = (
@@ -1366,7 +1367,7 @@ class CppGemmTemplate(CppTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         options = self.get_options(
