@@ -181,7 +181,7 @@ float gamma(const T x) {
   // The algorithm directly approximates gamma over (1,2) and uses
   // reduction identities to reduce other arguments to this interval.
   // numerator coefficients for gamma approximation over the interval (1,2)
-  const float GAMMA_NUMERATOR_COEF[8] = {
+  constexpr float GAMMA_NUMERATOR_COEF[8] = {
       -1.71618513886549492533811E+0,
       2.47656508055759199108314E+1,
       -3.79804256470945635097577E+2,
@@ -192,7 +192,7 @@ float gamma(const T x) {
       6.64561438202405440627855E+4};
 
   // denominator coefficients for gamma approximation over the interval (1,2)
-  const float GAMMA_DENOMINATOR_COEF[8] = {
+  constexpr float GAMMA_DENOMINATOR_COEF[8] = {
       -3.08402300119738975254353E+1,
       3.15350626979604161529144E+2,
       -1.01515636749021914166146E+3,
