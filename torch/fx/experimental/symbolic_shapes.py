@@ -2227,7 +2227,7 @@ class _ShapeGuardPrinter(abc.ABC):
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
-        self._print_cache: Dict[sympy.Expr, str] = {}
+        self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
         return self.source_ref(source)
@@ -2254,7 +2254,7 @@ class ShapeGuardPrinter(ShapeGuardPythonPrinter):
 class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
     def __init__(self, *args: Any) -> None:
         self.all_symbols: Set[str] = set()
-        self.source_to_symbol: Dict[Source, sympy.Symbol] = {}
+        self.source_to_symbol: dict[Source, sympy.Symbol] = {}
         super().__init__(*args)
 
     def print_source(self, source: Source) -> str:
@@ -2285,7 +2285,7 @@ class _ShapeGuardsHelper:
 # A dataclass for storing C++ expressions and helper variables
 @dataclass(frozen=True)
 class _CppShapeGuardsHelper(_ShapeGuardsHelper):
-    source_to_symbol: Dict[Source, sympy.Symbol]
+    source_to_symbol: dict[Source, sympy.Symbol]
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
