@@ -7592,6 +7592,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt(*inputs)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_symint_copy_into_unbacked_slice(self):
         @torch.compile()
         def fn(a, x):
