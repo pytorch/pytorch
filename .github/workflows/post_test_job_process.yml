@@ -1,0 +1,37 @@
+name: post-test-job-process
+on:
+  workflow_dispatch:
+    inputs:
+        workflow_runner_id:
+          description: 'workflow (runner) id of the workflow the test is running'
+          required: True
+        workflow_attempt:
+          description: 'the workflow (runner) attempt'
+          required: True
+        workflow_name:
+          description: 'name of the workflow'
+          required: True
+        job_id:
+          description: 'the job (runner) id for the test'
+          required: True
+        job_name:
+          description: 'the job name of the test'
+          required: True
+
+jobs:
+  process-utilization-logs:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-22.04
+    environment: post-test
+    permissions:
+      id-token: write
+    name: process and upload utilziation logs for ${{ github.event.inputs.workflow_name }}:${{ github.event.inputs.job_name }}, with attempt ${{ github.event.inputs.workflow_attempt}}
+    steps:
+      - name: Print Inputs
+        run: |
+          echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
+          echo "workflow_attempt: ${{github.event.inputs.workflow_attempt}}"
+          echo "workflow_Name: ${{github.event.inputs.workflow_name}}"
+          echo "job_id: ${{github.event.inputs.job_id}}"
+          echo "job_name:  ${{github.event.inputs.job_name}}"
+# TODO():add upload utilization tests script
