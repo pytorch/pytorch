@@ -2,14 +2,22 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Optional
 
 import sympy
 
 import torch
 
 from .. import cpp_builder, ir
-from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
+from ..cpu_vec_isa import (
+    pick_vec_isa,
+    VecAMX,
+    VecAVX2,
+    VecAVX512,
+    VecISA,
+    VecNEON,
+    VecSVE,
+)
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
@@ -181,12 +189,12 @@ class CppMicroGemmConfig:
     input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
-    vec_isa_cls: Type[VecISA]
+    vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
     extra_check: Optional[Callable[..., bool]] = None
 
 
-micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):
@@ -319,6 +327,22 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),

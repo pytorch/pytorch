@@ -2,7 +2,7 @@
 import contextlib
 import logging
 import re
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -967,6 +967,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         output_code = kernel_group.loops_code.getvalue()
 
         var_q_symbol, var_kv_symbol = self.block_vars
+        # See [Note] Handle the case where the split sizes are not statically known.
         # We don't know the value of qBlockSize and rkvBlockSize during compilation time
         # thus we've represented them by symbols.
         # We change the symbol strings back to "cur_qSplitSize" and "cur_kvSplitSize"
@@ -1033,7 +1034,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
