@@ -129,8 +129,7 @@ float LogGamma(const T x) {
       log(fabs(abs_x * sinpi(abs_x))); // Reflection Formula
 }
 
-template <typename T>
-T calc_digamma_positive_domain(T x) {
+float calc_digamma_positive_domain(float x) {
   const float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
@@ -164,24 +163,23 @@ T calc_digamma_positive_domain(T x) {
   return result + log(x) - (0.5 / x) - y;
 }
 
-template <typename T>
-T calc_trigamma(T x) {
-  T sign = T(1);
-  T result = T(0);
+float calc_trigamma(float x) {
+  float sign = 1.0f;
+  float result = 0.0f;
 
-  if (x < T(0)) {
-    sign = T(-1);
+  if (x < 0.0f) {
+    sign = -1.0f;
     auto sin_pi_x = sin(M_PI_F * x);
     result -= (M_PI_F * M_PI_F) / (sin_pi_x * sin_pi_x);
     x = 1.0f - x;
   }
 
-  else if (x == T(0)) {
+  else if (x == 0.0) {
     return INFINITY;
   }
 
-  else if (x < T(1)) {
-    result += T(1) / (x * x);
+  else if (x < 1.0) {
+    result += 1.0 / (x * x);
     x += 1.0f;
   }
 
