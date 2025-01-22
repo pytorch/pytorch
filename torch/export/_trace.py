@@ -53,6 +53,8 @@ from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
+from torch._functorch._aot_autograd.schemas import GraphSignature
+from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
@@ -1437,11 +1439,6 @@ def _export_to_aten_ir_make_fx(
     transform=lambda x: x,
 ) -> ATenExportArtifact:
     def _make_fx_helper(mod, args, kwargs, **flags):
-        from torch._functorch._aot_autograd.schemas import GraphSignature
-        from torch._functorch._aot_autograd.subclass_utils import (
-            get_subclass_typing_container,
-        )
-
         kwargs = kwargs or {}
 
         named_parameters = dict(mod.named_parameters(remove_duplicate=False))
