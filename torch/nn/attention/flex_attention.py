@@ -499,8 +499,8 @@ class BlockMask:
         )
 
     def _adjust(self, new_q_len: int, new_kv_len: int):
-        new_num_rows = new_q_len // self.BLOCK_SIZE[0]
-        new_num_cols = new_kv_len // self.BLOCK_SIZE[1]
+        new_num_rows = (new_q_len + self.BLOCK_SIZE[0] - 1) // self.BLOCK_SIZE[0]
+        new_num_cols = (new_kv_len + self.BLOCK_SIZE[1] - 1) // self.BLOCK_SIZE[1]
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
             self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
         )
