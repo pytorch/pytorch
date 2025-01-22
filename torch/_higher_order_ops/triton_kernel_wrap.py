@@ -277,12 +277,9 @@ def generate_ttir(
             return attrs
 
     specialization = _get_specialization(ordered_args.values())
-    # TODO(5512)
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
-
-    # TODO(5512)
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
 
@@ -293,7 +290,7 @@ def generate_ttir(
 
     else:
 
-        def get_signature_value(_idx: int, arg: Any) -> str:
+        def get_signature_value(idx: int, arg: Any) -> str:
             return kernel._type_of(kernel.key_of(arg))
 
     if triton_version_uses_attrs_dict():
