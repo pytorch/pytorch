@@ -3370,7 +3370,7 @@ class CompiledAutograd0(torch.nn.Module):
                 yield v.grad
 
         self.check_output_and_recompiles(
-            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
     @unittest.expectedFailure

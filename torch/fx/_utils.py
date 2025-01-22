@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 from torch._logging import LazyString
@@ -43,7 +43,7 @@ def _format_graph_code(name, filename, graph_str):
     return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
-def first_call_function_nn_module_stack(graph: torch.fx.Graph) -> Optional[Dict]:
+def first_call_function_nn_module_stack(graph: torch.fx.Graph) -> Optional[dict]:
     """
     Returns the nn_module_stack of the first call_function node.
     """
