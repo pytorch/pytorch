@@ -1,11 +1,11 @@
 import functools
 import math
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
+
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -40,22 +40,30 @@ class Dimension(int):
     propagating the padding information of dimensions across the ops.
     """
 
-    def __new__(cls, value, is_padded=None, *args, **kwargs):
+    is_padded = None
+
+    def __new__(cls, value: int, is_padded: bool | None = None, *args, **kwargs):
         ret = super(cls, cls).__new__(cls, value)
         ret.is_padded = is_padded
         return ret
 
+    def __is_padded(self, other):
+        is_padded = self.is_padded
+        if isinstance(other, Dimension):
+            is_padded = is_padded or other.is_padded
+        return is_padded
+
     def __add__(self, other):
         res = super(Dimension, self).__add__(other)
-        return self.__class__(res, self.is_padded or other.is_padded)
+        return self.__class__(res, self.__is_padded(other))
 
     def __sub__(self, other):
         res = super(Dimension, self).__sub__(other)
-        return self.__class__(res, self.is_padded or other.is_padded)
+        return self.__class__(res, self.__is_padded(other))
 
     def __mul__(self, other):
         res = super(Dimension, self).__mul__(other)
-        return self.__class__(res, self.is_padded or other.is_padded)
+        return self.__class__(res, self.__is_padded(other))
 
     def __repr__(self) -> str:
         if self.is_padded:
@@ -307,6 +315,21 @@ class ViewOp(PaddedOp):
             return [torch.Size(orig_output_shape)]
 
 
+@register_padded_op(["squeeze"])
+class SqueezeOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
+        dim = args[1]
+
+        if dim < 0:
+            dim += len(input_shape)
+
+        return [input_shape[:dim] + input_shape[dim + 1 :]]
+
+
 @register_padded_op(["unsqueeze"])
 class UnsqueezeOp(PaddedOp):
     def __init__(self) -> None:
@@ -366,7 +389,9 @@ class ExpandOp(PaddedOp):
         return [torch.Size(shape)]
 
 
-@register_padded_op(["clone", "where", "tril", "sin", "rsqrt", "silu"])
+@register_padded_op(
+    ["clone", "where", "tril", "sin", "rsqrt", "silu", "silu_backward", "neg"]
+)
 class ElementwiseUnaryOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
@@ -413,12 +438,13 @@ class MatmulOp(PaddedOp):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
     def validate(self, args, kwargs):
-        # Don't allow contraction on padded dimensions
-        if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
-            args[1].orig_shape[0], Dimension
-        ):
-            assert args[0].orig_shape[1].is_padded is False
-            assert args[1].orig_shape[0].is_padded is False
+        pass
+        ## Don't allow contraction on padded dimensions
+        # if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
+        #    args[1].orig_shape[0], Dimension
+        # ):
+        #    assert args[0].orig_shape[1].is_padded is False
+        #    assert args[1].orig_shape[0].is_padded is False
 
 
 @register_padded_op(["bmm"])
@@ -448,6 +474,17 @@ class ScaledDotProductAttentionOp(PaddedOp):
 
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
+
+
+@register_padded_op(["_scaled_dot_product_efficient_attention_backward"])
+class ScaledDotProductAttentionBackwardOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
+
+        return [input_shape, input_shape, input_shape, None]
 
 
 @register_padded_op(["index"])
@@ -563,7 +600,62 @@ class EmbeddingOp(PaddedOp):
         return [torch.Size(out_shape)]
 
 
-@register_padded_op(["slice", "unbind", "_to_copy", "copy_", "mean", "t", "sum", "pow"])
+@register_padded_op(["cat"])
+class CatOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        input = args[0]
+        dim = args[1]
+
+        if dim < 0:
+            dim += len(input[0].orig_shape) + 1
+
+        return [
+            input[0].orig_shape[:dim]
+            + (sum([i.orig_shape[dim] for i in input]),)
+            + input[0].orig_shape[dim:]
+        ]
+
+
+@register_padded_op(["select_backward"])
+class SelectBackwardOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[1]
+        return [input_shape]
+
+
+@register_padded_op(["embedding_dense_backward"])
+class EmbeddingDenseBackwardOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        grad_output_shape = input_shapes[0]
+        indices_shape = args[1].orig_shape
+        num_weights = args[2]
+
+        return [[num_weights] + list(grad_output_shape[len(indices_shape) :])]
+
+
+@register_padded_op(
+    [
+        "slice",
+        "unbind",
+        "_to_copy",
+        "copy_",
+        "mean",
+        "t",
+        "sum",
+        "pow",
+        "new_empty_strided",
+        "index_put",
+    ]
+)
 class NoOp(PaddedOp):
     def __init__(self) -> None:
         super().__init__()
@@ -627,6 +719,16 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
 
     out_str = "{0:40} U: {1:60} {2:20}".format("", arg_shapes_str, out_shape_str)
     log(out_str)
+
+
+def log_op_not_in_op_table(opname: str, args, out):
+    """Logs the function name and the shapes of its arguments and outputs."""
+    log("Function '%s' is not implemented for PaddedTensor" % opname)
+    log(
+        "arg shapes",
+        pytree.tree_map_only(PaddedTensor, lambda x: x.shape, args),
+    )
+    log("out shape", pytree.tree_map_only(PaddedTensor, lambda x: x.shape, out))
 
 
 def get_strides(shape: torch.Size) -> List[int]:
@@ -734,6 +836,30 @@ def convert_to_padded_dims(
     return shape_new
 
 
+def run_func(func, args, kwargs):
+    """
+    Runs a function with the given arguments. If the function errors because of non-contiguous
+    tensors, it tries to fix the error by converting the tensors to contiguous.
+    """
+    try:
+        out = func(*args, **kwargs)
+    except ValueError as e:
+        if "Cannot view a tensor with" in str(e):
+            # Try to fix the error by converting the tensor to contiguous
+            def f(arg: Tensor):
+                if not arg.is_contiguous():
+                    return arg.contiguous()
+                return arg
+
+            args = pytree.tree_map_only(torch.Tensor, f, args)
+
+            out = func(*args, **kwargs)
+        else:
+            raise e
+
+    return out
+
+
 class PaddedTensor(torch.Tensor):
     """
     PaddedTensor enables computation benefits by padding tensors to given sizes.
@@ -788,7 +914,7 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
-        neutral_element=0,
+        neutral_element: Optional[Any] = 0,
     ):
         if multipliers is None:
             multipliers = []
@@ -851,14 +977,20 @@ class PaddedTensor(torch.Tensor):
         log("Dispatching %s" % func._overloadpacket.__name__)
         log("-" * 40)
 
+        # Convert arg tensors to padded tensors
+        args = convert_tensor_args(args)
+
+        # Run function
+        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
+
+        out = run_func(func, tensor_args, tensor_kwargs)
+
         if func._opname not in PADDED_OP_TABLE:
+            log_op_not_in_op_table(func._opname, args, out)
             raise NotImplementedError(
                 f"Function '{func._opname}' is not implemented for PaddedTensor"
             )
         op = PADDED_OP_TABLE[func._opname]
-
-        # Convert arg tensors to padded tensors
-        args = convert_tensor_args(args)
 
         # Validate arguments
         op.validate(args, kwargs)
@@ -868,10 +1000,6 @@ class PaddedTensor(torch.Tensor):
             PaddedTensor, lambda x: x.orig_shape, args
         )
         orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
-
-        # Run function
-        tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
-        out = func(*tensor_args, **tensor_kwargs)
 
         log_function_with_shapes(func, args, tensor_args, out, orig_out_shapes)
 

@@ -87,6 +87,13 @@ class AtenOpTests(PaddedTensorTestCase):
             self.assertEqual(z.unpad().shape, torch.Size([3, 5]))
             self.assert_padded_dims(z, [0, 1])
 
+    def test_squeeze(self):
+        a = PaddedTensor(torch.randn(3, 1, 5), [4, 1, 6])
+        z = aten.squeeze(a, 1)
+
+        self.assertEqual(z.shape, torch.Size([4, 6]))
+        self.assertEqual(z.unpad().shape, torch.Size([3, 5]))
+
     def test_view_collapse(self):
         # Collapse start
         x = PaddedTensor(torch.randn(3, 5, 7), [4, 6, 1])
@@ -145,41 +152,40 @@ class ModelTests(PaddedTensorTestCase):
         super().setUp()
 
     def test_transformer_model(self):
-        with torch.no_grad():
-            with torch.device("cuda"):
-                pad = 4
-                bsz, seqlen = 4, 2 + pad
+        with torch.device("cuda"):
+            pad = 4
+            bsz, seqlen = 4, 2 + pad
 
-                # Set up transformer
-                args = ModelArgs.from_name("stories15M")
-                transformer = Transformer(args)
-                transformer.setup_caches(bsz, seqlen)
+            # Set up transformer
+            args = ModelArgs.from_name("stories15M")
+            transformer = Transformer(args)
+            transformer.setup_caches(bsz, seqlen)
 
-                # Set up inputs
-                inputs = (
-                    torch.randint(0, 3, (bsz, seqlen - pad)).to(device="cuda"),
-                    torch.randint(0, 3, (seqlen - pad,)).to(device="cuda"),
-                )
+            # Set up inputs
+            inputs = (
+                torch.randint(0, 3, (bsz, seqlen - pad)).to(device="cuda"),
+                torch.randint(0, 3, (seqlen - pad,)).to(device="cuda"),
+            )
 
-                inputs_p = [
-                    PaddedTensor(inputs[0], [bsz, seqlen], None),
-                    PaddedTensor(inputs[1], [seqlen], None, -1),
-                ]
+            inputs_p = [
+                PaddedTensor(inputs[0], [bsz, seqlen], None),
+                PaddedTensor(inputs[1], [seqlen], None, -1),
+            ]
 
-                # Run
-                out = transformer(*inputs)
+            # Run
+            out = transformer(*inputs)
 
-                transformer = torch.compile(transformer, mode="reduce-overhead")
-                out_p = transformer(*inputs_p)
-                out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
+            transformer = torch.compile(transformer, mode="reduce-overhead")
+            out_p = transformer(*inputs_p)
+            out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
 
-                # Check
-                self.are_equal(out, out_p)
+            # Check
+            self.are_equal(out, out_p)
 
-                is_out_equal = pytree.tree_map(
-                    lambda o, p: torch.allclose(o, p, atol=1e-5), out, out_p
-                )
-                self.assertTrue(is_out_equal)
+            is_out_equal = pytree.tree_map(
+                lambda o, p: torch.allclose(o, p, atol=1e-5), out, out_p
+            )
+            self.assertTrue(is_out_equal)
 
 
 if __name__ == "__main__":
