@@ -1768,15 +1768,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.randn([1] * (dim + 1), device=device, dtype=dtype)
             model = Model("ConvTranspose", dim).to(device).to(dtype=dtype)
             y = model(x)
-            self.assertEqual(
-                y.size(),
-                tuple(
-                    [
-                        0,
-                    ]
-                    + [1] * dim
-                ),
-            )
+            self.assertEqual(y.numel(), 0)
+            self.assertEqual(x.shape[1:], y.shape[1:])
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_same_padding(self, device, dtype):
