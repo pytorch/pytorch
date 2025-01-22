@@ -8,13 +8,11 @@
 #include <ATen/ops/rms_norm_native.h>
 #endif
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/RMSNorm.h>
 #include <fmt/format.h>
 
-namespace at::native {
-
-using namespace mps;
+namespace at::native::mps {
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
@@ -22,10 +20,10 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/RMSNorm_metallib.h>
 #endif
 
-static Tensor rms_norm_mps_kernel(const Tensor& input,
-                                  IntArrayRef normalized_shape,
-                                  const Tensor& weight,
-                                  const double eps) {
+Tensor rms_norm_mps_kernel(const Tensor& input,
+                           c10::SymIntArrayRef normalized_shape,
+                           const Tensor& weight,
+                           const double eps) {
   auto output = at::empty_like(input);
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input.sizes();
@@ -67,37 +65,4 @@ static Tensor rms_norm_mps_kernel(const Tensor& input,
   return output;
 }
 
-Tensor rms_norm_mps(const Tensor& input,
-                    IntArrayRef normalized_shape,
-                    const std::optional<Tensor>& weight_opt,
-                    const std::optional<double> eps_opt) {
-  std::vector<at::SymInt> normalized_shape_symint;
-  for (const auto& val : normalized_shape) {
-    normalized_shape_symint.emplace_back(at::SymInt(val));
-  }
-
-  if (weight_opt.has_value()) {
-    const Tensor weight = weight_opt.value();
-    const bool any_nested = input.is_nested() || weight.is_nested();
-    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
-    const bool all_contiguous = input.is_contiguous() && weight.is_contiguous();
-    const bool is_input_fp = input.dtype() == kBFloat16 || input.dtype() == kHalf || input.dtype() == kFloat;
-    const bool is_weight_fp = weight.dtype() == kBFloat16 || weight.dtype() == kHalf || weight.dtype() == kFloat;
-
-    if (!(at::GradMode::is_enabled() && any_inputs_require_grad) && all_contiguous && !any_nested && is_input_fp &&
-        is_weight_fp) {
-      _check_rms_norm_inputs_symint(input, normalized_shape_symint, weight);
-      double eps_val;
-      if (!eps_opt.has_value()) {
-        eps_val = std::numeric_limits<at::scalar_value_type<double>::type>::epsilon();
-      } else {
-        eps_val = eps_opt.value();
-      }
-      return rms_norm_mps_kernel(input, normalized_shape, weight, eps_val);
-    }
-  }
-
-  return rms_norm_symint(input, normalized_shape_symint, weight_opt, eps_opt);
-}
-
-} // namespace at::native
+} // namespace at::native::mps

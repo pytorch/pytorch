@@ -5,6 +5,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <ATen/native/layer_norm.h>
+#include <ATen/native/mps/operations/RMSNorm.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
@@ -265,6 +268,28 @@ Tensor rms_norm_symint(
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+#ifdef USE_MPS
+  if (weight_opt.has_value()) {
+    const Tensor weight = weight_opt.value();
+    const bool any_nested = input.is_nested() || weight.is_nested();
+    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
+    const bool all_contiguous = input.is_contiguous() && weight.is_contiguous();
+    const bool is_input_fp = input.dtype() == kBFloat16 || input.dtype() == kHalf || input.dtype() == kFloat;
+    const bool is_weight_fp = weight.dtype() == kBFloat16 || weight.dtype() == kHalf || weight.dtype() == kFloat;
+
+    if (!(GradMode::is_enabled() && any_inputs_require_grad) && all_contiguous && !any_nested && is_input_fp &&
+        is_weight_fp) {
+      double eps_val;
+      if (!eps.has_value()) {
+        eps_val = std::numeric_limits<at::scalar_value_type<double>::type>::epsilon();
+      } else {
+        eps_val = eps.value();
+      }
+      return mps::rms_norm_mps_kernel(input, normalized_shape, weight, eps_val);
+    }
+  }
+#endif
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
