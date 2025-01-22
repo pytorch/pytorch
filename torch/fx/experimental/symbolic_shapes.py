@@ -2219,13 +2219,27 @@ class _ShapeGuardPrinter(abc.ABC):
     def print_source(self, source: Source) -> str:
         ...
 
+    @abc.abstractmethod
+    def doprint(self, expr: sympy.Expr) -> str:
+        ...
+
 
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
+        self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
         return self.source_ref(source)
+
+    def doprint(self, expr: sympy.Expr) -> str:
+        val = self._print_cache.get(expr, None)
+        if val is not None:
+            return val
+        else:
+            res = PythonPrinter.doprint(self, expr)
+            self._print_cache[expr] = res
+            return res
 
 
 @deprecated(
@@ -2235,6 +2249,12 @@ class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
 )
 class ShapeGuardPrinter(ShapeGuardPythonPrinter):
     pass
+
+
+# A dataclass for storing shape guards
+@dataclass(frozen=True)
+class _ShapeGuardsHelper:
+    exprs: list[str]
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
@@ -4575,10 +4595,10 @@ class ShapeEnv:
 
     def produce_guards(self, *args: Any, **kwargs: Any) -> list[str]:
         """
-        Like produce_guards_verbose, but only returns the non-verbose guard expressions
+        Like produce_guards_verbose, but only returns the non-verbose python guard expressions
         (no verbose guards produced.)
         """
-        return self.produce_guards_verbose(*args, **kwargs)[0]
+        return self.produce_guards_verbose(*args, **kwargs, langs=("python",))[0].exprs
 
     def produce_guards_verbose(
         self,
@@ -4594,7 +4614,8 @@ class ShapeEnv:
         _simplified: bool = False,
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
-    ) -> tuple[list[str], list[str]]:  # python, verbose
+        langs: tuple[str, ...] = ("python", "verbose_python"),
+    ) -> list[_ShapeGuardsHelper]:
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -4611,6 +4632,9 @@ class ShapeEnv:
         some equality guards are nontrivial!  It would be nice to get simplified
         output to print them too).  It's private because it's not
         intended for normal use
+
+        Returns guards in python and python with verbose comments (verbose) by
+        default.
         """
         self.log.info("produce_guards")
 
@@ -4731,9 +4755,15 @@ class ShapeEnv:
         ] = collections.defaultdict(set)
         constraint_violations: list[tuple[bool, str, Callable[[], str]]] = []
 
+        printers: list[_ShapeGuardPrinter] = []
         py_printer = ShapeGuardPythonPrinter(
             symbol_to_source, source_ref, self.var_to_sources
         )
+        for lang in langs:
+            if lang in ["python", "verbose_python"]:
+                printers.append(py_printer)
+            else:
+                raise NotImplementedError(f"Unknown lang: {lang}")
 
         def record_constraint_violation(
             warn_only: bool,
@@ -4991,8 +5021,7 @@ class ShapeEnv:
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        python_exprs = []
-        verbose_exprs = []
+        all_exprs: list[list[str]] = [[] for _ in langs]
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -5031,26 +5060,24 @@ class ShapeEnv:
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
 
-                res = f"{py_printer.print_source(source)} == {py_printer.doprint(expr)}"
-                python_exprs.append(res)
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                    res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
 
-                if (s0 := self.source_to_var.get(srcname)) is not None:
-                    if source != self.var_to_sources[s0][0]:
-                        verbose_exprs.append(
-                            f"{res}  # duck sizing added this equality because these "
-                            f"variables had the same size {self.var_to_val[s0]} "
-                            "(to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)"
-                        )
-                    elif (sloc := self.replacements_slocs.get(s0)) is not None:
-                        verbose_exprs.append(f"{res}  # {sloc}")
-                    else:
-                        verbose_exprs.append(
-                            f"{res}  # (unknown var {s0}, please file a bug)"
-                        )
-                else:
-                    verbose_exprs.append(
-                        f"{res}  # (unknown source {srcname}, please file a bug)"
-                    )
+                    if lang == "verbose_python":
+                        if (s0 := self.source_to_var.get(srcname)) is not None:
+                            if source != self.var_to_sources[s0][0]:
+                                res = (
+                                    f"{res}  # duck sizing added this equality because these "
+                                    f"variables had the same size {self.var_to_val[s0]} "
+                                    "(to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)"
+                                )
+                            elif (sloc := self.replacements_slocs.get(s0)) is not None:
+                                res = f"{res}  # {sloc}"
+                            else:
+                                res = f"{res}  # (unknown var {s0}, please file a bug)"
+                        else:
+                            res = f"{res}  # (unknown source {srcname}, please file a bug)"
+                    exprs.append(res)
 
                 if (
                     isinstance(source, TensorPropertySource)
@@ -5122,9 +5149,13 @@ class ShapeEnv:
                 ):
                     assert self.dim_constraints is not None
                     is_trivial = self.dim_constraints.add(expr)
-                guard_expr = py_printer.doprint(expr)
-                python_exprs.append(guard_expr)
-                verbose_exprs.append(f"{guard_expr}  # {guard.sloc}")
+
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                    guard_expr = printer.doprint(expr)
+                    if lang == "verbose_python":
+                        guard_expr = f"{guard_expr}  # {guard.sloc}"
+                    exprs.append(guard_expr)
+
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
@@ -5139,7 +5170,7 @@ class ShapeEnv:
                             )
                             msg = (
                                 f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {guard_expr}."
+                                f"satisfy the generated guard {py_printer.doprint(expr)}."
                             )
                             record_constraint_violation(
                                 c.warn_only, self._debug_name(source), msg
@@ -5186,6 +5217,7 @@ class ShapeEnv:
             assert sources
             bounds = []
             rf = source_ref(sources[0])
+            verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
@@ -5193,16 +5225,24 @@ class ShapeEnv:
                 # default
                 if not _simplified or r.lower != self._default_value_range().lower:
                     bounds.append(sympy.Le(r.lower, symbol, evaluate=False))
-                verbose_exprs.append(f"{r.lower} <= {rf}  # {vr_sloc.lower}")
+                verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
-                verbose_exprs.append(f"{rf} <= {r.upper}  # {vr_sloc.upper}")
+                if verbose_expr:
+                    verbose_expr = f"{r.lower} <= {rf} <= {r.upper}  # {vr_sloc.lower} and {vr_sloc.upper}"
+                else:
+                    verbose_expr = f"{rf} <= {r.upper}  # {vr_sloc.upper}"
             if bounds:
                 bound = sympy.And(*bounds, evaluate=False)
-                python_exprs.append(py_printer.doprint(bound))
+
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                    if lang == "verbose_python":
+                        exprs.append(verbose_expr)
+                    else:
+                        exprs.append(printer.doprint(bound))
                 # NB: verbose_exprs are done above
 
                 # Check constraints
@@ -5232,11 +5272,16 @@ class ShapeEnv:
             # if you have something like an equality guard, nan will play
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
-                res = f"not __math_isnan({py_printer.print_source(sources[0])})"
-                python_exprs.append(res)
-                verbose_exprs.append(
-                    f"{res}  # implicit guard for float input due to NaN specialization in the framework"
-                )
+                res = f"not math.isnan({py_printer.print_source(sources[0])})"
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
+                    if lang == "verbose_python":
+                        exprs.append(
+                            f"{res}  # implicit guard for float input due to NaN specialization in the framework"
+                        )
+                    elif lang == "python":
+                        exprs.append(res)
+                    else:
+                        raise NotImplementedError(f"Unimplemented for lang: {lang}")
 
         if constraint_violations:
             warn_msgs: list[str] = []
@@ -5267,7 +5312,7 @@ class ShapeEnv:
             {
                 **self.co_fields,
                 **self.counter,
-                "num_guards": len(python_exprs),
+                "num_guards": len(all_exprs[0]),
                 "free_symbols": sum(1 for v in symbol_to_source.values() if v),
                 # The keys are meaningless from an aggregate perspective, so
                 # don't include them.  Biggest first.
@@ -5304,7 +5349,11 @@ class ShapeEnv:
         # Only run translation validation when we are not passing custom guards
         if guards is None:
             self._check_translation_validate()
-        return python_exprs, verbose_exprs
+
+        helpers: list[_ShapeGuardsHelper] = []
+        for exprs, printer, lang in zip(all_exprs, printers, langs):
+            helpers.append(_ShapeGuardsHelper(exprs))
+        return helpers
 
     def produce_guards_expression(
         self,
