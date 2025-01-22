@@ -30,4 +30,4 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo Dependency libuv installation finished.
+echo Dependency libuv installation finished. 

@@ -19,4 +19,4 @@ pip install pytest numpy
 :: find file name for pytorch wheel
 for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
 
-pip install %TORCH_WHEEL_FILENAME%
+pip install %TORCH_WHEEL_FILENAME% 

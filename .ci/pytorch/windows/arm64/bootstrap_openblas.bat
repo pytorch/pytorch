@@ -43,4 +43,4 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo Dependency OpenBLAS installation finished.
+echo Dependency OpenBLAS installation finished. 
