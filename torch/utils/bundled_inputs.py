@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
-from typing import Any, TypeVar, Optional, NamedTuple, Union, Callable
-from collections.abc import Sequence
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
 from torch._C import TupleType, ListType
@@ -40,10 +39,10 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Union[Optional[Sequence[tuple[Any, ...]]], dict[Callable, Optional[Sequence[tuple[Any, ...]]]]],
-        info: Optional[Union[list[str], dict[Callable, list[str]]]] = None,
+        inputs: Union[Optional[Sequence[Tuple[Any, ...]]], Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]]],
+        info: Optional[Union[List[str], Dict[Callable, List[str]]]] = None,
         *,
-        _receive_inflate_expr: Optional[list[str]] = None,
+        _receive_inflate_expr: Optional[List[str]] = None,
 ) -> torch.jit.ScriptModule:
     """Create and return a copy of the specified model with inputs attached.
 
@@ -128,9 +127,9 @@ def bundle_inputs(
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[Sequence[tuple[Any, ...]]] = None,
-        _receive_inflate_expr: Optional[list[str]] = None,  # For debugging.
-        info: Optional[list[str]] = None,  # Optional argument to provide info about forward or its inputs
+        inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
+        _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
+        info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
         skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for the forward function.
@@ -182,9 +181,9 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: dict[Callable, Optional[Sequence[tuple[Any, ...]]]],
-        _receive_inflate_expr: Optional[list[str]] = None,  # For debugging.
-        info: Optional[dict[Callable, list[str]]] = None,  # Optional argument to provide info about the function or its inputs
+        inputs: Dict[Callable, Optional[Sequence[Tuple[Any, ...]]]],
+        _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
+        info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
         skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for an arbitrary list of public functions.
@@ -288,7 +287,7 @@ def augment_many_model_functions_with_bundled_inputs(
             deflated_inputs = []
             parts = []
             for inp_idx, args in enumerate(input_list):
-                if not isinstance(args, tuple) and not isinstance(args, list):  # type: ignore[arg-type]
+                if not isinstance(args, Tuple) and not isinstance(args, List):  # type: ignore[arg-type]
                     raise TypeError(
                         f"Error bundled input for function {function_name} idx: {inp_idx} is not a Tuple or a List"
                     )
@@ -364,7 +363,7 @@ def augment_many_model_functions_with_bundled_inputs(
 
 def _inflate_expr(
     arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False
-) -> tuple[Union[T, torch.Tensor], str, Optional[str]]:
+) -> Tuple[Union[T, torch.Tensor], str, Optional[str]]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
     # Or just use "{}" as the format string to ignore size limits.
@@ -410,9 +409,9 @@ def _inflate_expr(
     else:
         return arg, ref, None
 
-def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> tuple[list[str], list[str]]:
-    methods: list[str] = []
-    attributes: list[str] = []
+def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptModule) -> Tuple[List[str], List[str]]:
+    methods: List[str] = []
+    attributes: List[str] = []
 
     # Has bundled inputs for forward
     if hasattr(script_module, 'get_all_bundled_inputs'):

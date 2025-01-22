@@ -2,10 +2,9 @@
 
 import functools
 import operator
-from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -21,7 +20,7 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
+LoweringDict = Dict[Union[OpOverload, str], Callable[..., Any]]
 TargetType = Union[Callable[..., Any], str]
 
 
@@ -31,13 +30,13 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     lowering object. Errors if buffers are created unexpectedly
     """
 
-    graph_outputs: Optional[list[ir.IRNode]]
+    graph_outputs: Optional[List[ir.IRNode]]
     root_graph: torch._inductor.graph.GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
     allowed_mutations: Optional[OrderedSet[OpOverload]]
     additional_lowerings: Optional[LoweringDict]
-    buffers: list[ir.Buffer]
+    buffers: List[ir.Buffer]
     mutated_buffers: OrderedSet[str]
 
     def __init__(
@@ -103,7 +102,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         target: TargetType,
         args: Any,
-        kwargs: dict[str, Any],
+        kwargs: Dict[str, Any],
     ) -> Any:
         from .lowering import lowerings
 
@@ -124,7 +123,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
             return lowerings[target](*args, **kwargs)
 
-    def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
+    def output(self, target: str, args: tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 
@@ -156,7 +155,7 @@ class TracingOpsHandler(WrapperHandler[T]):
 
 
 def lower_pointwise_subgraph(
-    subgraph: ir.Subgraph, inputs: list[InputDescriptor]
+    subgraph: ir.Subgraph, inputs: List[InputDescriptor]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(

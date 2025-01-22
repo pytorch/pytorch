@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Sized
-from typing import TypeVar
+from typing import List, Sized, Type, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
@@ -43,7 +42,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         datapipe: MapDataPipe[_T],
         batch_size: int,
         drop_last: bool = False,
-        wrapper_class: type[DataChunk] = DataChunk,
+        wrapper_class: Type[DataChunk] = DataChunk,
     ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -53,7 +52,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         self.wrapper_class = wrapper_class
 
     def __getitem__(self, index) -> DataChunk:
-        batch: list = []
+        batch: List = []
         indices = range(index * self.batch_size, (index + 1) * self.batch_size)
         try:
             batch.extend(self.datapipe[i] for i in indices)

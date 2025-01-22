@@ -3,8 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Optional, Union, Protocol, overload
-from collections.abc import Sequence
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
 from typing_extensions import TypeIs
 from collections import deque
 
@@ -69,15 +68,15 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flags: deque[bool] = deque()
-        self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()
+        self.old_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
-            self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
 
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
-            self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
 
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -294,7 +293,7 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 
 # Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
 class TensorWithFlatten(Protocol):
-    def __tensor_flatten__(self) -> tuple[Sequence[str], object]:
+    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
         ...
 
     @staticmethod
@@ -308,7 +307,7 @@ class TensorWithFlatten(Protocol):
     shape: torch._C.Size
 
     @overload
-    def stride(self, dim: None = None) -> tuple[int, ...]:
+    def stride(self, dim: None = None) -> Tuple[int, ...]:
         ...
 
     @overload
@@ -316,7 +315,7 @@ class TensorWithFlatten(Protocol):
         ...
 
     @overload
-    def size(self, dim: None = None) -> tuple[int, ...]:
+    def size(self, dim: None = None) -> Tuple[int, ...]:
         ...
 
     @overload
@@ -403,7 +402,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
         and hasattr(t, "__tensor_unflatten__")
     )
 
-def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten]]:
+def is_traceable_wrapper_subclass_type(t: Type) -> TypeIs[Type[TensorWithFlatten]]:
     """Same as above, but takes a type argument instead of an instance."""
     return (issubclass(t, torch.Tensor) and t != torch.Tensor
             and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__"))
@@ -516,19 +515,19 @@ and output of type {type(ret)}. But expected types to match."""
 # and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
 @dataclass
 class AliasInfo:
-    alias_set: set[str]
+    alias_set: Set[str]
     is_write: bool
     name: Optional[str]
 
 
 @dataclass
 class SchemaInfo:
-    args: list[AliasInfo]
-    outs: list[AliasInfo]
+    args: List[AliasInfo]
+    outs: List[AliasInfo]
 
 
 # Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: dict[Any, SchemaInfo] = {}
+parsed_schema_map: Dict[Any, SchemaInfo] = {}
 
 
 # Given an OpOverload, returns schema information on it.

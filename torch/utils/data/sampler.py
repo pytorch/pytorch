@@ -1,7 +1,16 @@
 # mypy: allow-untyped-defs
 import itertools
-from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, Optional, TypeVar, Union
+from typing import (
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Sized,
+    TypeVar,
+    Union,
+)
 
 import torch
 
@@ -282,7 +291,7 @@ class WeightedRandomSampler(Sampler[int]):
         return self.num_samples
 
 
-class BatchSampler(Sampler[list[int]]):
+class BatchSampler(Sampler[List[int]]):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
@@ -323,7 +332,7 @@ class BatchSampler(Sampler[list[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[list[int]]:
+    def __iter__(self) -> Iterator[List[int]]:
         # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         sampler_iter = iter(self.sampler)
         if self.drop_last:

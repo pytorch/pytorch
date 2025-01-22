@@ -4,6 +4,7 @@ import cProfile
 import pstats
 import sys
 import os
+from typing import Dict
 
 import torch
 from torch.autograd import profiler
@@ -36,7 +37,7 @@ def run_env_analysis():
     print('Running environment analysis...')
     info = get_env_info()
 
-    result: dict[str, str] = {}
+    result: Dict[str, str] = {}
 
     debug_str = ''
     if info.is_debug_build:
