@@ -29,13 +29,11 @@ import argparse
 import copy
 import dataclasses
 import datetime
-import json
 import os
 import signal
 import threading
 import time
 from collections import defaultdict
-from dataclasses_json import dataclass_json
 from typing import Any
 
 import psutil  # type: ignore[import]
