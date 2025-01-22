@@ -116,6 +116,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -2981,6 +2982,8 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
+        elif isinstance(value, types.GenericAlias):
+            return BuiltinVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )

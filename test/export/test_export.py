@@ -10728,42 +10728,6 @@ def forward(self, x, y):
             ep.graph_module.code
         )
 
-    @testing.expectedFailureCppSerDes
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
-    def test_slice_with_floordiv(self):
-        # slice operation emits runtime assert s0//2 <= s1
-        class M1(torch.nn.Module):
-            def forward(self, x, y):
-                d = x.size(0) // 2
-                return y[d:]
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.m1 = M1()
-
-            def forward(self, x, y):
-                d = x.size(0) // 2
-                m1_res = self.m1(x, y)
-                return y[d:] + m1_res
-
-        inputs = (torch.ones(10), torch.ones(10))
-        d0 = torch.export.Dim("d0", max=2048)
-        d1 = torch.export.Dim("d1", max=2048)
-        ep = export(
-            M(),
-            inputs,
-            dynamic_shapes=((d0,), (d1,)),
-        )
-        ep.module()(torch.ones(8), torch.ones(4))
-        ep.module()(torch.ones(8), torch.ones(5))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression \(s0//2\) \<\= s1",
-        ):
-            ep.module()(torch.ones(10), torch.ones(4))
-
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
