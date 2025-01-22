@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
@@ -160,8 +161,6 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
-    from torch._guards import detect_fake_mode
-
     fake_mode = detect_fake_mode(inputs)
     tracing_mode = "real"
     if fake_mode is None:
@@ -545,8 +544,10 @@ def check_input_alias_and_mutation(
     fake_args: List[FakeTensor],
 ) -> Tuple[List[int], dict[int, int], dict[int, int]]:
     with disable_proxy_modes_tracing():
-        """This function creturns mutated inputs, inp-out alias and out-out alias
-        in the graph module gm.
+        """This function returns mutated inputs, inp-out alias and out-out alias
+        in the graph module gm. It checks whether input tensor versions have
+        changed after run gm once to detect mutation and checks tensor storage
+        to detect alias.
         """
 
         def _tensor_version(t) -> Optional[int]:
@@ -562,18 +563,18 @@ def check_input_alias_and_mutation(
             arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in fake_args
         ]
         before = [_tensor_version(arg) for arg in cloned]
-        # We need to temporarily turn inference_mode off because
-        # under inference mode, tensor version counter is not tracked.
-        fake_mode = torch._guards.detect_fake_mode(fake_args)
-        fake_ctx = fake_mode if fake_mode is not None else nullcontext()
-        ignore_fresh_unbacked = (
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode is not None
-            else nullcontext()
-        )
-        with torch.inference_mode(False), fake_ctx, ignore_fresh_unbacked:
+        with ExitStack() as ctx_stack:
+            # We need to temporarily turn inference_mode off because
+            # under inference mode, tensor version counter is not tracked.
+            ctx_stack.enter_context(torch.inference_mode(False))
+            if (fake_mode := detect_fake_mode(fake_args)) is not None:
+                ctx_stack.enter_context(fake_mode)
+                if fake_mode.shape_env is not None:
+                    ctx_stack.enter_context(
+                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    )
             outputs = gm(*cloned)
-        outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
+            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
         after = [_tensor_version(arg) for arg in cloned]
         mutated_inputs = [
             i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
