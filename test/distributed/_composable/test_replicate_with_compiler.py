@@ -241,8 +241,9 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_backward_only(self):
-        self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
+    def test_compile_backward_only(self, device):
+        self._test_compile(
+            use_gpu=True, no_sync=False, no_compile_forward=True, device=device)
 
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
