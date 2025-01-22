@@ -22,6 +22,7 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
@@ -3130,6 +3131,120 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
+
+    def test_tensor_subclass_basic(self):
+        from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("to_twotensor(Tensor a, Tensor b) -> Tensor")
+            lib.define("from_twotensor(Tensor c) -> (Tensor, Tensor)")
+
+            def to_twotensor_backward(ctx, grad):
+                return torch.ops.mylib.from_twotensor(grad)
+
+            def from_twotensor_backward(ctx, grad_a, grad_b):
+                raise AssertionError("shouldn't get hit")
+
+            torch.library.register_autograd(
+                "mylib::to_twotensor", to_twotensor_backward, lib=lib
+            )
+            torch.library.register_autograd(
+                "mylib::from_twotensor", from_twotensor_backward, lib=lib
+            )
+
+            @torch.library.register_torch_dispatch(
+                "mylib::to_twotensor", TwoTensorMode, lib=lib
+            )
+            def _(_0, _1, _2, args, kwargs):
+                assert not kwargs
+                a, b = args
+                return TwoTensor(a.clone(), b.clone())
+
+            @torch.library.register_torch_dispatch(
+                "mylib::from_twotensor", TwoTensor, lib=lib
+            )
+            def _(_0, _1, _2, args, kwargs):
+                assert not kwargs
+                (c,) = args
+                return c.a.clone(), c.b.clone()
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def fn(x):
+                return x * x + 2
+
+            param1 = torch.randn(4, 4, requires_grad=True)
+            param2 = torch.randn(4, 4, requires_grad=True)
+            with TwoTensorMode():
+                x = torch.ops.mylib.to_twotensor(param1, param2)
+
+            inner_compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
+            graphs = []
+
+            def compiler_fn(gm):
+                graphs.append(gm)
+                return inner_compiler_fn(gm)
+
+            with compiled_autograd._enable(compiler_fn):
+                res = fn(x)
+                res.sum().backward()
+
+            self.assertEqual(param1.grad, 2 * param1)
+            self.assertEqual(param2.grad, 2 * param2)
+            self.assertEqual(len(graphs), 1)
+
+            graph_code = normalize_gm(graphs[0].print_readable(print_output=False))
+            # The graph should have make_subclass calls in it.
+            self.assertExpectedInline(
+                graph_code,
+                """\
+class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks):
+        getitem = inputs[0]
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        getitem_4 = inputs[4];  inputs = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], [4, 4]);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], True)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0];  getitem_8 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], getitem_7);  getitem_1 = getitem_2 = getitem_7 = None
+        aot0_primals_1 = call_aot_bwd_prologue[0]
+        aot0_primals_2 = call_aot_bwd_prologue[1]
+        aot0_tangents_1 = call_aot_bwd_prologue[2]
+        aot0_tangents_2 = call_aot_bwd_prologue[3];  call_aot_bwd_prologue = None
+
+        aot0_mul_2 = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_primals_1);  aot0_tangents_1 = aot0_primals_1 = None
+        aot0_mul_3 = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_primals_2);  aot0_tangents_2 = aot0_primals_2 = None
+
+        aot0_add_2 = torch.ops.aten.add.Tensor(aot0_mul_2, aot0_mul_2);  aot0_mul_2 = None
+        aot0_add_3 = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
+
+        make_subclass = torch__dynamo_compiled_autograd_make_subclass(aot0_add_2, aot0_add_3);  aot0_add_2 = aot0_add_3 = None
+
+        getitem_13 = hooks[1];  hooks = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_13, (), make_subclass);  getitem_13 = make_subclass = None
+        getitem_16 = call_backward[0]
+        getitem_17 = call_backward[1];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16, getitem_17], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_16 = getitem_17 = None
+        getitem_19 = validate_outputs_2[0]
+
+        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_19);  getitem_4 = getitem_19 = accumulate_grad__1 = None
+
+        getitem_20 = validate_outputs_2[1];  validate_outputs_2 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_20);  getitem_3 = getitem_20 = accumulate_grad_ = None
+
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+            )
 
     # https://github.com/pytorch/pytorch/issues/138920
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
