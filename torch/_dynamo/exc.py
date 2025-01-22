@@ -6,7 +6,7 @@ import textwrap
 import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, NoReturn, Optional, Type, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
 
@@ -273,7 +273,7 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e: Type[Exception], tx: Any) -> None:
+def raise_observed_exception(e: type[Exception], tx: Any) -> None:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
