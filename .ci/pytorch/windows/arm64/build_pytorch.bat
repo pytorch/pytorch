@@ -1,22 +1,34 @@
 @echo on
 
 :: environment variables
-set BLAS=APL
-set USE_LAPACK=1
 set CMAKE_BUILD_TYPE=%BUILD_TYPE%
 set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
+set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
+set MSSdk=1
 if defined PYTORCH_BUILD_VERSION (
   set PYTORCH_BUILD_VERSION=%PYTORCH_BUILD_VERSION%
   set PYTORCH_BUILD_NUMBER=1
 )
 
+:: Set BLAS type
+if %ENABLE_APL% == 1 (
+    set BLAS=APL
+    set USE_LAPACK=1
+) else if %ENABLE_OPENBLAS% == 1 (
+    set BLAS=OpenBLAS
+    set OpenBLAS_HOME=%DEPENDENCIES_DIR%\OpenBLAS\install
+)
+
 :: activate visual studio
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64 -vcvars_ver=%MSVC_VERSION%
+call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
 where cl.exe
 
 :: change to source directory
 cd %PYTORCH_ROOT%
+
+:: copy libuv.dll
+copy %libuv_ROOT%\lib\Release\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
 python -m venv .venv
@@ -26,8 +38,9 @@ where python
 
 :: python install dependencies
 python -m pip install --upgrade pip
-pip install wheel
 pip install -r requirements.txt
+:: DISTUTILS_USE_SDK should be set after psutil dependency
+set DISTUTILS_USE_SDK=1
 
 :: start sccache server and reset sccache stats
 sccache --start-server

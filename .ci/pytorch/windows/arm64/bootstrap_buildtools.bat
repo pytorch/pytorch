@@ -16,15 +16,29 @@ curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
 
 :: Install the Visual Studio Build Tools with C++ components
 echo Installing Visual Studio Build Tools with C++ components...
-"%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
-    --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
-    --add Microsoft.VisualStudio.Component.VC.ASAN ^
-    --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
-    --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ^
-    --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
-    --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 ^
-    --add Microsoft.VisualStudio.Component.VC.14.36.17.6.ARM64
-    
+echo Installing MSVC %MSVC_VERSION%
+if "%MSVC_VERSION%" == "latest" (
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
+        --add Microsoft.VisualStudio.Component.VC.ASAN ^
+        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
+        --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
+        --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+) else if "%MSVC_VERSION%" == "14.40" (
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
+        --add Microsoft.VisualStudio.Component.VC.ASAN ^
+        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
+        --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 ^
+        --add Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64
+) else if "%MSVC_VERSION%" == "14.36" (
+    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
+        --add Microsoft.VisualStudio.Component.VC.ASAN ^
+        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
+        --add Microsoft.VisualStudio.Component.VC.14.36.17.6.ARM64 ^
+        --add Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
+)
 
 :: Check if installation was successful
 if %errorlevel% neq 0 (
