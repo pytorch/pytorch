@@ -16,6 +16,8 @@
 
 namespace torch::autograd {
 
+using torch::dynamo::autograd::IValuePacker;
+
 static variable_list CopyBackwards_apply_functional(
     variable_list&& grads,
     std::array<bool, 2> needs_input_grad,
@@ -41,6 +43,16 @@ static variable_list CopyBackwards_apply_functional(
   return grad_inputs;
 }
 
+static variable_list CopyBackwards_apply_functional_ivalue(
+    const variable_list& grads,
+    const ivalue_list& args) {
+  PackedArgs r(args);
+  auto needs_input_grad = r.unpack<std::array<bool, 2>>();
+  auto src_options = r.unpack<c10::TensorOptions>();
+  return CopyBackwards_apply_functional(
+      variable_list(grads), needs_input_grad, src_options);
+}
+
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   return CopyBackwards_apply_functional(
       std::move(grads),
@@ -51,11 +63,43 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 void CopyBackwards::compiled_args(CompiledNodeArgs& args) {
   args.collect(src_options);
 }
+
 variable_list CopyBackwards::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   saved.before(src_options);
-  auto result = apply(variable_list(inputs));
+
+  static c10::once_flag flag;
+  c10::call_once(flag, [&]() {
+    std::vector<at::TypePtr> schema = {
+        IValuePacker<std::array<bool, 2>>::packed_type(),
+        IValuePacker<c10::TensorOptions>::packed_type()};
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    interface->bind_function(
+        saved.get_py_compiler(),
+        name(),
+        CopyBackwards_apply_functional_ivalue,
+        schema);
+  });
+
+  PackedArgs packed_args;
+  packed_args.pack<std::array<bool, 2>>(
+      {task_should_compute_output(0), task_should_compute_output(1)});
+  packed_args.pack(src_options);
+
+  auto output_metadata = torch::dynamo::autograd::
+      IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
+          torch::dynamo::autograd::get_input_metadata(next_edges()));
+
+  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+  auto result = interface->call_function(
+      saved.get_py_compiler(),
+      "apply_functional",
+      name(),
+      inputs,
+      std::move(packed_args).vec(),
+      output_metadata);
+
   saved.after(src_options);
   return result;
 }
