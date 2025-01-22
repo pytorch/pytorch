@@ -22,7 +22,7 @@ Super_SloMo,pass,0
 
 
 
-alexnet,pass,0
+alexnet,eager_two_runs_differ,0
 
 
 
@@ -82,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,22
+detectron2_fcos_r_50_fpn,eager_fail_to_run,22
 
 
 
@@ -146,7 +146,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_to_run,0
+hf_BigBird,pass,0
 
 
 
@@ -162,6 +162,10 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,0
+
+
+
 hf_Reformer,pass,5
 
 
@@ -170,7 +174,7 @@ hf_T5,pass,0
 
 
 
-hf_T5_base,eager_fail_to_run,0
+hf_T5_base,pass,0
 
 
 
@@ -202,7 +206,7 @@ llama_v2_7b_16h,model_fail_to_load,0
 
 
 
-llava,model_fail_to_load,0
+llava,pass,0
 
 
 
@@ -234,7 +238,7 @@ moco,pass,7
 
 
 
-moondream,model_fail_to_load,0
+moondream,pass,0
 
 
 
@@ -322,15 +326,23 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
+stable_diffusion_text_encoder,model_fail_to_load,0
 
 
 
-stable_diffusion_unet,pass_due_to_skip,0
+stable_diffusion_unet,model_fail_to_load,0
+
+
+
+timm_efficientdet,pass,0
 
 
 
 timm_efficientnet,pass,0
+
+
+
+timm_nfnet,pass,0
 
 
 
@@ -362,7 +374,7 @@ tts_angular,pass,2
 
 
 
-vgg16,pass,0
+vgg16,eager_two_runs_differ,0
 
 
 
