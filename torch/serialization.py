@@ -1887,6 +1887,9 @@ def _load(
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
+            # tag fake storage with its offset in the file
+            storage_offset = zip_file.get_record_offset(name)
+            storage._offset = storage_offset
         elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset : storage_offset + numel]
