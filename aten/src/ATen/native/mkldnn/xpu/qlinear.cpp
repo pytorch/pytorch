@@ -8,7 +8,7 @@ using namespace at::native::onednn;
 namespace at::native::xpu {
 
 Tensor q_linear_pointwise(
-    Tensor act, // int8 cpu tensor
+    Tensor act,
     double act_scale,
     int64_t act_zero_point,
     Tensor weight,
