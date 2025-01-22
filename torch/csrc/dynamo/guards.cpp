@@ -5071,13 +5071,10 @@ double profile_guard_manager(
     root->check_nopybind(locals);
   }
 
-  int count = 0;
   auto start = std::chrono::high_resolution_clock::now();
-
   for (int i = 0; i < n_iters; i++) {
     root->check_nopybind(locals);
   }
-
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> total_elapsed = end - start;
 
