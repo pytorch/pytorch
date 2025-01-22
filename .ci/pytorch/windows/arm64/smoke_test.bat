@@ -27,11 +27,11 @@ python -c "import torch"
 if ERRORLEVEL 1 exit /b 1
 
 echo Running python rnn_smoke.py...
-python %BUILDER_ROOT%\test_example_code\rnn_smoke_win_arm64.py
+python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
 echo Checking that basic CNN works...
-python %BUILDER_ROOT%\test_example_code\cnn_smoke_win_arm64.py
+python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
 
 goto end
@@ -54,7 +54,7 @@ set INCLUDE=%INCLUDE%;%install_root%\include;%install_root%\include\torch\csrc\a
 set LIB=%LIB%;%install_root%\lib
 set PATH=%PATH%;%install_root%\lib
 
-cl %BUILDER_ROOT%\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
 if ERRORLEVEL 1 exit /b 1
 
 .\simple-torch-test.exe
