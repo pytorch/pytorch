@@ -482,6 +482,28 @@ class ListVariable(CommonListMethodsVariable):
         return variables.ConstantVariable.create(hasattr([], name))
 
 
+class FxImmutableListVariable(ListVariable):
+    def python_type(self):
+        return torch.fx.immutable_collections.immutable_list
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # load torch.fx.immutable_collections.immutable_list
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(torch.fx.immutable_collections),
+                    codegen.create_load_attr("immutable_list"),
+                ]
+            )
+        )
+
+        # Construct the list
+        super().reconstruct(codegen)
+
+        # Construct the immutable_list
+        codegen.extend_output(create_call_function(1, False))
+
+
 class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:

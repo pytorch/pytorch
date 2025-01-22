@@ -421,8 +421,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
-        elif self.value is torch.fx.immutable_collections.immutable_list:
-            return variables.BuiltinVariable(list).call_list(tx, *args, **kwargs)
+        elif (
+            self.value is torch.fx.immutable_collections.immutable_list
+            and len(args) == 1
+            and isinstance(args[0], variables.ListVariable)
+        ):
+            arg = args[0]
+            if arg.source:
+                install_guard(arg.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return variables.FxImmutableListVariable(
+                list(arg.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
