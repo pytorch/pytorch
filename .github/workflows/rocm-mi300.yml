@@ -1,10 +1,9 @@
-name: rocm
+name: rocm-mi300
 
 on:
   push:
     branches:
       - main
-      - release/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
