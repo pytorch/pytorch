@@ -10,7 +10,7 @@ import os
 import sys
 import unittest
 from contextlib import nullcontext
-from typing import Any, cast, List
+from typing import Any, cast
 
 import numpy as np
 
@@ -207,7 +207,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 super().step()
                 kwarg.append(5)
 
-        kwarg: List[Any] = []
+        kwarg: list[Any] = []
         x = torch.tensor([1.0], device=self.device, requires_grad=True)
         o = ZeroRedundancyOptimizer(
             [x],
