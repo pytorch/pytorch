@@ -3960,6 +3960,10 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
             y = torch.ops.aten.dropout.default(x, 0.1, train=False)
@@ -4220,8 +4224,6 @@ def forward(self, arg0_1, arg1_1):
         not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported"
     )
     def test_aot_export_predispatch_with_cond_nested(self):
-        torch._dynamo.reset()
-
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4300,8 +4302,6 @@ def forward(self, arg0_1):
         not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported"
     )
     def test_aot_export_predispatch_map_1(self):
-        torch._dynamo.reset()
-
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4429,8 +4429,6 @@ def forward(self, arg0_1, arg1_1):
         not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported"
     )
     def test_aot_export_predispatch_with_cond(self):
-        torch._dynamo.reset()
-
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4867,8 +4865,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run"
     )
     def test_aot_export_with_torch_cond(self):
-        torch._dynamo.reset()
-
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
