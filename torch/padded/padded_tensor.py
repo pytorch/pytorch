@@ -438,12 +438,11 @@ class MatmulOp(PaddedOp):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
     def validate(self, args, kwargs):
-        # Don't allow contraction on padded dimensions
+        # Validate contraction dimension: Either both or none of them should be padded
         if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
             args[1].orig_shape[0], Dimension
         ):
-            assert args[0].orig_shape[1].is_padded is False
-            assert args[1].orig_shape[0].is_padded is False
+            assert args[0].orig_shape[1].is_padded == args[1].orig_shape[0].is_padded
 
 
 @register_padded_op(["bmm"])
