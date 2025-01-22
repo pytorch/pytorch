@@ -74,7 +74,7 @@ from torch.utils._sympy.functions import (
     PythonMod,
 )
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.printers import PythonPrinter
+from torch.utils._sympy.printers import CppPrinter, PythonPrinter
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
@@ -2251,10 +2251,41 @@ class ShapeGuardPrinter(ShapeGuardPythonPrinter):
     pass
 
 
+class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
+    def __init__(self, *args: Any) -> None:
+        self.all_symbols: set[str] = set()
+        self.source_to_symbol: dict[Source, sympy.Symbol] = {}
+        super().__init__(*args)
+
+    def print_source(self, source: Source) -> str:
+        if source in self.source_to_symbol:
+            return self.source_to_symbol[source].name
+
+        source_name = source.name()
+        mangled_name = re.sub("[^0-9a-zA-Z_]+", "_", source_name)
+        old_mangled_name = mangled_name
+        count = 0
+        while mangled_name in self.all_symbols:
+            mangled_name = f"{old_mangled_name}_{count}"
+            count += 1
+        self.source_to_symbol[source] = sympy.Symbol(mangled_name)
+        self.all_symbols.add(mangled_name)
+        return mangled_name
+
+    def doprint(self, expr: sympy.Expr) -> str:
+        return CppPrinter.doprint(self, expr)
+
+
 # A dataclass for storing shape guards
 @dataclass(frozen=True)
 class _ShapeGuardsHelper:
     exprs: list[str]
+
+
+# A dataclass for storing C++ expressions and helper variables
+@dataclass(frozen=True)
+class _CppShapeGuardsHelper(_ShapeGuardsHelper):
+    source_to_symbol: dict[Source, sympy.Symbol]
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
@@ -4762,6 +4793,12 @@ class ShapeEnv:
         for lang in langs:
             if lang in ["python", "verbose_python"]:
                 printers.append(py_printer)
+            elif lang == "cpp":
+                printers.append(
+                    _ShapeGuardCppPrinter(
+                        symbol_to_source, source_ref, self.var_to_sources
+                    )
+                )
             else:
                 raise NotImplementedError(f"Unknown lang: {lang}")
 
@@ -5280,6 +5317,8 @@ class ShapeEnv:
                         )
                     elif lang == "python":
                         exprs.append(res)
+                    elif lang == "cpp":
+                        exprs.append(f"~std::isnan({printer.print_source(sources[0])})")
                     else:
                         raise NotImplementedError(f"Unimplemented for lang: {lang}")
 
@@ -5352,7 +5391,11 @@ class ShapeEnv:
 
         helpers: list[_ShapeGuardsHelper] = []
         for exprs, printer, lang in zip(all_exprs, printers, langs):
-            helpers.append(_ShapeGuardsHelper(exprs))
+            if lang == "cpp":
+                assert isinstance(printer, _ShapeGuardCppPrinter)
+                helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
+            else:
+                helpers.append(_ShapeGuardsHelper(exprs))
         return helpers
 
     def produce_guards_expression(
