@@ -229,14 +229,10 @@ class ComposabilityTest(MultiProcContinousTest):
         ref_model.to(self.device)
 
         # Prepare inputs
-        inputs, _, input_mb = self._rand_microbatches(dp_mesh, num_microbatches, dim)
-        targets, targets_local, target_mb = self._rand_microbatches(
+        inputs, input_local, _ = self._rand_microbatches(dp_mesh, num_microbatches, dim)
+        targets, target_local, _ = self._rand_microbatches(
             dp_mesh, num_microbatches, dim
         )
-        # WHY do we have to format the targets list differently than the inputs list???
-        target_mb = [
-            targets_local[i].reshape((1, dim)) for i in range(num_microbatches)
-        ]
 
         def apply_dp(partial_model):
             return DDP(partial_model, process_group=dp_mesh.get_group())
@@ -254,9 +250,9 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Run the pipeline
         if pp_group.rank() == 0:
-            pipeline_schedule._step_microbatches(arg_mbs=input_mb)
+            pipeline_schedule.step(input_local)
         else:
-            pipeline_schedule._step_microbatches(target_mbs=target_mb)
+            pipeline_schedule.step(target=target_local)
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the DDP all-reduce becomes a no-op.
@@ -314,16 +310,12 @@ class ComposabilityTest(MultiProcContinousTest):
             ref_model.to(dtype=mp_dtype)
 
         # Prepare inputs
-        inputs, _, input_mb = self._rand_microbatches(
+        inputs, input_local, _ = self._rand_microbatches(
             dp_mesh, num_microbatches, dim, dtype=mp_dtype
         )
-        targets, targets_local, target_mb = self._rand_microbatches(
+        targets, target_local, _ = self._rand_microbatches(
             dp_mesh, num_microbatches, dim, dtype=mp_dtype
         )
-        # WHY do we have to format the targets list differently than the inputs list???
-        target_mb = [
-            targets_local[i].reshape((1, dim)) for i in range(num_microbatches)
-        ]
 
         # Apply FSDP to stage module
         def apply_dp(partial_model):
@@ -353,9 +345,9 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Run the pipeline
         if pp_group.rank() == 0:
-            pipeline_schedule._step_microbatches(arg_mbs=input_mb)
+            pipeline_schedule.step(input_local)
         else:
-            pipeline_schedule._step_microbatches(target_mbs=target_mb)
+            pipeline_schedule.step(target=target_local)
         for m in partial_models:
             for p in m.parameters():
                 assert p.grad is not None
