@@ -6,7 +6,8 @@ from dataclasses_json import DataClassJsonMixin
 
 _DATA_MODEL_VERSION = 1.0
 
-
+# the db schema related to this is:
+# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 # data model for test log usage
 @dataclass
 class UtilizationStats:

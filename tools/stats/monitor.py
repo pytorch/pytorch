@@ -358,9 +358,6 @@ class UsageLogger:
         """
         Logs the stats in json format to stdout.
         """
-        if self._debug_mode:
-            print(stats)
-            return
         print(stats)
 
     def _collect_gpu_data(self) -> list[GpuData]:
