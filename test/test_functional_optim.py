@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.distributed
@@ -27,9 +27,9 @@ class MyModule(torch.nn.Module):
 class MyDummyFnOptimizer:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         _allow_empty_param_list: bool = False,
@@ -63,7 +63,7 @@ class MyDummyFnOptimizer:
                 "MyDummyFnOptimizer does not support step_param() as of now"
             )
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]):
         # call the custom optimizer step implementation
         with torch.no_grad():
             raise RuntimeError("MyDummyFnOptimizer does not support step() as of now")
