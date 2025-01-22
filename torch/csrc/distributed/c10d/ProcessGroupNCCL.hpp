@@ -65,6 +65,10 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
+// Control whether to propagate NCCL errors to all ranks through TCPStore.
+static std::vector<std::string> TORCH_NCCL_PROPAGATE_ERROR = {
+    "TORCH_NCCL_PROPAGATE_ERROR"};
+
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -1214,6 +1218,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
   bool dumpOnTimeoutOrEx_;
+
+  // Whether or not to propagate detected errors to all ranks in the same PG
+  // through TCPStore.
+  bool propagatePgError_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
   bool sleepAfterException_{};

@@ -2930,6 +2930,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
         # set heartbeat timeout to a small value so that we don't wait too long for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2974,15 +2975,15 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
-        # avoid FR dumping logic during restart
-        prev_nccl_dump_handling = os.environ.get("TORCH_NCCL_DUMP_ON_TIMEOUT", None)
-        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         # test the barrier behavior in the non blocking wait setting
         prev_nccl_async_error_handling = os.environ.get(
             "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
         )
+        # avoid FR dumping logic during restart
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         # initialize pg for the first time
@@ -2999,11 +3000,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         barrier_work = nccl_backend.barrier()
         barrier_work.wait()
         barrier_result = barrier_work.get_future_result().wait()
+        self.assertEqual(WorkResult(barrier_result), WorkResult.SUCCESS)
         self.assertEqual(nccl_backend.get_error(), ErrorType.SUCCESS)
         if self.rank == 0:
             work = nccl_backend.allreduce(torch.rand(10).cuda(self.rank))
             work.wait()
             result = work.get_future_result().wait()
+            self.assertEqual(WorkResult(result), WorkResult.TIMEOUT)
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
             # we need a brand new fileStore for the new PG
             # the new file name is shared through the old fileStore
@@ -3046,9 +3049,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ] = prev_nccl_async_error_handling
-
-        if prev_nccl_dump_handling is not None:
-            os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = prev_nccl_dump_handling
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val

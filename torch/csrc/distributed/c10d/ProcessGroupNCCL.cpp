@@ -908,6 +908,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -975,9 +976,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix()
-            << "ProcessGroupNCCL initialization options: " << "size: " << size
-            << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
+            << "size: " << size << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -989,6 +989,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1614,7 +1615,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   std::string errorMsg;
   std::string exitReason;
   bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
-  int monitorPollInterval = coordCheckIntervalMilSec_;
+  int monitorPollInterval = checkDumpSignal || propagatePgError_
+      ? coordCheckIntervalMilSec_
+      : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::optional<DumpPipe> dumpPipe = std::nullopt;
@@ -1639,8 +1642,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
     auto currentTime = std::chrono::steady_clock::now();
 
-    // Check and set remote error if it has not been set before
-    checkAndSetRemoteError();
+    if (propagatePgError_) {
+      // Check and set remote error if it has not been set before
+      checkAndSetRemoteError();
+    }
 
     // We put extra functionality in the thread for the default PG (aka,
     // local_id_=0) because the signal is same across different PGs. We only
@@ -2102,9 +2107,12 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
-  if (!shouldDump_.load()) {
-    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+  if (shouldDump_.load()) {
+    // already signaled dump, skipping signal again and wait for the dump
+    // future.
+    return;
   }
+  LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
   // signal the monitor thread on PG0 to start dumping
   shouldDump_.store(true);
   // Give time for dumping before throwing exception
@@ -2118,7 +2126,8 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   } else if (status == std::future_status::ready) {
     auto end = std::chrono::steady_clock::now();
     LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms" << " giving time for flight recorder dumps to finish.";
+              << "ms"
+              << " giving time for flight recorder dumps to finish.";
   }
 }
 
@@ -2247,8 +2256,10 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastCompletedSeq);
 
         // broadcast remote error signal to all other ranks in this specific PG.
-        broadcastSignal(
-            store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_, rank_);
+        if (propagatePgError_) {
+          broadcastSignal(
+              store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_, rank_);
+        }
 
         // Print the traceback of the collective at call time
         work.printTraceback();
