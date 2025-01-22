@@ -4108,7 +4108,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
-            if torch.jit.isinstance(x, list[str]):
+            if torch.jit.isinstance(x, typing.List[str]):
                 return x * 2
             return x
 
