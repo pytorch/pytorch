@@ -1411,9 +1411,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
             args = [
                 old_handle_name,
-                f"&{handle_name}",
                 size_array_var,
                 stride_array_var,
+                f"&{handle_name}",
             ]
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"

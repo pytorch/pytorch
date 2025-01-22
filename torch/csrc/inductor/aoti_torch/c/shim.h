@@ -303,9 +303,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_as_strided(
     AtenTensorHandle self,
-    AtenTensorHandle* ret,
     const int64_t* sizes_ptr,
-    const int64_t* strides_ptr);
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,

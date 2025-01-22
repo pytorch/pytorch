@@ -143,8 +143,8 @@ class InplacePaddingTest(TestCase):
             act, (code,) = run_and_get_code(torch.compile(f), x)
 
         # Buf0 should be over-allocated and then strided.
-        FileCheck().check(
-            "aoti_torch_as_strided(buf0_handle, &buf0_handle_restrided,"
+        FileCheck().check_regex(
+            r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
         ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))

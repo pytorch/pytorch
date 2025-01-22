@@ -797,9 +797,9 @@ AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
 
 AOTITorchError aoti_torch_as_strided(
     AtenTensorHandle self,
-    AtenTensorHandle* ret,
     const int64_t* sizes_ptr,
-    const int64_t* strides_ptr) {
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     int64_t ndim = self_tensor->dim();
