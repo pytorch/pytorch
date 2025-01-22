@@ -479,6 +479,9 @@ def pad_listlike(x: int | Sequence[int], size: int) -> Sequence[int]:
 
 # Used to ensure that iterating over a set is deterministic
 def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
+    if len(x) == 0:
+        return []
+
     def sort_func(elem: _T) -> str:
         if isinstance(elem, str):
             return elem
@@ -1462,7 +1465,7 @@ def use_cpp_gemm_template(
     if not config.cpp.weight_prepack:
         return False
 
-    int8_gemm = mat1.get_dtype() == torch.uint8
+    int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
