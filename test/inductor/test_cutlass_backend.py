@@ -3,8 +3,10 @@ import logging
 import math
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 from unittest import mock
+
+from torch.export import Dim
 
 
 try:
@@ -112,7 +114,7 @@ class TestCutlassBackend(TestCase):
             ) as mocked_select_algorithm:
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
                 Y = mm(a, b)
-                passed_choice_callers: List[ChoiceCaller] = mocked_select_algorithm[0][
+                passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
                     1
                 ]
                 assert all(
@@ -571,7 +573,7 @@ class TestCutlassBackend(TestCase):
             return torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
         def compare_results(
-            m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]
+            m: int, k: int, n: int, alpha: float, beta: float, x_shape: list[int]
         ) -> None:
             x = torch.randn(x_shape).cuda().half()
             a = torch.randn(m, k).cuda().half()
@@ -699,6 +701,48 @@ class TestCutlassBackend(TestCase):
             dynamic_shapes = {
                 "x": {0: M, 1: K},
                 "w": {0: K, 1: N},
+            }
+
+            x = torch.randn(M, K).cuda().half()
+            w = torch.randn(K, N).cuda().half()
+
+            actual = AOTIRunnerUtil.run(
+                "cuda",
+                model,
+                (x, w),
+                dynamic_shapes=dynamic_shapes,
+            )
+            expected = model(x, w)
+            torch.testing.assert_close(expected, actual)
+
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    def test_force_cutlass_backend_aoti_cexpr_codegen(self):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x, w):
+                x0, x1 = x.shape
+                x = x.reshape(x0 // 2, x1, 2)[:, :, 0]
+                x = x.contiguous()
+                x = x.as_strided(x.size(), x.stride())
+
+                return x @ w
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "autotune_fallback_to_aten": False,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+            }
+        ):
+            model = MyModel()
+            M, N, K = 128, 64, 64
+            dynamic_shapes = {
+                "x": {0: Dim.DYNAMIC},
+                "w": None,
             }
 
             x = torch.randn(M, K).cuda().half()
