@@ -1,4 +1,6 @@
 import logging
+import math
+import time
 import traceback
 import weakref
 from copy import deepcopy
@@ -87,10 +89,12 @@ class SACAlgorithm(str, Enum):
 
     Attributes:
         GREEDY: Represents the greedy algorithm for SAC.
+        KNAPSACK: Represents the knapsack algorithm for SAC.
         OPTIMAL: Represents the optimal algorithm for SAC.
     """
 
     GREEDY = "greedy"
+    KNAPSACK = "knapsack"
     OPTIMAL = "optimal"
 
 
@@ -133,6 +137,7 @@ class _SACPolicy:
         count = self.recompute_counter if ctx.is_recompute else self.forward_counter
 
         if f_name != self.func_names[count]:
+            logger.warning("Encountered an unexpected operation (%s) in SAC. It will recomputed by default.", f_name)
             return CheckpointPolicy.MUST_RECOMPUTE
 
         if ctx.is_recompute:
@@ -238,6 +243,123 @@ def get_greedy_checkpointing_policy_per_module(
 
     return policy_output
 
+def get_knapsack_checkpointing_policy_per_module(
+    sac_stats: SACStats, sac_greedy_order_meta: SACGreedyOrderMeta, memory_budget: float
+) -> List[int]:
+    """
+    Compute knapsack checkpoint policy per module.
+
+    Args:
+        sac_stats (SACStats): SAC statistics.
+        sac_greedy_order_meta (SACGreedyOrderMeta): SAC greedy order metadata.
+        memory_budget (float): Memory budget as a fraction of total memory (0 <= memory_budget <= 1).
+
+    Returns:
+        List[int]: Policy output as a list of integers (1: save, 0: discard).
+
+    Raises:
+        ValueError: If memory_budget is not within the valid range (0 <= memory_budget <= 1).
+        AssertionError: If the saved memory calculated by the knapsack algorithm exceeds the memory budget.
+    """
+
+    # Validate memory budget range
+    if not (0 <= memory_budget <= 1):
+        raise ValueError(
+            f"`memory_budget` must be a float between 0 and 1. Got {memory_budget}."
+        )
+
+    # Initialize policy output with all ops recomputed
+    policy_output = [0 for _ in range(len(sac_stats.memory))]
+
+    sac_memory = sum(sac_stats.memory)
+    sac_memory_budget = memory_budget * sac_memory
+
+    stored_ops, _, inplace_op_groups, random_inplace_ops, msps_meta = (
+        sac_greedy_order_meta.stored_ops,
+        sac_greedy_order_meta.recomputed_ops,
+        sac_greedy_order_meta.inplace_op_groups,
+        sac_greedy_order_meta.random_inplace_ops,
+        sac_greedy_order_meta.msps_meta,
+    )
+
+    stored_indices: Set[int] = set()
+    for s_idx in stored_ops:
+        stored_indices.add(s_idx)
+        if s_idx in inplace_op_groups:
+            stored_indices.update(inplace_op_groups[s_idx])
+        if s_idx in random_inplace_ops:
+            stored_indices.update(random_inplace_ops)
+    saved_memory = sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
+
+    # Check if saved ops exceed memory budget
+    if saved_memory > sac_memory_budget:
+        logger.error(
+            "Ops that need to be saved already exceed the given memory budget.\n"
+            "Ops: %s\n"
+            "Budget: %s Saved Ops Memory: %s",
+            [sac_stats.func_names[i] for i in stored_indices],
+            sac_memory_budget,
+            saved_memory,
+        )
+        return [
+            1 if idx in stored_indices else 0 for idx in range(len(sac_stats.memory))
+        ]
+
+    revised_memory_budget = sac_memory_budget - saved_memory
+    msps_meta = deepcopy(msps_meta)
+    # Explicitly remove the ops having 0 runtime since there is no benefit of saving them
+    msps_meta = [msps for msps in msps_meta if msps.runtime > 0]
+    values = [msps.runtime for msps in msps_meta]
+
+    # Normalize weights (fraction of memory)
+    weights = [msps.memory / sac_memory for msps in msps_meta]
+    # Scale capacity to steps: e.g., 0.65 -> 66 steps (0.01 increments)
+    step_size = 0.01
+    capacity = math.floor((revised_memory_budget / sac_memory) / step_size)
+    scaled_weights = [math.ceil(w / step_size) for w in weights]
+
+    n = len(values)
+    # Initialize DP table
+    dp = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
+
+    # Build the DP table to maximize reciprocal runtimes
+    for i in range(1, n + 1):
+        for size in range(capacity + 1):
+            if scaled_weights[i - 1] <= size:
+                dp[i][size] = max(
+                    dp[i - 1][size],
+                    dp[i - 1][size - scaled_weights[i - 1]] + values[i - 1],
+                )
+            else:
+                dp[i][size] = dp[i - 1][size]
+
+    # Backtrack to find selected indices
+    size = capacity
+    selected_indices = set()
+
+    for i in range(n, 0, -1):
+        if dp[i][size] != dp[i - 1][size]:
+            selected_idx = i - 1
+            selected_indices.add(msps_meta[selected_idx].op_idx)
+            if msps_meta[selected_idx].op_idx in random_inplace_ops:
+                selected_indices.update(random_inplace_ops)
+            if inplace_op_group := inplace_op_groups.get(msps_meta[selected_idx].op_idx, None):
+                selected_indices.update(inplace_op_group)
+            size -= scaled_weights[selected_idx]
+
+    # Update the stored_ops to include selected_indices
+    stored_indices.update(selected_indices)
+
+    # Calculate the final saved memory
+    final_saved_memory = sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
+    assert final_saved_memory <= sac_memory_budget, f"Knapsack saved memory ({final_saved_memory}) exceeds the memory budget ({sac_memory_budget})"
+
+    # Update policy output to be saved for all the stored_indices
+    for i in stored_indices:
+        policy_output[i] = 1
+
+    return policy_output
+
 
 def get_auto_sac_policies(
     train_step: Callable,
@@ -252,7 +374,7 @@ def get_auto_sac_policies(
     fsdp_units: Optional[Set[str]] = None,
     mp_policies: Optional[Dict[str, MixedPrecisionPolicy]] = None,
     runtime_kwargs: Optional[Dict[str, Any]] = None,
-) -> AutoSACResult:
+) -> Tuple[AutoSACResult, Tuple[float, float]]:
     """
     Computes auto-SAC (Selective Activation Checkpointing) policies for the given model.
 
@@ -284,7 +406,7 @@ def get_auto_sac_policies(
             of FSDP unit FQNs. Defaults to `None`.
         runtime_kwargs (Optional[Dict[str, Any]], optional):
             A dictionary of runtime-related configuration parameters. Supported keys:
-                - `"estimate_mode"` (str): The runtime estimation mode to use. Supported modes:
+                - `"estimate_mode_type"` (str): The runtime estimation mode to use. Supported modes:
                     - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
                     - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
                       Defaults to `"operator-level-cost-model"`.
@@ -299,6 +421,8 @@ def get_auto_sac_policies(
         AutoSACResult:
             The computed SAC policies, activation memory decisions, recomputation time,
             and peak memory estimates.
+        optimization_times:
+            Times for main ILP and SAC policy generation
 
     Limitations:
         1. Calling a module multiple times in forward is not supported yet, but will be supported in future.
@@ -347,11 +471,14 @@ def get_auto_sac_policies(
         # Parse module information into a graph
         graph = parse_module_info(mod_info)
         # Solve SAC MILP problem
+        main_ilp_start = time.time()
         ac_decisions, est_recomp_time, est_peak_mem = sac_milp(
             graph, memory_budget, shard_degree, ac_units, fsdp_units
         )
+        main_ilp_end = time.time()
 
         sac_policies: Dict[str, Tuple[List[str], List[int]]] = {}
+        policy_start_time = time.time()
         if est_peak_mem != -1:
             # Solver succeeded Compute SAC policies for each module
             # TODO (@sanketpurandare) This can be completely paralellized.
@@ -363,6 +490,10 @@ def get_auto_sac_policies(
                 ]
                 if sac_algo == SACAlgorithm.GREEDY:
                     policy_output = get_greedy_checkpointing_policy_per_module(
+                        sac_stats, sac_greedy_order_meta, budget
+                    )
+                elif sac_algo == SACAlgorithm.KNAPSACK:
+                    policy_output = get_knapsack_checkpointing_policy_per_module(
                         sac_stats, sac_greedy_order_meta, budget
                     )
                 else:
@@ -377,9 +508,13 @@ def get_auto_sac_policies(
                 "Failed to solve ILP. Empty policies will be returned.\n"
                 " Try setting a higher memory budget."
             )
+        policy_end_time = time.time()
+        main_ilp_time_ms = (main_ilp_end - main_ilp_start) * 1e3
+        policy_time_ms = (policy_end_time - policy_start_time) * 1e3
         auto_sac_result = AutoSACResult(
             sac_policies, ac_decisions, est_recomp_time, est_peak_mem
         )
+        
     except Exception as e:
         print(
             "Set environment variable DEBUG_AUTO_SAC=1 for more debugging information.",
@@ -387,6 +522,7 @@ def get_auto_sac_policies(
         )
         traceback.print_exc()
         auto_sac_result = AutoSACResult({}, {}, 0.0, -1)
+        main_ilp_time_ms = policy_time_ms = 0.0
 
     logger.info(
         "Memory Budget: %.2f GiB\n"
@@ -399,7 +535,7 @@ def get_auto_sac_policies(
         auto_sac_result.recomputation_time,
     )
 
-    return auto_sac_result
+    return auto_sac_result, (main_ilp_time_ms, policy_time_ms)
 
 
 def apply_auto_sac_policies(

@@ -75,7 +75,7 @@ def collect_stats(
             The inputs required for the training step. This can be any data structure suitable for the model's `forward` method.
         runtime_kwargs (Optional[Dict[str, Any]], optional):
             A dictionary of runtime-related configuration parameters. Supported keys:
-                - `"estimate_mode"` (str): The runtime estimation mode to use. Supported modes:
+                - `"estimate_mode_type"` (str): The runtime estimation mode to use. Supported modes:
                     - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
                     - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
                     Defaults to `"operator-level-cost-model"`.
@@ -115,7 +115,7 @@ def collect_stats(
     runtime_kwargs = runtime_kwargs or {}
 
     # Extract runtime_kwargs with defaults
-    estimate_mode = runtime_kwargs.get("estimate_mode", "operator-level-cost-model")
+    estimate_mode = runtime_kwargs.get("estimate_mode_type", "operator-level-cost-model")
     gpu_type = runtime_kwargs.get("gpu_type", "")
     custom_config = runtime_kwargs.get("custom_config", None)
 
