@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn
@@ -302,7 +302,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
     return SDPBackend.ERROR
 
 
-def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
+def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> tuple[torch.Tensor, int, int]:
     # This function is used to calculate two pieces of metadata that are needed
     # for use with flash-attention and efficient_attention kernels. They are the
     # cumulative sequence_length over a batch of sequences and the maximum
@@ -634,7 +634,7 @@ def _autocast(
     key: torch.Tensor,
     value: torch.Tensor,
     attn_mask: Optional[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """
     [Autocasting SDPA for NJT]
 
