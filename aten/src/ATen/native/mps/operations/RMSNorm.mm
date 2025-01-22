@@ -23,6 +23,7 @@ Tensor rms_norm_mps_kernel(const Tensor& input,
                            c10::SymIntArrayRef normalized_shape,
                            const Tensor& weight,
                            const double eps) {
+  TORCH_CHECK(input.is_contiguous() && weight.is_contiguous());
   auto output = at::empty_like(input);
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input.sizes();

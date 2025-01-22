@@ -274,14 +274,12 @@ Tensor rms_norm_symint(
     const Tensor weight = weight_opt.value();
     const bool any_nested = input.is_nested() || weight.is_nested();
     const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
-    const bool all_contiguous = input.is_contiguous() && weight.is_contiguous();
     const bool is_input_fp = isFloatingType(input.scalar_type());
     const bool is_weight_fp = isFloatingType(weight.scalar_type());
 
-    if (!(GradMode::is_enabled() && any_inputs_require_grad) && all_contiguous && !any_nested && is_input_fp &&
-        is_weight_fp) {
+    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
       auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
-      return mps::rms_norm_mps_kernel(input, normalized_shape, weight, eps_val);
+      return mps::rms_norm_mps_kernel(input.contiguous(), normalized_shape, weight.contiguous(), eps_val);
     }
   }
 #endif
