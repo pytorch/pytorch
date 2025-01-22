@@ -19,7 +19,7 @@ PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
 # enable debug asserts in serialization
-export TORCH_DEBUG_SERIALIZATION=1
+export TORCH_SERIALIZATION_DEBUG=1
 
 mkdir -p "$TMP_DIR"/build/torch
 
