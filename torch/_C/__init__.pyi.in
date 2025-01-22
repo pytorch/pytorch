@@ -1315,7 +1315,6 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 
 has_openmp: _bool
 has_mkl: _bool
-_has_kleidiai: _bool
 _has_mps: _bool
 has_lapack: _bool
 _has_cuda: _bool
@@ -1815,6 +1814,7 @@ def _mtia_recordMemoryHistory(
     max_entries
 ) -> None: ...
 def _mtia_memorySnapshot() -> Dict[str, Any]: ...
+def _mtia_getDeviceCount() -> _int: ...
 
 
 # Defined in torch/csrc/mps/Module.cpp
