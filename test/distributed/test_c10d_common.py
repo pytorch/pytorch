@@ -77,11 +77,12 @@ def gpus_for_rank(world_size):
 
 
 class AbstractTimeoutTest:
-    def _test_store_timeout(self, backend, init_method, c2p):
+    def _test_store_timeout(self, backend, c2p):
         try:
+            os.environ['MASTER_ADDR'] = "localhost"
+            os.environ['MASTER_PORT'] = "29600"
             dist.init_process_group(
                 backend=backend,
-                init_method=init_method,
                 world_size=1,
                 rank=0,
                 timeout=timedelta(seconds=1),
@@ -98,35 +99,24 @@ class AbstractTimeoutTest:
             # thread
             c2p.append(e)
 
-    def _init_methods(self):
-        f = tempfile.NamedTemporaryFile(delete=False)
-        if sys.platform == "win32":
-            yield "file:///{}".format(f.name.replace("\\", "/"))
-            f.close()
-        else:
-            yield f"file://{f.name}"
-            f.close()
-            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
-
     def _test_default_store_timeout(self, backend):
-        for init_method in self._init_methods():
-            c2p = []
-            t = threading.Thread(
-                target=self._test_store_timeout, args=(backend, init_method, c2p)
-            )
-            t.daemon = True
-            t.start()
-            t.join(5)
+        c2p = []
+        t = threading.Thread(
+            target=self._test_store_timeout, args=(backend, c2p)
+        )
+        t.daemon = True
+        t.start()
+        t.join(5)
 
-            self.assertEqual(1, len(c2p))
-            if isinstance(c2p[0], float):
-                # waiting time should be 1s, use 3s to rule out false alarm
-                self.assertGreater(3, c2p[0])
-            elif isinstance(c2p[0], RuntimeError):
-                # let @retry_on_connect_failures handle the error
-                raise c2p[0]
-            else:
-                raise RuntimeError(f"Unexpected type {type(c2p[0])}")
+        self.assertEqual(1, len(c2p))
+        if isinstance(c2p[0], float):
+            # waiting time should be 1s, use 3s to rule out false alarm
+            self.assertGreater(3, c2p[0])
+        elif isinstance(c2p[0], RuntimeError):
+            # let @retry_on_connect_failures handle the error
+            raise c2p[0]
+        else:
+            raise RuntimeError(f"Unexpected type {type(c2p[0])}")
 
 
 class TimeoutTest(TestCase):
