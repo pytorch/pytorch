@@ -107,8 +107,7 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-jammy-py3-clang12-executorch / build
-  - pull / linux-jammy-py3-clang12-executorch / test (executorch, 1, 1, linux.2xlarge)
+  - pull
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -119,8 +118,7 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-focal-py3_9-clang9-xla / build
-  - pull / linux-focal-py3_9-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull
 
 - name: Documentation
   patterns:
