@@ -1608,7 +1608,7 @@ class PythonWrapperCodegen(CodeGen):
 
             arg = kwargs[key]
 
-            if kwargs[key] is None and not triton_version_uses_attrs_dict():
+            if kwargs[key] is None:
                 constants[key] = None
             else:
                 if isinstance(arg, ir.TMADescriptor):
@@ -1648,8 +1648,6 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-
-        equal_to_1_args = [] if triton_version_uses_attrs_dict() else equal_to_1_args
 
         triton_signature = signature_to_meta(
             signature,
