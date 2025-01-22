@@ -1384,8 +1384,8 @@ class PipelineStage(_PipelineStageBase):
         )
 
         # set attributes needed for forward
-        with torch.no_grad():
-            outputs = self.submod(*args, **kwargs)
+        # with torch.no_grad():
+        outputs = self.submod(*args, **kwargs)
 
         # if single tensor, convert so it is always a list
         if isinstance(outputs, torch.Tensor):
