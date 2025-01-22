@@ -918,8 +918,12 @@ def istype(obj: object, allowed_types: Iterable[type]) -> bool:
 
 def istype(obj, allowed_types):
     """isinstance() without subclasses"""
+    from .variables import LazyVariableTracker
+
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
+    if isinstance(obj, LazyVariableTracker):
+        obj = obj.realize()
     return type(obj) is allowed_types
 
 

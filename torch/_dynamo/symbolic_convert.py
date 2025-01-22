@@ -574,10 +574,18 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             return
 
         if value.is_python_constant():
+            # TODO materializing containers like dict as a constant could force
+            # installing more guards than necessary (e.g., guards for all keys
+            # and values), when in theory we only need a `SEQUENCE_LENGTH` guard
+            # for these objects.
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
                 self.jump(inst)
+            # TODO install guards for more types.
+            if istype(value, ConstDictVariable) and value.source:
+                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
         ):
