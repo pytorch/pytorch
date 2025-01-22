@@ -1608,9 +1608,7 @@ class PythonWrapperCodegen(CodeGen):
 
             arg = kwargs[key]
 
-            if (
-                kwargs[key] is None and not triton_version_uses_attrs_dict()
-            ):
+            if kwargs[key] is None and not triton_version_uses_attrs_dict():
                 constants[key] = None
             else:
                 if isinstance(arg, ir.TMADescriptor):
@@ -1651,6 +1649,8 @@ class PythonWrapperCodegen(CodeGen):
                     ):
                         equal_to_1_args.append(key)
 
+        equal_to_1_args = [] if triton_version_uses_attrs_dict() else equal_to_1_args
+
         triton_signature = signature_to_meta(
             signature,
             size_dtype=None,  # try to infer based on symints
@@ -1669,7 +1669,7 @@ class PythonWrapperCodegen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **dict.fromkeys(equal_to_1_args, 1),  # TODO(5512)
+                **dict.fromkeys(equal_to_1_args, 1),
             },
             "configs": [
                 config_of(
