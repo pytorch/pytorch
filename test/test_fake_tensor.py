@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.custom_op_db import custom_op_db
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -159,11 +160,16 @@ class FakeTensorTest(TestCase):
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_index_cuda_with_cpu(self):
+    @parametrize(
+        "dtype",
+        all_types_complex_float8_and(),
+    )
+    def test_index_cuda_with_cpu(self, dtype):
         with FakeTensorMode():
-            x = torch.rand([2048], device="cuda")
+            x = torch.ones([2048], device="cuda", dtype=dtype)
             out = x[torch.zeros([36], dtype=torch.int64)]
             self.checkType(out, "cuda", [36])
+            self.assertEqual(out.dtype, dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
@@ -1590,6 +1596,17 @@ class FakeTensorPropTest(TestCase):
         # before feeding it into nonzero, or have some sort of randomness)
         self.assertIsNot(u0, u1)
         self.assertTrue(statically_known_true(u0 == u1))
+
+    def test_nonzero_stride(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            value = torch.ones(5)
+            fake_r = value.nonzero()
+
+        r = torch.ones(5).nonzero()
+
+        self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
 
     def test_torch_load_with_fake_mode(self):
         class TheModelClass(torch.nn.Module):

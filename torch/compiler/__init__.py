@@ -194,7 +194,7 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
@@ -432,7 +432,7 @@ def is_exporting() -> bool:
     return _is_exporting_flag
 
 
-def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     """
     Serializes all the cache artifacts that were created during the compilation
 
