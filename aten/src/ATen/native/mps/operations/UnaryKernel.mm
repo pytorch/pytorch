@@ -36,8 +36,10 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
       auto scalarStr = self.scalar_type() == kComplexFloat ? "float" : "half";
       cplState = lib.getPipelineStateForFunc(name + "_complex_kernel", {scalarStr, scalarStr});
     } else {
-      cplState = lib.getPipelineStateForFunc(name + "_kernel",
-                                             {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
+      cplState = lib.getPipelineStateForFunc(
+        fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)));
+      //cplState = lib.getPipelineStateForFunc(name + "_kernel",
+      //                                       {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
     }
 
     if (!outputTensor.is_contiguous()) {

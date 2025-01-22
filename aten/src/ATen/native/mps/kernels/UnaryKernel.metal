@@ -83,8 +83,8 @@ kernel void exp_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
 }
 
 template <typename T0, typename T1>
-kernel void tanh_kernel( device vec2type_t<T0> *output [[buffer(0)]],
-                        device vec2type_t<T1> *input [[ buffer(1)]],
+kernel void tanh_kernel( device T0* output [[buffer(0)]],
+                        device T1* input [[ buffer(1)]],
                         uint index [[thread_position_in_grid]]) {
   output[index] = T0(precise::tanh(input[index]));
 }
@@ -111,3 +111,31 @@ kernel void tanh_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
   auto tan_y = T0(precise::tan(input[index].y));
   output[index] = complex_div(vec2type_t<T0>(tanh_x, tan_y), vec2type_t<T0>(T0(1), tanh_x * tan_y));
 }
+
+
+#define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1)                                   \
+  template [[host_name("erfinv_" #DTYPE0 "_" #DTYPE1)]] kernel void erfinv_kernel(   \
+      device DTYPE0* input [[buffer(0)]],                                            \
+      device DTYPE1* output [[buffer(1)]],                                           \
+      uint id [[thread_position_in_grid]]);					     \
+  template [[host_name("exp_" #DTYPE0 "_" #DTYPE1)]] kernel void exp_kernel(   \
+      device DTYPE0* input [[buffer(0)]],                                            \
+      device DTYPE1* output [[buffer(1)]],                                           \
+      uint id [[thread_position_in_grid]]);					     \
+  template [[host_name("tanh_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_kernel(   \
+      device DTYPE0* input [[buffer(0)]],                                            \
+      device DTYPE1* output [[buffer(1)]],                                           \
+      uint id [[thread_position_in_grid]]);
+
+
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
+#endif
+INSTANTIATE_UNARY_KERNELS2(half, half);
+INSTANTIATE_UNARY_KERNELS2(float, float);
+INSTANTIATE_UNARY_KERNELS2(bool, float);
+INSTANTIATE_UNARY_KERNELS2(uchar, float);
+INSTANTIATE_UNARY_KERNELS2(char, float);
+INSTANTIATE_UNARY_KERNELS2(short, float);
+INSTANTIATE_UNARY_KERNELS2(int, float);
+INSTANTIATE_UNARY_KERNELS2(long, float);
