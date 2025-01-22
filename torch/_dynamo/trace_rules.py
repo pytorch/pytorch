@@ -3250,6 +3250,7 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
     "torch.export.unflatten",
     "torch.optim",
+    "torch.fx.node",
 }
 
 if torch.distributed.is_available():
