@@ -2227,7 +2227,7 @@ class _ShapeGuardPrinter(abc.ABC):
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
-        self._print_cache: Dict[sympy.Expr, str] = {}
+        self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
         return self.source_ref(source)
