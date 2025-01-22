@@ -49,15 +49,11 @@ from statistics import mean
 from typing import (
     Any,
     Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
     Optional,
-    Type,
     TypeVar,
     Union,
 )
+from collections.abc import Iterable, Iterator
 from unittest.mock import MagicMock
 
 import expecttest
@@ -307,7 +303,7 @@ NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backen
 DEVICE_LIST_SUPPORT_PROFILING_TEST = ('cpu', 'cuda', 'xpu')
 ALLOW_XPU_PROFILING_TEST = True
 
-check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra', 'thor']
 IS_JETSON = any(name in platform.platform() for name in check_names)
 
 def gcIfJetson(fn):
@@ -354,11 +350,13 @@ def get_tracked_input() -> Optional[TrackedInput]:
         return None
     return getattr(test_fn, "tracked_input", None)
 
-def clear_tracked_input():
+def clear_tracked_input() -> None:
     test_fn = extract_test_fn()
     if test_fn is None:
         return
-    return getattr(test_fn, "tracked_input", None)
+    if not hasattr(test_fn, "tracked_input"):
+        return
+    test_fn.tracked_input = None  # type: ignore[attr-defined]
 
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
@@ -644,7 +642,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
+        self.arg_names: list[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -687,7 +685,7 @@ class parametrize(_TestParametrizer):
             for idx, values in enumerate(self.arg_values):
                 maybe_name = None
 
-                decorators: List[Any] = []
+                decorators: list[Any] = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
@@ -940,11 +938,7 @@ parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SL
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
 parser.add_argument('--rerun-disabled-tests', action='store_true')
 parser.add_argument('--pytest-single-test', type=str, nargs=1)
-if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
-else:
-    parser.add_argument('--showlocals', action='store_true', default=False)
-    parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
+parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -1171,10 +1165,10 @@ def sanitize_pytest_xml(xml_file: str):
     tree.write(xml_file)
 
 
-def get_pytest_test_cases(argv: List[str]) -> List[str]:
+def get_pytest_test_cases(argv: list[str]) -> list[str]:
     class TestCollectorPlugin:
         def __init__(self) -> None:
-            self.tests: List[Any] = []
+            self.tests: list[Any] = []
 
         def pytest_collection_finish(self, session):
             for item in session.items:
@@ -2635,7 +2629,7 @@ def check_if_enable(test: unittest.TestCase):
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             if matches_test(disabled_test):
-                platform_to_conditional: Dict = {
+                platform_to_conditional: dict = {
                     "mac": IS_MACOS,
                     "macos": IS_MACOS,
                     "win": IS_WINDOWS,
@@ -2704,7 +2698,7 @@ class RelaxedBooleanPair(BooleanPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
         # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
-        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *self._supported_number_types, *tensor_or_array_types)
         if not (
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2761,7 +2755,7 @@ class RelaxedNumberPair(NumberPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
-        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *tensor_or_array_types)
         if not (
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2847,7 +2841,7 @@ class UnittestPair(Pair):
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
-    CLS: Union[Type, tuple[Type, ...]]
+    CLS: Union[type, tuple[type, ...]]
     TYPE_NAME: Optional[str] = None
 
     def __init__(self, actual, expected, **other_parameters):
@@ -5070,8 +5064,8 @@ def get_tensors_from(args, kwargs):
 
 
 # Returns scalar tensor representation of a list of integer byte values
-def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
-    dtype_to_ctype: Dict[torch.dtype, Any] = {
+def bytes_to_scalar(byte_list: list[int], dtype: torch.dtype, device: torch.device):
+    dtype_to_ctype: dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
         torch.uint16: ctypes.c_uint16,

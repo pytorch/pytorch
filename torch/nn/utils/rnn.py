@@ -1,16 +1,6 @@
 import warnings
 from collections.abc import Iterable
-from typing import (
-    Any,
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    overload,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -228,7 +218,7 @@ def _packed_sequence_init_args(
     batch_sizes: Optional[Tensor] = None,
     sorted_indices: Optional[Tensor] = None,
     unsorted_indices: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -279,7 +269,7 @@ def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
 
 def pack_padded_sequence(
     input: Tensor,
-    lengths: Union[Tensor, List[int]],
+    lengths: Union[Tensor, list[int]],
     batch_first: bool = False,
     enforce_sorted: bool = True,
 ) -> PackedSequence:
@@ -347,7 +337,7 @@ def pad_packed_sequence(
     batch_first: bool = False,
     padding_value: float = 0.0,
     total_length: Optional[int] = None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     r"""Pad a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -419,7 +409,7 @@ def pad_packed_sequence(
 
 # NOTE: for JIT-compatibility, we need to be more restrictive here and use specific types instead of Iterable.
 def pad_sequence(
-    sequences: Union[Tensor, List[Tensor]],
+    sequences: Union[Tensor, list[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
     padding_side: str = "right",
@@ -487,7 +477,7 @@ def unpad_sequence(
     padded_sequences: Tensor,
     lengths: Tensor,
     batch_first: bool = False,
-) -> List[Tensor]:
+) -> list[Tensor]:
     r"""Unpad padded Tensor into a list of variable length Tensors.
 
     ``unpad_sequence`` unstacks padded Tensor into a list of variable length Tensors.
@@ -533,7 +523,7 @@ def unpad_sequence(
 
 
 def pack_sequence(
-    sequences: List[Tensor],
+    sequences: list[Tensor],
     enforce_sorted: bool = True,
 ) -> PackedSequence:
     r"""Packs a list of variable length Tensors.
@@ -571,7 +561,7 @@ def pack_sequence(
     )
 
 
-def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
+def unpack_sequence(packed_sequences: PackedSequence) -> list[Tensor]:
     r"""Unpack PackedSequence into a list of variable length Tensors.
 
     ``packed_sequences`` should be a PackedSequence object.
