@@ -13,11 +13,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// More accurate than metal's M_PI_F and tanpi()
-constant float PI = 3.14159265358979323846264338327;
-
 template <typename T>
-T LogGamma(T);
+float LogGamma(const T);
 
 template <typename T>
 T Gamma(const T x) {
@@ -85,7 +82,7 @@ T Gamma(const T x) {
 }
 
 template <typename T>
-T LogGamma(T x) {
+float LogGamma(const T x) {
   constexpr float LOG_PI = 1.14472988584940017414342735135305;
   constexpr float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
   constexpr float LGAMMA_EXPANSION_COEF[8] = {
@@ -100,38 +97,36 @@ T LogGamma(T x) {
 
   float logGamma;
 
-  bool is_negative = (x < 0);
-  if (is_negative) {
-    x = -x;
-  }
-  if (x == 0) {
+  const auto abs_x = metal::abs(static_cast<float>(x));
+  if (abs_x == 0) {
     return INFINITY;
   }
-  if (x < 12.0) {
-    logGamma = log(fabs(Gamma(x)));
+  if (abs_x < 12.0) {
+    logGamma = log(fabs(Gamma(abs_x)));
   } else {
     // Abramowitz and Stegun 6.1.41
     // Asymptotic series should be good to at least 11 or 12 figures
     // For error analysis, see Whittiker and Watson
     // A Course in Modern Analysis (1927), page 252
 
-    float z = 1.0 / (x * x);
+    float z = 1.0 / (abs_x * abs_x);
     float sum = LGAMMA_EXPANSION_COEF[7];
 
     for (int i = 6; i >= 0; i--) {
       sum *= z;
       sum += LGAMMA_EXPANSION_COEF[i];
     }
-    float series = sum / x;
+    float series = sum / abs_x;
 
-    logGamma = (x - 0.5) * log(x) - x + HALF_LOG_TWO_PI + series;
+    logGamma = (abs_x - 0.5) * log(abs_x) - abs_x + HALF_LOG_TWO_PI + series;
   }
 
-  if (is_negative) {
-    return LOG_PI - logGamma - log(fabs(x * sinpi(x))); // Reflection Formula
+  if (x >= 0) {
+    return logGamma;
   }
 
-  return logGamma;
+  return LOG_PI - logGamma -
+      log(fabs(abs_x * sinpi(abs_x))); // Reflection Formula
 }
 
 template <typename T>
@@ -175,10 +170,9 @@ T calc_trigamma(T x) {
   T result = T(0);
 
   if (x < T(0)) {
-    constexpr T PI_SQUARED = 9.86960440108935861883449099987615;
     sign = T(-1);
-    auto sin_pi_x = sin(PI * x);
-    result -= (PI_SQUARED) / (sin_pi_x * sin_pi_x);
+    auto sin_pi_x = sin(M_PI_F * x);
+    result -= (M_PI_F * M_PI_F) / (sin_pi_x * sin_pi_x);
     x = 1.0f - x;
   }
 
@@ -300,7 +294,7 @@ kernel void digamma(
       // source of error (when |x| > 1).
       float r = fract(x);
       output[id] = static_cast<T1>(
-          calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r));
+          calc_digamma_positive_domain(1.0f - x) - M_PI_F / tan(M_PI_F * r));
     }
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
