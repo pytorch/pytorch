@@ -60,6 +60,12 @@ class LazyVariableTracker(VariableTracker):
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
+        # NOTE: The value of `mutation_type` is decided in the underlying `VT`
+        # (after it's been realized), thus we remove `mutation_type` from Lazy
+        # VT's instance __dict__, and have force any `lazy_vt.mutation_type` to
+        # route through `__getattr__` below, rather than returning the default
+        # `None` assigned in `VariableTracker.__init__`.
+        del self.mutation_type
 
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""
