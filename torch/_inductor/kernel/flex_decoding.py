@@ -123,7 +123,7 @@ flex_decoding_template = TritonTemplate(
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
     # initialize offsets
     tl.device_assert(BLOCK_M % G == 0)
@@ -133,8 +133,8 @@ flex_decoding_template = TritonTemplate(
     offs_hq = offs_g + off_hkv * G
     off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
     offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
-    offs_d = tl.arange(0, QK_HEAD_DIM)
-    offs_vd = tl.arange(0, V_HEAD_DIM)
+    offs_d = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
     stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
@@ -148,13 +148,16 @@ flex_decoding_template = TritonTemplate(
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
-    if SAFE_M_BOUNDARY:
-        q = tl.load(Q + q_offset + q_range)
+    if not SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=(offs_d[None, None, :] < QK_HEAD_DIM) & (off_m[None, :, None] < Q_LEN))
+    elif SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=offs_d[None, None, :] < QK_HEAD_DIM)
+    elif not SAFE_M_BOUNDARY and SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=off_m[None, :, None] < Q_LEN)
     else:
-        mask = off_m[None, :, None] < Q_LEN
-        q = tl.load(Q + q_offset + q_range, mask)
+        q = tl.load(Q + q_offset + q_range)
 
-    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM])
+    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_ROUNDED])
 
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -177,7 +180,7 @@ flex_decoding_template = TritonTemplate(
         shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
@@ -185,7 +188,7 @@ flex_decoding_template = TritonTemplate(
         shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(off_n, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM),
+        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
     offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -226,7 +229,7 @@ flex_decoding_template = TritonTemplate(
             shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
             strides=(stride_kk, stride_kn),
             offsets=(0, off_n),
-            block_shape=(QK_HEAD_DIM, BLOCK_N),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
             order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
@@ -234,7 +237,7 @@ flex_decoding_template = TritonTemplate(
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(off_n, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM),
+            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
             order=(1, 0)
         )
         offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -290,7 +293,7 @@ flex_decoding_template = TritonTemplate(
     idx_m = off_m[None, :, None]
     idx_d = offs_vd[None, None, :]
 
-    mask = (idx_m < Q_LEN)
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
