@@ -287,12 +287,14 @@ AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle){
     CONVERT_EXCEPTION_TO_ERROR_CODE({
-      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto constant_map = std::make_shared<torch::aot_inductor::FreeConstantMap>();
+      auto constant_holder = std::make_shared<torch::aot_inductor::ConstantMap>();
       auto constant_array = std::make_shared<std::vector<torch::aot_inductor::ConstantHandle>>();
       auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
 
       auto model = new torch::aot_inductor::AOTInductorModel(
           constant_map,
+          constant_holder,
           constant_array,
           "cpu", // device_str is hardcoded, as AOTInductorModelCreate is only use for CPU models
           ""

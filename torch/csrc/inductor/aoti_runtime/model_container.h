@@ -20,14 +20,19 @@ class AOTInductorModelContainer {
       size_t num_models,
       const std::string& device_str,
       const std::optional<std::string>& cubin_dir = std::nullopt) {
-    constants_map_ = std::make_shared<ConstantMap>();
+    constants_map_ = std::make_shared<FreeConstantMap>();
+    constants_holder_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
 
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
       models_.push_back(AOTInductorModel::Create(
-          constants_map_, constants_array_, device_str, cubin_dir));
+          constants_map_,
+          constants_holder_,
+          constants_array_,
+          device_str,
+          cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -59,7 +64,7 @@ class AOTInductorModelContainer {
 #endif
 
     for (auto& model : models_) {
-      model->update_constants_map(constants_map_);
+      model->update_constants_map(constants_holder_);
     }
 
     in_spec_ = model->get_in_spec();
@@ -336,7 +341,7 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->emplace(constant_name, tensor_handle);
+      (*constants_map_to_update)[constant_name] = tensor_handle;
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -430,8 +435,13 @@ class AOTInductorModelContainer {
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
   // or _binary_constants_bin_start (for CPU).
-  std::shared_ptr<ConstantMap> constants_map_;
-  std::shared_ptr<ConstantMap> constants_map_secondary_;
+  std::shared_ptr<FreeConstantMap> constants_map_;
+  std::shared_ptr<FreeConstantMap> constants_map_secondary_;
+
+  // The map that holds the constants' RAIIAtenTensorHandle (if needed,) this is
+  // used to retain ref counts and make sure the tensor don't get freed.
+  std::shared_ptr<ConstantMap> constants_holder_;
+  std::shared_ptr<ConstantMap> constants_holder_secondary_;
 
   // Holds the indexed array of constant for faster lookup during runtime.
   std::shared_ptr<std::vector<ConstantHandle>> constants_array_;
@@ -488,12 +498,13 @@ class AOTInductorModelContainer {
   std::shared_ptr<ConstantMap> get_constants_map(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
-      return constants_map_;
+      return constants_holder_;
     } else {
-      if (!constants_map_secondary_) {
-        constants_map_secondary_ = std::make_shared<ConstantMap>();
+      if (!constants_holder_secondary_) {
+        constants_holder_secondary_ = std::make_shared<ConstantMap>();
+        constants_map_secondary_ = std::make_shared<FreeConstantMap>();
       }
-      return constants_map_secondary_;
+      return constants_holder_secondary_;
     }
   }
 
