@@ -1146,9 +1146,11 @@ class Reduction(Loops):
                 # No need to split.
                 return ReductionHint.INNER, split
             if input_node is not None and isinstance(input_node, TensorBox):
-                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                    input_node
-                )
+                with patch.object(FlexibleLayout, "allow_indexing", True):
+                    (
+                        new_ranges,
+                        new_reduction_ranges,
+                    ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
                         sympy_product(new_ranges + new_reduction_ranges)
