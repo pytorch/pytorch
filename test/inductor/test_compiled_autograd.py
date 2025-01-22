@@ -2799,8 +2799,11 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        # Compiled autograd's initial capture lifts custom C++ autograd::Function bwd instead of tracing
+        # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        # In the future, we can consider having a cpu scalar movement pass sometime after we trace
+        # into the custom C++ autograd::Function (like in AOTDispatcher)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     def test_logs(self):
         logs, ctx = logs_to_string(
