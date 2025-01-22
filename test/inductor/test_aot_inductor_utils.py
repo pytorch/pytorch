@@ -3,7 +3,6 @@
 import copy
 import os
 import shutil
-import sys
 import tempfile
 import types
 
@@ -15,16 +14,10 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import clone_preserve_strides
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils import _pytree as pytree
-
-
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-    clone_preserve_strides,
-)
 
 
 class WrapperModule(torch.nn.Module):
@@ -186,9 +179,12 @@ def check_model(
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
 
-        example_inputs = tuple(
-            clone_preserve_strides(x, device=self.device) for x in example_inputs
-        )
+        # For non mixed device inputs with default "cpu",set the device manully.
+        if all(t.device.type == "cpu" for t in example_inputs):
+            example_inputs = tuple(
+                clone_preserve_strides(x).to(self.device) for x in example_inputs
+            )
+
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
