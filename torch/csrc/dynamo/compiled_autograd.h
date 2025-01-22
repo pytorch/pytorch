@@ -994,9 +994,10 @@ struct IValuePacker<size_t> {
     // significant Tensor overhead). If you run into this limitation the fix is
     // to figure out how to pack size_t into int64_t. Note that size_t has some
     // weird behavior on Mac OS.
-    size_t maximum_value = std::numeric_limits<int64_t>::max();
+    uint64_t maximum_value = std::numeric_limits<int64_t>::max();
     TORCH_INTERNAL_ASSERT(
-        t <= maximum_value, "size_t too large to pack into IValue");
+        static_cast<uint64_t>(t) <= maximum_value,
+        "size_t too large to pack into IValue");
     return static_cast<int64_t>(t); // pack as int64_t
   }
   static size_t unpack(const at::IValue& t) {
@@ -1100,24 +1101,30 @@ inline packed_tensoroptions_t pack_TensorOptions(const at::TensorOptions& t) {
 inline at::TensorOptions unpack_TensorOptions(
     const packed_tensoroptions_t& tuple) {
   at::TensorOptions result;
-  if (std::get<0>(tuple).has_value()) {
-    result = result.requires_grad(std::get<0>(tuple).value());
+  auto maybe_requires_grad = std::get<0>(tuple);
+  if (maybe_requires_grad.has_value()) {
+    result = result.requires_grad(maybe_requires_grad.value());
   }
-  if (std::get<1>(tuple).has_value()) {
-    result = result.memory_format(std::get<1>(tuple).value());
+  auto maybe_memory_format = std::get<1>(tuple);
+  if (maybe_memory_format.has_value()) {
+    result = result.memory_format(maybe_memory_format.value());
   }
-  if (std::get<2>(tuple).has_value()) {
-    result = result.device(std::get<2>(tuple).value());
+  auto maybe_device = std::get<2>(tuple);
+  if (maybe_device.has_value()) {
+    result = result.device(maybe_device.value());
   }
-  if (std::get<3>(tuple).has_value()) {
-    result = result.dtype(
-        caffe2::TypeMeta::fromScalarType(std::get<3>(tuple).value()));
+  auto maybe_dtype = std::get<3>(tuple);
+  if (maybe_dtype.has_value()) {
+    result =
+        result.dtype(caffe2::TypeMeta::fromScalarType(maybe_dtype.value()));
   }
-  if (std::get<4>(tuple).has_value()) {
-    result = result.layout(std::get<4>(tuple).value());
+  auto maybe_layout = std::get<4>(tuple);
+  if (maybe_layout.has_value()) {
+    result = result.layout(maybe_layout.value());
   }
-  if (std::get<5>(tuple).has_value()) {
-    result = result.pinned_memory(std::get<5>(tuple).value());
+  auto maybe_pinned_memory = std::get<5>(tuple);
+  if (maybe_pinned_memory.has_value()) {
+    result = result.pinned_memory(maybe_pinned_memory.value());
   }
   return result;
 }
