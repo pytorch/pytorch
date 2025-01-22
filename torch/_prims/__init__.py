@@ -393,6 +393,8 @@ def _prim_elementwise_meta(
     Stride logic is currently incorrect.
     """
 
+    from torch.fx.experimental.symbolic_shapes import is_unbacked_symint
+
     assert len(args) > 0
 
     utils.check_same_dtype(*args)
@@ -459,7 +461,25 @@ def _prim_elementwise_meta(
                 dtype = dtype
 
         assert shape is not None
-        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
+
+        # If input's strides are all unbacked SymInts, then output strides should be all unbacked SymInts.
+        # Create new unbacked SymInts for output, don't reuse the input ones.
+        if (
+            isinstance(args_[0], torch.Tensor)
+            and len(args_[0].stride()) > 0
+            and isinstance(args_[0].stride()[0], torch.SymInt)
+            and all(is_unbacked_symint(x) for x in args_[0].stride())
+        ):
+            arg_ = args_[0]
+            strides = []
+            for i in range(len(shape)):
+                x = torch._library.fake_impl.allocate_size(
+                    arg_.stride()[0].node.shape_env  # type: ignore[attr-defined]
+                )  # type: ignore[return-value]
+                strides.append(x)
+            return torch.empty_strided(shape, strides, device=device, dtype=dtype, requires_grad=arg_.requires_grad)  # type: ignore[return-value]
+        else:
+            return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
