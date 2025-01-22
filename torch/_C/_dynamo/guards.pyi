@@ -56,6 +56,34 @@ class GuardManager:
         example_value,
         guard_manager_enum,
     ) -> GuardManager: ...
+    def tensor_property_size_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_shape_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_storage_offset_manager(
+        self,
+        idx: None,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def indexed_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
     def lambda_manager(
         self,
         python_lambda,
@@ -117,6 +145,14 @@ def install_no_tensor_aliasing_guard(
 def install_storage_overlapping_guard(
     overlapping_guard_managers: list[GuardManager],
     non_overlapping_guard_managers: list[GuardManager],
+    verbose_code_parts: list[str],
+): ...
+def install_symbolic_shape_guard(
+    guard_managers: list[GuardManager],
+    nargs_int: int,
+    nargs_float: int,
+    py_addr: int,
+    py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
 ): ...
 def profile_guard_manager(
