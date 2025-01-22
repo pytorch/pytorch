@@ -3,7 +3,8 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from typing import Any, DefaultDict, Deque, Dict, Iterable, Iterator, List, Optional
+from collections.abc import Iterable, Iterator
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
@@ -105,8 +106,8 @@ class GroupBatchFusionBase:
         raise NotImplementedError("fuse called on base")
 
 
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
+PRE_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
+POST_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
 
 
 def register_fusion(name: str, pre_grad=True):
@@ -120,14 +121,14 @@ def register_fusion(name: str, pre_grad=True):
     return decorator
 
 
-def list_group_batch_fusions(pre_grad=True) -> List[str]:
+def list_group_batch_fusions(pre_grad=True) -> list[str]:
     if pre_grad:
         return list(PRE_GRAD_FUSIONS.keys())
     else:
         return list(POST_GRAD_FUSIONS.keys())
 
 
-def decompose_stack(graph: torch.fx.GraphModule, input_tensors: List[Any]) -> Any:
+def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> Any:
     unsqueezed_inputs = []
     unsqueezed_inputs_meta = []
     for input_tensor in input_tensors:
@@ -209,7 +210,7 @@ class PostGradBatchLinearFusion(BatchFusion):
         batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None, str(users))
         return batch_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_inputs = []
         batch_weights = []
         batch_biases = []
@@ -335,7 +336,7 @@ class GroupLinearFusion(GroupFusion):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         group_inputs = []
         group_weights = []
         group_biases = []
@@ -437,7 +438,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_inputs, batch_others = [], []
         alpha = subset[0].kwargs.get("alpha", DEFAULT_ALPHA)
         batch_inputs_meta, batch_others_meta = [], []
@@ -500,7 +501,7 @@ class BatchLinearLHSFusion(BatchFusion):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
         batch_input = None
         batch_weights, batch_weights_meta = [], []
@@ -644,7 +645,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
         batch_weights = []
@@ -768,7 +769,7 @@ class BatchLayernormFusion(BatchFusion):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         group_inputs = []
         group_shapes = []
         group_weights = []
@@ -930,7 +931,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
@@ -1007,7 +1008,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
@@ -1061,7 +1062,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             group_key = None
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
@@ -1201,7 +1202,7 @@ class _OrderedSet:
 
 def find_independent_subset_greedy(
     node_list: Iterable[torch.fx.Node],
-    graph_search_options: Dict[str, Any],
+    graph_search_options: dict[str, Any],
 ) -> Iterator[Iterable[torch.fx.Node]]:
     """
     Yields a list of subsets of `node_list` where no element in the subset
@@ -1248,9 +1249,9 @@ def find_independent_subset_greedy(
     # keep the correct order.
     node_list = _OrderedSet(node_list)
 
-    cache: Dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
+    cache: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
     while node_list:
-        subset: List[torch.fx.Node] = []
+        subset: list[torch.fx.Node] = []
         subset_deps = OrderedSet[torch.fx.Node]()
 
         next_round_node_list = _OrderedSet()
@@ -1285,16 +1286,16 @@ def get_fusion_candidates(
     rule: GroupBatchFusionBase,
     root_node: torch.fx.Node,
     fused_set: OrderedSet[torch.fx.Node],
-) -> DefaultDict[Any, List[torch.fx.Node]]:
+) -> collections.defaultdict[Any, list[torch.fx.Node]]:
     """
     Search fusion candidates for a specific rule using BFS starting from the root node.
     We only search the subgraph within graph_search_options["max_fuse_search_depth"].
     """
-    q: Deque[tuple[int, torch.fx.Node]] = collections.deque()
+    q: collections.deque[tuple[int, torch.fx.Node]] = collections.deque()
 
-    candidate_dict: DefaultDict[Any, List[torch.fx.Node]] = collections.defaultdict(
-        list
-    )
+    candidate_dict: collections.defaultdict[
+        Any, list[torch.fx.Node]
+    ] = collections.defaultdict(list)
 
     if root_node.target in SEARCH_EXCLUSIONS:
         return candidate_dict
@@ -1351,8 +1352,8 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
 
 
-def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
-    fusions: List[GroupBatchFusionBase] = []
+def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
+    fusions: list[GroupBatchFusionBase] = []
     for name, options in config_options.items():
         # we skip all patterns from pattern_matcher passes (e.g., split_cat)
         if name not in PRE_GRAD_FUSIONS and name not in POST_GRAD_FUSIONS:
@@ -1365,7 +1366,7 @@ def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
 
 
 def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
-    fusions: List[GroupBatchFusionBase] = []
+    fusions: list[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
     if pre_grad:
