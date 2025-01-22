@@ -836,9 +836,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # via STORE_ATTR
             Hashable = variables.ConstDictVariable._HashableTracker
             if isinstance(value, variables.DeletedVariable):
-                self.generic_dict_vt.items.__delitem__(Hashable(name_vt))
+                key = Hashable(name_vt)
+                if key in self.generic_dict_vt.items:
+                    self.generic_dict_vt.items.__delitem__(key)
             else:
-                self.generic_dict_vt.items[Hashable(name_vt)] = value
+                self.generic_dict_vt.items[key] = value
 
         return variables.ConstantVariable(None)
 
@@ -1034,6 +1036,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
         from . import ConstantVariable
+
+        # TODO(anijain2305) - This can be removed once we inline _collections_abc
+        if name == "get" and type(self.value).get in (
+            collections.abc.Mapping.get,
+            dict.get,
+        ):
+            return variables.UserMethodVariable(polyfills.mapping_get, self)
 
         source = AttrSource(self.source, name) if self.source else None
 
