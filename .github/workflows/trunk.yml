@@ -174,14 +174,38 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.4' || 'linux.rocm.gpu.4' }}" },
-        ]}
+        {
+          include: [
+            # ----- DEFAULT (6 shards) on MI200 -----
+            { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.2" },
+            { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.2" },
+            { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.2" },
+            { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
+            { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
+            { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
+
+            # ----- DEFAULT (6 shards) on MI300 -----
+            { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+            { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+            { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+            { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+            { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+            { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+
+            # ----- DISTRIBUTED on MI200 -----
+            { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.4" },
+
+            # ----- DISTRIBUTED on MI300 -----
+            { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi300.4" }
+          ]
+        }
     secrets: inherit
 
   linux-focal-rocm6_3-py3_10-test:
+    # Only run on push to main (post-merge).
+    if: >
+      ${{ github.event_name == 'push' &&
+         github.ref == 'refs/heads/main' }}
     permissions:
       id-token: write
       contents: read
@@ -196,9 +220,6 @@ jobs:
       test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
     secrets: inherit
-    if: |
-      (github.event_name == 'push' && github.event.ref == 'refs/heads/main') || 
-      (github.event_name == 'pull_request' && github.event.label == 'ciflow/rocm')
 
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build:
