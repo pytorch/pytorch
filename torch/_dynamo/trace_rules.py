@@ -3151,35 +3151,7 @@ def is_numpy_type_info(obj) -> bool:
     return isinstance(obj, (np.finfo, np.iinfo))
 
 
-BUILTIN_SKIPLIST = (
-    abc,
-    collections,
-    copy,
-    copyreg,
-    enum,
-    functools,
-    importlib,
-    inspect,
-    linecache,
-    logging,
-    multiprocessing,
-    operator,
-    posixpath,
-    random,
-    re,
-    selectors,
-    signal,
-    tempfile,
-    threading,
-    tokenize,
-    traceback,
-    types,
-    typing,
-    unittest,
-    weakref,
-    _collections_abc,
-    _weakrefset,
-)
+BUILTIN_SKIPLIST = ()
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
