@@ -143,6 +143,8 @@ jobs:
           path: |
             docs/build
             build/
+            docs/source/generated
+            source/generated
           key: ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-${{ hashFiles('docs/source/**') }}
           restore-keys: |
            ${{ runner.os }}-sphinx-cache-${{ matrix.docs_type }}-

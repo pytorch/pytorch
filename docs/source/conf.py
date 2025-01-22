@@ -69,8 +69,11 @@ extensions = [
 
 # Configure cache
 
-doctree_path = os.environ.get('SPHINX_DOCTREE_DIR', '.doctrees')
-doctree_cache_dir = os.path.abspath(doctree_path)
+doctree_path = os.environ.get('SPHINX_DOCTREE_DIR', 'docs/build/.doctrees')
+cache_path = os.path.join('docs/build', '.sphinx-cache')
+
+os.makedirs(doctree_path, exist_ok=True)
+os.makedirs(cache_path, exist_ok=True)
 
 # Enable caching
 html_use_opensearch = False
