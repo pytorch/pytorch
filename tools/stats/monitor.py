@@ -35,6 +35,7 @@ import signal
 import threading
 import time
 from collections import defaultdict
+from dataclasses_json import dataclass_json
 from typing import Any
 
 import psutil  # type: ignore[import]
@@ -254,7 +255,7 @@ class UsageLogger:
         output the data.
         """
         self._metadata.start_at = datetime.datetime.now().timestamp()
-        self.log_json(dataclasses.asdict(self._metadata))
+        self.log_json(self._metadata.to_json())
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
@@ -313,7 +314,7 @@ class UsageLogger:
                 # verify there is data
                 if stats.level:
                     stats.log_duration = f"{time_diff * 1000:.2f} ms"
-                    self.log_json(dataclasses.asdict(stats))
+                    self.log_json(stats.to_json())
                 time.sleep(self._log_interval)
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
@@ -360,9 +361,9 @@ class UsageLogger:
         Logs the stats in json format to stdout.
         """
         if self._debug_mode:
-            print(json.dumps(stats, indent=4))
+            print(stats)
             return
-        print(json.dumps(stats))
+        print(stats)
 
     def _collect_gpu_data(self) -> list[GpuData]:
         gpu_data_list = []

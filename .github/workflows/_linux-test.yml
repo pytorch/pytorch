@@ -173,7 +173,7 @@ jobs:
           WORKFLOW_NAME: ${{ github.workflow }}
           WORKFLOW_RUN_ID: ${{github.run_id}}
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclass_json
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
