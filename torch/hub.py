@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -784,7 +784,7 @@ def _legacy_zip_load(
     model_dir: str,
     map_location: MAP_LOCATION,
     weights_only: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.
@@ -808,7 +808,7 @@ def load_state_dict_from_url(
     check_hash: bool = False,
     file_name: Optional[str] = None,
     weights_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
