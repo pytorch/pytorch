@@ -152,40 +152,41 @@ class ModelTests(PaddedTensorTestCase):
         super().setUp()
 
     def test_transformer_model(self):
-        with torch.device("cuda"):
-            pad = 4
-            bsz, seqlen = 4, 2 + pad
+        with torch.no_grad():
+            with torch.device("cuda"):
+                pad = 4
+                bsz, seqlen = 4, 2 + pad
 
-            # Set up transformer
-            args = ModelArgs.from_name("stories15M")
-            transformer = Transformer(args)
-            transformer.setup_caches(bsz, seqlen)
+                # Set up transformer
+                args = ModelArgs.from_name("stories15M")
+                transformer = Transformer(args)
+                transformer.setup_caches(bsz, seqlen)
 
-            # Set up inputs
-            inputs = (
-                torch.randint(0, 3, (bsz, seqlen - pad)).to(device="cuda"),
-                torch.randint(0, 3, (seqlen - pad,)).to(device="cuda"),
-            )
+                # Set up inputs
+                inputs = (
+                    torch.randint(0, 3, (bsz, seqlen - pad)).to(device="cuda"),
+                    torch.randint(0, 3, (seqlen - pad,)).to(device="cuda"),
+                )
 
-            inputs_p = [
-                PaddedTensor(inputs[0], [bsz, seqlen], None),
-                PaddedTensor(inputs[1], [seqlen], None, -1),
-            ]
+                inputs_p = [
+                    PaddedTensor(inputs[0], [bsz, seqlen], None),
+                    PaddedTensor(inputs[1], [seqlen], None, -1),
+                ]
 
-            # Run
-            out = transformer(*inputs)
+                # Run
+                out = transformer(*inputs)
 
-            transformer = torch.compile(transformer, mode="reduce-overhead")
-            out_p = transformer(*inputs_p)
-            out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
+                transformer = torch.compile(transformer, mode="reduce-overhead")
+                out_p = transformer(*inputs_p)
+                out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
 
-            # Check
-            self.are_equal(out, out_p)
+                # Check
+                self.are_equal(out, out_p)
 
-            is_out_equal = pytree.tree_map(
-                lambda o, p: torch.allclose(o, p, atol=1e-5), out, out_p
-            )
-            self.assertTrue(is_out_equal)
+                is_out_equal = pytree.tree_map(
+                    lambda o, p: torch.allclose(o, p, atol=1e-5), out, out_p
+                )
+                self.assertTrue(is_out_equal)
 
 
 if __name__ == "__main__":
