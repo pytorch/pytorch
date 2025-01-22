@@ -483,6 +483,23 @@ class ListVariable(CommonListMethodsVariable):
 
 
 class FxImmutableListVariable(ListVariable):
+    def __init__(self, items, **kwargs) -> None:
+        super().__init__(items, **kwargs)
+        self.mutable_methods = {
+            "__delitem__",
+            "__iadd__",
+            "__imul__",
+            "__setitem__",
+            "append",
+            "clear",
+            "extend",
+            "insert",
+            "pop",
+            "remove",
+            "reverse",
+            "sort",
+        }
+
     def python_type(self):
         return torch.fx.immutable_collections.immutable_list
 
@@ -502,6 +519,19 @@ class FxImmutableListVariable(ListVariable):
 
         # Construct the immutable_list
         codegen.extend_output(create_call_function(1, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        if name in self.mutable_methods:
+            # immutable fx list raises NotImplementedError
+            raise_observed_exception(NotImplementedError, tx)
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class DequeVariable(CommonListMethodsVariable):

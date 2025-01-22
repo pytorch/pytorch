@@ -4439,6 +4439,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertTrue(type(ref) is type(res))
 
+    def test_fx_immutable_list_mutation_not_allowed(self):
+        def fn(inputs, x, f=lambda x: x * 2):
+            immutable_inputs = torch.fx.immutable_collections.immutable_list(inputs)
+            try:
+                immutable_inputs.append(x)
+            except NotImplementedError:
+                pass
+            return torch.fx.node.map_aggregate(immutable_inputs, f)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inputs = [torch.randn(4), [torch.randn(4), torch.randn(4)]]
+        x = torch.randn(4)
+
+        self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
+
 
 instantiate_parametrized_tests(FunctionTests)
 
