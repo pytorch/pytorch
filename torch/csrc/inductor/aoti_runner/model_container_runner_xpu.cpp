@@ -23,7 +23,7 @@ std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run_impl(
     at::xpu::XPUStream xpu_stream = c10::xpu::getCurrentXPUStream();
     stream_handle = reinterpret_cast<void*>(&(xpu_stream.queue()));
   }
-  return AOTIModelContainerRunner::run_impl(inputs, stream_handle);
+  return AOTIModelContainerRunner::run_impl(input_handles, stream_handle);
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run_with_xpu_stream(
