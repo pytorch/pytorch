@@ -7,7 +7,8 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
-from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
