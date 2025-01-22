@@ -21,7 +21,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
@@ -403,7 +403,7 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-_CLOSURE_VARS: Optional[Dict[str, object]] = None
+_CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
 def _get_closure_vars():
@@ -455,15 +455,15 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: Union[str | List[str]], guard: Guard
-) -> List[str]:
+    code_parts: Union[str | list[str]], guard: Guard
+) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
 
 
 def convert_to_concrete_values(size_or_stride):
-    converted: List[Optional[int]] = []
+    converted: list[Optional[int]] = []
     for dim in size_or_stride:
         if not is_symbolic(dim):
             converted.append(dim)
@@ -565,7 +565,7 @@ def match_on_id_for_tensor(guard):
 # the original guard object that created it for provenance
 @dataclasses.dataclass
 class GuardCodeList:
-    code_list: List[str]
+    code_list: list[str]
     guard: Guard
 
 
@@ -586,8 +586,8 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
-        local_scope: Dict[str, object],
-        global_scope: Dict[str, object],
+        local_scope: dict[str, object],
+        global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
@@ -595,7 +595,7 @@ class GuardBuilder(GuardBuilderBase):
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -608,19 +608,19 @@ class GuardBuilder(GuardBuilderBase):
             self.scope[name] = package_module
         self.guard_manager = guard_manager
 
-        self.argnames: List[str] = []
+        self.argnames: list[str] = []
         # Code is python expression strings generated for each guard
-        self.code: List[GuardCodeList] = []
+        self.code: list[GuardCodeList] = []
         # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
-        self.shape_env_code: List[GuardCodeList] = []
+        self.shape_env_code: list[GuardCodeList] = []
 
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
-        self.no_tensor_aliasing_names: List[str] = []
-        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
+        self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_guard_managers: list[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -635,13 +635,13 @@ class GuardBuilder(GuardBuilderBase):
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
-        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
+        self.id_matched_objs: dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[
+        self._cached_guard_managers: dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
-        self._cached_duplicate_input_guards: Set[tuple[str, str]] = set()
+        self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -789,7 +789,7 @@ class GuardBuilder(GuardBuilderBase):
         attr_name = source.member
         mod_dict = base_example_value.__dict__
 
-        all_class_attribute_names: Set[str] = set()
+        all_class_attribute_names: set[str] = set()
         for x in inspect.getmro(base_example_value.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -1264,7 +1264,7 @@ class GuardBuilder(GuardBuilderBase):
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
         _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
@@ -1471,6 +1471,16 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
+    def DISPATCH_KEY_SET_MATCH(self, guard: Guard):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch._C.DispatchKeySet)
+        code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
+
+        self.get_guard_manager(guard).add_dispatch_key_set_guard(
+            val, get_verbose_code_parts(code_parts, guard)
+        )
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
@@ -1543,7 +1553,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
-            np_types: tuple[Type[Any], ...] = (
+            np_types: tuple[type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -1849,13 +1859,13 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
-            names: Dict[str, tuple[int, int]] = {}
-            source_pairs: List[tuple[Source, Source]] = []
-            derived_equalities: List[  # type: ignore[type-arg]
+            names: dict[str, tuple[int, int]] = {}
+            source_pairs: list[tuple[Source, Source]] = []
+            derived_equalities: list[  # type: ignore[type-arg]
                 tuple[Source, Union[Source, Symbol], Callable]
             ] = []
-            phantom_symbols: Dict[str, Symbol] = {}
-            relaxed_sources: Set[Source] = set()
+            phantom_symbols: dict[str, Symbol] = {}
+            relaxed_sources: set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -2057,7 +2067,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
-            code: List[str] = []
+            code: list[str] = []
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 terms = [
@@ -2246,8 +2256,8 @@ class PyExprCSEPass:
 
     @dataclasses.dataclass
     class Config:
-        expr_count: Dict[str, int]
-        expr_to_name: Dict[str, str]
+        expr_count: dict[str, int]
+        expr_to_name: dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
         def __init__(self, config: PyExprCSEPass.Config) -> None:
@@ -2267,7 +2277,7 @@ class PyExprCSEPass:
             super().__init__()
             self._config = config
             self._gen_name = gen_name
-            self.preface: List[str] = []
+            self.preface: list[str] = []
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
@@ -2306,7 +2316,7 @@ class PyExprCSEPass:
         self._counter += 1
         return name
 
-    def count(self, exprs: List[str]) -> None:
+    def count(self, exprs: list[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
             try:
@@ -2315,7 +2325,7 @@ class PyExprCSEPass:
                 log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
                 raise
 
-    def replace(self, expr: str) -> tuple[List[str], str]:
+    def replace(self, expr: str) -> tuple[list[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
         new_node = replacer.visit(ast.parse(expr))
         return replacer.preface, _ast_unparse(new_node)
@@ -2358,7 +2368,7 @@ class CheckFunctionManager:
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
-        self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self._weakrefs: dict[int, ReferenceType[object]] = {}
 
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
@@ -2567,7 +2577,7 @@ class CheckFunctionManager:
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
-        aotautograd_guards: List[GuardEnvExpr] = (
+        aotautograd_guards: list[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
             if self.output_graph
             else []
@@ -2702,7 +2712,7 @@ def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     csepass = PyExprCSEPass()
     csepass.count(code_parts)
 
-    def replace(expr: str) -> tuple[List[str], str]:
+    def replace(expr: str) -> tuple[list[str], str]:
         return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
@@ -2778,7 +2788,7 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     """
@@ -2788,11 +2798,11 @@ def get_guard_fail_reason_helper(
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
-    verbose_code_parts: List[str] = []
+    verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
@@ -2846,7 +2856,7 @@ def get_guard_fail_reason_helper(
 def get_guard_fail_reason(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -2869,7 +2879,7 @@ def get_guard_fail_reason(
 
 def get_and_maybe_log_recompilation_reason(
     cache_entry, frame: DynamoFrameType
-) -> List[str]:
+) -> list[str]:
     """
     Return the list of guard failure reasons using cache_entry.
     Logs the recompilation reason if `recompiles` logging is enabled.
@@ -2955,7 +2965,7 @@ def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
 def guard_error_hook(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     index: int,
     last: bool,
 ):
