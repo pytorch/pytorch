@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     BytesIOContext,
     download_file,
     instantiate_parametrized_tests,
+    # IS_CI,
     IS_FBCODE,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
@@ -826,6 +827,11 @@ class SerializationMixin:
             f.seek(0)
             loaded_data = torch.load(f, weights_only=True)
             self.assertEqual(data, loaded_data)
+
+    # @unittest.skipIf(not IS_CI, "only check debug var is set in CI")
+    def test_debug_set_in_ci(self):
+        # This test is to make sure that the serialization debug flag is set in CI
+        self.assertTrue(os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1")
 
 
 class serialization_method:
@@ -4523,25 +4529,40 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
+    def test_has_format_version(self):
+        sd = torch.nn.Linear(2, 3).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with torch.serialization._open_file_like(f, "rb") as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as opened_zipfile:
+                    self.assertTrue(opened_zipfile.has_record(".format_version"))
+                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'0x01')
+
     @parametrize('path_type', (str, Path))
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")
     def test_mmap_load_offset_calculation(self, path_type):
-        m = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+        calculate_offsets_before = serialization_config.load.calculate_storage_offsets
+        try:
+            serialization_config.load.calculate_storage_offsets = True
+            m = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
 
-        with TemporaryFileName() as f:
-            f = path_type(f)
-            state_dict = m.state_dict()
-            torch.save(state_dict, f)
-            result = torch.load(f, mmap=True)
-            result_non_mmap = torch.load(f, mmap=False)
+            with TemporaryFileName() as f:
+                f = path_type(f)
+                state_dict = m.state_dict()
+                torch.save(state_dict, f)
+                result = torch.load(f, mmap=True)
+                result_non_mmap = torch.load(f, mmap=False)
 
-        with torch.device("meta"):
-            model_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
-            model_non_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
-        model_mmap_state_dict.load_state_dict(result, assign=True)
-        model_non_mmap_state_dict.load_state_dict(result_non_mmap, assign=True)
-        inp = torch.randn(4, 4)
-        self.assertEqual(model_mmap_state_dict(inp), model_non_mmap_state_dict(inp.clone()))
+            with torch.device("meta"):
+                model_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+                model_non_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+            model_mmap_state_dict.load_state_dict(result, assign=True)
+            model_non_mmap_state_dict.load_state_dict(result_non_mmap, assign=True)
+            inp = torch.randn(4, 4)
+            self.assertEqual(model_mmap_state_dict(inp), model_non_mmap_state_dict(inp.clone()))
+        finally:
+            serialization_config.load.calculate_storage_offsets = calculate_offsets_before
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
