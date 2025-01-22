@@ -3182,8 +3182,7 @@ class TestCase(expecttest.TestCase):
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
             if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-            elif TEST_WITH_TORCHDYNAMO:
-                # TorchDynamo optimize annotation
+            elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
                     super_run = torch._dynamo.optimize("inductor")(super_run)
                 else:
