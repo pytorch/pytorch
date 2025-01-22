@@ -1869,7 +1869,14 @@ class GraphModuleDeserializer(metaclass=Final):
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
-        log.debug("[deserialize_node] %s: %s(%s, {%s}) -> %s", fx_node.name, fx_node.target, fx_node.args, fx_node.kwargs, fx_node.meta.get("val"))
+        log.debug(
+            "[deserialize_node] %s: %s(%s, {%s}) -> %s",
+            fx_node.name,
+            fx_node.target,
+            fx_node.args,
+            fx_node.kwargs,
+            fx_node.meta.get("val"),
+        )
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
