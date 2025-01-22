@@ -1,7 +1,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, TypeVar, Union
+from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -111,9 +111,9 @@ class _FSDPModMemStats:
 
     def __init__(self, mod_fqn: str) -> None:
         self.mod_fqn = mod_fqn
-        self.local_peak: Dict[torch.device, int] = {}
-        self.snapshots: Dict[
-            _FSDPModState, List[Dict[torch.device, Dict[str, int]]]
+        self.local_peak: dict[torch.device, int] = {}
+        self.snapshots: dict[
+            _FSDPModState, list[dict[torch.device, dict[str, int]]]
         ] = {}
 
 
@@ -169,7 +169,7 @@ class FSDPMemTracker(MemTracker):
         self._in_fake_mode: bool = False
         self._fsdp_mod_to_saved_methods: WeakIdKeyDictionary = WeakIdKeyDictionary()
         self._saved_collectives: _SavedCollectives
-        self._ref_class: Type[_RefType] = _FSDPRefType
+        self._ref_class: type[_RefType] = _FSDPRefType
 
     def _instrument_fsdp_sharded_params_grads(
         self, fsdp_param_group: FSDPParamGroup
@@ -190,8 +190,8 @@ class FSDPMemTracker(MemTracker):
     def _fsdp_state_pre_forward(
         self,
         fsdp_mod: FSDPModule,
-        orig_fsdp_state_pre_fw: Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]],
-    ) -> Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]]:
+        orig_fsdp_state_pre_fw: Callable[_P, tuple[tuple[Unpack[_Ts]], dict[str, Any]]],
+    ) -> Callable[_P, tuple[tuple[Unpack[_Ts]], dict[str, Any]]]:
         # We capture memory snapshots before and after ``FSDPState._pre_forward`` to attribute the `unsharded` params
         # and `all_gather` buffers.  There are three cases:
         # Case 1: If the module is not in the ``memory_tracking`` dictionary, create a new ``_FSDPModMemStats``
@@ -208,7 +208,7 @@ class FSDPMemTracker(MemTracker):
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
             *args: _P.args, **kwargs: _P.kwargs
-        ) -> tuple[tuple[Unpack[_Ts]], Dict[str, Any]]:
+        ) -> tuple[tuple[Unpack[_Ts]], dict[str, Any]]:
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
             assert mod_fqn is not None
             if fsdp_mod not in self.memory_tracking:
@@ -538,7 +538,7 @@ class FSDPMemTracker(MemTracker):
         def barrier(
             group: Union[ProcessGroup, None] = dist.GroupMember.WORLD,
             async_op: bool = False,
-            device_ids: Union[List[int], None] = None,
+            device_ids: Union[list[int], None] = None,
         ) -> Union[Work, None]:
             if self._in_fake_mode:
                 return None
