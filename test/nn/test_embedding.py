@@ -478,6 +478,32 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
+    def test_embedding_indices_larger_than_num_weights(self, device):
+        # Test case from https://github.com/pytorch/pytorch/pull/144760 (only on CPU device)
+        grad = torch.full(
+            (
+                8,
+                0,
+                3,
+                7,
+                6,
+                1,
+                0,
+            ),
+            0,
+            dtype=torch.float,
+        )
+        indices = torch.full((2,), 1250999896764, dtype=torch.long)
+        num_weights = 536870912
+        padding_idx = 0
+        scale_grad_by_freq = True
+        sparse = False
+        if device == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "Index out of range"):
+                torch.ops.aten.embedding_backward(
+                    grad, indices, num_weights, padding_idx, scale_grad_by_freq, sparse
+                )
+
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 1D input separated into bags
     # with an offset array. Compare against an equivalent 2D input that uses
