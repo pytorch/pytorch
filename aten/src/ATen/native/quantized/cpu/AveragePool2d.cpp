@@ -129,6 +129,11 @@ inline std::pair<int, int> get_kernel(IntArrayRef kernel_size) {
   const int kW = kernel_size.size() == 1
       ? kH
       : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  TORCH_CHECK(
+    kH > 0 && kW > 0,
+    "avg_pool2d: kernel must be a positive integer");
+
   return std::make_pair(kW, kH);
 }
 
@@ -140,6 +145,10 @@ inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
   const int dW = stride.empty()
       ? kW
       : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+    
+  TORCH_CHECK(
+      dH > 0 && dW > 0,
+      "avg_pool2d: stride must be a positive integer");
   return std::make_pair(dW, dH);
 }
 
@@ -150,6 +159,11 @@ inline std::pair<int, int> get_padding(IntArrayRef padding) {
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW =
       padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  TORCH_CHECK(
+    padH > 0 && padW > 0,
+    "avg_pool2d: padding must be a positive integer");
+
   return std::make_pair(padW, padH);
 }
 
