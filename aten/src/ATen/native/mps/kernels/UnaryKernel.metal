@@ -68,6 +68,13 @@ struct vectypes<bfloat> {
 };
 #endif
 
+template <>
+struct vectypes<short> {
+  using type4 = short4;
+  using type3 = short3;
+  using type2 = short2;
+};
+
 template <typename T>
 using vec2type_t = typename vectypes<T>::type2;
 
@@ -95,6 +102,10 @@ bfloat dot(bfloat2 a, bfloat2 b) {
   return a.x * b.x + a.y * b.y;
 }
 #endif
+
+short dot(short2 a, short2 b) {
+  return a.x * b.x + a.y * b.y;
+}
 
 template<typename T>
 T complex_div(T a, T b) {
@@ -127,7 +138,6 @@ kernel void tanh_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
       device DTYPE1* input [[buffer(1)]],                                           \
       uint id [[thread_position_in_grid]]);
 
-
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 #endif
@@ -139,3 +149,16 @@ INSTANTIATE_UNARY_KERNELS2(float, char);
 INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
+
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE0, DTYPE1)				\
+  template [[host_name("exp_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void exp_complex_kernel<DTYPE0>(   \
+      device vec2type_t<DTYPE0>* output [[buffer(0)]],                                            \
+      device vec2type_t<DTYPE0>* input [[buffer(1)]],                                           \
+      uint did [[thread_position_in_grid]]);							\
+  template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_complex_kernel<DTYPE0>(   \
+      device vec2type_t<DTYPE0>* output [[buffer(0)]],                                            \
+      device vec2type_t<DTYPE0>* input [[buffer(1)]],                                           \
+      uint did [[thread_position_in_grid]]);
+
+INSTANTIATE_UNARY_KERNELS_VEC2(short, short);
+INSTANTIATE_UNARY_KERNELS_VEC2(float, float);

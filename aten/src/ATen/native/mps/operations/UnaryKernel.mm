@@ -34,7 +34,7 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
     id<MTLComputePipelineState> cplState = nil;
     if (c10::isComplexType(self.scalar_type())) {
       auto scalarStr = self.scalar_type() == kComplexFloat ? "float" : "half";
-      cplState = lib.getPipelineStateForFunc(name + "_complex_kernel", {scalarStr, scalarStr});
+      cplState = lib.getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
     } else {
       cplState = lib.getPipelineStateForFunc(
         fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)));
