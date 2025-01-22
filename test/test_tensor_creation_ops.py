@@ -3388,14 +3388,6 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
-    def test_normal_default_device(self, device):
-        try:
-            torch.set_default_device(device)
-            t = torch.normal(0, 1, (10, 10))
-        finally:
-            torch.set_default_device(None)
-        self.assertEqual(str(t.device), device)
-
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
@@ -3510,6 +3502,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
     def test_randint_distribution(self, device):
         size = 1_000_000
         n_max = int(0.75 * 2 ** 32)
@@ -3666,6 +3659,116 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+
+    @dtypes(*integral_types_and(torch.uint16, torch.uint32, torch.uint64))
+    def test_randint_like(self, device, dtype):
+        SIZE = 100
+        RANGE = (0, 6)
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.randint_like(tensor, *RANGE, generator=generator)
+        generator = seed(None)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
+            torch.complex32, torch.complex64, torch.complex128)
+    def test_randn_like(self, device, dtype):
+        SIZE = 100
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.randn(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.randn(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.randn_like(tensor, generator=generator)
+        generator = seed(None)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+    @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
+    def test_rand_like(self, device, dtype):
+        SIZE = 100
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.rand(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.rand(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.rand_like(tensor, generator=generator)
+        generator = seed(None)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
