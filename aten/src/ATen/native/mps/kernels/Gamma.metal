@@ -17,7 +17,7 @@ template <typename T>
 float LogGamma(const T);
 
 template <typename T>
-T Gamma(const T x) {
+float Gamma(const T x) {
   if (x < 0.001) {
     constexpr float EULER_MASCHERONI = 0.577215664901532860606512090;
     // For small x, 1/Gamma(x) has power series x + gamma x^2  - ...
