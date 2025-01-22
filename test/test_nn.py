@@ -8163,7 +8163,7 @@ class TestNNDeviceType(NNTestCase):
     def test_avg_pool_negatives(self, device):
         x = torch.randn(8, 2, 1, 1, device=device, dtype=torch.float32)
         # Negative stride as in your repro snippet
-        with self.assertRaisesRegex(RuntimeError, r"stride must be a positive integer"):
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
             sym_0 = (8, 2, 1, 1)
             sym_1 = torch.float32
             sym_3 = 0
