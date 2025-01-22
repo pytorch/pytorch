@@ -1285,7 +1285,7 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str, closure_vars: Optional[Dict[str, Any]] = None) -> Any:
+    def get(self, name: str, closure_vars: Optional[dict[str, Any]] = None) -> Any:
         if closure_vars is None:
             closure_vars = _get_closure_vars()
         return eval(name, self.scope, closure_vars)
