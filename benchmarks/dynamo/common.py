@@ -3555,6 +3555,13 @@ def run(runner, args, original_dir=None):
         if args.devices == ["xpu"]:
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            # sizes following #145130 (due to enabling split-k?)
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
