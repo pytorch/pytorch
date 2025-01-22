@@ -373,10 +373,10 @@ def is_pointwise_use(
     Uses in views ops will follow the views uses
     """
 
+    if not use.op == "call_function":
+        return False
     if not (
-        use.op == "call_function"
-        and isinstance(use.target, torch._ops.OpOverload)
-        or use.target is operator.getitem
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
     ):
         return False
 
@@ -479,6 +479,9 @@ def pad_listlike(x: int | Sequence[int], size: int) -> Sequence[int]:
 
 # Used to ensure that iterating over a set is deterministic
 def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
+    if len(x) == 0:
+        return []
+
     def sort_func(elem: _T) -> str:
         if isinstance(elem, str):
             return elem
@@ -556,10 +559,9 @@ def _aggregate_origins(
 
 def get_fused_kernel_name(
     node_schedule: Sequence[BaseSchedulerNode],
-    descriptive_names: bool | Literal["torch", "original_aten", "inductor_node"],
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] | None,
 ) -> str:
-    assert descriptive_names is not True
-    if not descriptive_names:
+    if descriptive_names is None:
         return ""
 
     all_origins = _aggregate_origins(node_schedule)
@@ -679,11 +681,11 @@ def gather_origins(
     from . import ir
 
     def is_unrealized_node(n: IRNode) -> bool:
-        return (
-            (isinstance(n, ir.TensorBox) and is_unrealized_node(n.data))
-            or (isinstance(n, ir.StorageBox) and is_unrealized_node(n.data))
-            or isinstance(n, ir.Pointwise)
-        )
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -1458,7 +1460,7 @@ def use_cpp_gemm_template(
     if not config.cpp.weight_prepack:
         return False
 
-    int8_gemm = mat1.get_dtype() == torch.uint8
+    int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
