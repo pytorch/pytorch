@@ -3504,7 +3504,7 @@ Tensor _weight_int4pack_mm_cpu_tensor(
   TORCH_CHECK(qGroupSize.numel() == 1, __func__, ": qGroupSize should be a scalar tensor.");
   TORCH_CHECK(qGroupSize.scalar_type() == at::kLong,
       __func__, ": qGroupSize should be an int64 tensor, but got ", qGroupSize.scalar_type());
-  int group_size = qGroupSize.item<int64_t>();
+  int64_t group_size = qGroupSize.item<int64_t>();
   return _weight_int4pack_mm_cpu(A, B, group_size, qScaleAndZeros);
 }
 
