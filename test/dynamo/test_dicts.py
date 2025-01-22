@@ -725,6 +725,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         foo.scalar = 12
         self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
+    def test_branch_on_dict(self):
+        def fn(x, d):
+            if d:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(1)
+        d = {}
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, d), opt_fn(x, d))
+
+        d["a"] = 1
+        self.assertEqual(fn(x, d), opt_fn(x, d))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
