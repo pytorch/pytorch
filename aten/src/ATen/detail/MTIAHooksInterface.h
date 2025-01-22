@@ -127,6 +127,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return nullptr;
   }
 
+  virtual DeviceIndex getDeviceCount() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return 0;
+  }
+
 };
 
 struct TORCH_API MTIAHooksArgs {};
