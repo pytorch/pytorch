@@ -8,7 +8,7 @@ import itertools
 import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, List
 from typing_extensions import Never
 from unittest.mock import patch
 
