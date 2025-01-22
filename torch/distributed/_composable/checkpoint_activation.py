@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
-from typing import Any, ContextManager, Dict, Generator, Optional
+from typing import Any, ContextManager, Optional
 
 import torch
 import torch.nn as nn
@@ -85,7 +86,7 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
         )
 
     def forward_pre_hook(
-        module: nn.Module, args: tuple[Any, ...], kwargs: Dict[str, Any]
+        module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> None:
         if checkpoint.state(module).enable_hook:
 
