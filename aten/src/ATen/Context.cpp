@@ -428,10 +428,6 @@ bool Context::hasMKLDNN() {
 #endif
 }
 
-bool Context::hasKleidiAI() {
-  return AT_KLEIDIAI_ENABLED();
-}
-
 bool Context::hasOpenMP() {
 #ifdef _OPENMP
   return true;
