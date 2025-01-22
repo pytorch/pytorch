@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
+
 namespace at::native::mps {
 
 Tensor rms_norm_mps_kernel(const Tensor& input,

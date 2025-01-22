@@ -5,7 +5,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/rms_norm_native.h>
 #endif
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
