@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, List, no_type_check
+from typing import Any, Callable, no_type_check
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
@@ -72,7 +72,7 @@ def _apply_optim_in_backward_hook(
         reducer, process_group = ddp_inst.reducer, ddp_inst.process_group
         fut = reducer._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
-        with torch.get_device_module().stream(optimizer_stream):
+        with optimizer_stream:
             fut.wait()
             # Apply gradient division since C++ side only allreduces and does
             # not average. TODO: (rohan-varma) the div factor may be different
