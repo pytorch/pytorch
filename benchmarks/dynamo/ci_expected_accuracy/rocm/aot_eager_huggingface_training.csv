@@ -30,7 +30,7 @@ BertForQuestionAnswering,pass,5
 
 
 
-BlenderbotForCausalLM,pass,0
+BlenderbotForCausalLM,pass_due_to_skip,0
 
 
 
@@ -38,7 +38,7 @@ BlenderbotSmallForCausalLM,pass,6
 
 
 
-BlenderbotSmallForConditionalGeneration,pass_due_to_skip,8
+BlenderbotSmallForConditionalGeneration,pass,8
 
 
 
