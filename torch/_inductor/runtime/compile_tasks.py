@@ -6,7 +6,7 @@ import sys
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Callable, Dict, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ def _set_triton_ptxas_path() -> None:
 
 
 def _worker_compile_triton(
-    load_kernel: Callable[[], CachingAutotuner], extra_env: Dict[str, str]
+    load_kernel: Callable[[], CachingAutotuner], extra_env: dict[str, str]
 ) -> None:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
