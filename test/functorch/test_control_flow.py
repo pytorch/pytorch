@@ -6986,7 +6986,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
             )
 
-    def test_input_alias(self):
+    def test_input_output_alias(self):
         def fn(f, *args):
             return torch.cond(args[0].sum() > 0, f, f, args)
 
@@ -6997,7 +6997,24 @@ class GraphModule(torch.nn.Module):
             ):
                 torch.compile(fn)(f, x)
 
-    def test_input_mutation(self):
+    def test_input_input_alias(self):
+        def fn(view_f, arg):
+            def f(arg1, arg2):
+                return arg1.cos(), arg2.sin()
+
+            return torch.cond(arg.sum() > 0, f, f, (arg, view_f(arg)))
+
+        x = torch.randn(2, 2)
+        # ALIAS_FN[0] is an identical function, cond optimizes the duplication
+        # as a result of auto lifting.
+        for view_f in ALIAS_FN[1:]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+            ):
+                torch.compile(fn)(view_f, x)
+
+    @parametrize("inference_mode", [True, False])
+    def test_input_mutation(self, inference_mode):
         def fn(view_f, *args):
             def mutate_f(x):
                 v = view_f(x)
@@ -7012,6 +7029,12 @@ class GraphModule(torch.nn.Module):
                 torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
             ):
                 torch.compile(fn)(f, x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+            ):
+                with torch.inference_mode(inference_mode):
+                    torch.compile(fn)(f, x)
 
 
 _hop_schema_test_schema_types = [
