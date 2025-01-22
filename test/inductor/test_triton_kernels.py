@@ -2039,7 +2039,6 @@ def forward(self, arg0_1, arg1_1):
 
     # TODO enable this test case on XPU.
     @requires_cuda
-    @unittest.skip
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
@@ -2194,7 +2193,6 @@ def forward(self, arg0_1, arg1_1):
         res2 = fn_c(x2)
         self.assertEqual(x2 * x2, res2)
 
-    @unittest.skip
     @requires_gpu
     def test_triton_kernel_none_args(self):
         # https://github.com/pytorch/pytorch/issues/115344
@@ -3321,7 +3319,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @unittest.skip
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
