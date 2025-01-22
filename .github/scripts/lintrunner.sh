@@ -6,8 +6,8 @@ CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
 eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
 conda activate "${CONDA_ENV}"
 
-# Use uv to speed up lintrunner init
-python3 -m pip install uv==0.1.45
+# Use uv to speed up lintrunner init, dataclasses_json to avoid unimport error
+python3 -m pip install uv==0.1.45 dataclasses_json
 
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries
