@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -285,7 +285,8 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
-        return {**g.constants, **frozen_params}
+        constants = g.constants or {}
+        return {**constants, **frozen_params}
 
 
 @dataclasses.dataclass
@@ -303,7 +304,7 @@ class CompiledFxGraph(OutputCode):
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
     mutated_input_idxs: OrderedSet[int]
-    constants: Dict[str, torch.Tensor]
+    constants: Optional[Dict[str, torch.Tensor]]
     frozen_param_names: Dict[str, str]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
