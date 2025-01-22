@@ -288,6 +288,7 @@ class TestFxGraphCache(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
     def test_cache_hot_load(self, device, dtype, dynamic):
         """
         Verify that we can populate and hot load functions from the cache.
@@ -364,6 +365,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
     def test_cache_hot_load_pgo(self):
         """
@@ -1026,6 +1028,34 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
         self.assertNotEqual(a, b)
+
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_guard_overspec(self):
+        b = torch.tensor([0, 2, 4, 6, 8])
+
+        @torch.compile
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.isin(x, b)
+
+        model = MyModel()
+
+        counters.clear()
+
+        for i in range(1, 5):
+            model(torch.arange(i))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        counters.clear()
+
+        for i in range(1, 5):
+            model(torch.arange(i))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
