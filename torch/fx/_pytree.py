@@ -1,11 +1,11 @@
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, Optional
 from typing_extensions import deprecated
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import PyTree, TreeSpec
 
 
-FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
+FlattenFuncSpec = Callable[[PyTree, TreeSpec], list]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
 
@@ -15,7 +15,7 @@ FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
     category=FutureWarning,
 )
 def register_pytree_flatten_spec(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn_spec: FlattenFuncSpec,
     flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
 ) -> None:
@@ -39,7 +39,7 @@ def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
     exact_structural_match: bool = False,
-) -> List[Any]:
+) -> list[Any]:
     if not isinstance(spec, TreeSpec):
         assert python_pytree._cxx_pytree_exists, "C++ PyTree is not available"
 
