@@ -15,12 +15,11 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   auto sizes = t->sym_sizes();
   auto strides = t->sym_strides();
 
-  // When we have unbacked symints, this becomes quite complicated
-  // and might result in guard on data dependent errors. For now
-  // let us bail early if there are unbacked symints in either
-  // the sizes or strides.
+  // When we have unbacked symint strides, is_non_overlapping_and_dense
+  // often results in guard on data dependent errors. For now
+  // let us bail early if there are unbacked symint strides.
   for (const auto i : c10::irange(strides.size())) {
-    if (!strides[i].has_hint() || !sizes[i].has_hint()) {
+    if (!strides[i].has_hint()) {
       return MemOverlap::TooHard;
     }
   }
