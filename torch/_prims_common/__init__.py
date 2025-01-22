@@ -455,7 +455,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> List[int]:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        is_unbacked_symint,
+    )
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -501,6 +504,11 @@ def compute_elementwise_output_logical_to_physical_perm(
 
     if is_channels_last and not is_contiguous:
         return [0, *list(range(2, ndim)), 1]
+
+    # Short-circuits if unknown strides (a.k.a all strides are unbacked symints).
+    # The output's strides are still unbacked symints for elementwise ops.
+    if all(is_unbacked_symint(x) for x in tensors[0].stride()):
+        return list(range(ndim))
 
     shape = tensors[0].shape
 

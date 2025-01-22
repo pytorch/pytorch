@@ -974,6 +974,120 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, y_ref)
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_is_contiguous_after_matmul1(self):
+        # We guarantee that the output of matmul is contiguous, so the backward graph should be fully captured.
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                assert grad_x.is_contiguous()
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.sum().backward()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        y2 = opt_fn(x2, W2)
+        y2.sum().backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_call_contiguous_on_grad_with_unknown_strides(self):
+        # Though the grad_output is unknown strides (a.k.a all unbacked symints),
+        # the `coutiguous` call output should be a contiguous tensor.
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                grad_output = grad_output.contiguous()
+                x, weight = ctx.saved_tensors
+                if grad_output.is_contiguous():
+                    grad_x = grad_output.matmul(weight)
+                    grad_weight = grad_output.transpose(0, 1).matmul(x)
+                else:
+                    grad_x = grad_output.matmul(weight) + 0.2
+                    grad_weight = grad_output.transpose(0, 1).matmul(x) + 0.3
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x1 = torch.randn(5, 3, requires_grad=True)
+        x2 = copy.deepcopy(x1)
+        W1 = torch.randn(4, 3, requires_grad=True)
+        W2 = copy.deepcopy(W1)
+
+        y1 = fn(x1, W1)
+        y1.sum().backward()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        y2 = opt_fn(x2, W2)
+        y2.sum().backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(W1.grad, W2.grad)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_call_is_contiguous_on_grad_with_unknown_strides(self):
+        # Calling `is_contiguous` on a grad_output with unknown strides should graph break.
+        class LinearFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                y = x.matmul(weight.t())
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                assert grad_output.is_contiguous()
+                x, weight = ctx.saved_tensors
+                grad_x = grad_output.matmul(weight)
+                grad_weight = grad_output.transpose(0, 1).matmul(x)
+
+                return grad_x, grad_weight
+
+        def fn(x, weight):
+            return LinearFunction.apply(x, weight)
+
+        x = torch.randn(5, 3, requires_grad=True)
+        W = torch.randn(4, 3, requires_grad=True)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Data-dependent jumps in backward graph"
+        ):
+            opt_fn(x, W)
+
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
 

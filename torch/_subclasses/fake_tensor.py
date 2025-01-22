@@ -966,15 +966,14 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or is_sparse_any(t)
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
+    if t._has_symbolic_sizes_strides or is_sparse_any(t):
         memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 
