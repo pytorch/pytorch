@@ -2,7 +2,7 @@
 
 import abc
 from collections.abc import Sequence
-from typing import IO, Type
+from typing import IO
 
 
 # NOTE: everything in this file is experimental, and subject to
@@ -75,9 +75,9 @@ class StreamTransformExtension(Extension):
 class ExtensionRegistry:
     def __init__(self) -> None:
         # Populate default registry contents
-        self.extensions: dict[str, Type[Extension]] = {}
+        self.extensions: dict[str, type[Extension]] = {}
 
-    def register(self, cls: Type[Extension]) -> None:
+    def register(self, cls: type[Extension]) -> None:
         self.extensions[cls.registry_name()] = cls
 
     def from_descriptor_list(self, descriptors: Sequence[str]) -> Sequence[Extension]:
