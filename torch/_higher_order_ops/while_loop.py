@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, List, Tuple, Union
+from typing import Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -33,8 +33,8 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
         if not isinstance(carried_inputs, tuple):
@@ -126,7 +126,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
-    additional_inputs: Tuple = ()
+    additional_inputs: tuple = ()
 
     # The reason we flatten the output before calling into dynamo is that
     # we want to create a consistent input ordering for cond_fn and body_fn.
@@ -330,15 +330,15 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_meta_consistency(
-    lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
-    ) -> List[str]:
+        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    ) -> list[str]:
         def diff_meta(
             lhs: Union[torch.Tensor, torch.SymInt, int],
             rhs: Union[torch.Tensor, torch.SymInt, int],
