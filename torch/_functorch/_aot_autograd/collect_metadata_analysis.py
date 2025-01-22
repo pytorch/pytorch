@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional, Set
+from typing import Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -150,13 +150,13 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[List[int]] = None,
+    static_input_indices: Optional[list[int]] = None,
     pre_dispatch: bool = False,
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
     is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
-    memo: Dict[Tensor, Tensor] = {}
+    memo: dict[Tensor, Tensor] = {}
 
     def _to_fun(t):
         if isinstance(t, Tensor):
@@ -173,8 +173,8 @@ def run_functionalized_fw_and_collect_metadata(
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
-        input_info: List[InputAliasInfo] = []
-        output_info: List[OutputAliasInfo] = []
+        input_info: list[InputAliasInfo] = []
+        output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -275,15 +275,16 @@ def run_functionalized_fw_and_collect_metadata(
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
 
         # Keep track of which outputs alias other outputs
-        out_tensor_alias_counts: DefaultDict = collections.defaultdict(int)
+        out_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
         # This tells us, for a given group of outputs that alias each other,
         # whether they e.g. all came from an unbind call
-        num_aliased_tensors_that_are_multi_output_views: DefaultDict = (
+        num_aliased_tensors_that_are_multi_output_views: collections.defaultdict = (
             collections.defaultdict(int)
         )
 
-        out_storage_to_metadata_key_to_tensors: DefaultDict[
-            Optional[StorageWeakRef], DefaultDict[MetadataKey, Set[torch.Tensor]]
+        out_storage_to_metadata_key_to_tensors: collections.defaultdict[
+            Optional[StorageWeakRef],
+            collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
         curr_storage = None
@@ -382,8 +383,8 @@ def run_functionalized_fw_and_collect_metadata(
                     ].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
-        intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
-        intermediate_bases: List[torch.Tensor] = []
+        intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
+        intermediate_bases: list[torch.Tensor] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
