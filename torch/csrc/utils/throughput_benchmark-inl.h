@@ -8,10 +8,10 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/Parallel.h>
+#include <ATen/autocast_mode.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
-#include <ATen/autocast_mode.h>
 
 namespace torch::throughput_benchmark::detail {
 
