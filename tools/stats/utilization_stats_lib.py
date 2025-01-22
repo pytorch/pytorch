@@ -1,23 +1,21 @@
 from dataclasses import dataclass
-from dataclasses_json import dataclass_json
 from typing import Optional
+
+from dataclasses_json import DataClassJsonMixin
 
 
 _DATA_MODEL_VERSION = 1.0
 
 
 # data model for test log usage
-
 @dataclass
-@dataclass_json
 class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
 
 
 @dataclass
-@dataclass_json
-class UtilizationMetadata:
+class UtilizationMetadata(DataClassJsonMixin):
     level: Optional[str] = None
     workflow_id: Optional[str] = None
     job_id: Optional[str] = None
@@ -31,25 +29,23 @@ class UtilizationMetadata:
     start_at: Optional[float] = None
     error: Optional[str] = None
 
+
 @dataclass
-@dataclass_json
-class GpuUsage:
+class GpuUsage(DataClassJsonMixin):
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
 
 
 @dataclass
-@dataclass_json
-class RecordData:
+class RecordData(DataClassJsonMixin):
     cpu: Optional[UtilizationStats] = None
     memory: Optional[UtilizationStats] = None
     gpu_usage: Optional[list[GpuUsage]] = None
 
 
 @dataclass
-@dataclass_json
-class UtilizationRecord:
+class UtilizationRecord(DataClassJsonMixin):
     level: Optional[str] = None
     timestamp: Optional[float] = None
     data: Optional[RecordData] = None
