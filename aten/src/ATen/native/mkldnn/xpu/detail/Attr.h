@@ -402,10 +402,10 @@ static inline void construct_attr_by_post_op(
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
-    c10::optional<at::Tensor> accum,
-    const c10::string_view& unary_post_op,
+    std::optional<at::Tensor> accum,
+    const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    const c10::string_view& unary_post_op_algorithm,
+    const std::string_view& unary_post_op_algorithm,
     at::native::onednn::Attr& attr) {
   bool is_none_post_op =
       (binary_post_op == "none" && unary_post_op == "none"); // not post-ops
