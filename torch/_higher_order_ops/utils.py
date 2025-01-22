@@ -134,7 +134,7 @@ def _set_compilation_env():
 
 def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
     example_inputs = [
-        ph.meta.get("val", None) for ph in gm.graph.nodes if ph.op == "placeholder"
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
     inp_mutation, _, _ = check_input_alias_and_mutation(gm, example_inputs)
     if len(inp_mutation) > 0:
@@ -149,7 +149,9 @@ def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
 
 
 def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
-    example_inputs = [ph.meta["val"] for ph in gm.graph.nodes if ph.op == "placeholder"]
+    example_inputs = [
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
+    ]
     _, inp_alias_map, _ = check_input_alias_and_mutation(gm, example_inputs)
     if len(inp_alias_map) > 0:
         return True
@@ -165,27 +167,16 @@ def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
     if fake_mode is None:
         tracing_mode = "fake"
 
-    # Note: we need to turn off proxy tensorm mode to avoid tracing the logic where
-    # we wrap real tensors into fake tensors using as_strided().
+    # Note: we need to turn off proxy tensor mode to avoid tracing infra
+    # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
+    # as fake tensor.
     with disable_proxy_modes_tracing():
-        gm = make_fx(
+        return make_fx(
             fn,
             tracing_mode=tracing_mode,
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-
-    def _fill_missing_meta_val_for_constant_phs(gm, inputs):
-        phs = [ph for ph in gm.graph.nodes if ph.op == "placeholder"]
-        assert len(phs) == len(
-            inputs
-        ), f"len(phs):{len(phs)} is not equal to len(inputs):{len(inputs)}"
-        for ph, inp in zip(phs, inputs):
-            if "val" not in ph.meta:
-                ph.meta["val"] = inp
-
-    _fill_missing_meta_val_for_constant_phs(gm, inputs)
-    return gm
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
@@ -566,10 +557,10 @@ def check_input_alias_and_mutation(
         def _tensor_storage(t) -> StorageWeakRef:
             return StorageWeakRef(t._typed_storage())
 
+        # Clone the fake args to avoid mutating the original fake args
         cloned = [
             arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in fake_args
         ]
-        # check tensor mutations via version counter
         before = [_tensor_version(arg) for arg in cloned]
         # We need to temporarily turn inference_mode off because
         # under inference mode, tensor version counter is not tracked.
