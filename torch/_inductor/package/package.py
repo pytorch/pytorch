@@ -180,7 +180,11 @@ def package_aoti(
         "files. You can get this list of files through calling "
         "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
     )
-    assert isinstance(archive_file, (io.IOBase, IO)) or (
+    assert (
+        isinstance(archive_file, (io.IOBase, IO))
+        and archive_file.writable()
+        and archive_file.seekable()
+    ) or (
         isinstance(archive_file, (str, os.PathLike))
         and os.fspath(archive_file).endswith(".pt2")
     ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
@@ -272,7 +276,9 @@ class AOTICompiledModel:
 
 
 def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
-    assert isinstance(path, (io.IOBase, IO)) or (
+    assert (
+        isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
+    ) or (
         isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")
     ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
 
@@ -286,6 +292,6 @@ def load_package(path: FileLike, model_name: str = "model") -> AOTICompiledModel
             loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
-    path = os.fspath(path)
+    path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

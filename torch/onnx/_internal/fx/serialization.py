@@ -177,9 +177,11 @@ def save_model_with_external_data(
                     # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
                     state_dict = torch.load(el, map_location="cpu", mmap=True)
                 except (RuntimeError, ValueError) as e:
-                    if "mmap can only be used with files saved with" in str(
-                        e
-                    ) or isinstance(el, (io.IOBase, IO)):
+                    if "mmap can only be used with files saved with" in str(e) or (
+                        isinstance(el, (io.IOBase, IO))
+                        and el.readable()
+                        and el.seekable()
+                    ):
                         log.warning(
                             "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
                             "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."

@@ -105,7 +105,11 @@ def aoti_compile_and_package(
 
     assert (
         package_path is None
-        or isinstance(package_path, (io.IOBase, IO))
+        or (
+            isinstance(package_path, (io.IOBase, IO))
+            and package_path.writable()
+            and package_path.seekable()
+        )
         or (
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
