@@ -293,7 +293,7 @@ def generate_ttir(
 
     else:
 
-        def get_signature_type(_idx: int, arg: Any) -> str:
+        def get_signature_value(_idx: int, arg: Any) -> str:
             return kernel._type_of(kernel.key_of(arg))
 
     if triton_version_uses_attrs_dict():
