@@ -58,7 +58,7 @@ jobs:
       - name: Install requirements
         shell: bash
         run: |
-          pip install requests==2.32.2 clickhouse-connect==0.7.16
+          pip install requests==2.32.2 clickhouse-connect==0.8.14
       - name: Update slow test file
         shell: bash
         env:
