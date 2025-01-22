@@ -1235,7 +1235,9 @@ class Reduction(Loops):
         num_inner = 0
         for i in indices:
             j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
-            strides = V.graph.sizevars.stride_hints(j, reduction_vars, ranges1.keys())
+            strides = V.graph.sizevars.stride_hints(
+                j, reduction_vars, list(ranges1.keys())
+            )
             outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
