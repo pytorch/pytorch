@@ -3,12 +3,10 @@ import math
 import unittest
 
 import torch
-import os
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
-from torch._dynamo.utils import counters
-
 
 
 def dummy_fn(x):
@@ -247,11 +245,14 @@ class TestInductorConfig(TestCase):
         a_orig = torch.rand(25, dtype=torch.float32, device="cpu")
         b_orig = torch.rand(5, 5, dtype=torch.float32, device="cpu")
 
-        compiled_fn = torch.compile(fn, options={
-                                        "fx_graph_cache":True,
-                                        "fx_graph_remote_cache":False,
-                                        "bundle_triton_into_fx_graph_cache": True,
-                                        })
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "fx_graph_cache": True,
+                "fx_graph_remote_cache": False,
+                "bundle_triton_into_fx_graph_cache": True,
+            },
+        )
 
         a1 = a_orig.clone()
         b1 = b_orig.clone()
@@ -262,31 +263,28 @@ class TestInductorConfig(TestCase):
         eager_result = fn(a1, b1)
         compiled_result = compiled_fn(a2, b2)
         self.assertEqual(eager_result, compiled_result)
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_miss"], 1
-        )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
 
         counters.clear()
 
-        compiled_fn2 = torch.compile(fn2, options={
-                                        "fx_graph_cache":False,
-                                        "fx_graph_remote_cache":False,
-                                        "bundle_triton_into_fx_graph_cache": False,
-                                        })
+        compiled_fn2 = torch.compile(
+            fn2,
+            options={
+                "fx_graph_cache": False,
+                "fx_graph_remote_cache": False,
+                "bundle_triton_into_fx_graph_cache": False,
+            },
+        )
 
         # A first call should do nothing since cache is disabled
         eager_result = fn2(a1, b1)
         compiled_result = compiled_fn2(a2, b2)
         self.assertEqual(eager_result, compiled_result)
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_miss"], 0
-        )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-
-
 
 
 if __name__ == "__main__":
