@@ -12,12 +12,23 @@ MemOverlap has_internal_overlap(const TensorBase& tensor) {
 MemOverlap has_internal_overlap(TensorImpl* t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
+  auto sizes = t->sym_sizes();
+  auto strides = t->sym_strides();
+
+  // When we have unbacked symints, this becomes quite complicated
+  // and might result in guard on data dependent errors. For now
+  // let us bail early if there are unbacked symints in either
+  // the sizes or strides.
+  for (const auto i : c10::irange(strides.size())) {
+    if (!strides[i].has_hint() || !sizes[i].has_hint()) {
+      return MemOverlap::TooHard;
+    }
+  }
+
   if (t->is_non_overlapping_and_dense()) {
     return MemOverlap::No;
   }
 
-  auto strides = t->sym_strides();
-  auto sizes = t->sym_sizes();
   for (const auto i : c10::irange(strides.size())) {
     // NB: The size oblivious test is written very carefully here.  When
     // unbacked SymInts are involved, we should try to conservatively report
