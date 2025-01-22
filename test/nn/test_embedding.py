@@ -480,19 +480,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     def test_embedding_indices_larger_than_num_weights(self, device):
         # Test case from https://github.com/pytorch/pytorch/pull/144760 (only on CPU device)
-        grad = torch.full(
-            (
-                8,
-                0,
-                3,
-                7,
-                6,
-                1,
-                0,
-            ),
-            0,
-            dtype=torch.float,
-        )
+        grad = torch.full((0,), 0)
         indices = torch.full((2,), 1250999896764, dtype=torch.long)
         num_weights = 536870912
         padding_idx = 0
