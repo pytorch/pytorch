@@ -3,8 +3,9 @@ import functools
 import math
 import os
 import sys
+from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Optional
 
 import sympy
 from sympy import Expr
@@ -18,7 +19,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, cache_on_self, normalize_name
+from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -64,7 +65,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
-        self.initialized_kernels: Dict[str, Kernel] = {}
+        self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
@@ -126,17 +127,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
 
-    def get_device_include(self):
-        if V.graph.aot_mode:
-            return f"#include <torch/csrc/inductor/aoti_include/{self.device}.h>"
-        return f"#include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>"
-
     def write_header(self):
         if V.graph.is_const_graph:
             # We do not write header for constant graph, it will be written by main module.
             return
 
-        if not V.graph.aot_mode:
+        if V.graph.aot_mode:
+            self.header.splice(
+                """
+                #include <torch/csrc/inductor/aoti_runtime/interface.h>
+                #include <torch/csrc/inductor/aoti_runtime/model.h>
+                """
+            )
+            with open(
+                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
+            ) as f:
+                self.header.splice(f.read())
+        else:
             self.header.splice(
                 """
                 import torch
@@ -144,17 +151,61 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
+                #include <optional>
+                #include <Python.h>
+
+                #define PYBIND11_SIMPLE_GIL_MANAGEMENT
+                #include <pybind11/gil.h>
+                namespace py = pybind11;
+
+                class RAIIPyObject {
+                public:
+                    RAIIPyObject() : obj_(nullptr) {}
+                    RAIIPyObject(PyObject* obj) : obj_(obj) {}
+                    ~RAIIPyObject() {
+                        Py_XDECREF(obj_);
+                    }
+                    RAIIPyObject& operator=(const RAIIPyObject& other) {
+                        if (this != &other) {
+                            Py_XDECREF(obj_);
+                            obj_ = other.obj_;
+                            Py_XINCREF(obj_);
+                        }
+                        return *this;
+                    }
+                    operator PyObject*() {
+                        return obj_;
+                    }
+                    PyObject* get() {
+                        return obj_;
+                    }
+                private:
+                    PyObject* obj_;
+                };
+
+                #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+                #include <torch/csrc/inductor/aoti_runtime/utils.h>
+                using namespace torch::aot_inductor;
                 """
             )
 
-        self.header.splice(self.get_device_include())
+        self.header.splice(
+            f"""
+            #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+            #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+            #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+            #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
 
-        if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            #include <c10/util/generic_math.h>
+            typedef at::Half half;
+            typedef at::BFloat16 bfloat16;
 
+            // Round up to the nearest multiple of {ALIGN_BYTES}
+            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
+              return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
+            }}
+            """
+        )
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
@@ -378,7 +429,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = ""
+                if config.aot_inductor.compile_wrapper_with_O0:
+                    run_impl_proto += """
+                    #ifdef __clang__
+                    __attribute__((optnone))
+                    #else
+                    __attribute__((optimize("O0")))
+                    #endif
+                    """
+
+                run_impl_proto += """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -391,6 +452,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
+
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
@@ -743,7 +805,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
-            const_index_mapping: List[Optional[tuple[int, str]]] = [None] * len(
+            const_index_mapping: list[Optional[tuple[int, str]]] = [None] * len(
                 V.graph.const_output_index
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
@@ -848,9 +910,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def get_output_refs(self):
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
-    def generate_return(self, output_refs: List[str]):
+    def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
-        output2idx: Dict[str, int] = {}
+        output2idx: dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if output == "nullptr":
                 continue
@@ -1050,7 +1112,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.generate_c_shim_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+        self, kernel: str, out: str, out_view: Optional[str], args: list[str]
     ):
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1204,7 +1266,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_free_by_names(self, names_to_del: List[str]):
+    def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
@@ -1286,7 +1348,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
         )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, allocation_shape=None
+    ):
         orig_stride = stride
         device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
@@ -1386,7 +1450,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, list[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]
@@ -1467,10 +1531,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return final_tmp_name
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
-        """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
-        handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
         )
 
     def codegen_multi_output(self, name, value):
@@ -1625,8 +1687,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         op_overload,
         raw_args,
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -1766,7 +1828,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1979,11 +2041,11 @@ if (custom_op_wrapper.get() == NULL) {
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
+        codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
         # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
@@ -2056,8 +2118,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs
-        output_args: Optional[List[str]] = None,
-        raw_outputs: Optional[List[ir.Buffer]] = None,
+        output_args: Optional[list[str]] = None,
+        raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,

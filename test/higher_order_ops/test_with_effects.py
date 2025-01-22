@@ -4,7 +4,7 @@
 import unittest
 from collections import deque
 from functools import partial
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch._dynamo
@@ -390,7 +390,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return output
 
             def add_hooks(module, config):
-                handles: List[RemovableHandle] = []
+                handles: list[RemovableHandle] = []
                 q = deque([(module.__class__.__name__, module)])
                 while q:
                     name, m = q.pop()

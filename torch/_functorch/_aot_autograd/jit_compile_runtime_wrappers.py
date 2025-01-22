@@ -14,7 +14,7 @@ import logging
 import time
 import traceback
 from contextlib import nullcontext
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils.dlpack
@@ -72,6 +72,10 @@ from .utils import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 zip = strict_zip
 
 log = logging.getLogger(__name__)
@@ -82,10 +86,10 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
-DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
+DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
-def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:
+def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
     """
@@ -96,7 +100,7 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]
 # bits of aot_autograd, and doesn't need to do any specific wrapping.
 def aot_dispatch_export(
     flat_fn: Callable,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -136,7 +140,7 @@ def aot_dispatch_export(
 
 def aot_dispatch_base(
     flat_fn,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -283,11 +287,11 @@ def aot_dispatch_base(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: List[Optional[FakeTensor]],
-    user_fw_outs: List[Optional[FakeTensor]],
-    bw_outs: List[Optional[FakeTensor]],
-    saved_tensors: List[FakeTensor],
-) -> List[int]:
+    fw_ins: list[Optional[FakeTensor]],
+    user_fw_outs: list[Optional[FakeTensor]],
+    bw_outs: list[Optional[FakeTensor]],
+    saved_tensors: list[FakeTensor],
+) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
     an alias of any tensors in fw_ins, user_fw_outs, and bw_outs.
@@ -317,7 +321,7 @@ def collect_bw_donated_buffer_idxs(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     fw_metadata: ViewAndMutationMeta,
-) -> List[int]:
+) -> list[int]:
     """
     Collects backward donated buffer indexes from fw_module and bw_module.
     """
@@ -372,7 +376,7 @@ def collect_bw_donated_buffer_idxs(
 
 def aot_dispatch_autograd(
     flat_fn,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -541,7 +545,7 @@ def aot_dispatch_autograd(
         # and we will end up with a zero grad at x.
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach: List[int] = []
+        _indices_of_inps_to_detach: list[int] = []
 
         # reversed() since we expect output at end of graph
         bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
@@ -888,7 +892,7 @@ def aot_dispatch_autograd(
     )
 
     if config.debug_assert:
-        flat_requires_grad: List[Optional[bool]] = [
+        flat_requires_grad: list[Optional[bool]] = [
             a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
         ]
         compiled_fn = DebugAssertWrapper(

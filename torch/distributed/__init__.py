@@ -79,7 +79,7 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    _breakpoint_cache: typing.Dict[int, typing.Any] = {}
+    _breakpoint_cache: dict[int, typing.Any] = {}
 
     def breakpoint(rank: int = 0, skip: int = 0):
         """
