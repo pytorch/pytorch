@@ -78,12 +78,7 @@ namespace {
       TORCH_CHECK(input.size(1) == grad_output.size(1),
         "adaptive_avg_pool2d_backward(): Expected `grad_output.size(1)` to be ", input.size(1), " but got ", grad_output.size(1));
     }
-    for (const auto i : c10::irange(ndim-2, ndim)) {
-      TORCH_CHECK(grad_output.size(i) > 0,
-        "adaptive_avg_pool2d_backward(): Expected `grad_output` to have non-zero size for non-batch dimensions, "
-        "but `grad_output` has sizes ", grad_output.sizes(), " with dimension ", i, " being "
-        "empty");
-    }
+    adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool2d_backward");
 
     grad_input.resize_(input.sizes(), input.suggest_memory_format());
     grad_input.zero_();
