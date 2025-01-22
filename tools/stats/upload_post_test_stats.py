@@ -25,7 +25,82 @@ from tools.stats.upload_stats_lib import (
 
 USAGE_LOG_FILENAME = "usage_log.txt"
 
-if __name__ == "__main__":
+def unzip_file(path: Path,file_name: str):
+    try:
+        with zipfile.ZipFile(path) as zip_file:
+            # Read the desired file from the zip archive
+            return zip_file.read(name=file_name).decode()
+    except Exception as e:
+        print(f"::warning trying to download test log {object} failed by: {e}")
+        return ""
+
+
+def get_records(workflow_run_id: int,job_id: int, workflow_run_attempt: int):
+    artifact_paths = download_s3_artifacts("logs-test",workflow_run_id,workflow_run_attempt,job_id)
+    if len(artifact_paths) == 0:
+        print(f"Failed to download artifacts for workflow {workflow_run_id} and job {job_id}")
+        return
+    elif len(artifact_paths) > 1:
+        print(f"Found more than one artifact for workflow {workflow_run_id} and job {job_id}, {artifact_paths}")
+        return
+
+    p = artifact_paths[0]
+    test_log_content = unzip_file(p,USAGE_LOG_FILENAME)
+    metadata, records = convertToDataModel(test_log_content)
+    if metadata == None:
+        return
+    print(f"metadata: {metadata}")
+
+def process_line(line: str):
+    try:
+        record = UtilizationRecord.from_json(line)
+        if record.error:
+            return record, False
+        return record, True
+    except Exception as e:
+        print(f"Failed to parse JSON line: {e}")
+        return None, False
+
+def convertToDataModel(content: str):
+    if not content:
+        return None , []
+    lines = content.splitlines()
+    metadata = None
+    if len(lines) < 2:
+        print("Expected at least two records from log file")
+        return None, []
+    print(f"peek metadata json: {lines[0]}")
+    print(f"peek log record json: {lines[1]}")
+
+    try:
+        metadata = UtilizationMetadata.from_json(lines[0])
+    except Exception as e:
+        print(f"Failed to parse metadata: {e} for data: {lines[0]}")
+        return None, []
+
+    if metadata.data_model_version != getDataModelVersion():
+        print(f"Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}")
+        return None, []
+
+    result_logs, _ = process_utilization_records(lines)
+
+    if result_logs:
+        return metadata,result_logs
+    return metadata, []
+
+def process_utilization_records(lines: list[str]) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
+    results = [process_line(line) for line in lines[1:]]
+    valid_records = [record for record, valid in results if valid and record is not None]
+    invalid_records = [record for record, valid in results if not valid and record is not None]
+    return valid_records, invalid_records
+
+def parse_args()-> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments.
+    """
     parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
@@ -63,85 +138,18 @@ if __name__ == "__main__":
         required=True,
         help="Head repository of the workflow",
     )
-
-    args = parser.parse_args()
-
-    print(f"Workflow id is: {args.workflow_run_id}")
-
-    # Flush stdout so that any errors in the upload show up last in the logs.
-    sys.stdout.flush()
-
-
-def unzip_file(path: Path,file_name: str) -> str:
-    try:
-        with zipfile.ZipFile(path) as zip_file:
-            # Read the desired file from the zip archive
-            return zip_file.read(name=file_name).decode()
-    except Exception as e:
-        print(f"::warning trying to download test log {object} failed by: {e}")
-        return ""
-
-def getTestLog(workflow_run_id: int,job_id: int, workflow_run_attempt: int):
-    artifact_paths = download_s3_artifacts("logs-test",workflow_run_id,workflow_run_attempt,job_id)
-    if len(artifact_paths) == 0:
-        print(f"Failed to download artifacts for workflow {workflow_run_id} and job {job_id}")
-        return
-    elif len(artifact_paths) > 1:
-        print(f"Found more than one artifact for workflow {workflow_run_id} and job {job_id}, {artifact_paths}")
-        return
-
-    p = artifact_paths[0]
-    test_log_content = unzip_file(p,USAGE_LOG_FILENAME)
-    metadata, records = convertToDataModel(test_log_content)
-    if metadata == None:
-        return
-    print(f"metadata: {metadata}")
-
+    return parser.parse_args()
 
 def prepareDbBatchInsertion(metadata: UtilizationMetadata, records: list[UtilizationRecord]):
-
     pass
 
-
-def process_line(line: str) -> tuple[Optional[UtilizationRecord], bool]:
-    try:
-        record = UtilizationRecord.from_json(line)
-        if record.error:
-            return record, False
-        return record, True
-    except Exception as e:
-        print(f"Failed to parse JSON line: {e}")
-        return None, False
-
-def convertToDataModel(content: str) -> tuple[Optional[UtilizationMetadata], list[UtilizationRecord]]:
-    if not content:
-        return None , []
-    lines = content.splitlines()
-    metadata = None
-    if len(lines) < 2:
-        print("Expected at least two records from log file")
-        return None, []
-    print(f"peek metadata json: {lines[0]}")
-    print(f"peek log record json: {lines[1]}")
-
-    try:
-        metadata = UtilizationMetadata.from_json(lines[0])
-    except Exception as e:
-        print(f"Failed to parse metadata: {e} for data: {lines[0]}")
-        return None, []
-
-    if metadata.data_model_version != getDataModelVersion():
-        print(f"Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}")
-        return None, []
-
-    result_logs, _ = process_utilization_records(lines)
-
-    if result_logs:
-        return metadata,result_logs
-    return metadata, []
-
-def process_utilization_records(lines: list[str]) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
-    results = [process_line(line) for line in lines[1:]]
-    valid_records = [record for record, valid in results if valid and record is not None]
-    invalid_records = [record for record, valid in results if not valid and record is not None]
-    return valid_records, invalid_records
+if __name__ == "__main__":
+    args = parse_args()
+    print(f"Workflow id is: {args.workflow_run_id}")
+    workflow_run_id =
+    job_id = 35805057544
+    workflow_name = "inductor"
+    workflow_run_attempt = 1
+    get_records(args.workflow_run_id,args.job_id,args.workflow_run_attempt)
+    # Flush stdout so that any errors in the upload show up last in the logs.
+    sys.stdout.flush()
