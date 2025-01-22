@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel"""
 
+import copy
 import logging
 import math
 from collections.abc import Sequence
@@ -960,7 +961,8 @@ def lower_cpu(
     #       qk_data = torch.where(mask, qk_data, torch.full_like(qk_data, -float("inf")))
     #       return qk_data
     def convert_mask_graph_module(mask_graph):
-        graph = mask_graph.graph_module.graph
+        gm = copy.deepcopy(mask_graph.graph_module)
+        graph = gm.graph
         # Add qk_data as the first input
         with graph.inserting_before(next(iter(graph.nodes))):
             qk_data_node = graph.placeholder("qk_data")
@@ -995,7 +997,7 @@ def lower_cpu(
         output_node.args = (where_node,)
 
         graph.lint()
-        converted = torch.fx.GraphModule(mask_graph.graph_module, graph)
+        converted = torch.fx.GraphModule(gm, graph)
         return converted
 
     converted_mask_graph_module = convert_mask_graph_module(mask_graph)
