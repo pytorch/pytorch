@@ -502,10 +502,10 @@ class _TargetExpr(PatternExpr):
             return f"[{first_repr}, ...]"
         elif self.fns[0] is getattr(torch, first_repr, None):
             return f"torch.{first_repr}"
-        elif isinstance(self.fns[0], torch._ops.OpOverload):
-            return str(self.fns[0])
         elif self.fns[0] is getattr(operator, first_repr, None):
             return f"operator.{first_repr}"
+        elif isinstance(self.fns[0], torch._ops.OpOverload):
+            return str(self.fns[0])
         else:
             return first_repr
 
