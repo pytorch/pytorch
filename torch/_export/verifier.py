@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
+import builtins
 import inspect
 import math
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Tuple, Type, TYPE_CHECKING
+from typing import Any, final, TYPE_CHECKING
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
@@ -12,6 +13,7 @@ from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
     SymIntArgument,
+    SymFloatArgument,
     SymBoolArgument,
     TensorArgument,
     TokenArgument,
@@ -81,7 +83,7 @@ def _check_torch_fn(node: torch.fx.Node) -> None:
         raise SpecViolationError(f"Node.meta {node.name} has invalid torch_fn field {torch_fn}")
 
 class _VerifierMeta(type):
-    _registry: Dict[str, Type['Verifier']] = {}
+    _registry: dict[str, type['Verifier']] = {}
 
     def __new__(metacls, name, bases, attrs):
         if bases:
@@ -111,7 +113,7 @@ def getattr_recursive(obj: Any, target: str) -> Any:
 class Verifier(metaclass=_VerifierMeta):
     dialect = "ATEN"
 
-    def allowed_builtin_ops(self) -> List:
+    def allowed_builtin_ops(self) -> list:
         return [
             operator.getitem,
             operator.add,
@@ -136,12 +138,13 @@ class Verifier(metaclass=_VerifierMeta):
             math.floor,
             math.trunc,
             round,
+            builtins.getattr,
         ]
 
-    def allowed_op_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_op_types(self) -> tuple[type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
 
-    def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_getattr_types(self) -> tuple[type[Any], ...]:
         return (torch.fx.GraphModule,)
 
     def check_valid_op(self, op):
@@ -160,18 +163,18 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
-        def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
+        def _allowed_getattr_types() -> tuple[type[Any], ...]:
             ret = self.allowed_getattr_types()
             assert not any(t is object for t in ret)
             return ret
 
         def _check_valid_op(op) -> None:
-            def _allowed_builtin_ops() -> List:
+            def _allowed_builtin_ops() -> list:
                 ret = self.allowed_builtin_ops()
                 assert all(inspect.isbuiltin(op) for op in ret)
                 return ret
 
-            def _allowed_op_types() -> Tuple[Type[Any], ...]:
+            def _allowed_op_types() -> tuple[type[Any], ...]:
                 ret = self.allowed_op_types()
                 assert not any(t is object for t in ret)
                 return ret
@@ -310,7 +313,7 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
-        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument)):
             if input_spec.arg.name != node:
                 raise SpecViolationError(
                     f"Input spec name {input_spec.arg.name} does not match node name {node}"
@@ -423,7 +426,7 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     num_tokens = len(gs.output_tokens)
     end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
-    mutate_nodes: List[str] = output_nodes[num_tokens:end]
+    mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:
@@ -455,7 +458,7 @@ def _verify_exported_program_signature(exported_program) -> None:
             )
 
 
-def load_verifier(dialect: str) -> Type[Verifier]:
+def load_verifier(dialect: str) -> type[Verifier]:
     if dialect == "ATEN" or dialect == "":
         return _VerifierMeta._registry.get(dialect, Verifier)
     return _VerifierMeta._registry[dialect]

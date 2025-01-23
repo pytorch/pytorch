@@ -1,11 +1,13 @@
+import atexit
 import collections
 import dataclasses
 import functools
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -41,7 +43,7 @@ class ConfigChange(BinarySubsystem):
 
 
 # Dictionary of backend -> subsystems
-BACKENDS: Dict[str, List[Subsystem]] = {
+BACKENDS: dict[str, list[Subsystem]] = {
     # run dynamo without aot_autograd
     "eager": [],
     # run dynamo with aot_autograd, but no partitioner or decomps
@@ -66,8 +68,8 @@ BACKENDS: Dict[str, List[Subsystem]] = {
     ],  # TODO - add more - fusions ?
 }
 
-subsystem_call_counter: Dict[str, int] = collections.Counter()
-call_counter_debug_info: Dict[int, str] = {}
+subsystem_call_counter: dict[str, int] = collections.Counter()
+call_counter_debug_info: dict[int, str] = {}
 
 
 def reset_counters() -> None:
@@ -114,18 +116,20 @@ class CompilerBisector:
 
     bisection_enabled: bool = False
 
-    @classmethod
-    def get_dir(cls) -> str:
-        return f"{cache_dir()}/{SUBDIR_NAME}"
+    in_process_cache: Optional[str] = None
 
     @classmethod
-    def write_lines_to_file(cls, file_path: str, lines: List[str]) -> None:
+    def get_dir(cls) -> str:
+        return f"{cache_dir() if not cls.in_process_cache else cls.in_process_cache}/{SUBDIR_NAME}"
+
+    @classmethod
+    def write_lines_to_file(cls, file_path: str, lines: list[str]) -> None:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as file:
             file.writelines(lines)
 
     @classmethod
-    def read_lines_from_file(cls, file_path: str) -> List[str]:
+    def read_lines_from_file(cls, file_path: str) -> list[str]:
         if os.path.exists(file_path):
             with open(file_path) as file:
                 return file.readlines()
@@ -150,7 +154,7 @@ class CompilerBisector:
 
     @classmethod
     def set_config_values(
-        cls, backend: str, subsystem: str, config_data: Dict[str, object]
+        cls, backend: str, subsystem: str, config_data: dict[str, object]
     ) -> None:
         file_path = os.path.join(cls.get_dir(), backend, f"{subsystem}_config.txt")
         lines = [f"{k}={v}\n" for k, v in config_data.items()]
@@ -229,7 +233,7 @@ class CompilerBisector:
     @classmethod
     def get_bisect_range(
         cls, backend_name: str, subsystem_name: str
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_bisect_range.txt"
         )
@@ -263,7 +267,7 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_config_change(cls, config_name: str) -> Optional[Dict[str, object]]:
+    def get_config_change(cls, config_name: str) -> Optional[dict[str, object]]:
         backend = cls.get_backend()
         subsystem = cls.get_subsystem()
 
@@ -285,8 +289,10 @@ class CompilerBisector:
 
     @classmethod
     def delete_bisect_status(cls) -> None:
-        if os.path.exists(cls.get_dir()):
-            shutil.rmtree(cls.get_dir())
+        # in process_cache we have created if it exists, just the subdirectory of non created dir
+        dir_name = cls.in_process_cache if cls.in_process_cache else cls.get_dir()
+        if os.path.exists(dir_name):
+            shutil.rmtree(dir_name)
             print("Bisection status deleted.")
         else:
             print("No bisection status found.")
@@ -485,14 +491,21 @@ class CompilerBisector:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
             cls.bisection_enabled = True
+            cls.in_process_cache = tempfile.mkdtemp()
 
-            # TODO - cli interface, and in-process different directories
+            def cleanup() -> None:
+                cls.bisection_enabled = bisection_enabled_orig
+                cls.delete_bisect_status()
+                cls.in_process_cache = None
+
+            cleanup_handler = atexit.register(cleanup)
+
             class DisableBisect:
                 def __del__(self) -> None:
-                    cls.bisection_enabled = bisection_enabled_orig
-                    cls.delete_bisect_status()
+                    cleanup()
+                    atexit.unregister(cleanup_handler)
 
-            cleanup = DisableBisect()
+            _cleanup = DisableBisect()
 
         curr_backend = cls.get_backend()
         curr_subsystem_name = cls.get_subsystem()

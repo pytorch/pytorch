@@ -12,10 +12,10 @@ on:
         type: boolean
         default: true
       inference:
-        description: Run inference (off by default)?
+        description: Run inference (on by default)?
         required: false
         type: boolean
-        default: false
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -44,6 +44,7 @@ jobs:
         { include: [
           { config: "perf_smoketest", shard: 1, num_shards: 1, runner: "macos-m1-14" },
         ]}
+    secrets: inherit
 
   macos-perf-py3-arm64-test:
     name: macos-perf-py3-arm64-mps
@@ -54,3 +55,6 @@ jobs:
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-perf-py3-arm64-build.outputs.test-matrix }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit

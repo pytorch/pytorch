@@ -1,18 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Literal,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import Protocol
 from unittest.mock import patch
 
@@ -51,8 +39,7 @@ def _arg_str(a) -> str:
 # implementations make heavy use of __getattr__ magic, and pre-existing
 # stubs for methods would interfere with this mechanism.
 #
-# TODO: A superclass that does desugaring for operations like
-# reciprocal/square might be useful.
+# See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
@@ -244,7 +231,7 @@ class OpsHandler(Protocol[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, Tuple[T, ...]]:
+    ) -> Union[T, tuple[T, ...]]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -269,10 +256,10 @@ class OpsHandler(Protocol[T]):
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
-        values: Tuple[T, ...],
-    ) -> Tuple[T, ...]:
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
+        values: tuple[T, ...],
+    ) -> tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
         """
@@ -281,11 +268,11 @@ class OpsHandler(Protocol[T]):
 
     def sort(
         self,
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[T, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[T, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[T, ...]:
+    ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
         """
@@ -294,11 +281,11 @@ class OpsHandler(Protocol[T]):
     def bucketize(
         self,
         values: T,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
@@ -761,15 +748,15 @@ class NoopHandler:
         return None
 
     @staticmethod
-    def frexp(x) -> Tuple[None, None]:
+    def frexp(x) -> tuple[None, None]:
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
+    def scan(dtypes, combine_fn, values) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
-    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -915,8 +902,8 @@ class KernelFormatterHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, Tuple[str, ...]],
-    ) -> Union[str, Tuple[str, ...]]:
+        value: Union[str, tuple[str, ...]],
+    ) -> Union[str, tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -963,7 +950,7 @@ def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
 class OpCountResult(NamedTuple):
     num_ops: int
     used_ops: OrderedSet[str]
-    read_buffers: List[str]
+    read_buffers: list[str]
     nontrivial_read_count: int
 
 
@@ -975,8 +962,8 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
-        self._used_ops: OrderedSet[str] = OrderedSet()
-        self._read_names: List[str] = []
+        self._used_ops = OrderedSet[str]()
+        self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
     def __getattr__(self, name):
@@ -1019,11 +1006,11 @@ class OpCounterCSE:
     def bucketize(
         self,
         values: T,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[T] = None,
     ) -> T:
         """
@@ -1078,7 +1065,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
 
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.cse_cache: dict[str, Union[T, tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

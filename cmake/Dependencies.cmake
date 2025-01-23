@@ -500,7 +500,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
   endif()
 
-  if(NOT TARGET XNNPACK)
+  if(NOT TARGET XNNPACK OR NOT TARGET microkernels-prod)
     set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
@@ -539,6 +539,12 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+    if(Win32)
+      # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
+      # Windows runtime has provided the math functions - #134989
+      set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
+    endif()
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
@@ -548,16 +554,19 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   add_library(XNNPACK SHARED IMPORTED)
+  add_library(microkernels-prod SHARED IMPORTED)
   find_library(XNNPACK_LIBRARY XNNPACK)
+  find_library(microkernels-prod_LIBRARY microkernels-prod)
   set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
-  if(NOT XNNPACK_LIBRARY)
+  set_property(TARGET microkernels-prod PROPERTY IMPORTED_LOCATION "${microkernels-prod_LIBRARY}")
+  if(NOT XNNPACK_LIBRARY or NOT microkernels-prod_LIBRARY)
     message(FATAL_ERROR "Cannot find XNNPACK")
   endif()
   message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 endif()
 
 # ---[ Vulkan deps
@@ -993,31 +1002,6 @@ endif()
 
 # ---[ HIP
 if(USE_ROCM)
-  # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
-  # Currently only active for Ubuntu 20.04 and greater versions.
-  if(UNIX AND EXISTS "/etc/os-release")
-    file(STRINGS /etc/os-release OS_RELEASE)
-    set(DISTRO_NAME "")
-    set(DISTRO_VERSION "")
-    foreach(line ${OS_RELEASE})
-      string(REGEX MATCH "^NAME=" DISTRO_NAME_MATCH ${line})
-      if(NOT DISTRO_NAME_MATCH STREQUAL "")
-        string(REGEX REPLACE "^NAME=\"(.*)\"" "\\1" DISTRO_NAME ${line})
-      endif()
-      string(REGEX MATCH "^VERSION_ID=" DISTRO_VERSION_MATCH ${line})
-      if(NOT DISTRO_VERSION_MATCH STREQUAL "")
-        string(REGEX REPLACE "^VERSION_ID=\"(.*)\"" "\\1" DISTRO_VERSION ${line})
-      endif()
-    endforeach()
-    if(DISTRO_NAME STREQUAL "Ubuntu" AND DISTRO_VERSION VERSION_GREATER_EQUAL "20.04")
-      find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
-      if(LIBTINFO_LOC)
-        get_filename_component(LIBTINFO_LOC_PARENT ${LIBTINFO_LOC} DIRECTORY)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath-link,${LIBTINFO_LOC_PARENT}")
-      endif()
-    endif()
-  endif()
-
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -1042,8 +1026,15 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    if(HIPBLASLT_VEC_EXT)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
+    endif()
+    list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     if(HIP_NEW_TYPE_ENUMS)
       list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
+    endif()
+    if(WIN32)
+      add_definitions(-DROCM_ON_WINDOWS)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1073,7 +1064,9 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
+    if(UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
+    endif(UNIX)
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1308,28 +1301,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   endif()
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
-endif()
-
-# --[ x86-simd-sort integration
-if(USE_X86_SIMD_SORT)
-  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(WARNING
-      "x64 operating system is required for x86-simd-sort. "
-      "Not compiling with x86-simd-sort. "
-      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
-    set(USE_X86_SIMD_SORT OFF)
-  endif()
-
-  if(USE_X86_SIMD_SORT)
-    if(USE_OPENMP AND NOT MSVC)
-      set(USE_XSS_OPENMP ON)
-    else()
-      set(USE_XSS_OPENMP OFF)
-    endif()
-
-    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
-    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
-  endif()
 endif()
 
 # --[ ATen checks
@@ -1581,7 +1552,7 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if((NOT USE_XPU) OR WIN32)
+  if((NOT USE_XPU) OR (NOT XPU_ENABLE_KINETO))
     set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")

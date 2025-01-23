@@ -16,7 +16,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
-from .variables import NewCellVariable
+from .variables import CellVariable
 from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
 
@@ -152,7 +152,7 @@ class ComptimeContext:
         var = tx.symbolic_locals[name]
 
         # Auto-dereference when accessing cell locals in python.
-        if isinstance(var, NewCellVariable):
+        if isinstance(var, CellVariable):
             return ComptimeVar(tx.output.side_effects.load_cell(var))
 
         return ComptimeVar(var)
@@ -380,7 +380,7 @@ class _Comptime:
         """
 
         def inner(inner_ctx):
-            ctx = inner_ctx.parent()
+            ctx = inner_ctx.parent()  # noqa: F841
             builtins.breakpoint()
 
         comptime(inner)

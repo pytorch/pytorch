@@ -2,7 +2,9 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import io
 import itertools
+import json
 import logging
 import os
 import os.path
@@ -10,7 +12,8 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
+from collections.abc import Iterator
+from typing import Any, Callable, IO, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -21,6 +24,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -36,7 +40,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-SchedulerNodeList = List[Any]
+SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
@@ -51,7 +55,7 @@ def has_dot() -> bool:
 
 
 def draw_buffers(
-    nodes: List[BaseSchedulerNode],
+    nodes: list[BaseSchedulerNode],
     print_graph: bool = False,
     fname: Optional[str] = None,
 ) -> None:
@@ -96,7 +100,7 @@ def draw_buffers(
     )
 
 
-def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
@@ -196,7 +200,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 def update_orig_fx_node_name_to_buf_name(
     nodes: Optional[SchedulerNodeList],
-    node_name_to_buf_name: Dict[str, str],
+    node_name_to_buf_name: dict[str, str],
     parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
 ) -> None:
@@ -230,12 +234,12 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: Dict[str, str]
-) -> Dict[str, BufMeta]:
+    node_name_to_buf_name: dict[str, str]
+) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
-            buf_name_to_n_node[buf_name] = {node_name}
+            buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
             buf_name_to_n_node[buf_name].add(node_name)
 
@@ -253,7 +257,7 @@ def annotate_orig_fx_with_snodes(
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
-    node_name_to_buf_name: Dict[str, str] = {}
+    node_name_to_buf_name: dict[str, str] = {}
     update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
     if node_name_to_buf_name is None:
         return
@@ -306,6 +310,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
+    _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -421,7 +426,7 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[Any],
     ) -> None:
@@ -470,7 +475,7 @@ class DebugFormatter:
     def fx_graph(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_dir = None
@@ -500,7 +505,7 @@ class DebugFormatter:
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
-        inputs: List[torch.Tensor],
+        inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -543,19 +548,24 @@ class DebugFormatter:
     def output_code(self, filename: str) -> None:
         shutil.copy(filename, self.filename("output_code.py"))
 
+    def log_inductor_triton_kernel_to_post_grad_node_info(
+        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+    ) -> None:
+        with self.fopen(filename, "w") as fd:
+            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+
     def log_autotuning_results(
         self,
         name: str,
-        input_nodes: List[ir.IRNode],
-        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        input_nodes: list[ir.IRNode],
+        timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
     ) -> None:
-        import json
-
         from .ir import FixedLayout
 
-        def build_node_info(node: ir.IRNode) -> Dict[str, str]:
+        def build_node_info(node: ir.IRNode) -> dict[str, str]:
             if hasattr(node, "name"):
                 node_name = node.name
             else:
@@ -565,7 +575,7 @@ class DebugFormatter:
                 "type": type(node).__name__,
             }
             try:
-                layout = node.get_layout()
+                layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
                     offset = 0
                     try:
@@ -580,36 +590,36 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(V.graph.sizevars.size_hints(layout.size)),
-                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        size=[*V.graph.sizevars.size_hints(layout.size)],
+                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
                 else:
-                    node_info["layout"] = str(node.get_layout())
-            except Exception as e:
+                    node_info["layout"] = str(layout)
+            except Exception:
                 pass
             try:
                 node_info["dtype"] = str(node.get_dtype())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["device"] = str(node.get_device())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["stride"] = str(
                     V.graph.sizevars.size_hints(node.get_stride())
                 )
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
-            except Exception as e:
+            except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
                 node_info["data"] = build_node_info(node.data)
@@ -710,3 +720,41 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
+
+
+def aot_inductor_minifier_wrapper(
+    func: Callable[..., str],
+    exported_program: torch.export.ExportedProgram,
+    *,
+    inductor_configs: dict[str, Any],
+    package_path: Optional[Union[str, io.BytesIO]] = None,
+) -> str:
+    from torch._inductor import config
+
+    use_minifier = config.aot_inductor.dump_aoti_minifier
+
+    gm = exported_program.module()
+    assert isinstance(gm, torch.fx.GraphModule)
+
+    args, kwargs = exported_program.example_inputs
+
+    try:
+        return func(
+            gm,
+            args,
+            kwargs,
+            inductor_configs=inductor_configs,
+            package_path=package_path,
+            load_and_run=use_minifier,
+        )
+    except Exception as e:
+        if use_minifier:
+            # TODO: check accuracy and re-direct to minifier
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            dump_to_minify(
+                exported_program,
+                "compile_fx_aot",
+                options=inductor_configs,
+            )
+        raise e

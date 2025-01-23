@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 import unittest
-from typing import Any, Dict, Optional, OrderedDict, Tuple
+from collections import OrderedDict
+from typing import Any, Optional
 
 import torch
 from torch._export.passes.lift_constants_pass import (
@@ -33,9 +34,9 @@ class GraphBuilder:
         self.graph = torch.fx.Graph()
         self.nodes = {}
         self.values = {}
-        self.nn_module_stack_key: Dict[str, int] = {}
+        self.nn_module_stack_key: dict[str, int] = {}
         self.latest_id = 0
-        self.input_to_kind: Dict[torch.fx.Node, InputKind] = {}
+        self.input_to_kind: dict[torch.fx.Node, InputKind] = {}
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
@@ -86,7 +87,7 @@ class GraphBuilder:
 
     def create_nn_module_stack(
         self, module_fqn: str
-    ) -> OrderedDict[int, Tuple[str, type]]:
+    ) -> OrderedDict[int, tuple[str, type]]:
         cur_name = ""
         nn_module_stack = OrderedDict()
         for atom in module_fqn.split("."):

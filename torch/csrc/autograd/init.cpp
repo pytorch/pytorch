@@ -131,6 +131,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!ParameterClass)
     return nullptr;
 
+  py::class_<at::TensorGeometry>(m, "TensorGeometry")
+      .def("sizes", &at::TensorGeometry::sizes)
+      .def("strides", &at::TensorGeometry::strides)
+      .def("storage_offset", &at::TensorGeometry::storage_offset);
+
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
       .def("name", [](const LegacyEvent& e) { return e.name(); })
@@ -539,7 +544,7 @@ static PyObject* set_autocast_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
+      {"set_autocast_enabled(std::string_view device_type, bool enabled)",
        "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -562,7 +567,7 @@ static PyObject* is_autocast_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"is_autocast_enabled(c10::string_view device_type)",
+      {"is_autocast_enabled(std::string_view device_type)",
        "is_autocast_enabled()"}); // this signature is depracated.
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -585,7 +590,7 @@ static PyObject* get_autocast_dtype(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"get_autocast_dtype(c10::string_view device_type)"});
+      {"get_autocast_dtype(std::string_view device_type)"});
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -600,7 +605,7 @@ static PyObject* set_autocast_dtype(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"set_autocast_dtype(c10::string_view device_type, ScalarType dtype)"});
+      {"set_autocast_dtype(std::string_view device_type, ScalarType dtype)"});
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -632,7 +637,7 @@ static PyObject* is_autocast_available(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_is_autocast_available(c10::string_view device_type)"});
+      {"_is_autocast_available(std::string_view device_type)"});
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -1135,7 +1140,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1159,7 +1164,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1225,10 +1230,9 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == std::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1241,10 +1245,9 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == std::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;

@@ -115,12 +115,13 @@ inline Tensor new_qtensor(
   // TODO: why isn't this just using GetAllocator
   if (device.is_cuda()) {
     allocator = at::detail::getCUDAHooks().getCUDADeviceAllocator();
+  } else if (at::accelerator::isAccelerator(device.type())) {
+    TORCH_INTERNAL_ASSERT(!device.is_cuda(), "CUDA should already get the allocator.");
+    allocator = at::GetAllocator(device.type());
   } else if (device.is_cpu()) {
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
-  } else if (device.is_privateuseone()) {
-    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }
@@ -365,9 +366,7 @@ Tensor from_blob_quantized_per_tensor_affine(
   const auto ndim = sizes.size();
   if (ndim > 0) {
     strides.resize(ndim);
-    // NOLINTNEXTLINE
-    int32_t i = ndim - 1;
-    // NOLINTNEXTLINE
+    int64_t i = static_cast<int64_t>(ndim - 1);
     strides[i] = 1;
     while (--i >= 0) {
       strides[i] = sizes[i + 1] * strides[i + 1];

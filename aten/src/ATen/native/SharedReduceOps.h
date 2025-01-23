@@ -63,7 +63,7 @@ inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
 #define compat_pow std::pow
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace detail {
 
@@ -539,7 +539,7 @@ struct MinMaxOps {
 #endif
 };
 
-}} // namespace at::native
+} // namespace at::native
 
 #undef MAX
 #undef MIN

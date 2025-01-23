@@ -14,7 +14,7 @@ import logging
 import time
 import traceback
 from contextlib import nullcontext
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils.dlpack
@@ -36,7 +36,6 @@ from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
     AOTAutogradCacheEntry,
-    autograd_cache_enabled,
     CompiledBackward,
     CompiledForward,
     should_use_remote_autograd_cache,
@@ -64,7 +63,17 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+from .utils import (
+    _get_symint_hints,
+    contain_metadata_mutation_ops,
+    make_boxed_func,
+    strict_zip,
+    unlift_tokens,
+)
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 zip = strict_zip
@@ -77,10 +86,10 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
-DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
+DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
-def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:
+def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
     """
@@ -91,7 +100,7 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]
 # bits of aot_autograd, and doesn't need to do any specific wrapping.
 def aot_dispatch_export(
     flat_fn: Callable,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -131,7 +140,7 @@ def aot_dispatch_export(
 
 def aot_dispatch_base(
     flat_fn,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -143,14 +152,13 @@ def aot_dispatch_base(
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
-
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
     # Save the forward_graph_str right after aot_dispatch_base_graph,
     # to save in the cache
     aot_forward_graph_str = None
-    if autograd_cache_enabled():
+    if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
             print_output=False, include_stride=True, include_device=True
         )
@@ -191,7 +199,7 @@ def aot_dispatch_base(
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
@@ -212,7 +220,7 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
-    if autograd_cache_enabled() and cache_info:
+    if cache_info is not None:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
@@ -279,11 +287,11 @@ def aot_dispatch_base(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: List[Optional[FakeTensor]],
-    user_fw_outs: List[Optional[FakeTensor]],
-    bw_outs: List[Optional[FakeTensor]],
-    saved_tensors: List[FakeTensor],
-) -> List[int]:
+    fw_ins: list[Optional[FakeTensor]],
+    user_fw_outs: list[Optional[FakeTensor]],
+    bw_outs: list[Optional[FakeTensor]],
+    saved_tensors: list[FakeTensor],
+) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
     an alias of any tensors in fw_ins, user_fw_outs, and bw_outs.
@@ -313,10 +321,27 @@ def collect_bw_donated_buffer_idxs(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     fw_metadata: ViewAndMutationMeta,
-) -> List[int]:
+) -> list[int]:
     """
     Collects backward donated buffer indexes from fw_module and bw_module.
     """
+
+    # [Note: Metadata mutation in proxy tracing]
+    # node.meta["val"] is a snapshot of the tensor value when tracing a graph,
+    # instead of the final state after the graph has run. node.meta["val"] is
+    # not updated even if later there is a metadata mutation op.
+    # See: https://github.com/pytorch/pytorch/pull/141308#issuecomment-2495798947
+    #
+    # Currently, metadata mutation op happens only for sacrificial parameter
+    # specifically the `set_` op. This motivates banning metadata mutation from
+    # proxy tracing.
+    #
+    # Since node.meta["val"] is used to detect donated buffer, we return an empty
+    # list if there exists metadata mutation op.
+    if contain_metadata_mutation_ops(fw_module) or contain_metadata_mutation_ops(
+        bw_module
+    ):
+        return []
 
     fw_ins = fw_module.graph.find_nodes(op="placeholder")
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
@@ -351,7 +376,7 @@ def collect_bw_donated_buffer_idxs(
 
 def aot_dispatch_autograd(
     flat_fn,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
@@ -421,7 +446,7 @@ def aot_dispatch_autograd(
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -520,7 +545,7 @@ def aot_dispatch_autograd(
         # and we will end up with a zero grad at x.
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach: List[int] = []
+        _indices_of_inps_to_detach: list[int] = []
 
         # reversed() since we expect output at end of graph
         bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
@@ -801,13 +826,12 @@ def aot_dispatch_autograd(
 
     try_save_cache_entry: Optional[Callable] = None
 
-    if autograd_cache_enabled():
-        cache_info = aot_config.cache_info
-        if cache_info is not None:
-            forward_time_taken_ns = time.time_ns() - cache_info.start_time_ns
-        else:
-            forward_time_taken_ns = None
+    if aot_config.cache_info is not None:
+        forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
 
+        # NB: aot_config here is technically not needed as an argument: we could just
+        # close over aot_config.cache_info, since aot_config never changes.
+        # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
             compiled_bw_func, _fw_metadata, aot_config
         ):
@@ -868,7 +892,7 @@ def aot_dispatch_autograd(
     )
 
     if config.debug_assert:
-        flat_requires_grad: List[Optional[bool]] = [
+        flat_requires_grad: list[Optional[bool]] = [
             a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
         ]
         compiled_fn = DebugAssertWrapper(
