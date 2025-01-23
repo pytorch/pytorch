@@ -861,7 +861,9 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
                 onerror=lambda func, path, exc_info: log.warning(
-                    "Failed to remove temporary cache dir at %s", inductor_cache_dir
+                    "Failed to remove temporary cache dir at %s",
+                    inductor_cache_dir,
+                    exc_info=exc_info,
                 ),
             )
     except Exception:
