@@ -2133,6 +2133,11 @@ class TritonKernel(SIMDKernel):
 
         if should_unwrap_unspec_arg(name):
             line = var
+            # unwrapped bf16/fp16 0d tensors are passed in as float32 scalars
+            # see triton_utils.py:signature_of
+            if dtype in (torch.float16, torch.bfloat16):
+                dtype = torch.float32
+
         else:
             if isinstance(indexing, BlockPtrOptions):
                 block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
