@@ -8,7 +8,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -146,8 +146,8 @@ class SuperVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
         if inner_fn is object.__init__:
@@ -286,8 +286,8 @@ class ComptimeVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..comptime import ComptimeContext
 
@@ -403,8 +403,8 @@ class InspectSignatureVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "bind":
             if not hasattr(self.fn, "__kwdefaults__"):
@@ -481,7 +481,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
     def __init__(
         self,
         bound_arguments: inspect.BoundArguments,
-        defaults: Dict[str, VariableTracker],
+        defaults: dict[str, VariableTracker],
         signature: InspectSignatureVariable,
         **kwargs,
     ):
@@ -552,8 +552,8 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "apply_defaults":
             # mimic calling apply_defaults
@@ -732,8 +732,8 @@ class AutogradFunctionVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
@@ -787,7 +787,7 @@ class AutogradFunctionVariable(VariableTracker):
 
 @dataclasses.dataclass
 class SavedTensorBox:
-    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+    tensors: list[VariableTracker] = dataclasses.field(default_factory=list)
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -856,8 +856,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
@@ -918,8 +918,8 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -950,8 +950,8 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.fn(*args, **kwargs)
 
@@ -1012,8 +1012,8 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
@@ -1021,8 +1021,8 @@ class GetAttrVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
             name in ("__getitem__", "get")
@@ -1073,6 +1073,14 @@ class GetAttrVariable(VariableTracker):
             else:
                 return variables.ConstantVariable(False)
 
+        elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
+            if isinstance(self.obj, variables.UserDefinedObjectVariable):
+                # Bypass any custom setattr as we are updating the `__dict__` itself
+                return self.obj.method_setattr_standard(tx, args[0], args[1])
+            if isinstance(self.obj, variables.NNModuleVariable):
+                # This matches how `setattr` is handled for NNModuleVariable
+                self.obj.convert_to_unspecialized(tx)
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1084,8 +1092,8 @@ class MethodWrapperVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
             args[0], variables.TensorVariable
@@ -1169,8 +1177,8 @@ class TypingVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Create a new typing variable, e.g., `List[int]`
         if name == "__getitem__" and len(args) == 1:
@@ -1238,8 +1246,8 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
@@ -1303,8 +1311,8 @@ class NumpyVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
 
@@ -1456,8 +1464,8 @@ class LoggingLoggerVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
@@ -1498,8 +1506,8 @@ class ConstantLikeVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
             # we only support constant propagation for methods
@@ -1679,8 +1687,8 @@ class RandomVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":
             tx.output.side_effects.mutation(self)
@@ -1750,7 +1758,7 @@ class WeakRefVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.referent_vt

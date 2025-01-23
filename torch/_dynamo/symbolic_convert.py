@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -127,7 +127,7 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
-compare_op_handlers: Dict[str, Any] = {
+compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
 handle_contains = BuiltinVariable(operator.contains).call_function
@@ -184,7 +184,7 @@ class SpeculationLog:
     a graph break.
     """
 
-    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
+    entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
 
     def restart(self):
@@ -213,11 +213,13 @@ class SpeculationLog:
                 f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
                 f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
             )
-        assert (
+        if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), f"""
+        ):
+            raise SpeculationLogDivergence(
+                f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
 - Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
 - Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
@@ -235,13 +237,14 @@ do this for graph breaks, you will infinite loop).
 
 Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
 """
+            )
         self.index += 1
         return entry
 
 
 @dataclasses.dataclass
 class LocalState:
-    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: dict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=dict
     )
 
@@ -256,14 +259,14 @@ class LocalState:
 class DistributedState:
     compile_pg: Any
     local_state: LocalState
-    all_states: Optional[List[LocalState]] = None
+    all_states: Optional[list[LocalState]] = None
 
 
 class TensorifyState:
     # These are the set of string symfloats names (eg. "zf0") that we collect
     # from the tensorify_python_scalars.py joint fx pass to inform us about
     # which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[str] = set()
+    force_specializations: set[str] = set()
 
     @classmethod
     def specialize(cls, index: str) -> None:
@@ -319,6 +322,10 @@ class BlockStackEntry:
             return self.with_context.exit(tx)
 
 
+class SpeculationLogDivergence(AssertionError):
+    pass
+
+
 class ReturnValueOp(Exception):
     pass
 
@@ -370,12 +377,8 @@ def _detect_and_normalize_assert_statement(
     current_instruction_pointer = self.instruction_pointer
     inst = self.instructions[current_instruction_pointer]
     # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
-    if sys.version_info < (3, 9):
-        if inst.opname != "LOAD_GLOBAL" or inst.argval != "AssertionError":
-            return False
-    else:
-        if inst.opname != "LOAD_ASSERTION_ERROR":
-            return False
+    if inst.opname != "LOAD_ASSERTION_ERROR":
+        return False
 
     current_instruction_pointer += 1
 
@@ -571,6 +574,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             return
 
         if value.is_python_constant():
+            # ConstDictVariable is optimized to be very lazy about insertion of
+            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
+            # here.
+            if isinstance(value, ConstDictVariable) and value.source:
+                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
@@ -721,7 +729,7 @@ def break_graph_if_unsupported(*, push):
         ):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
-            cleanup: List[Instruction] = []
+            cleanup: list[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 # Don't exit any modes we have entered,
@@ -808,22 +816,22 @@ class InstructionTranslatorBase(
     metaclass=BytecodeDistpatchTableMeta,
 ):
     output: OutputGraph
-    symbolic_locals: Dict[str, VariableTracker]
-    symbolic_globals: Dict[str, VariableTracker]
+    symbolic_locals: dict[str, VariableTracker]
+    symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
-    stack: List[VariableTracker]
+    stack: list[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    block_stack: List[BlockStackEntry]
+    block_stack: list[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
-    prefix_insts: List[Instruction]
+    prefix_insts: list[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    dispatch_table: List[Any]
-    exn_vt_stack: List[VariableTracker]
+    dispatch_table: list[Any]
+    exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
@@ -901,8 +909,8 @@ class InstructionTranslatorBase(
     def call_function(
         self,
         fn: VariableTracker,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ):
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
@@ -1099,14 +1107,14 @@ class InstructionTranslatorBase(
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
 
-    def push_many(self, vals: List[VariableTracker]):
+    def push_many(self, vals: list[VariableTracker]):
         for val in vals:
             self.push(val)
 
     def pop(self) -> VariableTracker:
         return self.stack.pop()
 
-    def popn(self, n: int) -> List[VariableTracker]:
+    def popn(self, n: int) -> list[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
@@ -1337,7 +1345,7 @@ class InstructionTranslatorBase(
 
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
-            raise NameError(f"name '{argval}' is not defined")
+            raise Unsupported(f"name '{argval}' is not defined")
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -2150,9 +2158,9 @@ class InstructionTranslatorBase(
         return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst):
-        format_string_parts: List[str] = []
-        args: List[VariableTracker] = []
-        kwargs: Dict[str, VariableTracker] = {}
+        format_string_parts: list[str] = []
+        args: list[VariableTracker] = []
+        kwargs: dict[str, VariableTracker] = {}
         for part in self.popn(inst.arg):
             if isinstance(part, ConstantVariable):
                 format_string_parts.append("{}")
@@ -2620,13 +2628,13 @@ class InstructionTranslatorBase(
     def __init__(
         self,
         output: OutputGraph,
-        instructions: List[Instruction],
-        f_locals: Dict[str, Any],
-        f_globals: Dict[str, Any],
-        f_builtins: Dict[str, Any],
-        code_options: Dict[str, Any],
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        instructions: list[Instruction],
+        f_locals: dict[str, Any],
+        f_globals: dict[str, Any],
+        f_builtins: dict[str, Any],
+        code_options: dict[str, Any],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         f_code: types.CodeType,
         export: bool,
@@ -2634,7 +2642,7 @@ class InstructionTranslatorBase(
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        closure: Optional[Tuple[types.CellType]] = None,
+        closure: Optional[tuple[types.CellType]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2658,14 +2666,14 @@ class InstructionTranslatorBase(
         self.exn_vt_stack = []
 
         # Properties of the input/output code
-        self.instructions: List[Instruction] = instructions
-        self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: Dict[
+        self.instructions: list[Instruction] = instructions
+        self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
+        self.f_locals: dict[
             str, Any
         ] = f_locals  # needed for recording accessed locals for replay
-        self.f_globals: Dict[str, Any] = f_globals
-        self.f_builtins: Dict[str, Any] = f_builtins
-        self.code_options: Dict[str, Any] = code_options
+        self.f_globals: dict[str, Any] = f_globals
+        self.f_builtins: dict[str, Any] = f_builtins
+        self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
@@ -2678,8 +2686,8 @@ class InstructionTranslatorBase(
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
-        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
-        self.num_calls: Dict[str, int] = {}
+        self.nn_module_stack: dict[str, tuple[str, type[Any]]] = {}
+        self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
         self.one_graph = False
@@ -2703,7 +2711,7 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: List[Optional[VariableTracker]] = [None] * len(
+        self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
         )
         linecache.lazycache(f_code.co_filename, f_globals)
@@ -2725,7 +2733,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def __init__(
         self,
-        instructions: List[Instruction],
+        instructions: list[Instruction],
         f_code,
         f_locals,
         f_globals,
@@ -2789,7 +2797,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
-            cell_and_freevars: Set[str] = set(self.cell_and_freevars())
+            cell_and_freevars: set[str] = set(self.cell_and_freevars())
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
                     var = LazyVariableTracker.create(
@@ -2861,7 +2869,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 torch_function_mode_stack
             )
 
-            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
+            self.debug_locals: list[tuple[VariableTracker, list[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -2984,7 +2992,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         # prologue of the resume function
 
         # sorted list of indices of nulls on the stack
-        null_idxes: List[int] = []
+        null_idxes: list[int] = []
         if sys.version_info >= (3, 11):
             # find indices of NullVariables
             for i, var in enumerate(self.stack):
@@ -3056,7 +3064,8 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst):
         if (
-            self.output.count_calls() == 0
+            not config.allow_empty_graphs
+            and self.output.count_calls() == 0
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
@@ -3146,7 +3155,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent,
         func: VariableTracker,
-        args: List[VariableTracker],
+        args: list[VariableTracker],
         kwargs,
         *,
         stop_generator_on_yield: bool = False,
@@ -3294,8 +3303,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self,
         parent: InstructionTranslatorBase,
         code: types.CodeType,
-        symbolic_locals: Dict[str, VariableTracker],
-        symbolic_globals: Dict[str, VariableTracker],
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3405,7 +3414,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
-    generated_items: List[VariableTracker]
+    generated_items: list[VariableTracker]
     # Flag wether or not the InlineGenerator should consume the entire iterator
     stop_generator_on_yield: bool
 

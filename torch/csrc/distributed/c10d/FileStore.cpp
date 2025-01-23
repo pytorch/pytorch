@@ -98,7 +98,9 @@ class Lock {
   }
 
   Lock(const Lock& that) = delete;
+  Lock& operator=(const Lock&) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
@@ -169,6 +171,10 @@ class File {
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) noexcept = delete;
+  File& operator=(File&&) noexcept = delete;
 
   ~File() {
     ::close(fd_);

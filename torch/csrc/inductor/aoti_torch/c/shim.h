@@ -44,8 +44,16 @@
 // to symbol clashes at link time if libtorch is included in a DLL and binary
 // that depends on the DLL. As a short term fix, we don't export the symbols.
 // In the long term, this will need to be addressed when Windows is supported.
-// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#ifdef OVRSOURCE
+// Do not export AOTI on Windows for internal builds
 #define AOTI_TORCH_EXPORT
+#else /* OVRSOURCE */
+#ifdef EXPORT_AOTI_FUNCTIONS
+#define AOTI_TORCH_EXPORT __declspec(dllexport)
+#else
+#define AOTI_TORCH_EXPORT __declspec(dllimport)
+#endif
+#endif /* OVRSOURCE */
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -292,6 +300,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     int32_t device_index,
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_as_strided(
+    AtenTensorHandle self,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,

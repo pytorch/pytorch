@@ -7,9 +7,7 @@ from torch.export.exported_program import _decompose_exported_program
 
 def _copy_graph_module_and_signature(
     ep: torch.fx.GraphModule,
-) -> typing.Tuple[
-    torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature
-]:
+) -> tuple[torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
     # and this can break placeholder names in some particular cases.
     # For example, node copying will avoid Python keywords like 'input', suffixing and renaming to 'input_1'.
@@ -60,6 +58,10 @@ def _export_forward_backward(
         cia_to_decomp={},
         python_decomp_table=core_aten_decompositions(),
         joint_loss_index=joint_loss_index,
+        # For serialization purpose, we don't want to decompose custom triton ops.
+        # If users would like to decompose custom triton ops, they could do it
+        # with run_decompositions() API.
+        decompose_custom_triton_ops=False,
     )
     gm, new_graph_signature = _copy_graph_module_and_signature(ep)
     _remove_detach_pass(gm, new_graph_signature)
