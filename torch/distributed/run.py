@@ -80,7 +80,8 @@ Single-node multi-worker
           ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
           else equivalent to ``"cpu"``),
           or an integer specifying the number of processes.
-          See `torch.distributed.run.determine_local_world_size <https://github.com/pytorch/pytorch/blob/0a94bb432ed75cc2d950d81b2921363218a7e459/torch/distributed/run.py#L673-L716>`_
+          See `torch.distributed.run.determine_local_world_size
+          <https://github.com/pytorch/pytorch/blob/0a94bb432ed75cc2d950d81b2921363218a7e459/torch/distributed/run.py#L673-L716>`_
           for more details.
 
 Stacked single-node multi-worker
