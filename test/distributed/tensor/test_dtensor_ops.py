@@ -190,7 +190,6 @@ dtensor_fails = {
     xfail("linalg.cholesky_ex"),
     xfail("linalg.cross"),
     xfail("linalg.det"),
-    xfail("linalg.det", "singular"),
     xfail("linalg.eig"),
     xfail("linalg.eigvals"),
     xfail("linalg.householder_product"),
