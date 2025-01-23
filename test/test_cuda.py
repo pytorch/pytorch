@@ -783,7 +783,7 @@ class TestCuda(TestCase):
             torch.nn.functional.batch_norm(x, mean, var, weight)
 
         # cuDNN expects bias tensor
-        with self.assertRaisesRegex(RuntimeError, 'undefined Tensor'):
+        with self.assertRaisesRegex(RuntimeError, "undefined Tensor"):
             with torch.backends.cudnn.flags(enabled=True, force=True):
                 torch.nn.functional.batch_norm(x, mean, var, weight)
 
@@ -810,7 +810,9 @@ class TestCuda(TestCase):
         target_lengths = [30, 25, 500]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device="cuda").log_softmax(2).requires_grad_()
+        log_probs = torch.randn(
+            50, 3, 15, dtype=torch.float, device="cuda"
+        ).log_softmax(2).requires_grad_()
 
         log_probs_ref = log_probs.detach().clone().requires_grad_()
 
@@ -821,7 +823,7 @@ class TestCuda(TestCase):
                 )
                 res.backward()
         except RuntimeError as e:
-            self.assertTrue(('CUDNN') in str(e))
+            self.assertTrue(("CUDNN") in str(e))
 
         with torch.backends.cudnn.flags(enabled=True, force=False):
             res2 = torch.nn.functional.ctc_loss(
