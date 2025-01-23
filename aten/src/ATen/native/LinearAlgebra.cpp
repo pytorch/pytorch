@@ -3496,18 +3496,6 @@ Tensor _weight_int4pack_mm_cpu(
   return C;
 }
 
-Tensor _weight_int4pack_mm_cpu_tensor(
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& qGroupSize,
-    const Tensor& qScaleAndZeros) {
-  TORCH_CHECK(qGroupSize.numel() == 1, __func__, ": qGroupSize should be a scalar tensor.");
-  TORCH_CHECK(qGroupSize.scalar_type() == at::kLong,
-      __func__, ": qGroupSize should be an int64 tensor, but got ", qGroupSize.scalar_type());
-  int64_t group_size = qGroupSize.item<int64_t>();
-  return _weight_int4pack_mm_cpu(A, B, group_size, qScaleAndZeros);
-}
-
 Tensor _dyn_quant_pack_4bit_weight_cpu(
     const Tensor& weights,
     const Tensor& scales_zeros,
