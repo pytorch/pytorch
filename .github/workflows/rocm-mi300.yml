@@ -1,12 +1,9 @@
-name: rocm
+name: rocm-mi300
 
 on:
   push:
     branches:
       - main
-      - release/*
-    tags:
-      - ciflow/rocm/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
@@ -36,12 +33,12 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
         ]}
     secrets: inherit
 
