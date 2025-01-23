@@ -265,11 +265,16 @@ class ObservedRuntimeError(ObservedException):
     pass
 
 
+class ObservedNotImplementedError(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
+    NotImplementedError: ObservedNotImplementedError,
 }
 
 
