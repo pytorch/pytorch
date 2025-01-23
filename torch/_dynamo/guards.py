@@ -48,6 +48,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
+from torch._dynamo.utils import CompileEventLogger
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -2480,6 +2481,7 @@ class CheckFunctionManager:
                 self.guard_manager.root, output_graph.local_scope, 50
             )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+            CompileEventLogger.compilation_metric(guard_latency_us=latency)
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
