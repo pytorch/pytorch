@@ -5060,36 +5060,26 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
-double profile_guard_manager(RootGuardManager* root, py::object f_locals) {
+double profile_guard_manager(
+    RootGuardManager* root,
+    py::object f_locals,
+    int n_iters) {
   PyObject* locals = f_locals.ptr();
 
   // Warmup
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 5; i++) {
     root->check_nopybind(locals);
   }
 
-  int count = 0;
   auto start = std::chrono::high_resolution_clock::now();
-  float profile_duration = 1.0;
-
-  // Run the loop for profile_duration seconds
-  while (true) {
+  for (int i = 0; i < n_iters; i++) {
     root->check_nopybind(locals);
-    count++;
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    // Break the loop if 1 second has passed
-    if (elapsed.count() >= 1.0) {
-      break;
-    }
   }
-
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> total_elapsed = end - start;
 
   // Calculate the average time per iteration in microseconds
-  return (total_elapsed.count() * profile_duration * 1e6) / count;
+  return (total_elapsed.count() * 1e6) / n_iters;
 }
 
 } // namespace
