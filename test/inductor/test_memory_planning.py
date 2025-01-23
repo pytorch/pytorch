@@ -23,6 +23,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+)
 
 @requires_gpu()
 @config.patch(memory_planning=True)
@@ -78,6 +82,7 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         try:

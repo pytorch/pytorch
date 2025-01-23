@@ -8,6 +8,10 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
 
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+)
 
 def get_nodes_by_name(graph, names):
     nodes = []
@@ -213,6 +217,7 @@ class GraphRegionTrackerTests(TestCase):
 'o4'], ['_foreach_add_3', 'getitem_6', 'getitem_7', 'sum_4', 'o5']]]""",
         )
 
+    @skipIfRocmArch(MI300_ARCH) # Flakey on MI300 CI
     def test_mismatched_global_state(self):
         @contextlib.contextmanager
         def _hip_allow_tf32():

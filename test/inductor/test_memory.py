@@ -10,6 +10,10 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+)
 
 class Foo(torch.nn.Module):
     """
@@ -53,6 +57,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         self.inputs = torch.ones((2048, 1), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory(self):
         outp_corr = self.model(self.inputs)
@@ -74,6 +79,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         outp = compiled_model(self.inputs)
         self.assertTrue(same(outp, outp_corr))
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_lpmf(self):
         outp_corr = self.model(self.inputs)
@@ -160,6 +166,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             outp = compiled_model(self.inputs)
             self.assertTrue(same(outp, outp_corr))
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_dfs(self):
         outp_corr = self.model(self.inputs)

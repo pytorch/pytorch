@@ -30,6 +30,10 @@ from torch._inductor.utils import run_and_get_code
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+)
 
 if HAS_CUDA:
     import triton  # @manual
@@ -144,6 +148,7 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """110""")
 
+    @skipIfRocmArch(MI300_ARCH)  # Flaky on MI300 CI
     def test_extern(self):
         def f(x):
             return torch.mm(x, x)
@@ -175,6 +180,7 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """600""")
 
+    @skipIfRocmArch(MI300_ARCH)  # Flaky on MI300 CI
     def test_cat(self):
         def f(a, b):
             return torch.cat([a.sin(), b.sin()])
@@ -709,6 +715,7 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(100, grad=True),)
         self.assertExpectedInline(count_numel_train(f, *inp), """450""")
 
+    @skipIfRocmArch(MI300_ARCH)
     @patch.object(functorch.compile.config, "max_dist_from_bw", 1000)
     def test_partitioning_unremat_bw(self):
         def f(x):
@@ -751,6 +758,7 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(16, grad=True),)
         self.assertExpectedInline(count_numel_train(f, *inp), """72""")
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):
             @staticmethod

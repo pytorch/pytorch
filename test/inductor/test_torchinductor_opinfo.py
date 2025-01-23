@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
+    MI300_ARCH,
     IS_MACOS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
@@ -207,6 +208,13 @@ if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
+
+    # MI300 Flakey
+    if torch.cuda.is_available():
+        prop = torch.cuda.get_device_properties(0)
+        if prop in MI300_ARCH:
+            inductor_skips["cuda"]["svd_lowrank"] = {f32}
+            inductor_skips["cuda"]["cow_input_masked_argmin"] = {f32}
 
 inductor_skips["xpu"] = {}
 

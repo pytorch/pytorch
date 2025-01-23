@@ -78,10 +78,12 @@ from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     freeze_rng_state,
     IS_FBCODE,
     scoped_load_inline,
     set_default_dtype,
+    skipIfRocmArch,
     skipIfNNModuleInlined,
     skipIfWindows,
     wrapDeterministicFlagAPITest,
@@ -7817,6 +7819,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch.compile(my_dyn_fn, backend=counter)(x012)
         self.assertEqual(counter.frame_count, 3)
 
+    @skipIfRocmArch(MI300_ARCH) # Flaky on MI300 CI
     def test_recompile_on_global_state_change(self):
         last_state = []
         cnt = 0

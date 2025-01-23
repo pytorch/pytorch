@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     IS_ARM64,
     IS_FBCODE,
     parametrize,
@@ -71,6 +72,38 @@ if TEST_WITH_ROCM:
         ("cpu", "cuda"), is_skip=True
     )
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
+
+    # Flakey MI300 failures:
+    if torch.cuda.is_available():
+        prop = torch.cuda.get_device_properties(0)
+        if prop in MI300_ARCH:
+            test_failures["test_strided_inputs"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_list_clearing"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_profiler_mark_wrapper_call"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_config_option_dont_assume_alignment_cudagraphs"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_dropout"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_aoti_eager_support_str"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_aoti_eager_cache_hit"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+            test_failures["test_recompile_on_global_state_change"] = TestFailure(
+                ("cuda"), is_skip=True
+            )
+
+
+
 
 
 if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):

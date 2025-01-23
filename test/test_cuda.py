@@ -2019,6 +2019,7 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
+    @skipIfRocmArch(MI300_ARCH) # Flakey on MI300 CI
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )

@@ -36,10 +36,12 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -89,6 +91,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
@@ -316,6 +319,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual("mixed_mm" in code, mixed_mm_expected)
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")

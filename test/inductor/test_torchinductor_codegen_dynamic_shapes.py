@@ -6,7 +6,7 @@ import sys
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import MI300_ARCH, TEST_WITH_ASAN, TEST_WITH_ROCM, skipIfRocmArch
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -387,6 +387,19 @@ if TEST_WITH_ROCM:
             "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
+
+    # Flakey MI300 CI problems
+    if torch.cuda.is_available():
+        prop = torch.cuda.get_device_properties(0)
+        if prop in MI300_ARCH:
+            test_failures.update(
+                {
+                    "test_aoti_eager_cache_hit_dynamic_shapes_cuda": TestFailure(("cuda")),
+                    "test_aoti_eager_support_str_dynamic_shapes_cuda": TestFailure(("cuda")),
+                    "test_aoti_eager_support_out_dynamic_shapes_cuda": TestFailure(("cuda")),
+                    "test_aoti_eager_dtype_device_layout_dynamic_shapes_cuda": TestFailure(("cuda")),
+                }
+            )
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"

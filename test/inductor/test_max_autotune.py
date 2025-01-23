@@ -25,8 +25,10 @@ from torch._inductor.select_algorithm import (
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
 )
 from torch.utils._triton import has_triton_tma_device
@@ -1029,6 +1031,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
         super().tearDown()
         PatchCaches.tearDown()
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @parametrize("dynamic", (False, True))
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch

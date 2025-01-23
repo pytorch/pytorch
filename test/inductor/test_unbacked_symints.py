@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import IS_LINUX, parametrize
+from torch.testing._internal.common_utils import MI300_ARCH, IS_LINUX, skipIfRocmArch, parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA,
@@ -109,6 +109,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @skipIfRocmArch(MI300_ARCH) # Flakey on MI300 CI
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):

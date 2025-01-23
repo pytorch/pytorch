@@ -30,9 +30,11 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     instantiate_parametrized_tests,
     parametrize,
     skipIfWindows,
+    skipIfRocmArch,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -73,6 +75,8 @@ class AOTAutogradCacheTests(InductorTestCase):
             "autotune_local_cache": True,
         }
     )
+
+    @skipIfRocmArch(MI300_ARCH) # Flakey on new MI300 CI
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))

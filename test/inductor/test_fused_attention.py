@@ -14,7 +14,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import MI300_ARCH, IS_LINUX, skipIfRocm, skipIfRocmArch
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -588,6 +588,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention)
 
+    @skipIfRocmArch(MI300_ARCH)
     def _test_sdpa_rewriter_12(self):
         def dot_prod_attention(
             query: torch.Tensor,

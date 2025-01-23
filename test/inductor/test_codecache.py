@@ -33,8 +33,10 @@ from torch.compiler._cache import CacheArtifactManager
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmArch,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -91,6 +93,7 @@ class TestFxGraphCache(TestCase):
         clear_inductor_caches()
         CacheArtifactManager.clear()
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -230,6 +233,7 @@ class TestFxGraphCache(TestCase):
                     grad_multiplier * read_and_emit_kernel_count,
                 )
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -277,6 +281,7 @@ class TestFxGraphCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @requires_triton()
     @config.patch(
         {
