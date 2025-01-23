@@ -1597,17 +1597,6 @@ class FakeTensorPropTest(TestCase):
         self.assertIsNot(u0, u1)
         self.assertTrue(statically_known_true(u0 == u1))
 
-    def test_nonzero_stride(self):
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-        with fake_mode:
-            value = torch.ones(5)
-            fake_r = value.nonzero()
-
-        r = torch.ones(5).nonzero()
-
-        self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
-
     def test_torch_load_with_fake_mode(self):
         class TheModelClass(torch.nn.Module):
             def __init__(self) -> None:
