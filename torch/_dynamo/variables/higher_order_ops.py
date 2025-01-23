@@ -21,6 +21,7 @@ from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch._higher_order_ops.utils import _make_inlinable
 from torch._ops import HigherOrderOperator
 from torch.fx.node import map_arg
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -711,6 +712,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "speculate_subgraph":
+            return SpeculateSubGraphHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "while_loop":
             return WhileLoopHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in ("map", "map_impl"):
@@ -767,6 +770,36 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+
+class SpeculateSubGraphHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ):
+        from .user_defined import UserDefinedObjectVariable
+
+        ((ret_val, ret_treespec), ret_graph, ret_lifted_freevars) = speculate_subgraph(
+            tx,
+            args[0],
+            args[1].unpack_var_sequence(tx),
+            {},
+            "speculate_subgraph",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+            should_flatten_outputs=False,
+        )
+        return VariableTracker.build(
+            tx,
+            (
+                ret_val,
+                ret_treespec,
+                UserDefinedObjectVariable(ret_graph),
+                UserDefinedObjectVariable(ret_lifted_freevars),
+            ),
+        )
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -2273,47 +2306,50 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-        tx: InstructionTranslator = tx
+        @_make_inlinable
+        def _create_scalar(query):
+            return query.new_empty([], dtype=torch.int32)
 
-        def create_scalar():
-            return query.call_method(
-                tx,
-                "new_empty",
-                (VariableTracker.build(tx, []),),
-                {
-                    "dtype": VariableTracker.build(tx, torch.int32),
-                },
-            )
+        if fn_name == "score_mod":
 
-        with discard_graph_changes(tx):
-            bhmn = [create_scalar() for _ in range(4)]
-            if fn_name == "score_mod":
-                scores_require_grad: bool = query.requires_grad
-                score = query.call_method(
-                    tx,
-                    "new_empty",
-                    (VariableTracker.build(tx, []),),
-                    {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
+            @_make_inlinable
+            def _fn(query, fn):
+                # list comprehension is not supported for inlinig yet
+                b, h, m, n = (
+                    _create_scalar(query),
+                    _create_scalar(query),
+                    _create_scalar(query),
+                    _create_scalar(query),
                 )
-                new_args = [score, *bhmn]
-            else:
-                assert fn_name == "mask_fn", "Illegal function name: " + fn_name
-                new_args = [*bhmn]
+                score = query.new_empty([], requires_grad=query.requires_grad)
+                return torch.ops.higher_order.speculate_subgraph(
+                    fn, (score, b, h, m, n)
+                )
 
-        with TransformGetItemToIndex():
+        else:
+            assert fn_name == "mask_fn", "Illegal function name: " + fn_name
+
+            @_make_inlinable
+            def _fn(query, fn):
+                # list comprehension is not supported for inlinig yet
+                b, h, m, n = (
+                    _create_scalar(query),
+                    _create_scalar(query),
+                    _create_scalar(query),
+                    _create_scalar(query),
+                )
+                return torch.ops.higher_order.speculate_subgraph(fn, (b, h, m, n))
+
+        with discard_graph_changes(tx), TransformGetItemToIndex():
             (
-                (_body_output, _body_treespec),
-                body_graph,
-                body_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                fn,
-                new_args,
-                {},  # expect only args no kwargs for now
-                description=fn_name,
-                source_target=self.value,
-                set_subgraph_inputs="flatten_manual",
-            )
+                _body_output,
+                _body_tree_spec,
+                body_graph_var,
+                body_lifted_freevars_var,
+            ) = _make_inlined(tx, _fn)(query, fn).unpack_var_sequence(tx)
+
+        body_graph = body_graph_var.value
+        body_lifted_freevars = body_lifted_freevars_var.value
 
         body_name = tx.output.install_subgraph(
             fn_name,

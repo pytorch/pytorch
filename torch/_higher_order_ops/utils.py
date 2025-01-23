@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
+import copy
 import functools
+import types
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Union
@@ -530,6 +532,42 @@ def diff_tensor_meta(
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
             continue
     return pair_diffs
+
+
+# Create a new code object with a different filename to bypass skipfile check
+def _make_inlinable(f: Callable) -> Any:
+    original_code = f.__code__
+    new_code = types.CodeType(
+        original_code.co_argcount,
+        original_code.co_posonlyargcount,
+        original_code.co_kwonlyargcount,
+        original_code.co_nlocals,
+        original_code.co_stacksize,
+        original_code.co_flags,
+        original_code.co_code,
+        original_code.co_consts,
+        original_code.co_names,
+        original_code.co_varnames,
+        __file__,
+        original_code.co_name,  # type: ignore[arg-type]
+        original_code.co_firstlineno,  # type: ignore[arg-type]
+        original_code.co_lnotab,  # type: ignore[arg-type]
+        original_code.co_freevars,  # type: ignore[arg-type]
+        original_code.co_cellvars,  # type: ignore[arg-type]
+    )
+    new_func = types.FunctionType(
+        new_code,
+        f.__globals__,
+        name=f.__name__,
+        argdefs=f.__defaults__,
+        closure=f.__closure__,
+    )
+    # Copy function attributes
+    new_func.__dict__.update(f.__dict__)
+    new_func.__annotations__ = copy.deepcopy(f.__annotations__)
+    new_func.__doc__ = f.__doc__
+    new_func.__kwdefaults__ = f.__kwdefaults__
+    return new_func
 
 
 # Note [lifted arg types in hop]

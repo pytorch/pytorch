@@ -238,3 +238,14 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()
+
+
+class SpecualteSubgraphOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("speculate_subgraph")
+
+    def __call__(self, fn, operands):
+        return super().__call__(fn, operands)
+
+
+speculate_subgraph = SpecualteSubgraphOp()
