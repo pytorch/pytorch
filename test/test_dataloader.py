@@ -1262,14 +1262,12 @@ class TestDataLoader(TestCase):
             list(iter(loader))
 
     def test_typing(self):
-        from typing import List
-
         # Make sure there is no TypeError
 
-        class SomeDatasetClass(Dataset[List[torch.Tensor]]):
+        class SomeDatasetClass(Dataset[list[torch.Tensor]]):
             pass
 
-        def _create_dataloader(is_train: bool) -> DataLoader[List[torch.Tensor]]:
+        def _create_dataloader(is_train: bool) -> DataLoader[list[torch.Tensor]]:
             pass
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
@@ -3094,17 +3092,15 @@ class TestDictDataLoader(TestCase):
             self.dataset, batch_size=2, pin_memory=True, pin_memory_device="cuda"
         )
         for sample in loader:
-            self.assertTrue(sample["a_tensor"].is_pinned(device="cuda"))
-            self.assertTrue(sample["another_dict"]["a_number"].is_pinned(device="cuda"))
+            self.assertTrue(sample["a_tensor"].is_pinned())
+            self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_only_device(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda")
         for sample in loader:
-            self.assertFalse(sample["a_tensor"].is_pinned(device="cuda"))
-            self.assertFalse(
-                sample["another_dict"]["a_number"].is_pinned(device="cuda")
-            )
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
 
 
 class DummyDataset(torch.utils.data.Dataset):
