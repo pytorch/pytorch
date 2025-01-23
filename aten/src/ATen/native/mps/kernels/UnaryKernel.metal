@@ -90,11 +90,11 @@ kernel void tanh_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
   template [[host_name("erfinv_" #DTYPE0 "_" #DTYPE1)]] kernel void erfinv_kernel(   \
       device DTYPE0* output [[buffer(0)]],                                            \
       device DTYPE1* input  [[buffer(1)]],                                           \
-      uint id [[thread_position_in_grid]]);					     \
+      uint id [[thread_position_in_grid]]);            		     \
   template [[host_name("exp_" #DTYPE0 "_" #DTYPE1)]] kernel void exp_kernel(   \
       device DTYPE0* output [[buffer(0)]],                                            \
       device DTYPE1* input  [[buffer(1)]],                                           \
-      uint id [[thread_position_in_grid]]);					     \
+      uint id [[thread_position_in_grid]]);            		     \
   template [[host_name("tanh_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_kernel(   \
       device DTYPE0* output [[buffer(0)]],                                            \
       device DTYPE1* input [[buffer(1)]],                                           \
@@ -112,11 +112,11 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE0, DTYPE1)				\
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE0, DTYPE1)            	\
   template [[host_name("exp_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void exp_complex_kernel<DTYPE0>(   \
       device vec2type_t<DTYPE0>* output [[buffer(0)]],                                            \
       device vec2type_t<DTYPE0>* input [[buffer(1)]],                                           \
-      uint did [[thread_position_in_grid]]);							\
+      uint did [[thread_position_in_grid]]);            				\
   template [[host_name("tanh_complex_" #DTYPE0 "_" #DTYPE1)]] kernel void tanh_complex_kernel<DTYPE0>(   \
       device vec2type_t<DTYPE0>* output [[buffer(0)]],                                            \
       device vec2type_t<DTYPE0>* input [[buffer(1)]],                                           \

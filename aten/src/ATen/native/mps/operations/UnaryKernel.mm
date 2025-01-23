@@ -37,7 +37,7 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
       cplState = lib.getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
     } else {
       cplState = lib.getPipelineStateForFunc(
-        fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)));
+          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)));
     }
 
     if (!outputTensor.is_contiguous()) {
