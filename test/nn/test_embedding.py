@@ -1631,6 +1631,20 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         w = torch.rand(3, 4, device=device, requires_grad=per_sample_weights_use_grad)
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
+    # Test case from https://github.com/pytorch/pytorch/pull/144854 (only on CPU device)
+    def test_embedding_bag_invalid_mode(self, device):
+        weight = torch.full((3, 4,), 1.11111e+15, dtype=torch.float)
+        indices = torch.full((5,), -2147483648, dtype=torch.long)
+        offsets = torch.full((0,), 0, dtype=torch.long)
+        scale_grad_by_freq = False
+        mode = 3046875451
+        sparse = False
+        per_sample_weights = None
+        include_last_offset = False
+        padding_idx = None
+        if device == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "Invalid embedding mode"):
+                torch.ops.aten.embedding_bag.padding_idx(weight, indices, offsets, scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset, padding_idx)
 
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals())
 instantiate_parametrized_tests(TestEmbeddingNN)

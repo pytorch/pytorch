@@ -896,7 +896,7 @@ void check_arguments(
 
   TORCH_CHECK(
     mode == EmbeddingBagMode::SUM || mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::MAX,
-      "mode should be in enum class EmbeddingBagMode")
+      "Invalid embedding mode")
   if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
     TORCH_CHECK(
         mode == EmbeddingBagMode::SUM,
