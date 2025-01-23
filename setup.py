@@ -384,6 +384,7 @@ def get_submodule_folders():
             "onnx",
             "fbgemm",
             "cutlass",
+            "openrng",
         ]
     ]
     if not os.path.exists(git_modules_path):
