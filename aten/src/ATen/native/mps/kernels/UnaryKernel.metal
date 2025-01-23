@@ -1,4 +1,6 @@
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
+using namespace c10::metal;
 using namespace metal;
 
 constant float a[4] = {0.886226899, -1.645349621, 0.914624893, -0.140543331};
@@ -41,46 +43,6 @@ kernel void exp_kernel( device T0* output [[buffer(0)]],
   output[index] = T0(precise::exp(input[index]));
 }
 
-
-template <typename T>
-struct vectypes {};
-
-template <>
-struct vectypes<float> {
-  using type4 = float4;
-  using type3 = float3;
-  using type2 = float2;
-};
-
-template <>
-struct vectypes<half> {
-  using type4 = half4;
-  using type3 = half3;
-  using type2 = half2;
-};
-
-#if __METAL_VERSION__ >= 310
-template <>
-struct vectypes<bfloat> {
-  using type4 = bfloat4;
-  using type3 = bfloat3;
-  using type2 = bfloat2;
-};
-#endif
-
-template <>
-struct vectypes<short> {
-  using type4 = short4;
-  using type3 = short3;
-  using type2 = short2;
-};
-
-template <typename T>
-using vec2type_t = typename vectypes<T>::type2;
-
-template <typename T>
-using vec4type_t = typename vectypes<T>::type4;
-
 template <typename T0>
 kernel void exp_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
                                 device vec2type_t<T0> *input [[ buffer(1)]],
@@ -91,7 +53,7 @@ kernel void exp_complex_kernel( device vec2type_t<T0> *output [[buffer(0)]],
 
 template <typename T0, typename T1>
 kernel void tanh_kernel( device T0* output [[buffer(0)]],
-                        device T1* input [[ buffer(1)]],
+                         device T1* input [[ buffer(1)]],
                         uint index [[thread_position_in_grid]]) {
   output[index] = T0(precise::tanh(input[index]));
 }
