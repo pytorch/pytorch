@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
-from typing import Any, List
+from typing import Any
 
 import sympy
 
@@ -362,6 +362,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     B = Bq
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.evaluate_static_shape(v)
+        if isinstance(v, sympy.Symbol)
+        else v
+        for k, v in kernel_options.items()
+    }
 
     # TODO: Fix flex decoding non-divisible case!
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -408,8 +415,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
-    choices: List[Any] = []
-    configs: List[tuple[int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
     if config.max_autotune:

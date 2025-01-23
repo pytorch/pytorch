@@ -8,19 +8,9 @@ import linecache
 import os
 import sys
 import types
+from collections.abc import Iterable
 from contextlib import contextmanager
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -64,7 +54,7 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
 # The primary motivation is to enable Numpy upgrade that many modules
 # depend on. The latest release of Numpy removed `numpy.str` and
 # `numpy.bool` breaking unpickling for many modules.
-EXTERN_IMPORT_COMPAT_NAME_MAPPING: Dict[str, Dict[str, Any]] = {
+EXTERN_IMPORT_COMPAT_NAME_MAPPING: dict[str, dict[str, Any]] = {
     "numpy": {
         "str": str,
         "bool": bool,
@@ -90,7 +80,7 @@ class PackageImporter(Importer):
     local to this importer.
     """
 
-    modules: Dict[str, types.ModuleType]
+    modules: dict[str, types.ModuleType]
 
     def __init__(
         self,
@@ -646,7 +636,7 @@ class PackageImporter(Importer):
             return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(
-        self, atoms: List[str]
+        self, atoms: list[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
         for i, atom in enumerate(atoms):
@@ -705,7 +695,7 @@ class _PathNode:
 class _PackageNode(_PathNode):
     def __init__(self, source_file: Optional[str]):
         self.source_file = source_file
-        self.children: Dict[str, _PathNode] = {}
+        self.children: dict[str, _PathNode] = {}
 
 
 class _ModuleNode(_PathNode):
