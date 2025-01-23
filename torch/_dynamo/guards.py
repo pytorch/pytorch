@@ -2472,11 +2472,14 @@ class CheckFunctionManager:
                     self.guard_manager, output_graph.local_scope
                 )
 
-            if guards_log.isEnabledFor(logging.DEBUG):
-                latency = profile_guard_manager(
-                    self.guard_manager.root, output_graph.local_scope
-                )
-                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+            # NB for developers: n_iters is chosen to be 50 to achieve
+            # statistical significance.  If you are working on a guard
+            # optimization, it might be a good idea to increase this number for
+            # more stabiilty during development.
+            latency = profile_guard_manager(
+                self.guard_manager.root, output_graph.local_scope, 50
+            )
+            guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
