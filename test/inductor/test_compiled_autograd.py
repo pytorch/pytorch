@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import unittest
+from copy import deepcopy
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
@@ -26,11 +27,16 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
 from torch.testing._internal.common_utils import (
     IS_S390X,
     scoped_load_inline,
     skipIfWindows,
 )
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -3617,6 +3623,15 @@ known_failing_tests = {
     "test_dtensor_partial_placement_graph_output",
     "test_tp_compile_comm_reordering",
     "test_unwrap_async_collective_tensor_tangent",
+    # Category: Higher Order Ops
+    # # AssertionError: Tensor-likes are not close!
+    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_auto_functionalize_simple_cpu_float32",
+    # # BypassAOTAutogradCache: Cannot cache a graph with compiled autograd enabled
+    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_invoke_subgraph_simple_cpu_float32",
+    # # AssertionError: assert type(args[1].realize()) is TensorVariable
+    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_nested_cpu_float32",
+    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_simple_cpu_float32",
+    "inductor.test_compiled_autograd.TestCompiledAutogradOpInfoCPU.test_hops_in_bwd_map_triple_nested_cpu_float32",
     # Uncategorized
 }
 
@@ -3637,6 +3652,72 @@ if torch.distributed.is_available() and HAS_CUDA:
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
     )
+
+
+class TestCompiledAutogradOpInfo(TestCase):
+    def reset(self) -> None:
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
+        compiled_autograd.reset()
+
+    @inductor_config.patch(fx_graph_cache=False)
+    @ops(hop_db, allowed_dtypes=(torch.float,))
+    def test_hops_in_bwd(self, device, dtype, op):
+        if self.id() in known_failing_tests:
+            self.skipTest("Expected to fail.")
+
+        self.reset()
+
+        def create_bwd_fn_closure(op_args, op_kwargs):
+            op_out_ref = []
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, grad):
+                    out = op.op(*op_args, **(op_kwargs))
+                    op_out_ref.append(out)
+                    return grad
+
+            def fn(x):
+                return Foo.apply(x).sum()
+
+            return fn, op_out_ref
+
+        # Note: requires_grad=False because aot dispatch is already covered elsewhere
+        for inp in op.sample_inputs(device, dtype, requires_grad=False):
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            eager_args = (*input, *inp.args)
+            eager_kwargs = inp.kwargs
+            compiled_args = deepcopy(eager_args)
+            compiled_kwargs = deepcopy(eager_kwargs)
+
+            # 1. Run eager
+            torch.manual_seed(123)
+            dummy = torch.randn(2, 2, dtype=dtype, device=device, requires_grad=True)
+            fn, op_out_ref = create_bwd_fn_closure(compiled_args, compiled_kwargs)
+            fn(dummy).backward()
+            self.assertEqual(len(op_out_ref), 1)
+            expected = op_out_ref[0]
+
+            # 2. Run under CA
+            torch.manual_seed(123)
+            dummy = torch.randn(2, 2, dtype=dtype, device=device, requires_grad=True)
+            fn, op_out_ref = create_bwd_fn_closure(compiled_args, compiled_kwargs)
+            with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
+                fn(dummy).backward()
+            self.assertEqual(len(op_out_ref), 1)
+            actual = op_out_ref[0]
+
+            self.assertEqual(expected, actual)
+
+        self.reset()
+
+
+instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
     if HAS_CPU:
