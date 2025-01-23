@@ -699,7 +699,8 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
                 if arg.is_out:
                     maybe_clone(kwargs["out"])
                 elif isinstance(args[idx], list):
-                    # Foreach case
+                    # Foreach case. (Possible optimization: if most of the
+                    # tensors need to be cloned, use a for each clone?)
                     for t in args[idx]:
                         maybe_clone(t)
                 else:
