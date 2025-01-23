@@ -2448,10 +2448,6 @@ class CheckFunctionManager:
         # in some form.
         self.guard_manager.id_matched_objs = builder.id_matched_objs
 
-        # TODO: don't do the string rep, do something more structured here
-        torch._logging.trace_structured(
-            "dynamo_cpp_guards_str", payload_fn=lambda: str(self.guard_manager)
-        )
         guards_log.debug("%s", self.guard_manager)
         self.guard_manager.id_matched_objs = builder.id_matched_objs
 
@@ -2459,6 +2455,7 @@ class CheckFunctionManager:
         # recompile.
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
+        latency = 0.0
         if not output_graph.export:
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
@@ -2483,6 +2480,11 @@ class CheckFunctionManager:
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
             CompileEventLogger.compilation_metric(guard_latency_us=latency)
 
+        # TODO: don't do the string rep, do something more structured here
+        torch._logging.trace_structured(
+            "dynamo_cpp_guards_str",
+            payload_fn=lambda: f"{self.guard_manager}\nGuard latency = {latency:.2f} us",
+        )
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
         # `self` alive for very long. Sometimes by mistake, we can run
