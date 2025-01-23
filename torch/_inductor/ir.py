@@ -2394,11 +2394,6 @@ def as_storage_and_layout(
     raise NotImplementedError
 
 
-as_contiguous_storage_and_layout = functools.partial(
-    as_storage_and_layout, want_contiguous=True
-)
-
-
 def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
@@ -2758,7 +2753,7 @@ class View(GenericView):
                 # TODO: unbacked should not diverge from backed in determining striding
                 x = ExternKernel.require_contiguous(x)
 
-            storage, old_layout = as_contiguous_storage_and_layout(x)
+            storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
