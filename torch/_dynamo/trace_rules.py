@@ -3157,7 +3157,6 @@ BUILTIN_SKIPLIST = (
     copy,
     copyreg,
     enum,
-    functools,
     importlib,
     inspect,
     linecache,
