@@ -119,6 +119,7 @@ class TORCH_API Context {
 
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -548,6 +549,10 @@ inline bool hasOpenMP() {
 
 inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
 }
 
 inline bool hasLAPACK() {

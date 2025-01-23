@@ -279,11 +279,6 @@ static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-// dynamo-owned random object for system random calls in order
-// to prevent pollution from rogue random calls (e.g. from third-party
-// functions) made from within dynamo tracing
-static PyObject* dynamo_random_obj;
-
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static PyObject* dynamo_call_callback(
@@ -302,7 +297,6 @@ static PyObject* dynamo_call_callback(
 
   // preserve python random state
   PyObject* prev_rng_state = random_getstate(random_module());
-  random_setstate(dynamo_random_obj, prev_rng_state);
 
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
@@ -1103,14 +1097,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   }
   if (PyModule_AddObject(
           module, "cache_limit_hit_flag", cache_limit_hit_flag) != 0) {
-    return NULL;
-  }
-
-  dynamo_random_obj = new_random_object();
-  if (dynamo_random_obj == NULL) {
-    return NULL;
-  }
-  if (PyModule_AddObject(module, "dynamo_random", dynamo_random_obj) != 0) {
     return NULL;
   }
 

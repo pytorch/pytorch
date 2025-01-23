@@ -198,8 +198,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         1) Save/restore torch.is_grad_enabled() state
         2) Save/restore torch random state
         3) Monkey patch torch.fx.graph_module._forward_from_src
-        NOTE: python random state is handled using torch._C._dynamo.eval_frame.dynamo_random, which
-        is set in eval_frame.c
+        NOTE: python random state is preserved in eval_frame.c and eval_frame.py
     """
 
     @functools.wraps(fn)

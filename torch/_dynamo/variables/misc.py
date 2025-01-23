@@ -1713,9 +1713,14 @@ class RandomVariable(VariableTracker):
                 r.setstate(state)
                 return getattr(r, name)(*args, **kwargs)
 
-            return call_random_fn(
-                tx, getattr(self.random, name), call_random_meth, args, kwargs
+            # self.random state not actually updated by call_random_meth, so update here
+            # by calling the method
+            getattr(self.random, name)(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
+
+            return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen):

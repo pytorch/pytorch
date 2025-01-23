@@ -18,7 +18,6 @@ from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
-from torch._C._dynamo.eval_frame import dynamo_random
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -423,6 +422,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
+            self.value is torch.fx.immutable_collections.immutable_list
+            and len(args) == 1
+            and isinstance(args[0], variables.ListVariable)
+        ):
+            arg = args[0]
+            if arg.source:
+                install_guard(arg.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return variables.FxImmutableListVariable(
+                list(arg.unpack_var_sequence(tx)),
+                mutation_type=ValueMutationNew(),
+            )
+        elif (
             issubclass(type(self.value), type)
             and hasattr(
                 self.value, "__enter__"
@@ -660,7 +671,7 @@ class NO_SUCH_SUBOBJ:
     pass
 
 
-def call_random_fn(tx, example_fn, runtime_fn, args, kwargs):
+def call_random_fn(tx, fn, args, kwargs):
     # example_fn: function called at compile time to generate example_value
     # runtime_fn: function called to generate random number at runtime
     from .builder import VariableBuilder
@@ -668,9 +679,11 @@ def call_random_fn(tx, example_fn, runtime_fn, args, kwargs):
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
-    example_value = example_fn(*args, **kwargs)
+    # NB: it is probably not important for the example_value to be exactly correct,
+    # we just need the right type
+    example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((runtime_fn, args, kwargs))
+    tx.output.random_calls.append((fn, args, kwargs))
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
@@ -745,10 +758,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     @functools.lru_cache(None)
     def _supported_random_functions():
         fns = {
-            random.random: dynamo_random.random,
-            random.randint: dynamo_random.randint,
-            random.randrange: dynamo_random.randrange,
-            random.uniform: dynamo_random.uniform,
+            random.random,
+            random.randint,
+            random.randrange,
+            random.uniform,
         }
         return fns
 
@@ -866,7 +879,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return call_random_fn(
                 tx,
-                self._supported_random_functions()[self.value],
                 self.value,
                 args,
                 kwargs,
