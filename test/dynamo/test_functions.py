@@ -455,6 +455,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(forward(t, 1.0).item(), 2)
         self.assertEqual(forward(t, 1.5).item(), 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_is_current_stream_capturing(self):
         @torch.compile(backend="eager", fullgraph=True)
         def forward(t):
