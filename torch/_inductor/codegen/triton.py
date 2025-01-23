@@ -4097,8 +4097,8 @@ class TritonScheduling(SIMDScheduling):
 
     def benchmark_combo_kernel(self, node_list):
         mod: ModuleType
-        ms: int
-        ms_clone: int
+        ms: float
+        ms_clone: float
 
         def cache_file_path():
             assert mod.__file__ is not None
@@ -4116,8 +4116,9 @@ class TritonScheduling(SIMDScheduling):
             with open(path, "w") as fd:
                 fd.write(str(ms) + " " + str(ms_clone))
 
-        total_ms, file_list = 0, []
-        total_clone_ms = 0
+        total_ms = 0
+        file_list = []
+        total_clone_ms: float = 0
         removed_buffers_orig = V.graph.removed_buffers
         V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
         inplaced_to_remove_orig = V.graph.inplaced_to_remove
@@ -4146,7 +4147,7 @@ class TritonScheduling(SIMDScheduling):
             )
             ms, ms_clone = load_cache()
             if ms is not None:
-                total_ms += ms
+                total_ms += ms  # type: ignore[assignment]
                 total_clone_ms += ms_clone
                 file_list.append(mod.__file__)
                 continue

@@ -15,7 +15,7 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import Any, Callable, Generic, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
 import sympy
 
@@ -3808,7 +3808,7 @@ class Scheduler:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, str]:
+    ) -> tuple[float, float, List[Optional[str]]]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -3916,9 +3916,9 @@ class Scheduler:
 
 class BaseScheduling:
     @classmethod
-    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+    def get_backend_features(cls, device: torch.device) -> Dict[BackendFeature, Any]:
         """Return a set of .codegen.common.BackendFeature()"""
-        return ()
+        return {}
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -4026,7 +4026,7 @@ class BaseScheduling:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, str]:
+    ) -> tuple[float, float, List[Optional[str]]]:
         """
         Benchmark the list of nodes to combine and return the execution time
         and memory copy time in milliseconds on randomly generated inputs.
