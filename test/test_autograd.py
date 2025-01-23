@@ -12466,7 +12466,10 @@ class TestAllowMutationOnSaved(TestCase):
 
     def test_inplace_foreach(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors():
-            a = [torch.tensor(1., requires_grad=True), torch.tensor(1., requires_grad=True)]
+            a = [
+                torch.tensor(1., requires_grad=True),
+                torch.tensor(1., requires_grad=True)
+            ]
             b = torch._foreach_exp(a)
             torch._foreach_add_(b, 1)
             (b[0] + b[1]).backward()
