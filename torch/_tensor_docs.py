@@ -6409,7 +6409,7 @@ add_docstr_all(
     "istft",
     r"""
 istft(n_fft, hop_length=None, win_length=None, window=None,
- center=True, normalized=False, onesided=True, length=None) -> Tensor
+ center=True, normalized=False, onesided=True, length=None, align_to_window=None) -> Tensor
 
 See :func:`torch.istft`
 """,

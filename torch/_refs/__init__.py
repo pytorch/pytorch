@@ -3477,6 +3477,7 @@ def istft(
     onesided: Optional[bool] = None,
     length: Optional[int] = None,
     return_complex=False,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     torch._check(
         window is None or window.device == input.device,
@@ -3484,6 +3485,10 @@ def istft(
             f"istft input and window must be on the same device but got self on {input.device}"
             + f" and window on {window.device}"  # type: ignore[union-attr]
         ),
+    )
+    torch._check(
+        not center or align_to_window is None,
+        "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3499,7 +3504,10 @@ def istft(
     n_frames = input.size(-1)
     fft_size = input.size(-2)
 
-    expected_output_signal_len = n_fft + hop_length_ * (n_frames - 1)
+    if align_to_window:
+        expected_output_signal_len = win_length_ + hop_length_ * (n_frames - 1)
+    else:
+        expected_output_signal_len = n_fft + hop_length_ * (n_frames - 1)
     torch._check(input.numel() > 0, lambda: "istft input tensor cannot be empty")
     torch._check(
         2 <= input.ndim <= 3,
@@ -3588,11 +3596,18 @@ def istft(
     assert expected_output_signal_len == y.size(1)
     assert expected_output_signal_len == window_envelop.size(1)
 
-    start = n_fft // 2 if center else 0
+    if center:
+        start = n_fft // 2
+    elif align_to_window:
+        start = (n_fft - win_length_) // 2
+    else:
+        start = 0
     if length is not None:
         end = start + length
     elif center:
         end = expected_output_signal_len - n_fft // 2
+    elif align_to_window:
+        end = expected_output_signal_len - (n_fft - win_length_) // 2
     else:
         end = expected_output_signal_len
 

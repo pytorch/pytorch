@@ -714,7 +714,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.isclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.isnan: lambda input: -1,
         torch.istft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False, align_to_window=None: -1  # noqa: B950
         ),
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction="mean", log_target=False: -1,
         torch.kron: lambda input, other: -1,

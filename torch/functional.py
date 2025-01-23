@@ -718,7 +718,8 @@ def stft(
 istft = _add_docstr(
     torch.istft,
     "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
-    "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
+    "normalized=False, onesided=None, length=None, return_complex=False, align_to_window=None) "
+    "-> Tensor:\n"
     r"""
 Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
 

@@ -989,6 +989,7 @@ class Tensor(torch._C.TensorBase):
         onesided: Optional[bool] = None,
         length: Optional[int] = None,
         return_complex: bool = False,
+        align_to_window: Optional[bool] = None,
     ):
         r"""See :func:`torch.istft`"""
         if has_torch_function_unary(self):
@@ -1005,6 +1006,7 @@ class Tensor(torch._C.TensorBase):
                 onesided=onesided,
                 length=length,
                 return_complex=return_complex,
+                align_to_window=align_to_window,
             )
         return torch.istft(
             self,
@@ -1017,6 +1019,7 @@ class Tensor(torch._C.TensorBase):
             onesided,
             length,
             return_complex=return_complex,
+            align_to_window=align_to_window,
         )
 
     def resize(self, *sizes):

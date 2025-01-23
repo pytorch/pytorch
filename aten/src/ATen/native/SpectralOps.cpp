@@ -1026,7 +1026,8 @@ static Tensor as_complex(const Tensor& self) {
 Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
              const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
              const bool center, const bool normalized, const std::optional<bool> onesidedOpt,
-             const std::optional<int64_t> lengthOpt, const bool return_complex) {
+             const std::optional<int64_t> lengthOpt, const bool return_complex,
+         const std::optional<bool> align_to_windowOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -1052,11 +1053,14 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
     } \
     SS << ", center=" << center << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", length="; \
-    write_opt(SS, lengthOpt) << ", return_complex=" << return_complex << ") "
+    write_opt(SS, lengthOpt) << ", return_complex=" << return_complex << ") " << ", align_to_window="; \
+    write_opt(SS, align_to_windowOpt) << ") "
 
   TORCH_CHECK(!window.defined() || window.device() == self.device(),
               "istft input and window must be on the same device but got self on ",
               self.device(), " and window on ", window.device())
+  TORCH_CHECK(!center || !align_to_windowOpt.has_value(),
+          "stft align_to_window should only be set when center = false.")
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
@@ -1070,7 +1074,8 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
 
-  const auto expected_output_signal_len = n_fft + hop_length * (n_frames - 1);
+  const bool align_to_window = align_to_windowOpt.value_or(false);
+  const auto expected_output_signal_len = align_to_window ? win_length + hop_length * (n_frames - 1) : n_fft + hop_length * (n_frames - 1);
 
   const auto options = at::device(input.device()).dtype(input.dtype());
   if (input.numel() == 0) {
@@ -1171,13 +1176,23 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   TORCH_INTERNAL_ASSERT(expected_output_signal_len == window_envelop.size(1));
 
   // We need to trim the front padding away if centered
-  const auto start = center ? n_fft / 2 : 0;
+  const auto start = [&]() -> size_t {
+    if (center) {
+        return n_fft / 2;
+    } else if (align_to_window) {
+        return (n_fft - win_length) / 2;
+    } else {
+        return 0;
+    }
+  }();
   const auto end = [&] () -> int64_t {
     if (lengthOpt.has_value()) {
       return start + *lengthOpt;
     }
     if (center) {
       return -(n_fft / 2);
+    } else if (align_to_window) {
+      return -(n_fft - win_length) / 2;
     }
     return expected_output_signal_len;
   }();
