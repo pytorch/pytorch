@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import builtins
-from torch._prims_common import compute_required_storage_length
 import copy
 import functools
 import hashlib
@@ -30,6 +29,7 @@ from typing import (
 )
 
 import torch
+from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -576,7 +576,7 @@ class CachingAutotuner(KernelInterface):
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contanminating them. We try to pass cloned args to the kernel.
         If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteratrion. Figure out the args
+        copy to cpu and restore them after each iteration. Figure out the args
         to be copied and do the copying.
         """
         if not self.optimize_mem:
@@ -585,13 +585,10 @@ class CachingAutotuner(KernelInterface):
         copies = {}
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
-        # dbg = len(args) > 0 and args[0].numel() >= 1500000000
-        dbg = False
         def maybe_copy(name, arg):
             if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                # TODO handle storage_offset
                 required_storage_length = compute_required_storage_length(
                     arg.size(),
                     arg.stride(),
@@ -606,9 +603,10 @@ class CachingAutotuner(KernelInterface):
                         device="cpu",
                         pin_memory=True,
                     )
-                    if dbg:
-                        breakpoint()
-                    cpu_arg.copy_(arg.as_strided((required_storage_length,), (1,)), non_blocking=False)
+                    cpu_arg.copy_(
+                        arg.as_strided((required_storage_length,), (1,)),
+                        non_blocking=True,
+                    )
                     copies[name] = (arg, cpu_arg)
                 else:
                     budget -= size
@@ -622,7 +620,6 @@ class CachingAutotuner(KernelInterface):
         return copies
 
     def restore_args_from_cpu(self, cpu_copies):
-
         for pair in cpu_copies.values():
             arg, cpu_arg = pair
             required_storage_length = compute_required_storage_length(
@@ -630,7 +627,9 @@ class CachingAutotuner(KernelInterface):
                 arg.stride(),
                 0,
             )
-            arg.as_strided((required_storage_length,), (1,)).copy_(cpu_arg, non_blocking=True)
+            arg.as_strided((required_storage_length,), (1,)).copy_(
+                cpu_arg, non_blocking=True
+            )
 
     def reset_to_zero_args(self, *args, **kwargs):
         if not self.reset_to_zero_arg_names:
@@ -673,7 +672,6 @@ class CachingAutotuner(KernelInterface):
             prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
         ]
         cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
-
 
         return cloned_args, cloned_kwargs
 
@@ -777,7 +775,6 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        return launcher
         if (
             self.heuristic_type == HeuristicType.TEMPLATE
             or self.heuristic_type == HeuristicType.USER_AUTOTUNE
