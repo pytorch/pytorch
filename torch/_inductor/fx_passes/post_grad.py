@@ -814,13 +814,19 @@ def decompose_triton_kernel_wrapper_functional(graph):
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
-        
-        existing = match.graph.find_nodes(op="call_function", target=torch.ops.higher_order.triton_kernel_wrapper_mutation)
+
+        existing = match.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.higher_order.triton_kernel_wrapper_mutation,
+        )
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-        new = match.graph.find_nodes(op="call_function", target=torch.ops.higher_order.triton_kernel_wrapper_mutation)
+        new = match.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.higher_order.triton_kernel_wrapper_mutation,
+        )
 
         # TODO - better way of finding new node
-        new_var = set(new) - set(existing)
+        new_var = OrderedSet(new) - OrderedSet(existing)
         assert len(new_var) == 1
         new_node = next(iter(new_var))
         new_node.meta["arg_kwarg_vals"] = match.output_node().meta.get("arg_kwarg_vals")

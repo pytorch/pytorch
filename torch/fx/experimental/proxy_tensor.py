@@ -20,7 +20,6 @@ from collections import defaultdict
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from torch.fx.node import Argument, Target
 from typing import (
     Any,
     Callable,
@@ -53,7 +52,11 @@ from torch._subclasses.fake_tensor import (
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
-from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
+from torch.fx.node import (
+    _side_effectful_need_to_be_preserved_pre_dispatch,
+    Argument,
+    Target,
+)
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
@@ -1103,10 +1106,10 @@ class PythonKeyTracer(Tracer):
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
                 return None
             return extract_val(v.meta["val"])
-        
+
         if isinstance(target, torch._ops.HigherOrderOperator):
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)
-            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp) 
+            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
 
