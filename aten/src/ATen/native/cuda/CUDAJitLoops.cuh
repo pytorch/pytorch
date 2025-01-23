@@ -49,6 +49,11 @@ struct JittedVecKernelCache {
   at::cuda::jit::NvrtcFunction vec1;
   at::cuda::jit::NvrtcFunction vec2;
   at::cuda::jit::NvrtcFunction vec4;
+#ifdef USE_ROCM
+  at::cuda::jit::NvrtcFunction vec8;
+  at::cuda::jit::NvrtcFunction vec16;
+#endif
+
 };
 
 struct JittedKernelVariantCache {
@@ -88,8 +93,11 @@ void launch_jitted_unrolled_kernel(
     c10::ArrayRef<const void*> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+
+  int tws = at::cuda::jit::calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
+  int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
+  const uint32_t grid = (N + bws - 1) / bws;
 
   if (!fn_cache.function) {
     const std::lock_guard<std::mutex> lock{jiterator_mutex};
@@ -97,7 +105,7 @@ void launch_jitted_unrolled_kernel(
       constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() ||
                                        !std::is_same<decltype(s), memory::StoreWithoutCast>();
       auto code = at::cuda::jit::generate_code(
-          desc, contiguous, dynamic_casting, scalar_pos);
+          desc, contiguous, dynamic_casting, scalar_pos, tws);
       fn_cache = at::cuda::jit::jit_pwise_function(code, desc.name);
     }
   }
@@ -114,14 +122,26 @@ void launch_jitted_vectorized_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos,
     const void *scalar_val, c10::ArrayRef<const void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+
+  int tws = at::cuda::jit::calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
+  int bws = tws * num_threads();
   // N is still int64_t for the computation, but it's always safe to cast result to int
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
-  const int vec_size = at::cuda::jit::can_vectorize_up_to(
+  const uint32_t grid = (N + bws - 1) / bws;
+
+  int vec_size = at::cuda::jit::can_vectorize_up_to(
       desc, c10::ArrayRef<char*>(data.data(), data.size()));
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
   at::cuda::jit::NvrtcFunction* fn_ptr = nullptr;
+
+#ifdef USE_ROCM
+  if (vec_size == 16) {
+    fn_ptr = &fn_cache.vec16;
+  } else if (vec_size == 8) {
+    fn_ptr = &fn_cache.vec8;
+  } else
+#endif
   if (vec_size == 4) {
     fn_ptr = &fn_cache.vec4;
   } else if (vec_size == 2) {
@@ -141,7 +161,7 @@ void launch_jitted_vectorized_kernel(
       // Generates program
       auto code = at::cuda::jit::generate_code(
           desc, /*contiguous=*/true, /*dynamic_casting=*/false,
-          scalar_pos, vectorized, vec_size);
+          scalar_pos, tws, vectorized, vec_size);
       std::string kernel_name = vectorized ? desc.name + "_vectorized" + std::to_string(vec_size) : desc.name;
 
       // Acquires the program

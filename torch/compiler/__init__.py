@@ -1,8 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
@@ -19,6 +23,8 @@ __all__ = [
     "is_compiling",
     "is_dynamo_compiling",
     "is_exporting",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
@@ -188,7 +194,7 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
@@ -203,7 +209,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
-    This allows the compiler to optimize away your function
+    This allows the compiler to optimize away your function.
     Returns The same function `fn`
 
     Args:
@@ -221,8 +227,8 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides a decorator to disable compilation on a function
-    It also provides the option of recursively disabling called functions
+    This function provides a decorator to disable compilation on a function.
+    It also provides the option of recursively disabling called functions.
 
     Args:
         fn (optional): The function to disable
@@ -424,3 +430,34 @@ def is_exporting() -> bool:
         >>>     # ...rest of the function...
     """
     return _is_exporting_flag
+
+
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
+    """
+    Serializes all the cache artifacts that were created during the compilation
+
+    Example:
+
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+    """
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
+
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)
