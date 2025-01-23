@@ -185,10 +185,10 @@ class TunableOp {
       }
 
       for (size_t i = 0; i < num_iter; i++) {
+        timer[i].Start();
         if (do_flush) {
           at::cuda::flush_icache();
         }
-        timer[i].Start();
         TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
         timer[i].End();
       }
