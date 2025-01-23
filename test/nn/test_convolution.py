@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     precisionOverride,
+    skipCPUIf,
     skipCPUIfNoMkldnn,
     skipCUDAIfCudnnVersionLessThan,
     skipCUDAIfMiopen,
@@ -1750,6 +1751,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float)
+    @skipCPUIf(True, "test other device")
     def test_ConvTranspose_output_channels_0(self, device, dtype):
         class Model(nn.Module):
             def __init__(self, operator, dim):
