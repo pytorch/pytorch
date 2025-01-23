@@ -5,7 +5,6 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict, Tuple
 from unittest import skip
 
 import torch
@@ -138,6 +137,24 @@ class AOTInductorTestsTemplate:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
+
+    def test_compile_wrapper_with_O0(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with config.patch("aot_inductor.compile_wrapper_with_O0", True):
+            self.check_model(model, example_inputs)
+            self.code_check_count(model, example_inputs, "__attribute__((", 2)
 
     def test_small_constant(self):
         class Model(torch.nn.Module):
@@ -1726,7 +1743,7 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x: Dict[str, torch.Tensor]):
+            def forward(self, x: dict[str, torch.Tensor]):
                 device = next(iter(x.values())).device
                 add_ = torch.zeros(5, device=device)
                 mul_ = torch.ones(5, device=device)
@@ -2642,7 +2659,7 @@ class AOTInductorTestsTemplate:
                 def forward(
                     self,
                     self_tensor: torch.Tensor,
-                    indices: Tuple[torch.Tensor],
+                    indices: tuple[torch.Tensor],
                     values: torch.Tensor,
                 ):
                     return torch.index_put(
@@ -4199,6 +4216,9 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @skipIfXpu(
+        msg="The operator 'aten::_int_mm' is not currently implemented for the XPU device"
+    )
     def test__int_mm(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4212,6 +4232,28 @@ class AOTInductorTestsTemplate:
             torch.randint(-10, 10, (32, 64), device=self.device, dtype=torch.int8),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_assert_tensor_meta(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_tensor_metadata.default(
+                    x,
+                    dtype=torch.int32,
+                )
+                return (x + 1,)
+
+        example_inputs = (torch.tensor(1, dtype=torch.int32),)
+        with config.patch(
+            {
+                "implicit_fallbacks": False,
+            }
+        ):
+            self.check_model(
+                Module(),
+                example_inputs,
+                atol=0.1,
+                rtol=1e-3,
+            )
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
@@ -4242,7 +4284,7 @@ def fail_cpu(is_skip=False):
     )
 
 
-def fail_gpu(suffixes: Tuple[str, ...], is_skip=False):
+def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
     return TestFailure(
         suffixes,
         is_skip=is_skip,
