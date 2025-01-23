@@ -27,9 +27,20 @@ extern "C" {
 
 #endif // __cplusplus
 
-PyObject* new_random_object();
+// reference to random module
+// returns borrowed reference
 PyObject* random_module();
+
+// rng.getstate()
+// rng can be random module or random.Random object
+// rng: borrowed reference
+// returns new reference
 PyObject* random_getstate(PyObject* rng);
+
+// rng.setstate(state)
+// rng can be random module or random.Random object
+// rng, state: borrowed references
+// no return value
 void random_setstate(PyObject* rng, PyObject* state);
 
 #ifdef __cplusplus
