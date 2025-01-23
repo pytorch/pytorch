@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+import getpass
 import inspect
 import os
 import re
 import sys
+import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._environment import is_fbcode
@@ -133,6 +135,12 @@ guard_nn_modules = True
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
+# Flag to enable preparation for graph freezing, so that the named parameters and
+# buffers are passed as params_flat in tracing context by AOT autograd.
+# Non-Inductor backends can use this list for graph freezing.
+prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
+
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
@@ -150,7 +158,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses: Set[Type[Any]] = set()
+traceable_tensor_subclasses: set[type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -173,7 +181,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
+skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -403,6 +411,9 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
+# Use C++ guard manger for symbolic shapes
+enable_cpp_symbolic_shape_guards = False
+
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
@@ -425,6 +436,10 @@ track_nodes_for_deduplication = False
 # Should be disabled in dynamo-wrapped tests since some tests check that no warnings are issued.
 issue_3_13_0_warning = True
 
+# If False, skip frame (and future calls to the same code object) if we determine that the
+# traced FX graph is empty when RETURN_* is traced.
+allow_empty_graphs = False
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
@@ -435,6 +450,10 @@ def default_debug_dir_root():
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
         return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+    elif is_fbcode():
+        return os.path.join(
+            tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
+        )
     else:
         return os.path.join(os.getcwd(), "torch_compile_debug")
 
@@ -479,13 +498,13 @@ log_compilation_metrics = True
 # allowing dynamo to construct larget graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
-reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
 # A set of methods that will be ignored while tracing,
 # to prevent graph breaks.
 # Add logging.Logger.<method> to ignore all calls for method,
 # or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: Set[Callable[..., Any]] = set()
+ignore_logger_methods: set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -518,7 +537,7 @@ fake_tensor_cache_crosscheck_enabled = (
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
-compiled_autograd_kwargs_override: Dict[str, Any] = {}
+compiled_autograd_kwargs_override: dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes

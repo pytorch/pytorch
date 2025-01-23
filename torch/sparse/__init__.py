@@ -19,11 +19,11 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, Tuple[int, ...], List[int]]]
+    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[Tuple[int]]
+    DimOrDims = Optional[tuple[int]]
 
 
 __all__ = [
@@ -591,7 +591,7 @@ def as_sparse_gradcheck(gradcheck):
             """Convert differentiable non-strided tensors to a representation containing differentiable strided tensors."""
             if not isinstance(args, (list, tuple)):
                 args = (args,)
-            new_args: List[Any] = []
+            new_args: list[Any] = []
             for obj in args:
                 if (
                     isinstance(obj, torch.Tensor)

@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -184,7 +184,7 @@ class NNModuleToString:
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
                 module_str = f"{module_str}.cuda()"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
@@ -203,7 +203,9 @@ class NNModuleToString:
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            model_str += (
+                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            )
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -212,7 +214,7 @@ class NNModuleToString:
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
+            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
         # attrs = dir(gm)
@@ -736,11 +738,11 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]],
+    func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
-    sym_shapes: Optional[Dict[str, int]] = None,
+    sym_shapes: Optional[dict[str, int]] = None,
     default_sym_shape: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
 
@@ -773,7 +775,7 @@ def aot_graph_input_parser(
         "Container for tensors as attributes"
 
     # Dictionary for tensors from annotations
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
 
     sym_shapes = sym_shapes or {}
 

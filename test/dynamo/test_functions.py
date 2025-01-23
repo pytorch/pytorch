@@ -4435,7 +4435,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
-
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @skipIfHpu
@@ -4458,7 +4457,6 @@ class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     def test_tensor_type5(a, b, device):
         m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
-
 
 instantiate_parametrized_tests(FunctionTests)
 devices = ("cuda", "hpu")

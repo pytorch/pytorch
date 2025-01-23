@@ -1419,6 +1419,89 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    # We set allow_ignore_mark_dynamic to True because Dynamo may end up specializing M dimension
+    # despite it being marked as dynamic with mark_dynamic.
+    @dynamo_config.patch({"allow_ignore_mark_dynamic": True})
+    @parametrize("has_bias", [True, False])
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("per_channel_quant", [True, False])
+    @parametrize("reshape_a", [True, False])
+    @parametrize("expand_a_scale", [True, False])
+    @parametrize("dynamic", [True, False])
+    def test_da8w8_sym_act_sym_wgt_with_int_mm(
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic
+    ):
+        r"""
+        This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
+        when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
+        The pattern is:
+            (no bias) _int_mm -> convert_element_type -> ([maybe_expand_a_scale] -> mul) -> mul
+        or
+            (with bias) pattern_no_bias -> add
+        Expansion of the scale of activation is optional.
+        The pattern depiction doesn't mean that convert_element_type output is fed into expand_a as input,
+        but simply that activation scale may be applied after an expand operation on it.
+        """
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            return
+        M = 32
+        in_feature = 48
+        out_feature = 64
+        q_min, q_max = -32, 31
+
+        class Mod(torch.nn.Module):
+            def __init__(self, dtype: torch.dtype, has_bias: bool):
+                super().__init__()
+                self.dtype = dtype
+                self.has_bias = has_bias
+                self.b = torch.randint(
+                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
+                )
+                self.per_channel_quant = per_channel_quant
+                a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
+                a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+                self.a_scale = (
+                    a_scale_per_channel if per_channel_quant else a_scale_per_tensor
+                )
+                self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
+                self.b_scale = self.b_scale.to(dtype)
+                self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+
+            def forward(self, a):
+                if reshape_a:
+                    a_reshaped = a.reshape(-1, a.size(-1))
+                else:
+                    a_reshaped = a
+                c = torch._int_mm(a_reshaped, self.b)
+                c = c.to(self.dtype)
+                if not expand_a_scale:
+                    a_scale = self.a_scale
+                else:
+                    a_scale = self.a_scale.expand(c.shape)
+                c = c * a_scale
+                c = c * self.b_scale
+                if self.has_bias:
+                    c = c + self.bias
+                return c
+
+        mod = Mod(dtype, has_bias).eval()
+        a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
+        if dynamic:
+            torch._dynamo.mark_dynamic(a, 0)
+            torch._dynamo.mark_static(a, 1)
+        self.common(
+            mod,
+            (a,),
+            atol=1e-2 if dtype is torch.bfloat16 else None,
+            rtol=1e-2 if dtype is torch.bfloat16 else None,
+        )
+
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
@@ -1682,6 +1765,187 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("gemm_num", (2, 3))
+    def test_grouped_linear_invalid(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        gemm_num,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, gemm_num):
+                super().__init__()
+                self.linears = [
+                    torch.nn.Linear(in_feature, out_feature + gemm_idx, bias=False)
+                    for gemm_idx in range(gemm_num)
+                ]
+
+            def forward(self, x):
+                return [linear(x) for linear in self.linears]
+
+        # each linear has different num of out features, thus invaild grouped gemm
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, gemm_num).eval()
+            v = torch.randn(batch_size, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            # gemm_num independent template instead of grouped gemm template
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"], gemm_num
+            )
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("input_3d", (False, True))
+    @parametrize("gemm_num", (2, 3))
+    def test_grouped_linear(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        input_3d,
+        gemm_num,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, gemm_num):
+                super().__init__()
+                self.linears = [
+                    torch.nn.Linear(in_feature, out_feature, bias=False)
+                    for _ in range(gemm_num)
+                ]
+
+            def forward(self, x):
+                return [linear(x) for linear in self.linears]
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            if dtype == torch.float16 and input_3d:
+                # reduce the number of tests
+                continue
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, gemm_num).eval()
+            B = (2, batch_size) if input_3d else (batch_size,)
+            v = torch.randn(*B, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("input_3d", (True, False))
+    @parametrize(
+        "bias",
+        (
+            [True, True],
+            [True, False],
+            [False, True],
+            [False, False],
+        ),
+    )
+    @parametrize(
+        "epilogue",
+        (
+            ["none", "none"],
+            ["relu", "none"],
+            ["none", "relu"],
+            ["relu", "relu"],
+            ["silu", "mul"],
+        ),
+    )
+    def test_grouped_linear_epilogue(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        input_3d,
+        bias,
+        epilogue,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias, epilogue):
+                super().__init__()
+                self.linear0 = torch.nn.Linear(in_feature, out_feature, bias=bias[0])
+                self.linear1 = torch.nn.Linear(in_feature, out_feature, bias=bias[1])
+                self.epilogue0 = epilogue[0]
+                self.epilogue1 = epilogue[1]
+
+            def forward(self, x):
+                res0 = self.linear0(x)
+                res1 = self.linear1(x)
+                if self.epilogue0 == "silu" and self.epilogue1 == "mul":
+                    return torch.nn.functional.silu(res0) * res1
+                else:
+                    if self.epilogue0 == "relu":
+                        res0 = torch.nn.functional.relu(res0)
+                    if self.epilogue1 == "relu":
+                        res1 = torch.nn.functional.relu(res1)
+                    return res0, res1
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            if input_3d and dtype == torch.float16:
+                # Reduce the number of test cases
+                continue
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, bias, epilogue).eval()
+            B = (2, batch_size) if input_3d else (batch_size,)
+            v = torch.randn(*B, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+            if any(e != "none" for e in epilogue):
+                self.assertGreater(
+                    counters["inductor"]["cpp_epilogue_fusion_counter"], 0
+                )
 
     @inductor_config.patch({"freezing": False})
     @patches
@@ -2030,6 +2294,10 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
+    )
+    test_grouped_linear_dynamic_shapes = TestSelectAlgorithm.test_grouped_linear
+    test_grouped_linear_epilogue_dynamic_shapes = (
+        TestSelectAlgorithm.test_grouped_linear_epilogue
     )
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
