@@ -180,9 +180,13 @@ def check_model(
             model = model.to(self.device)
 
         # For non mixed device inputs with default "cpu",set the device manully.
-        if all(t.device.type == "cpu" for t in example_inputs):
+        if all(
+            t.device.type == "cpu"
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        ):
             example_inputs = tuple(
-                clone_preserve_strides(x).to(self.device) for x in example_inputs
+                clone_preserve_strides(x, device=self.device) for x in example_inputs
             )
 
         ref_model = copy.deepcopy(model)

@@ -118,7 +118,7 @@ from torch._inductor.compile_fx import (
     compile_fx_inner,
     complex_memory_overlap,
 )
-from torch._inductor.utils import has_torchvision_roi_align
+from torch._inductor.utils import clone_preserve_strides, has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -366,20 +366,6 @@ def compute_grads(args, kwrags, results, grads):
         allow_unused=True,
         retain_graph=True,
     )
-
-
-def clone_preserve_strides(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return x
-    buffer = torch.as_strided(
-        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
-    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-    return out
 
 
 def check_model(

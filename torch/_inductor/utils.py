@@ -2230,7 +2230,10 @@ def align_inputs_from_check_idxs(
     return run
 
 
-def clone_preserve_strides(x: torch.Tensor):
+def clone_preserve_strides(x: torch.Tensor, device=None):
+    if not isinstance(x, torch.Tensor):
+        return x
+
     if 0 in x.size():
         # Short-circuits if the shape has no elements
         needed_size = 0
@@ -2238,7 +2241,11 @@ def clone_preserve_strides(x: torch.Tensor):
         needed_size = (
             sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
         )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    buffer = torch.as_strided(x, (needed_size,), (1,))
+    if not device:
+        buffer = buffer.clone()
+    else:
+        buffer = buffer.to(device, copy=True)
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
