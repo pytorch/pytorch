@@ -546,6 +546,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._current_autograd_node",
         "torch._C._current_graph_task_execution_order",
         "torch._C._current_graph_task_id",
+        "torch._C._cusparselt.getVersionInt",
         "torch._C._cxx_flags",
         "torch._C._debug_get_fusion_group_inlining",
         "torch._C._debug_only_are_vmap_fallback_warnings_enabled",

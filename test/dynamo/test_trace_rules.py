@@ -47,6 +47,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
     "torch._C._abort",
+    "torch._C._cusparselt.mm_search",
     "torch._C._mps_is_on_macos_or_newer",
     "torch._C._swap_tensor_impl",
     "torch._C._unsafe_reset_storage",
@@ -128,6 +129,9 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
         return hashable(obj) and obj in {
             torch._C._cuda_isCurrentStreamCapturing,
             torch._C._graph_pool_handle,
+            torch._C._cuda_beginAllocateToPool,
+            torch._C._cuda_endAllocateCurrentStreamToPool,
+            torch._C._cuda_releasePool,
         }
 
     # Add obj to c_binding_in_graph_functions set or non_c_binding_in_graph_functions set
@@ -316,9 +320,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             f"were not added to `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
             "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
         )
-        msg1 = "New torch objects:\n"
-        for o in sorted(x, key=lambda x: x.__name__):
-            msg1 += o.__name__ + "\n"
         msg2 = (
             f"Existing torch objects: {y} were removed. "
             f"Please remove them from `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
