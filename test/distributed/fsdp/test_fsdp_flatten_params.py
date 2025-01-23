@@ -11,15 +11,17 @@ from torch.distributed.fsdp._flat_param import (
     FlatParamShardMetadata,
     HandleShardingStrategy,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -45,7 +47,7 @@ class TestFlattenParams(FSDPTest):
 
     def _get_default_config(self):
         return {
-            "device": torch.device("cuda"),
+            "device": torch.device(device_type),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,
@@ -103,8 +105,8 @@ class TestFlattenParams(FSDPTest):
         params_to_flatten = encoder_1_params + decoder_0_params
         num_params = [len(encoder_1_params), len(decoder_0_params)]
         numel_to_flatten = sum(p.numel() for p in params_to_flatten)
-        module.encoder.layers[1] = FSDP(module.encoder.layers[1])
-        module.decoder.layers[0] = FSDP(module.decoder.layers[0])
+        module.encoder.layers[1] = FSDP(module.encoder.layers[1], device_id=device_type)
+        module.decoder.layers[0] = FSDP(module.decoder.layers[0], device_id=device_type)
         flat_params = [
             module.encoder.layers[1]._flat_param,
             module.decoder.layers[0]._flat_param,
@@ -173,7 +175,7 @@ class TestFlattenParams(FSDPTest):
         module = self._get_empty_module()
         in_data = torch.rand(1)
         ref_out = module(in_data)
-        fsdp_module = FSDP(module)
+        fsdp_module = FSDP(module, device_id=device_type)
         self.assertEqual(len(list(fsdp_module.parameters())), 0)
         self.assertIsNone(fsdp_module._flat_param)
         fsdp_out = fsdp_module(in_data)
@@ -270,9 +272,9 @@ class TestFlattenParams(FSDPTest):
         self._test_output(module)
 
     def _test_output(self, module: nn.Module):
-        module = module.to(self.rank)
+        module = module.to(device_type)
         ref_output = self._get_output(module)
-        fsdp_module = FSDP(module)
+        fsdp_module = FSDP(module, device_id=device_type)
         fsdp_output = self._get_output(fsdp_module)
         self.assertEqual(ref_output, fsdp_output)
 
@@ -295,14 +297,14 @@ class TestFlattenParams(FSDPTest):
         )
 
     def _test_pnorm_after_step_with_shared_params(self, half: bool):
-        module = self._get_shared_params_transformer().to(self.rank)
+        module = self._get_shared_params_transformer().to(device_type)
         if half:
             module = module.half()
         ref_pnorm_after_step = self._get_pnorm_after_step(module)
-        module = self._get_shared_params_transformer().to(self.rank)  # recreate
+        module = self._get_shared_params_transformer().to(device_type)  # recreate
         if half:
             module = module.half()
-        fsdp_module = FSDP(module)
+        fsdp_module = FSDP(module, device_id=device_type)
         fsdp_pnorm_after_step = self._get_pnorm_after_step(fsdp_module)
         self.assertEqual(ref_pnorm_after_step, fsdp_pnorm_after_step)
 
@@ -648,7 +650,7 @@ class TestFlattenParams(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestFlattenParams)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestFlattenParams, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

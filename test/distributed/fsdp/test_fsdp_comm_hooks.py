@@ -12,18 +12,23 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_CUDA,
+    TEST_HPU,
 )
+
+
+device_type = torch.device(get_devtype())
 
 
 if not dist.is_available():
@@ -31,8 +36,11 @@ if not dist.is_available():
     sys.exit(0)
 
 # bfloat16 is only supported by CUDA 11+
-BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    torch.version.cuda is not None or torch.version.hip is not None
+BFLOAT16_AVAILABLE = (
+    True
+    if (TEST_CUDA and (torch.version.cuda is not None or torch.version.hip is not None))
+    or TEST_HPU
+    else False
 )
 
 
@@ -40,7 +48,6 @@ class Net(nn.Module):
     def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
         # to ensure determinism
         torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
         super().__init__()
 
         if has_wrapping:
@@ -50,12 +57,12 @@ class Net(nn.Module):
                     nn.ReLU(),
                     FSDP(
                         nn.Linear(16, 8),
-                        device_id=torch.cuda.current_device(),
+                        device_id=device_type,
                         sharding_strategy=sharding_strategy,
                         mixed_precision=mixed_precision,
                     ),
                 ),
-                device_id=torch.cuda.current_device(),
+                device_id=device_type,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             )
@@ -134,13 +141,13 @@ class TestCommunicationHooks(FSDPTest):
         """
         out_dim = self.world_size
         net = torch.nn.Linear(1, out_dim, bias=False)
-        inpt = torch.tensor([self.rank]).float().cuda(self.rank)
+        inpt = torch.tensor([self.rank]).float().to(device_type.type)
 
         net_default_hook = FSDP(
             net,
-            device_id=torch.cuda.current_device(),
+            device_id=device_type,
             sharding_strategy=sharding_strategy,
-        ).to(self.rank)
+        ).to(device_type.type)
 
         # Check that by default, `_comm_hook` is None
         for entry in FSDP.fsdp_modules(net_default_hook):
@@ -172,13 +179,12 @@ class TestCommunicationHooks(FSDPTest):
         ]
 
     def _init_model(self, core, sharding_strategy, mixed_precision=None):
-        device = torch.device("cuda")
         return FSDP(
             core,
-            device_id=torch.cuda.current_device(),
+            device_id=device_type,
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
-        ).to(device)
+        ).to(device_type)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
@@ -277,9 +283,10 @@ class TestCommunicationHooks(FSDPTest):
             ShardingStrategy.HYBRID_SHARD,
             ShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
-            model = Net(False, None, None).cuda()
+            model = Net(False, None, None).to(device_type)
             fsdp_model = FSDP(
                 model,
+                device_id=device_type,
                 auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
                 sharding_strategy=sharding_strategy,
             )
@@ -337,7 +344,6 @@ class TestCommunicationHooks(FSDPTest):
     ):
         # keep everything deterministic for input data
         torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
 
         fsdp_with_hook = self._init_model(
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
@@ -359,7 +365,7 @@ class TestCommunicationHooks(FSDPTest):
         optim_hook = torch.optim.SGD(fsdp_with_hook.parameters(), lr=0.1)
         optim_mp = torch.optim.SGD(fsdp_with_mp.parameters(), lr=0.1)
 
-        in_data = torch.rand(16, 8).cuda()
+        in_data = torch.rand(16, 8).to(device_type)
         fsdp_with_hook.train()
         fsdp_with_mp.train()
         loss_hook = fsdp_with_hook(in_data).sum()
@@ -426,7 +432,7 @@ class TestCommunicationHooks(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestCommunicationHooks)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestCommunicationHooks, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

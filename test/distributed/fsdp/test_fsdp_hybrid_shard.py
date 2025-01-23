@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+from torch._utils import _get_device_module
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _rank_not_in_group
 from torch.distributed.fsdp import (
@@ -29,8 +30,14 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     TransformerWithSharedParams,
 )
+
+
+device_type = torch.device(get_devtype())
+
+DEVICE_COUNT = _get_device_module(device_type.type).device_count()
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -79,7 +86,7 @@ def patch_reduce_scatter(new_reduce_scatter):
 
 
 class MyModel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
@@ -97,7 +104,7 @@ class ShardingStrategyMode(Enum):
 class TestFSDPHybridShard(FSDPTest):
     @property
     def world_size(self):
-        return max(torch.cuda.device_count(), 2)
+        return max(DEVICE_COUNT, 2)
 
     @property
     def process_group(self):
@@ -105,22 +112,30 @@ class TestFSDPHybridShard(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_raises_manual_wrap_hybrid_shard_when_none_policy(self):
-        model = MyModel().cuda()
+        model = MyModel().to(device_type)
         err_ctx = self.assertRaisesRegex(
             ValueError,
             "requires explicit specification of process group or device_mesh.",
         )
 
         with err_ctx:
-            model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+            model = FSDP(
+                model,
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+                device_id=device_type,
+            )
 
         with err_ctx:
-            model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
+            model = FSDP(
+                model,
+                sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2,
+                device_id=device_type,
+            )
 
     @skip_if_lt_x_gpu(4)
     def test_hsdp_save_load_state_dict(self):
-        model = MyModel().cuda()
-        num_node_devices = torch.cuda.device_count()
+        model = MyModel().to(device_type)
+        num_node_devices = DEVICE_COUNT
         shard_rank_lists = list(range(0, num_node_devices // 2)), list(
             range(num_node_devices // 2, num_node_devices)
         )
@@ -160,7 +175,7 @@ class TestFSDPHybridShard(FSDPTest):
             msd = model.state_dict()
             osd = FSDP.optim_state_dict(model, optim)
 
-        load_model = fsdp_ctor(MyModel().cuda())
+        load_model = fsdp_ctor(MyModel().to(device_type))
         load_optim = torch.optim.AdamW(load_model.parameters())
         with FSDP.state_dict_type(load_model, StateDictType.SHARDED_STATE_DICT):
             load_model.load_state_dict(msd)
@@ -169,8 +184,8 @@ class TestFSDPHybridShard(FSDPTest):
 
     @skip_if_lt_x_gpu(4)
     def test_hsdp_sync_module_state(self):
-        model = MyModel().cuda()
-        num_node_devices = torch.cuda.device_count()
+        model = MyModel().to(device_type)
+        num_node_devices = DEVICE_COUNT
         shard_rank_lists = list(range(0, num_node_devices // 2)), list(
             range(num_node_devices // 2, num_node_devices)
         )
@@ -212,7 +227,7 @@ class TestFSDPHybridShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_invalid_pg_specification_raises(self):
         pol = ModuleWrapPolicy({nn.Linear})
-        model = MyModel().cuda()
+        model = MyModel().to(device_type)
         with self.assertRaisesRegex(
             ValueError, "Expected process_group to be passed in"
         ):
@@ -221,6 +236,7 @@ class TestFSDPHybridShard(FSDPTest):
                 auto_wrap_policy=pol,
                 process_group=self.process_group,
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+                device_id=device_type,
             )
 
     # TODO - add test for ZeRO-2 style sharding ensure params are not
@@ -258,7 +274,7 @@ class TestFSDPHybridShard(FSDPTest):
         use_device_mesh: bool,
     ):
         if use_device_mesh:
-            device_mesh = init_device_mesh("cuda", (1, self.world_size))
+            device_mesh = init_device_mesh(device_type.type, (1, self.world_size))
         else:
             device_mesh = None
         hsdp_model = self._init_hsdp_model(
@@ -313,7 +329,7 @@ class TestFSDPHybridShard(FSDPTest):
         with patch_allreduce(patched_allreduce), patch_reduce_scatter(
             patched_reduce_scatter
         ):
-            inp = hsdp_model.get_input(device=torch.cuda.current_device())
+            inp = hsdp_model.get_input(device=device_type)
             out = hsdp_model(inp[0], inp[1])
             loss = hsdp_model.get_loss(inp, out)
             loss.backward()
@@ -362,7 +378,7 @@ class TestFSDPHybridShard(FSDPTest):
         hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
         torch.manual_seed(global_pg.rank() + 1)
         for _ in range(5):
-            inp = fsdp_model.module.get_input(torch.device("cuda"))
+            inp = fsdp_model.module.get_input(device_type)
             losses: list[torch.Tensor] = []
             for model, optim in ((fsdp_model, fsdp_optim), (hsdp_model, hsdp_optim)):
                 optim.zero_grad()
@@ -378,7 +394,7 @@ class TestFSDPHybridShard(FSDPTest):
         )
         hsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
-            "device_id": torch.cuda.current_device(),
+            "device_id": device_type,
             "use_orig_params": use_orig_params,
         }
         fsdp_model = TransformerWithSharedParams.init(
@@ -405,7 +421,7 @@ class TestFSDPHybridShard(FSDPTest):
             {TransformerEncoderLayer, TransformerDecoderLayer},
         )
         hsdp_kwargs = {
-            "device_id": torch.cuda.current_device(),
+            "device_id": device_type,
             "auto_wrap_policy": auto_wrap_policy,
             "sharding_strategy": hsdp_sharding_strategy,
             "use_orig_params": use_orig_params,
@@ -432,7 +448,7 @@ class TestFSDPHybridShard(FSDPTest):
             # Use `FULL_SHARD` for the embedding and output projection
             hsdp_model = FSDP(
                 model,
-                device_id=torch.cuda.current_device(),
+                device_id=device_type,
                 sharding_strategy=ShardingStrategy.FULL_SHARD,
                 use_orig_params=use_orig_params,
             )
@@ -440,6 +456,5 @@ class TestFSDPHybridShard(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFSDPHybridShard)
-
 if __name__ == "__main__":
     run_tests()
