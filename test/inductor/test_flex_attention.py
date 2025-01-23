@@ -861,7 +861,8 @@ class TestFlexAttention(InductorTestCase):
         torch._dynamo.reset()
 
         # First compilation with original dimensions
-        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_sdpa1 = torch.compile(sdpa_partial1, backend=backend, dynamic=True)
         compiled_out1 = compiled_sdpa1(q1, k1, v1)
         compiled_out1.backward(backward_grad1)
 
@@ -879,10 +880,10 @@ class TestFlexAttention(InductorTestCase):
             v1_ref,
             v1,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Second compilation with new dimensions
-        compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
+        compiled_sdpa2 = torch.compile(sdpa_partial2, backend=backend, dynamic=True)
         compiled_out2 = compiled_sdpa2(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
 
@@ -900,10 +901,10 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Third compilation with new dimensions
-        compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
+        compiled_sdpa3 = torch.compile(sdpa_partial3, backend=backend, dynamic=True)
         compiled_out3 = compiled_sdpa3(q3, k3, v3)
         compiled_out3.backward(backward_grad3)
 
@@ -921,7 +922,7 @@ class TestFlexAttention(InductorTestCase):
             v3_ref,
             v3,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
     def run_automatic_dynamic_test(
         self,
