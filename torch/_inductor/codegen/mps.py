@@ -223,6 +223,10 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::erf({x})"
 
     @staticmethod
+    def lgamma(x: CSEVariable) -> str:
+        return f"c10::metal::log_gamma({x})"
+
+    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
