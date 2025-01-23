@@ -352,7 +352,7 @@ struct CppNode : public Node {
         IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
             torch::dynamo::autograd::get_input_metadata(next_edges()));
 
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
 
     // Each time apply_with_saved is called, we bind a new function to Python.
     // This is because the schema might be different on compiled autograd cache
@@ -368,14 +368,14 @@ struct CppNode : public Node {
         schema.emplace_back(ivalue.type());
       }
     }
-    auto fn_name = interface->bind_function(
+    auto fn_name = pyinterface->bind_function(
         saved.get_py_compiler(),
         std::string(typeid(T).name()),
         CppNode_apply_functional_ivalue<T>,
         schema,
         /*is_custom_function*/ true);
 
-    auto results = interface->call_function(
+    auto results = pyinterface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
         fn_name,
