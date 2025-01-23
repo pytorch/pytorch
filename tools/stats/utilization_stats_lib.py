@@ -6,6 +6,7 @@ from dataclasses_json import DataClassJsonMixin
 
 _DATA_MODEL_VERSION = 1.0
 
+
 # data model for test log usage
 @dataclass
 class UtilizationStats:
@@ -28,11 +29,13 @@ class UtilizationMetadata(DataClassJsonMixin):
     gpu_type: Optional[str] = None
     error: Optional[str] = None
 
+
 @dataclass
 class GpuUsage(DataClassJsonMixin):
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
+
 
 @dataclass
 class RecordData(DataClassJsonMixin):
@@ -40,9 +43,10 @@ class RecordData(DataClassJsonMixin):
     memory: Optional[UtilizationStats] = None
     gpu_usage: Optional[list[GpuUsage]] = None
 
+
 @dataclass
 class UtilizationRecord(DataClassJsonMixin):
-    level:str
+    level: str
     timestamp: float
     data: Optional[RecordData] = None
     cmd_names: Optional[list[str]] = None
@@ -51,7 +55,7 @@ class UtilizationRecord(DataClassJsonMixin):
 
 
 @dataclass
-class oss_ci_utilization_segment_v1(DataClassJsonMixin):
+class OssCiSegmentV1(DataClassJsonMixin):
     level: str
     name: str
     start_at: str
@@ -62,11 +66,12 @@ class oss_ci_utilization_segment_v1(DataClassJsonMixin):
 # the db schema related to this is:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 
+
 @dataclass
-class OssCiUtilizationMetadataV1():
+class OssCiUtilizationMetadataV1:
     created_at: str
     repo: str
-    workflow_id:int
+    workflow_id: int
     run_attempt: int
     job_id: int
     workflow_name: str
@@ -78,12 +83,13 @@ class OssCiUtilizationMetadataV1():
     gpu_type: str
     start_at: str
     end_at: str
-    segments  : list[oss_ci_utilization_segment_v1]
+    segments: list[OssCiSegmentV1]
+
 
 # this data model is for the time series data:
 ## https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
 @dataclass
-class OssCiUtilizationTimeSeriesV1():
+class OssCiUtilizationTimeSeriesV1:
     created_at: str
     type: str
     tags: list[str]
@@ -95,6 +101,7 @@ class OssCiUtilizationTimeSeriesV1():
     workflow_name: str
     job_name: str
     json_data: str
+
 
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
