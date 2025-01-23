@@ -90,7 +90,7 @@ void initModule(PyObject* module) {
 
   m.def(
       "_mtia_recordMemoryHistory",
-      [](std::optional<std::string> enabled,
+      [](const std::optional<std::string>& enabled,
          const std::string& stacks,
          size_t max_entries) {
         at::detail::getMTIAHooks().recordMemoryHistory(
@@ -100,6 +100,10 @@ void initModule(PyObject* module) {
   m.def("_mtia_memorySnapshot", []() {
     PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
     return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceCount", []() {
+    return at::detail::getMTIAHooks().deviceCount();
   });
 }
 

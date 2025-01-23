@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from copy import deepcopy
 from enum import Enum, IntEnum
 from functools import wraps
-from typing import Any, Dict, List, Literal, Tuple, TypedDict
+from typing import Any, Literal, TypedDict
 from unittest import mock
 
 import numpy as np
@@ -35,6 +35,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 import torch._functorch.config
+import torch.distributed as dist
 import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
@@ -42,7 +43,10 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
 from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
@@ -708,7 +712,7 @@ def create_rand_mask_from_inputs(
 class SequentialAppendList(torch.nn.Sequential):
     """from timm/models/vovnet.py"""
 
-    def forward(self, x: torch.Tensor, concat_list: List[torch.Tensor]) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, concat_list: list[torch.Tensor]) -> torch.Tensor:
         for i, module in enumerate(self):
             if i == 0:
                 concat_list.append(module(x))
@@ -2161,34 +2165,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             f(torch.zeros(2), A())
 
-    def test_dict_list_values(self):
-        def inner_fn(args):
-            return [x[1].shape for x in args]
-
-        @torch.compile(backend="eager")
-        def fn(tensors):
-            return inner_fn(zip(itertools.count(), tensors["args"]))
-
-        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
-        fn({"args": [torch.ones(5, 5)]})
-
-    def test_dict_iter(self):
-        class MyMod(torch.nn.Module):
-            def forward(self, x):
-                z = {"my": 1, "const": 2, "dict": 3, "variable": 4}
-                tot = 0
-                for key in z:
-                    tot += z[key]
-
-                return tot
-
-        x = torch.tensor([0])
-        model = MyMod()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        y = opt_model(x)
-
-        self.assertEqual(y, 10)
-
     def test_sort_out(self):
         dtype = torch.float32
         device = "cpu"
@@ -3287,26 +3263,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_dict_subclass_contains(self):
-        # pattern from huggingface
-        class ClassInstantier(collections.OrderedDict):
-            pass
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(x, d):
-            if "key1" in d:
-                x = x + 2
-            if "key2" in d:
-                x = x + 4
-            x = x + 8
-            return x
-
-        result = f(torch.ones(8), ClassInstantier({"key1": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 11.0)))
-
-        result = f(torch.ones(8), ClassInstantier({"key2": torch.ones(8)}))
-        self.assertTrue(same(result, torch.full([8], 13.0)))
-
     def test_hf_classinstantier(self):
         # hf activations.py
         class ClassInstantier(collections.OrderedDict):
@@ -4152,7 +4108,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
-            if torch.jit.isinstance(x, List[str]):
+            if torch.jit.isinstance(x, typing.List[str]):
                 return x * 2
             return x
 
@@ -4863,14 +4819,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     def test_detectron2_instances_cat(self):
         class Instances:
-            def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
+            def __init__(self, image_size: tuple[int, int], **kwargs: Any):
                 self._image_size = image_size
-                self._fields: Dict[str, Any] = {}
+                self._fields: dict[str, Any] = {}
                 for k, v in kwargs.items():
                     self.set(k, v)
 
             @property
-            def image_size(self) -> Tuple[int, int]:
+            def image_size(self) -> tuple[int, int]:
                 return self._image_size
 
             def __setattr__(self, name: str, val: Any) -> None:
@@ -4905,7 +4861,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return self._fields[name]
 
             @staticmethod
-            def cat(instance_lists: List["Instances"]) -> "Instances":
+            def cat(instance_lists: list["Instances"]) -> "Instances":
                 assert all(isinstance(i, Instances) for i in instance_lists)
                 assert len(instance_lists) > 0
                 if len(instance_lists) == 1:
@@ -5424,29 +5380,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager")
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
-
-    def test_dict_tag_guard(self):
-        class Foo:
-            def __init__(self) -> None:
-                self.scalar = 10
-
-        def fn(d, x):
-            return d["a"] * d["b"] * d["c"].scalar * x
-
-        foo = Foo()
-
-        d = {"a": 2, "b": 3, "c": foo}
-
-        opt_fn = torch.compile(fn, backend="eager")
-        inp = torch.randn(3, 3)
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
-
-        d["a"] = 4
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
-
-        # Check that recompilation happens
-        foo.scalar = 12
-        self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
     def test_nonconst_issubclass(self):
         def fn(x):
@@ -6064,7 +5997,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return val * 2, val * 2
 
         x = torch.randn(2, requires_grad=True)
@@ -6083,7 +6016,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/114344
     def test_return_value_duplication_mixed_grad(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             with torch.no_grad():
                 out0 = val + 1
             out1 = val + 1
@@ -6100,7 +6033,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/pull/134726#discussion_r1738774371
     def test_return_value_duplication_scalar(self) -> None:
-        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             x, y = val * 2, val * 2
             return x[0], y[0]
 
@@ -6401,6 +6334,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = f(t, [1, 2])
         self.assertEqual(t * 2, res)
 
+    def test_compile_copy__int_overload(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            return x.copy_(1)
+
+        t = torch.zeros(2)
+        res = f(t)
+        self.assertEqual(torch.ones_like(t), res)
+
     def test_symnode_is_not_op(self):
         @torch.compile(backend="eager", fullgraph=True, dynamic=True)
         def f(x, xs):
@@ -6499,12 +6441,136 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
 
+    @torch._dynamo.config.patch(allow_empty_graphs=True)
+    @parametrize("fullgraph", [True, False])
+    def test_empty_graph_nested_calls(self, fullgraph):
+        def k(x):
+            return x
+
+        def g(x):
+            return k(x)
+
+        def f(x):
+            return g(x)
+
+        # TODO clear this on all tests
+        torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos.clear()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=fullgraph, dynamic=False)
+        opt_f(torch.randn(3))
+        # we should not be compiling g or h as top-level functions
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 1)
+        # no recompilation
+        opt_f(torch.randn(3))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 1)
+        # recompilation
+        opt_f(torch.randn(4))
+        self.assertEqual(len(torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos), 2)
+
     def test_torchname(self):
         def fn(obj):
             return torch.typename(obj)
 
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(typing.Any), opt_fn(typing.Any))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not dist.is_available(), "test requires distributed")
+    def test_ddp_checkpoint(self):
+        # https://github.com/pytorch/pytorch/issues/144035
+        DIM = 256
+        SEQ_LEN = 32
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def mlp_forward(x, w1, w2, b1, b2):
+            y = F.linear(x, w1, b1)
+            y = F.relu(y)
+            y = F.linear(y, w2, b2)
+            return y
+
+        class MLP(nn.Module):
+            def __init__(
+                self,
+                in_features: int,
+                hidden_features: int,
+                out_features: int,
+            ):
+                super().__init__()
+                self.w_in = nn.Parameter(torch.randn(hidden_features, in_features))
+                self.w_out = nn.Parameter(torch.randn(out_features, hidden_features))
+                self.b_in = nn.Parameter(torch.randn(hidden_features))
+                self.b_out = nn.Parameter(torch.randn(out_features))
+
+            def forward(self, x):
+                result = torch.utils.checkpoint.checkpoint(
+                    mlp_forward,
+                    x,
+                    self.w_in,
+                    self.w_out,
+                    self.b_in,
+                    self.b_out,
+                    use_reentrant=False,
+                )
+                assert isinstance(result, torch.Tensor)
+                return result
+
+        x = torch.randn(100, SEQ_LEN, DIM)
+        y = torch.zeros(100)
+        dataset = torch.utils.data.TensorDataset(x, y)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
+        model = MLP(DIM, 4 * DIM, DIM)
+
+        try:
+            # required for DDP wrapper initialization
+            prior_master_addr = os.environ.get("MASTER_ADDR", None)
+            prior_master_port = os.environ.get("MASTER_PORT", None)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = "12355"
+            dist.init_process_group(backend="nccl", world_size=1, rank=0)
+            model = model.to("cuda")
+            model = nn.parallel.DistributedDataParallel(model)
+
+            for batch in dataloader:
+                x, y = batch
+                x = x.to("cuda")
+                output = model(x)
+                loss = output.sum()
+                loss.backward()
+        finally:
+            dist.destroy_process_group()
+            if prior_master_addr:
+                os.environ["MASTER_ADDR"] = prior_master_addr
+            else:
+                del os.environ["MASTER_ADDR"]
+
+            if prior_master_port:
+                os.environ["MASTER_PORT"] = prior_master_port
+            else:
+                del os.environ["MASTER_PORT"]
+
+    def test_dont_dce_rand(self):
+        # https://github.com/pytorch/pytorch/issues/143431
+        def f(image_latent):
+            B = 2
+            num_ref = 3
+            num_tar = 3
+            x = torch.rand(B, 12)
+            indices = torch.argsort(torch.rand(*x.shape), dim=-1)[
+                :, : num_ref + num_tar
+            ]
+            return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
+
+        torch.manual_seed(54321)
+        torch.cuda.manual_seed_all(54321)
+        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+
+        for backend in ["eager", "aot_eager"]:
+            torch.manual_seed(54321)
+            torch.cuda.manual_seed_all(54321)
+            actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                torch.randn((2, 12, 16, 32, 32))
+            ).sum()
+            self.assertEqual(actual, expected)
 
 
 instantiate_parametrized_tests(ReproTests)
