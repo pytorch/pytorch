@@ -181,30 +181,32 @@ def debug_insert_nops(
         instructions.insert(0, create_instruction("NOP"))
         instructions.insert(0, create_instruction("NOP"))
 
-    if is_generator(frame.f_code):
-        return None
+    metrics_context = torch._dynamo.utils.get_metrics_context()
+    with torch._dynamo.utils.dynamo_timed("debug_insert_nops"), metrics_context:
+        if is_generator(frame.f_code):
+            return None
 
-    debug_checks(frame.f_code)
-    code = transform_code_object(frame.f_code, insert_nops)
-    graph = OutputGraph(
-        code_options={},
-        compiler_fn=None,
-        root_tx=None,
-        export=False,
-        export_constraints=None,
-        frame_state={"_id": 0},
-        # TODO: shouldn't this be f_locals/f_globals from frame?
-        local_scope=locals(),
-        global_scope=globals(),
-        f_code=frame.f_code,
-        torch_function_mode_stack=[],
-    )
+        debug_checks(frame.f_code)
+        code = transform_code_object(frame.f_code, insert_nops)
+        graph = OutputGraph(
+            code_options={},
+            compiler_fn=None,
+            root_tx=None,
+            export=False,
+            export_constraints=None,
+            frame_state={"_id": 0},
+            # TODO: shouldn't this be f_locals/f_globals from frame?
+            local_scope=locals(),
+            global_scope=globals(),
+            f_code=frame.f_code,
+            torch_function_mode_stack=[],
+        )
 
-    return GuardedCode(
-        code,
-        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
-        CompileId(frame_id=0, frame_compile_id=0),
-    )
+        return GuardedCode(
+            code,
+            CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+            CompileId(frame_id=0, frame_compile_id=0),
+        )
 
 
 class CompileCounter:
