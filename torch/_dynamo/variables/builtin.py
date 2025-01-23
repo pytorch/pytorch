@@ -10,7 +10,7 @@ import operator
 import types
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -38,6 +38,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    dict_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -705,7 +706,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     @staticmethod
-    def _make_handler(fn, arg_types: List[type], has_kwargs: bool):
+    def _make_handler(fn, arg_types: list[type], has_kwargs: bool):
         from .lazy import LazyVariableTracker
 
         obj = BuiltinVariable(fn)
@@ -985,8 +986,8 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
@@ -1005,8 +1006,8 @@ class BuiltinVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if self.fn is object and name == "__setattr__":
             assert len(args) == 3
@@ -1031,6 +1032,15 @@ class BuiltinVariable(VariableTracker):
             return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+        if self.fn is dict:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in dict_methods:
+                if isinstance(args[0], variables.UserDefinedDictVariable):
+                    return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):

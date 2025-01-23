@@ -699,7 +699,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -1221,7 +1221,6 @@ def main():
         "include/ATen/native/cuda/*.cuh",
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
-        "include/ATen/native/kleidiai/*.h",
         "include/ATen/native/mps/*.h",
         "include/ATen/native/mkldnn/xpu/*.h",
         "include/ATen/native/mkldnn/xpu/detail/*.h",
@@ -1248,6 +1247,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/metal/*.h",
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
@@ -1284,7 +1284,6 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
-        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
@@ -1292,8 +1291,6 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
-        "include/torch/csrc/inductor/cpp_wrapper/*.h",
-        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",

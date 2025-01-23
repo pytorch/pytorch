@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -65,11 +65,11 @@ class TestConverter(TestCase):
         self,
         M,
         tracing_inputs,
-        option: Optional[List[str]] = None,
+        option: Optional[list[str]] = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: Optional[List[Any]] = None,
-    ) -> List[ExportedProgram]:
+        runtime_inputs: Optional[list[Any]] = None,
+    ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
             option = ["trace", "script"]
@@ -130,7 +130,7 @@ class TestConverter(TestCase):
                     self._check_tensor_list_equal(ep_out, orig_out)
         return ep_list
 
-    def _check_tensor_list_equal(self, xs: List[torch.Tensor], ys: List[torch.Tensor]):
+    def _check_tensor_list_equal(self, xs: list[torch.Tensor], ys: list[torch.Tensor]):
         self.assertEqual(len(xs), len(ys))
         for x, y in zip(xs, ys):
             if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
@@ -219,7 +219,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp)
 
         class Module(torch.nn.Module):
-            def forward(self, x: List[int]):
+            def forward(self, x: list[int]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -228,7 +228,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[int, str]):
+            def forward(self, x: dict[int, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -237,7 +237,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[bool, str]):
+            def forward(self, x: dict[bool, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -246,7 +246,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[float, str]):
+            def forward(self, x: dict[float, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -255,7 +255,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[torch.Tensor, str]):
+            def forward(self, x: dict[torch.Tensor, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -273,7 +273,7 @@ class TestConverter(TestCase):
     def test_aten_add_t(self):
         # python list append
         class Module(torch.nn.Module):
-            def forward(self, x: List[torch.Tensor]):
+            def forward(self, x: list[torch.Tensor]):
                 out = []
                 out = out + x
                 a = torch.cat(out)
@@ -531,7 +531,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return x is y, z
 
@@ -546,7 +546,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return x is not y, z
 
@@ -558,7 +558,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return not (x is not y), z
 
@@ -573,7 +573,7 @@ class TestConverter(TestCase):
                 return x + y
 
         class MUnpackTuple(torch.nn.Module):
-            def forward(self, x_tuple: Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, x_tuple: tuple[torch.Tensor, torch.Tensor]):
                 x, y = x_tuple
                 x = x.cos()
                 return x + y
@@ -904,7 +904,7 @@ class TestConverter(TestCase):
                 return x.dtype in [torch.int8]
 
         class MTensorIn(torch.nn.Module):
-            def forward(self, x: torch.Tensor, x_dict: Dict[torch.Tensor, str]):
+            def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
                 return x in x_dict
 
         # Traced function must return output that has tensors.
@@ -1118,14 +1118,14 @@ class TestConverter(TestCase):
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> List[int]:
+            def forward(self, x: torch.Tensor) -> list[int]:
                 return x.tolist()
 
         inp = (torch.tensor([1, 2, 3]),)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> List[List[int]]:
+            def forward(self, x: torch.Tensor) -> list[list[int]]:
                 return x.tolist()
 
         inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
@@ -1353,7 +1353,7 @@ class TestConverter(TestCase):
 
     def test_aten_append_t(self):
         class M(torch.nn.Module):
-            def forward(self, x: List[torch.Tensor]):
+            def forward(self, x: list[torch.Tensor]):
                 out = []
                 out.append(x[0] + x[1])
                 out.append(x[0] - x[1])
@@ -1381,7 +1381,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M1(), inp, ["script"])
 
     def test_ts2ep_with_loop(self):
-        def func1(x, x_list: List[torch.Tensor]):
+        def func1(x, x_list: list[torch.Tensor]):
             a, b, c = x, x, x
             for _ in range(1, 5, 2):
                 for k in range(5):
