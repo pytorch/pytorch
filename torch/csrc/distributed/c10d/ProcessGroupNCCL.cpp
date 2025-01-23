@@ -2064,8 +2064,8 @@ void ProcessGroupNCCL::broadcastSignal(
         reinterpret_cast<uint8_t*>(&srcRank),
         reinterpret_cast<uint8_t*>(&srcRank) + sizeof(srcRank));
     store->set(signal, vec);
-    LOG(ERROR) << logPrefix() << "Broadcasting signal " << signal
-               << " to other ranks via TCPStore.";
+    LOG(INFO) << logPrefix() << "Broadcasting signal " << signal
+              << " to other ranks via TCPStore.";
   } catch (const std::exception& e) {
     LOG(ERROR) << logPrefix() << "Failed to broadcast signal " << signal
                << " through TCPStore. Error: " << e.what();
@@ -2085,21 +2085,23 @@ int ProcessGroupNCCL::getSignalSrcRank(
     LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
                  << " on TCPStore, " << e.what();
   }
-
-  if (signalExists) {
-    // key exists, now read and parse the value (source rank)
-    try {
-      auto vec = store->get(std::string(signal));
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          vec.size() == sizeof(int),
-          "Invalid size for the timeout rank ID");
-      std::memcpy(&srcRank, vec.data(), vec.size());
-    } catch (const std::exception& e) {
-      LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
-                 << signal << " from TCPStore." << e.what();
-    }
+  if (!signalExists) {
+    return srcRank;
   }
+
+  // key exists, now read and parse the value (source rank)
+  std::vector<uint8_t> vec;
+  try {
+    vec = store->get(std::string(signal));
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
+               << signal << " from TCPStore." << e.what();
+  }
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      vec.size() == sizeof(int),
+      "Invalid size for the timeout rank ID");
+  std::memcpy(&srcRank, vec.data(), vec.size());
   return srcRank;
 }
 
@@ -2136,6 +2138,8 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
   if (getError() != ErrorType::SUCCESS) {
     return;
   }
+  // key/signal to read from the tcpstore is a string and pg specific:
+  // format is: remote_error:pg_uid
   int remoteErrorRank = getSignalSrcRank(
       store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_);
   if (remoteErrorRank != -1) {
@@ -2255,14 +2259,16 @@ void ProcessGroupNCCL::watchdogHandler() {
             ", last completed work: ",
             pgStatus_->lastCompletedSeq);
 
+        // Print the traceback of the collective at call time
+        work.printTraceback();
+
         // broadcast remote error signal to all other ranks in this specific PG.
+        // key/signal to write in the tcpstore is a string and pg specific:
+        // format is: remote_error:pg_uid
         if (propagatePgError_) {
           broadcastSignal(
               store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_, rank_);
         }
-
-        // Print the traceback of the collective at call time
-        work.printTraceback();
 
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight
