@@ -2768,7 +2768,7 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
-        self.assertIn("-> list[str]", traced._code)
+        self.assertIn("-> typing_List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
@@ -3567,8 +3567,8 @@ class TestFX(JitTestCase):
 
         traced(x, y)
 
-        FileCheck().check("tuple[()]")   \
-                   .check("tuple[str,tuple[()]]") \
+        FileCheck().check("typing_Tuple[()]")   \
+                   .check("typing_Tuple[str,typing_Tuple[()]]") \
                    .run(traced.code)
 
         scripted = torch.jit.script(traced)
