@@ -3070,7 +3070,7 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        common_buf_names: tuple[str, ...],
+        common_buf_names: Union[tuple[str], OrderedSet[str]],
     ) -> str:
         """
         Try to decide reasons why fusion fail due to no shared memory even though
