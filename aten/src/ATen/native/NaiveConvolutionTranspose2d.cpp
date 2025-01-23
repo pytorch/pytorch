@@ -78,8 +78,8 @@ static inline void slow_conv_transpose2d_shape_check(
 
   if (weight.defined()) {
     TORCH_CHECK(
-        weight.numel() != 0 && (weight.dim() == 2 || weight.dim() == 4),
-        "non-empty 2D or 4D weight tensor expected, but got: ",
+        (weight.dim() == 2 || weight.dim() == 4),
+        "2D or 4D weight tensor expected, but got: ",
         weight.sizes());
     if (bias.defined()) {
       check_dim_size(bias, 1, 0, weight.size(1));
