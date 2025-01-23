@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterable, Iterator, MutableSet, Set as AbstractSet
 from typing import Any, cast, Generic, Optional, TypeVar
 
@@ -19,12 +20,16 @@ class OrderedSet(MutableSet, Generic[T]):
     __slots__ = ("_dict",)
 
     def __init__(self, iterable: Optional[Iterable[T]] = None):
-        self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
+        self._dict = (
+            OrderedDict.fromkeys(iterable, None)
+            if iterable is not None
+            else OrderedDict()
+        )
 
     @staticmethod
     def _from_dict(dict_inp: dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
-        s._dict = dict_inp
+        s._dict = OrderedDict(dict_inp)
         return s
 
     #
