@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -32,16 +32,6 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 aten = torch._ops.ops.aten
 
 
-# TODO: This can be combined with the same method in associative_scan once
-# https://github.com/pytorch/pytorch/pull/139864 is merged
-# say we have a tensor of shape [3, 4, 5, 6]
-# shift_source_dim_to_target_dim(t, 0, 3) -> [4, 5, 6, 3]
-def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
-    assert 0 <= to_dim < t.ndim
-    assert 0 <= from_dim < t.ndim
-    return torch.movedim(t, from_dim, to_dim)
-
-
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
@@ -55,20 +45,20 @@ def wrap_combine_fn_flat(
     return [*carry_flat, *combined_flat]
 
 
-def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
+def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
 def scan(
     combine_fn: Callable[
-        [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
+        [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
     ],
     init: pytree.PyTree,
     xs: pytree.PyTree,
     *,
     dim: int = 0,
     reverse: bool = False,
-) -> Tuple[pytree.PyTree, pytree.PyTree]:
+) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
 
@@ -146,9 +136,7 @@ def scan(
     dim = utils.canonicalize_dim(ndim, dim)
 
     # Move scan dim to 0 and always perform scan on dim 0
-    leaves_xs = [
-        shift_source_dim_to_target_dim(elem, int(dim), 0) for elem in leaves_xs
-    ]
+    leaves_xs = [torch.movedim(elem, int(dim), 0) for elem in leaves_xs]
 
     out = combine_fn(
         pytree.tree_unflatten(leaves_init, spec_init),
@@ -345,10 +333,10 @@ def trace_scan(
     proxy_mode,
     func_overload,
     combine_fn: Callable,
-    init: List[torch.Tensor],
-    xs: List[torch.Tensor],
+    init: list[torch.Tensor],
+    xs: list[torch.Tensor],
     reverse: bool,
-    additional_inputs: List[torch.Tensor],
+    additional_inputs: list[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
 
@@ -464,13 +452,13 @@ def scan_functionalize(ctx, combine_fn, init, xs, reverse, additional_inputs):
             )
         )
         if _has_potential_branch_input_mutation(
-            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be modifying the input!"
             )
         if _has_potential_branch_input_alias(
-            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be aliasing the input!"

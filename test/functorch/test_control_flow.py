@@ -101,6 +101,18 @@ def compile_mode_helper(fct, compile_mode):
         return fct
 
 
+ALIAS_FN = [
+    lambda x: x,
+    lambda x: x.view(-1),
+    lambda x: x.reshape(-1),
+    lambda x: x.squeeze(0),
+    lambda x: x.unsqueeze(0),
+    lambda x: x.transpose(0, 1),
+    lambda x: x.flatten(),
+    lambda x: x.expand(1, *x.size()),
+]
+
+
 def get_scan_combine_fn(name, associative=True):
     def add(x: torch.Tensor, y: torch.Tensor):
         return x + y
@@ -4088,9 +4100,9 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
     while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
+    value = while_loop[2]
+    value_1 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, value, value_1)""",  # noqa: B950
             )
 
     def _wrap_with_functionalize(self, fn, func_type):
@@ -6973,6 +6985,56 @@ class GraphModule(torch.nn.Module):
             return (add, add_1, add_2, add_3, add_4, child_1)
 """,  # noqa: B950
             )
+
+    def test_input_output_alias(self):
+        def fn(f, *args):
+            return torch.cond(args[0].sum() > 0, f, f, args)
+
+        x = torch.randn(2, 2)
+        for f in ALIAS_FN:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+            ):
+                torch.compile(fn)(f, x)
+
+    def test_input_input_alias(self):
+        def fn(view_f, arg):
+            def f(arg1, arg2):
+                return arg1.cos(), arg2.sin()
+
+            return torch.cond(arg.sum() > 0, f, f, (arg, view_f(arg)))
+
+        x = torch.randn(2, 2)
+        # ALIAS_FN[0] is an identical function, cond optimizes the duplication
+        # as a result of auto lifting.
+        for view_f in ALIAS_FN[1:]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+            ):
+                torch.compile(fn)(view_f, x)
+
+    @parametrize("inference_mode", [True, False])
+    def test_input_mutation(self, inference_mode):
+        def fn(view_f, *args):
+            def mutate_f(x):
+                v = view_f(x)
+                v.add_(1)
+                return v.sin()
+
+            return torch.cond(args[0].sum() > 0, mutate_f, mutate_f, args)
+
+        x = torch.randn(2, 2)
+        for f in ALIAS_FN:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+            ):
+                torch.compile(fn)(f, x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+            ):
+                with torch.inference_mode(inference_mode):
+                    torch.compile(fn)(f, x)
 
 
 _hop_schema_test_schema_types = [

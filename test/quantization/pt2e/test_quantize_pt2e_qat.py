@@ -2,7 +2,7 @@
 import copy
 import operator
 import unittest
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -53,8 +53,8 @@ class PT2EQATTestCase(QuantizationTestCase):
     class _BaseConvBnModel(torch.nn.Module):
         def __init__(
             self,
-            conv_class: Type[torch.nn.Module],
-            bn_class: Type[torch.nn.Module],
+            conv_class: type[torch.nn.Module],
+            bn_class: type[torch.nn.Module],
             has_conv_bias: bool,
             has_bn: bool,
             has_relu: bool,
@@ -102,7 +102,7 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_numerics(
         self,
         model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
     ):
         self._verify_symmetric_xnnpack_qat_numerics_helper(
             model,
@@ -118,7 +118,7 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_numerics_helper(
         self,
         model: torch.nn.Module,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         is_per_channel: bool,
         verify_convert: bool = True,
     ):
@@ -179,11 +179,11 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_graph(
         self,
         m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         has_relu: bool,
         has_bias: bool = True,
         is_cuda: bool = False,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        expected_conv_literal_args: Optional[tuple[Any, ...]] = None,
         # TODO: set this to true by default
         verify_convert: bool = False,
     ):
@@ -211,12 +211,12 @@ class PT2EQATTestCase(QuantizationTestCase):
     def _verify_symmetric_xnnpack_qat_graph_helper(
         self,
         m: torch.fx.GraphModule,
-        example_inputs: Tuple[Any, ...],
+        example_inputs: tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
         has_bias: bool = True,
         is_cuda: bool = False,
-        expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        expected_conv_literal_args: Optional[tuple[Any, ...]] = None,
         verify_convert: bool = False,
     ):
         """
