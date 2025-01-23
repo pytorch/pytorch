@@ -221,6 +221,8 @@ def trunc_normal_(
         >>> w = torch.empty(3, 5)
         >>> nn.init.trunc_normal_(w)
     """
+    if tensor.dtype.itemsize <= 2:
+        raise ValueError("Only tensors with more than 32 bits are supported due to numerical precision issues")
     return _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=generator)
 
 
