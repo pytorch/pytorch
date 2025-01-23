@@ -40,6 +40,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocmVersionLessThan,
     skipMeta,
     skipMPS,
+    skipXLA,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -1752,6 +1753,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     # aten/src/ATen/native/mps/OperationUtils.mm: TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!"); on MPS
     @expectedFailureMPS
+    @skipXLA
     def test_ConvTranspose_output_channels_0(self, device, dtype):
         class Model(nn.Module):
             def __init__(self, operator, dim):
