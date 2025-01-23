@@ -116,7 +116,6 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
-from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -2936,10 +2935,10 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
-    @staticmethod
-    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+    @classmethod
+    def create(cls, tx: "InstructionTranslator", value) -> VariableTracker:
         value_type = type(value)
-        fast_handler = SourcelessBuilder._type_handlers.get(value_type)
+        fast_handler = cls._type_handlers.get(value_type)
         if fast_handler:
             return fast_handler(tx, value)
 
@@ -2983,7 +2982,7 @@ class SourcelessBuilder:
                 value
             )
         elif isinstance(value, types.GenericAlias):
-            return BuiltinVariable(value)
+            return TypingVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )

@@ -7,6 +7,7 @@ import random
 import re
 import sys
 import types
+import typing
 import warnings
 from typing import Optional, TYPE_CHECKING
 
@@ -1201,6 +1202,44 @@ class TypingVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def reconstruct(self, codegen: "torch._dynamo.codegen.PyCodegen") -> None:
+        self._reconstruct_type(codegen, self.value)
+
+    # Conversions from types.* to typing.* equivalents
+    _TYPING_CONVERSION = {
+        list: typing.List,
+        dict: typing.Dict,
+        tuple: typing.Tuple,
+        set: typing.Set,
+        frozenset: typing.FrozenSet,
+    }
+
+    @classmethod
+    def _reconstruct_type(
+        cls, codegen: "torch._dynamo.codegen.PyCodegen", value: type[object]
+    ):
+        if origin := typing.get_origin(value):
+            args = typing.get_args(value)
+
+            # We want to reconstruct the type alias, e.g., `List[int]`
+            # But for both `list[int]` and `List[int]` the origin will be `list` - so use extra effort to create the right one.
+            if isinstance(value, typing._GenericAlias):
+                origin = cls._TYPING_CONVERSION.get(origin, origin)
+
+            cls._reconstruct_type(codegen, origin)
+            for arg in args:
+                cls._reconstruct_type(codegen, arg)
+            if len(args) > 1:
+                codegen.append_output(codegen.create_build_tuple(len(args)))
+            codegen.append_output(codegen.create_binary_subscr())
+
+        else:
+            if value.__module__ == "builtins":
+                name = value.__name__
+            else:
+                name = f"{value.__module__}.{value.__qualname__}"
+            codegen.append_output(codegen.create_load_global(name))
 
 
 @functools.lru_cache(maxsize=1)

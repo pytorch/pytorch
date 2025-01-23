@@ -109,6 +109,10 @@ _TrackersType = Union[type[VariableTracker], tuple[type[VariableTracker], ...]]
 
 
 class BuiltinVariable(VariableTracker):
+    """
+    A VariableTracker that represents a built-in function object.
+    """
+
     _SENTINEL = object()
     _nonvar_fields = {
         "fn",
