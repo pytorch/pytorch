@@ -7,7 +7,7 @@ import torch
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
-from ..utils import _type_of, expr_fits_within_32bit
+from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
     ConstexprArg,
@@ -55,9 +55,15 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return tye
     if isinstance(arg, SizeArg):
         if arg.expr is None:
-            # From triton/runtime/jit.py
-            # `None` is nullptr.  Implicitly convert to *i8.
-            return "*i8"
+            if triton_version_uses_attrs_dict():
+                # In newer versions of Triton, the signature includes "None" args
+                # and their type is marked as "constexpr"
+                return "constexpr"
+            else:
+                # In older versions of Triton...
+                # From triton/runtime/jit.py
+                # `None` is nullptr.  Implicitly convert to *i8.
+                return "*i8"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
 
