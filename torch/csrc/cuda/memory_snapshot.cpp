@@ -98,8 +98,7 @@ CapturedTraceback* getFromContext(
 }
 
 void _initRecordAnnotations() {
-  static c10::once_flag ra_init;
-  c10::call_once(ra_init, [&] {
+  static auto init_placeholder [[maybe_unused]] = [&] {
     // Save user annotations to CCA memory snapshot tool
     at::addThreadLocalCallback(
         at::RecordFunctionCallback(
@@ -114,7 +113,8 @@ void _initRecordAnnotations() {
                   {{"name", fn.name()}, {"stage", "END"}});
             })
             .scopes({at::RecordScope::USER_SCOPE}));
-  });
+    return true;
+  }();
 }
 
 } // namespace

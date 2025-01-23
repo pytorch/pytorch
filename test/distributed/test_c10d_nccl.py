@@ -27,7 +27,6 @@ if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from typing import Dict, List
 
 import test_c10d_common
 from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
@@ -2546,7 +2545,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_broadcast(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2574,7 +2573,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_mixed_ops(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2615,8 +2614,8 @@ class WorkHookTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2673,8 +2672,8 @@ class WorkHookTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
 
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
