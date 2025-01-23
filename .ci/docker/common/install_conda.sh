@@ -98,7 +98,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     apt-get -y install expect-dev
 
     # We are currently building docs with python 3.8 (min support version)
-    pip_install -r /opt/conda/requirements-docs.txt
+    pip_install --use-pep517 -r /opt/conda/requirements-docs.txt
   fi
 
   popd
