@@ -16,12 +16,10 @@ import subprocess
 import sys
 import threading
 import time
-import typing
 import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
-from typing import Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -81,7 +79,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
-    _group_quantize_tensor_symmetric,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -438,7 +435,10 @@ def check_model(
             else:
                 return x
 
-        ref_inputs = list(map(upcast_fn, example_inputs))
+        # We previously call upcast_fn on example_inputs. It's incorrect
+        # if example_inputs is already fp32 and get inplace updated in the model.
+        # Call on the cloned tensors instead
+        ref_inputs = list(map(upcast_fn, ref_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
@@ -1282,6 +1282,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(32),))
 
     def test_add_inplace_permuted(self):
+        if config.cpu_backend == "halide":
+            raise unittest.SkipTest(
+                "Halide cpu backend does not work for this test case: https://github.com/pytorch/pytorch/issues/140344"
+            )
+
         def fn(x, y):
             return x.add_(y)
 
@@ -2262,85 +2267,6 @@ class CommonTemplate:
         c = torch.rand((m, n), dtype=torch.bfloat16)
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
-
-    @xfail_if_triton_cpu
-    @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfRocm
-    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
-    def test__dyn_quant_pack_4bit_weight(self):
-        q_group = 32
-        k = 128
-        n = 128
-
-        torch.manual_seed(1)
-        b = torch.rand((k, n), dtype=torch.float32)
-        in_features = b.size(0)
-        out_features = b.size(1)
-
-        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
-            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
-                b, n_bit=4, groupsize=q_group
-            )
-
-            if q_group == in_features:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
-            else:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
-            b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
-            )
-
-            return b_int4pack, b_scales_and_zeros
-
-        def fn(b, in_features, out_features):
-            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
-            return b_int4pack
-
-        self.common(fn, (b, in_features, out_features))
-
-    @xfail_if_triton_cpu
-    @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfRocm
-    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
-    def test__dyn_quant_matmul_4bit(self):
-        q_group = 32
-        m = 32
-        k = 128
-        n = 128
-
-        torch.manual_seed(1)
-        a = torch.rand((m, k), dtype=torch.float32)
-        b = torch.rand((k, n), dtype=torch.float32)
-        in_features = b.size(0)
-        out_features = b.size(1)
-
-        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
-            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
-                b, n_bit=4, groupsize=q_group
-            )
-
-            if q_group == in_features:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
-            else:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
-            b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
-            )
-
-            return b_int4pack, b_scales_and_zeros
-
-        def fn(a, q_group, in_features, out_features):
-            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
-            res = torch._dyn_quant_matmul_4bit(
-                a,
-                b_int4pack,
-                q_group,
-                in_features,
-                out_features,
-            )
-            return res
-
-        self.common(fn, (a, q_group, in_features, out_features))
 
     def test_expanded_reduction(self):
         def fn(x, y):
@@ -8544,7 +8470,7 @@ class CommonTemplate:
             compiled_f = compile_fx_inner(mod, cloned_args)
 
         @torch.library.custom_op("mylib::sin_out", mutates_args={"outs"})
-        def sin_out(x: torch.Tensor, outs: typing.List[torch.Tensor]) -> None:
+        def sin_out(x: torch.Tensor, outs: list[torch.Tensor]) -> None:
             x_np = x.numpy()
             assert len(outs) == 2
             out_np0 = out[0].numpy()
@@ -10583,6 +10509,14 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_single(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (10, 10))
+            return y
+
+        x = torch.rand(1, 1, 1)
+        self.common(fn, (x,))
+
     def test_pad_cast(self):
         def fn(x):
             return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
@@ -12355,7 +12289,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str, ...]
+    suffixes: tuple[str, ...]
     is_skip: bool = False
     __test__: bool = False
 
@@ -12438,7 +12372,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def noop_backend(
                 self,
                 model_: torch.fx.GraphModule,
-                example_inputs_: typing.List[torch.Tensor],
+                example_inputs_: list[torch.Tensor],
             ):
                 """
                 The Noop backend does not compile the fx graph it is given.
@@ -12464,7 +12398,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.example_args = fake_flat_tensor_args
                 return lambda x: example_inputs_
 
-        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+        def get_kernels(self, fn, args) -> list[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
