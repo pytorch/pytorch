@@ -148,9 +148,9 @@ def stft(
 
     if align_to_window is not None:
         raise errors.SymbolicValueError(
-            msg="Onnx stft does not currently support the align_to_window option",
+            msg="STFT does not currently support the align_to_window option",
             value=input,
-        )  # TODO(<add-issue-#>): add compatibility with align_to_window option.
+        )  # TODO(#insert-issue-id): add compatibility with align_to_window option.
 
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
