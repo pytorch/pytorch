@@ -105,7 +105,9 @@ _ref_test_ops = tuple(
 # Apply mps-specific xfails to the op_db
 # Only done on MacOS to avoid unnecessary overhead
 if IS_MACOS:
-    mps_op_db(op_db)
+    op_db = mps_op_db(op_db)
+    python_ref_db = mps_op_db(python_ref_db)
+    ops_and_refs = op_db + python_ref_db
 
 
 def reduction_dtype_filter(op):
@@ -957,7 +959,6 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @skipMPS
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype

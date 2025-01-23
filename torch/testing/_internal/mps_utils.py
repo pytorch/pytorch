@@ -1,36 +1,59 @@
+from typing import Dict, Iterable, List, Optional, Union, Callable
 import unittest
-from typing import Dict, Iterable, List, Optional, Union
 
 import torch
 from torch.testing._internal.common_utils import MACOS_VERSION
+from torch.testing._internal.common_device_type import expectedFailureMPS
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
 
-
+UNIMPLEMENTED_OP = "unimplemented_op"
+UNIMPLEMENTED_DTYPE = "unimplemented_dtype"
 NONCONTIGUOUS = "test_noncontiguous_samples"
+TEST_OUT = "test_out"
+
+COMMON = "TestCommon"
+
+
+def xfailUnimplementedOpMPS(test_func):
+    def wrapper(*args, **kwargs):
+        try:
+            test_func(*args, **kwargs)
+        except NotImplementedError:
+            raise unittest.SkipTest("Op not currently implemented on MPS")
+        except Exception as e:
+            raise RuntimeError(f"Test is marked as unimplemented on MPS, but instead of NotImplementedError we received {type(e).__name__}:{e} ")
+        else:
+            raise RuntimeError(f"Test is marked as unimplemented on MPS, but received unexpected success. Ensure CPU fallback is disabled")
+    return wrapper
 
 
 class MPSSkipInfo:
     def __init__(
         self,
-        tests: Union[str, List[str]],
+        *args,
+        test_class: str = COMMON,
         variant: Optional[str] = None,
         dtypes: Optional[Union[torch.dtype, List[torch.dtype]]] = None,
-        skip: bool = False,
+        skip: Callable = unittest.expectedFailure,
         skip_msg: str = "Skipped!",
         upper: Optional[float] = None,
         lower: Optional[float] = None,
     ):
         """Basic struct for tracking MPS OpInfo xfails
 
-        tests: Test(s) to apply this xfail info to
+        args: String names of test(s) to apply this xfail info to
+        test_class: Test class, e.g. 'TestCommon' etc.
         variant: Variant name. Set to empty str ("") to explicitly specify the non-variant case
         If set to None, will instead apply to all variants of the test
         dtypes: If none specified, xfails all dtype variants
-        skip: If True, skip instead of xfailing this test
+        skip: Type of decorator to add [expectedFailure, skipTest, xfailUnimplementedOpMPS, xfailUnimplementedDtypeMPS]
         upper: Upper bound MacOS version this xfail applies to (exclusive)
         lower: Lower bound MacOS version this xfail applies to (inclusive)
         """
-        self.tests = tests
+        self.tests: List[str] = []
+        for arg in args:
+            self.tests.append(arg)
+        self.test_class = test_class
         self.variant = variant
         self.dtypes = dtypes
         self.skip = skip
@@ -38,15 +61,23 @@ class MPSSkipInfo:
         self.upper = upper
         self.lower = lower
 
+        if UNIMPLEMENTED_OP in self.tests:
+            self.tests = [NONCONTIGUOUS, TEST_OUT]
+            self.skip = xfailUnimplementedOpMPS
+
 
 """Each op can have multiple skipInfos to account for OS differences & other variations"""
 MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
-    "__getitem__": MPSSkipInfo(NONCONTIGUOUS),
+    "__getitem__": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "_native_batch_norm_legit": MPSSkipInfo(TEST_OUT),
     "__rmatmul__": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
     ),
-    "__rsub__": MPSSkipInfo(NONCONTIGUOUS),
+    "__rsub__": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "_refs._conversions.cdouble": MPSSkipInfo(UNIMPLEMENTED_OP),
+    "_refs._conversions.double": MPSSkipInfo(UNIMPLEMENTED_OP),
+    "_refs.erfc": MPSSkipInfo(UNIMPLEMENTED_OP),
     "_segment_reduce": MPSSkipInfo(NONCONTIGUOUS),
     "_unsafe_masked_index": MPSSkipInfo(
         NONCONTIGUOUS,
@@ -211,9 +242,8 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             NONCONTIGUOUS,
-            skip=True,
-            skip_msg="Crashes on MPS with err: MPSMatrixDecompositionLU.mm:1146: \
-                failed assertion `Number of columns in source exceeds source matrix size.'",
+            skip=unittest.skip("Crashes on MPS with err: MPSMatrixDecompositionLU.mm:1146: \
+                failed assertion `Number of columns in source exceeds source matrix size.'"),
             dtypes=[torch.float32],
         ),
     ],
@@ -224,8 +254,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             NONCONTIGUOUS,
-            skip=True,
-            skip_msg="Crashes on MPS with err: failed assertion `Number of columns in source exceeds source matrix size.'",
+            skip=unittest.skip("Crashes on MPS with err: failed assertion `Number of columns in source exceeds source matrix size.'"),
             dtypes=[torch.float32],
         ),
     ],
@@ -241,8 +270,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             NONCONTIGUOUS,
-            skip=True,
-            skip_msg="Crashes on MPS with err: failed assertion `A command encoder is already encoding to this command buffer'",
+            skip=unittest.skip("Crashes on MPS with err: failed assertion `A command encoder is already encoding to this command buffer'"),
             dtypes=[torch.float32],
         ),
     ],
@@ -256,9 +284,8 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             NONCONTIGUOUS,
-            skip=True,
+            skip=unittest.skip("Crashes on MPS with err: failed assertion `Number of columns in source exceeds source matrix size.'"),
             dtypes=[torch.float32],
-            skip_msg="Crashes on MPS with err: failed assertion `Number of columns in source exceeds source matrix size.'",
         ),
     ],
     "linalg.matrix_rank": MPSSkipInfo(NONCONTIGUOUS),
@@ -285,7 +312,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         MPSSkipInfo(
             NONCONTIGUOUS,
             dtypes=[torch.float32],
-            skip=True,
+            skip=unittest.skip(""),
             skip_msg="Crashes on MPS with err: failed assertion `Number of columns in source exceeds source matrix size.'",
         ),
     ],
@@ -612,9 +639,8 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "torch.ops.aten._efficient_attention_forward": MPSSkipInfo(NONCONTIGUOUS),
     "trace": MPSSkipInfo(
         NONCONTIGUOUS,
-        skip=True,
-        skip_msg="Crashes on MPS with err: 'mps.scatter' op operand #0 must be tensor of mps native type values,\
-            but got 'tensor<25xcomplex<f32>>",
+        skip=unittest.skip("Crashes on MPS with err: 'mps.scatter' op operand #0 must be tensor of mps native type values,\
+            but got 'tensor<25xcomplex<f32>>"),
     ),
     "triangular_solve": MPSSkipInfo(NONCONTIGUOUS),
     "unfold": MPSSkipInfo(
@@ -664,17 +690,14 @@ def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
                     if not isinstance(skip.tests, List):
                         skip.tests = [skip.tests]
                     for test in skip.tests:
-                        test_module = "TestCommon"
-
                         decorator = DecorateInfo(
-                            unittest.skip(skip.skip_msg)
-                            if skip.skip
-                            else unittest.expectedFailure,
-                            test_module,
+                            skip.skip,
+                            skip.test_class,
                             test,
                             device_type="mps",
                             dtypes=skip.dtypes,
                         )
+                        
                         op.decorators = op.decorators + (decorator,)
 
     return op_db
