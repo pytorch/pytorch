@@ -24,7 +24,7 @@ aten__weight_int8pack_mm = ExternKernelChoice(
 )
 
 aten__weight_int4pack_mm_cpu = ExternKernelChoice(
-    torch._weight_int4pack_mm_for_cpu,
+    torch.ops.quantized_decomposed.int4mm_packed_weight_cpu,
     "at::_weight_int4pack_mm_for_cpu_tensor",
     has_out_variant=False,
 )
