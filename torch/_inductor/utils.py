@@ -855,13 +855,15 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            try:
-                shutil.rmtree(inductor_cache_dir)
-            except OSError:
+            shutil.rmtree(
+                inductor_cache_dir,
                 # Let's not fail if we can't clean up the temp dir. Also note that for
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
-                log.warning("Failed to remove temporary cache dir at %s", inductor_cache_dir)
+                onerror=lambda func, path, exc_info: log.warning(
+                    "Failed to remove temporary cache dir at %s", inductor_cache_dir
+                ),
+            )
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
