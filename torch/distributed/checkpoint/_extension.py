@@ -1,42 +1,23 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import abc
-import importlib.util
 import io
-import sys
 from collections.abc import Sequence
 from typing import cast, IO, Optional, Type
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
 
+from torch._utils import try_import
+
 
 # NOTE: everything in this file is experimental, and subject to
 # change.  Feedback and bug fixes are always welcome.
 
-
 pyzstd_module_name = "pyzstd"
-
-if (pyzstd := sys.modules.get(pyzstd_module_name, None)) is not None:
-    pass
-elif (pyzstd_spec := importlib.util.find_spec(pyzstd_module_name)) is not None:
-    pyzstd = importlib.util.module_from_spec(pyzstd_spec)
-    sys.modules[pyzstd_module_name] = pyzstd
-    pyzstd_spec.loader.exec_module(pyzstd)  # type: ignore[union-attr]
-else:
-    pyzstd = None
-
-
+pyzstd = try_import(pyzstd_module_name)
 zstandard_module_name = "zstandard"
-
-if (zstandard := sys.modules.get(zstandard_module_name, None)) is not None:
-    pass
-elif (zstandard_spec := importlib.util.find_spec(zstandard_module_name)) is not None:
-    zstandard = importlib.util.module_from_spec(zstandard_spec)
-    sys.modules[zstandard_module_name] = zstandard
-    zstandard_spec.loader.exec_module(zstandard)  # type: ignore[union-attr]
-else:
-    zstandard = None
+zstandard = try_import(zstandard_module_name)
 
 
 __all__ = [

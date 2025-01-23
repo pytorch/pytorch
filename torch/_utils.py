@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import copyreg
 import functools
+import importlib
 import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
+from types import ModuleType
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
@@ -1011,6 +1013,21 @@ class CallbackRegistry(Generic[P]):
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
 
+
+def try_import(module_name: str) -> Optional[ModuleType]:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    return None
+    
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
 # for use in the weights_only Unpickler.
