@@ -24,7 +24,7 @@ StreamTimer::StreamTimer() {
 StreamTimer::~StreamTimer() = default;
 
 void StreamTimer::Start() {
-  AT_CUDA_CHECK(cudaDeviceSynchronize());
+  AT_CUDA_CHECK(cudaEventSynchronize(start_));
   AT_CUDA_CHECK(cudaEventRecord(start_, at::cuda::getCurrentCUDAStream()));
 }
 
