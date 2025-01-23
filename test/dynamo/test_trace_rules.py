@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import functools
 import importlib
 import inspect
 import math
@@ -49,7 +50,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._mps_is_on_macos_or_newer",
     "torch._C._swap_tensor_impl",
     "torch._C._unsafe_reset_storage",
-    "torch._dynamo.eval_frame.reset_code",
     "torch._C.autocast_decrement_nesting",
     "torch._C.autocast_increment_nesting",
     "torch._C.clear_autocast_cache",
@@ -70,7 +70,9 @@ ignored_c_binding_in_graph_function_names = {
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
+    "torch._C._pickle_load_obj",
     "torch._C._pickle_save",
+    "torch._C._to_dlpack",
     "torch._validate_sparse_compressed_tensor_args",
     "torch._validate_sparse_csr_tensor_args",
     "torch._validate_sparse_bsr_tensor_args",
@@ -166,10 +168,11 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
+            "torch._C._aoti",
             "torch.optim.",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
-            "torch._C._dynamo.",
+            "torch._C._dynamo",
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
@@ -179,6 +182,8 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._C._distributed_c10d",
             "torch._C._distributed_rpc",
             "torch._C._functorch",
+            "torch._C._instruction_counter",
+            "torch.monitor",
             "torch._C._monitor",
             "torch._C._nvtx",
             "torch._C._lazy",
@@ -188,6 +193,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._decomp",
             "torch._dispatch",
             "torch._export",
+            "torch._C._export",
             "torch._functorch.make_functional",
             "torch._functorch.compile_utils",
             "torch._functorch.partitioners",
@@ -310,6 +316,9 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             f"were not added to `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
             "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
         )
+        msg1 = "New torch objects:\n"
+        for o in sorted(x, key=lambda x: x.__name__):
+            msg1 += o.__name__ + "\n"
         msg2 = (
             f"Existing torch objects: {y} were removed. "
             f"Please remove them from `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
@@ -334,9 +343,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
-    @unittest.skip(
-        "This test keeps getting broken and our disable infra is not handling well. see #120627"
-    )
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
         objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
@@ -362,6 +368,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 isinstance(
                     load_object(f),
                     (
+                        functools._lru_cache_wrapper,
                         types.FunctionType,
                         types.BuiltinFunctionType,
                         types.MethodDescriptorType,
