@@ -3318,12 +3318,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             post_grad_custom_post_pass=g,
         ):
             f_compile = torch.compile(f)
-
-            out = f(x, other)
-            out_compile = f_compile(x, other)
-            print(out)
-            print(out_compile)
-            assert torch.allclose(out_compile, out)
+            self.assertEqual(f(x, other), f_compile(x, other))
             self.assertTrue(called)
 
     @requires_gpu
