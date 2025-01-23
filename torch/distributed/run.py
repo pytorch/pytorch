@@ -363,7 +363,7 @@ utility
   if __name__ == "__main__":
       main()
 
-"""
+"""  # noqa: E501
 import os
 import sys
 import uuid
