@@ -3703,44 +3703,56 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def get_input_dtype(node: torch.fx.Node):
+            def get_input_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
                 """Get input dtype for nodes that may consumes lowp fp dt"""
                 if node.target == "store":
-                    return V.graph.get_dtype(node.args[1])
+                    return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
                 elif node.target == "to_dtype_bitcast":
-                    return node.args[-1]
+                    return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype":
-                    return node.kwargs.get("src_dtype", None)
+                    if len(node.args) > 3:
+                        return node.args[3]  # type: ignore[return-value]
+                    else:
+                        return node.kwargs.get("src_dtype", None)  # type: ignore[return-value]
                 else:
                     return None
 
-            def get_output_dtype(node: torch.fx.Node):
+            def get_output_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
                 """Get output dtype for nodes that may produce lowp fp dt"""
                 if node.target == "load":
                     assert len(node.args) == 3
-                    return V.graph.get_dtype(node.args[1])
+                    return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
                 elif node.target == "constant":
-                    return node.args[-1]
+                    return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype":
-                    return node.args[-1]
+                    return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
-                    return node.args[2]
+                    return node.args[2]  # type: ignore[return-value]
                 else:
                     return None
 
             def is_lowp_fp_source(node: torch.fx.Node, dt: torch.dtype):
-                """If the node produce the lowp fp dt as output without casting to high precision"""
+                """Check if the given node produces output with expected low precision floating point data type."""
+                assert dt in DTYPE_LOWP_FP
                 return get_output_dtype(node) == dt
 
             def is_lowp_fp_sink(node: torch.fx.Node, dt: torch.dtype):
-                """If the node can accepts the lowp fp dt as input without casting to high precision"""
-                input_dtype = get_input_dtype(node)
-                if input_dtype is not None:
+                """Check if the given node accept input with expected low precision floating point data type."""
+                assert dt in DTYPE_LOWP_FP
+                if input_dtype := get_input_dtype(node):
                     return input_dtype == dt
                 elif node.target == "to_dtype":
                     return True
                 else:
                     return False
+
+            def is_lowp_fp_source_no_promote(node: torch.fx.Node, dt: torch.dtype):
+                """Check if the node is a lowp fp sources which are all directly fed to ops that accepts lowp fp input
+                thus no need to promote to float
+                """
+                return is_lowp_fp_source(node, dt) and all(
+                    is_lowp_fp_sink(user, dt) for user in node.users
+                )
 
             sub_graph_nodes = list(sub_graph.nodes)
             to_lowp_fp_legalized_nodes = []
@@ -3757,20 +3769,16 @@ class CppKernelProxy(CppKernel):
                         to_type_node = sub_graph.call_method(
                             "to_dtype", args=(ops, _node, torch.float)
                         )
-                        to_type_node_args = to_type_node.args
-                        _node.replace_all_uses_with(to_type_node)
-                        to_type_node.args = to_type_node_args
+                        _node.replace_all_uses_with(
+                            to_type_node, lambda n: n is not to_type_node
+                        )
                         metrics.cpp_to_dtype_count += 1
                 elif (
                     _node.target == "store"
                     and (dt := get_input_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     ops, name, _, value_var, _ = _node.args
-                    # No need to promote to float if it is a user of a lowp fp sources
-                    # which are all directly fed to ops that accepts lowp fp input
-                    if is_lowp_fp_source(value_var, dt) and all(
-                        is_lowp_fp_sink(user, dt) for user in value_var.users
-                    ):
+                    if is_lowp_fp_source_no_promote(value_var, dt):
                         continue
                     dtype = V.graph.get_dtype(name)
                     with sub_graph.inserting_before(_node):
@@ -3809,13 +3817,13 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, value, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
                         continue
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, x, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
                         continue
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
@@ -3835,19 +3843,13 @@ class CppKernelProxy(CppKernel):
                     (ops, value_var, dtype, src_dtype) = _node.args
 
                     # to_dtype_bitcast act as a lowp fp sink:
-                    # c10::bit_cast requires the source and target have the bitwidth. Because the input tensor's dtype
-                    # could be promoted, e.g. from float16 to float, we have to cast the tensor to its original source
-                    # dtype before invoking bit_cast.
+                    # c10::bit_cast requires the source and target have the same bitwidth. Because the input tensor's
+                    # dtype could be promoted, e.g. from float16 to float, we have to cast the tensor to its original
+                    # source dtype before invoking bit_cast.
                     if src_dtype in DTYPE_LOWP_FP:
                         # No need to promote to float if it is a user of a lowp fp sources
                         # which are all directly fed to ops that accepts lowp fp input
-                        if not (
-                            is_lowp_fp_source(value_var, src_dtype)
-                            and all(
-                                is_lowp_fp_sink(user, src_dtype)
-                                for user in value_var.users
-                            )
-                        ):
+                        if not is_lowp_fp_source_no_promote(value_var, src_dtype):
                             with sub_graph.inserting_before(_node):
                                 to_type_node = sub_graph.call_method(
                                     "to_dtype", args=(ops, value_var, src_dtype)
@@ -3868,9 +3870,9 @@ class CppKernelProxy(CppKernel):
                                 to_type_node = sub_graph.call_method(
                                     "to_dtype", args=(ops, _node, torch.float)
                                 )
-                                to_type_node_args = to_type_node.args
-                                _node.replace_all_uses_with(to_type_node)
-                                to_type_node.args = to_type_node_args
+                                _node.replace_all_uses_with(
+                                    to_type_node, lambda n: n is not to_type_node
+                                )
                                 metrics.cpp_to_dtype_count += 1
                 else:
                     pass
