@@ -190,9 +190,13 @@ class DynamoExporterTest(common_utils.TestCase):
                 providers=[("CPUExecutionProvider")],
             )
             inputs_names = [i.name for i in session.get_inputs()]
-            output = session.run(None, dict(zip(inputs_names, (example_input.numpy(),))))
+            output = session.run(
+                None, dict(zip(inputs_names, (example_input.numpy(),)))
+            )
             self.assertEqual(expected_output.shape, output[0].shape)
-            torch.testing.assert_close(expected_output, torch.from_numpy(output[0]), atol=1e-4, rtol=1e-4)
+            torch.testing.assert_close(
+                expected_output, torch.from_numpy(output[0]), atol=1e-4, rtol=1e-4
+            )
 
     # TODO(justinchuby): Test multi-output HOPs
 
