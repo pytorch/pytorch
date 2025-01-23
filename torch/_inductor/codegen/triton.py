@@ -4117,7 +4117,7 @@ class TritonScheduling(SIMDScheduling):
                 fd.write(str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
-        total_clone_ms: float = 0
+        total_clone_ms: float = 0.0
         removed_buffers_orig = V.graph.removed_buffers
         V.graph.removed_buffers = OrderedSet(removed_buffers_orig)
         inplaced_to_remove_orig = V.graph.inplaced_to_remove
