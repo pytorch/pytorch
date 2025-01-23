@@ -13,7 +13,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Dict, Generic, List, TYPE_CHECKING
+from typing import Generic, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -218,6 +218,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
+            and obj is not dict.__new__
         ):
             return VariableTracker.build(tx, obj, source)
 
@@ -291,8 +292,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             name == "__subclasses__"
@@ -301,7 +302,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutation_type": ValueMutationNew()}
-            subs_as_vars: List[VariableTracker] = []
+            subs_as_vars: list[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(
@@ -322,18 +323,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif name == "__new__" and self.value is collections.OrderedDict:
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return variables.ConstDictVariable(
+                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
-        from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -353,8 +359,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.construct_dict),
+                [self, *args],
+                kwargs,
             )
         elif (
             self.value is collections.defaultdict
@@ -756,8 +764,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, UserMethodVariable
 
@@ -846,8 +854,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
 
@@ -1312,8 +1320,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
@@ -1419,13 +1427,21 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if type(self.value).__iter__ in (
+            dict.__iter__,
+            collections.OrderedDict.__iter__,
+        ):
+            return self._dict_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
