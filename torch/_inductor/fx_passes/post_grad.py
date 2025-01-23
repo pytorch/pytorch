@@ -826,7 +826,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
         )
 
         # TODO - better way of finding new node
-        new_var = OrderedSet(new) - OrderedSet(existing)
+        new_var: OrderedSet[torch.fx.Node] = OrderedSet(new) - OrderedSet(existing)
         assert len(new_var) == 1
         new_node = next(iter(new_var))
         new_node.meta["arg_kwarg_vals"] = match.output_node().meta.get("arg_kwarg_vals")

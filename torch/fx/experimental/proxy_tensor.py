@@ -1102,13 +1102,13 @@ class PythonKeyTracer(Tracer):
     ) -> torch.fx.Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
 
-        def map_fn(v):
+        def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
                 return None
             return extract_val(v.meta["val"])
 
         if isinstance(target, torch._ops.HigherOrderOperator):
-            arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)
+            arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
             node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
         return node
