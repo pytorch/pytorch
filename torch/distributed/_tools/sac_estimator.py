@@ -697,8 +697,8 @@ class SACEstimator(TorchDispatchMode):
         return SACTradeOffStats(
             n_segments=n_segments,
             slopes=slopes,
-            intercepts=intercepts,
-            fit_breaks=fit_breaks,
+            intercepts=intercepts,  # type: ignore[arg-type]
+            fit_breaks=fit_breaks,  # type: ignore[arg-type]
             tradeoff_curve=tradeoff_curve,
             sac_memory=sac_memory,
             sac_runtime=sac_runtime,

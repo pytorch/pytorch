@@ -239,7 +239,7 @@ class KnapsackEvaluator:
         """
         results = self.evaluate_distribution_of_results_for_knapsack_algo(
             knapsack_algo=knapsack_algo,
-            memory_budget_values=np.linspace(
+            memory_budget_values=np.linspace(  # type: ignore[arg-type]
                 min_mem_budget, max_mem_budget, iterations
             ).tolist(),
         )
