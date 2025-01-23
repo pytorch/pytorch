@@ -1346,22 +1346,41 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_dtype(),
             buffer.get_size(),
             buffer.get_stride(),
+            V.graph.get_allocation_size(buffer),
         )
 
     def make_allocation(
         self, name, device, dtype, shape, stride, allocation_shape=None
     ):
+        if allocation_shape is None:
+            allocation_shape = shape
+
         orig_stride = stride
         device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
+        allocation_size = self.codegen_shape_tuple(allocation_shape)
         stride = self.codegen_shape_tuple(orig_stride)
+
         size_array_var = self.codegen_int_array_var(
             size,
             self.wrapper_call.writeline,
             known_statically=self.is_statically_known_list_of_ints(shape),
             graph=self.get_codegened_graph(),
         )
+
+        if allocation_size != size:
+            allocation_size_array_var = self.codegen_int_array_var(
+                allocation_size,
+                self.wrapper_call.writeline,
+                known_statically=self.is_statically_known_list_of_ints(
+                    allocation_shape
+                ),
+                graph=self.get_codegened_graph(),
+            )
+        else:
+            allocation_size_array_var = size_array_var
+
         stride_array_var = self.codegen_int_array_var(
             stride,
             self.wrapper_call.writeline,
@@ -1371,22 +1390,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device_type, device_id = device_str.split(",")
         device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
 
+        handle_name = f"{name}_handle"
         args = [
             str(len(shape)),
-            size_array_var,
+            allocation_size_array_var,
             stride_array_var,
             dtype_code,
             device_type,
             device_idx,
-            f"&{name}_handle",
+            f"&{handle_name}",
         ]
 
-        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
         self.wrapper_call.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
         )
 
-        return f"RAIIAtenTensorHandle {name}({name}_handle);"
+        if allocation_size != size:
+            old_handle_name, handle_name = handle_name, f"{name}_handle_restrided"
+            self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
+            args = [
+                old_handle_name,
+                size_array_var,
+                stride_array_var,
+                f"&{handle_name}",
+            ]
+            self.wrapper_call.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
+            )
+
+        return f"RAIIAtenTensorHandle {name}({handle_name});"
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         size = self.codegen_shape_tuple(shape)
