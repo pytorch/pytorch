@@ -1023,6 +1023,7 @@ class VariableBuilder:
                 value, "_torchdynamo_inline", source=self.source
             )
         elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
             return FunctoolsWrapsVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
