@@ -149,6 +149,21 @@ def check_files(
         ]
     stdout = str(proc.stdout, "utf-8").strip()
     stderr = str(proc.stderr, "utf-8").strip()
+    if proc.returncode not in (0, 1):
+        return [
+            LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=code,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=stderr,
+            )
+        ]
+
     rc = [
         LintMessage(
             path=match["file"],
