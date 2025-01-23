@@ -228,6 +228,7 @@ def _scaled_dot_product_ring_efficient_attention(
         raise NotImplementedError("attn_bias is not supported yet")
 
     if not compute_log_sumexp:
+        # TODO (xilun): when we have a chance we should try allowing compute_log_sumexp=False
         warning_once(
             logger,
             "_scaled_dot_product_ring_efficient_attention requires compute_log_sumexp "
