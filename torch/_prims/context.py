@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Optional
 
 import torch
 import torch._decomp
@@ -28,7 +29,7 @@ def torch_to_refs_map():
         (torch.fft, torch._refs.fft),
         (torch.linalg, torch._refs.linalg),
     ]
-    r: Dict[Any, Any] = {
+    r: dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
         torch.Tensor.__xor__: torch._refs.bitwise_xor,
         torch.Tensor.__and__: torch._refs.bitwise_and,
@@ -107,7 +108,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         orig_func: Callable,
         types: Sequence,
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: Optional[dict] = None,
     ):
         if kwargs is None:
             kwargs = {}
