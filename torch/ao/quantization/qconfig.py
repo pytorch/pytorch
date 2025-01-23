@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Type, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -613,7 +613,7 @@ def _add_module_to_qconfig_obs_ctr(
 
 
 _ObserverOrFakeQuantizeConstructor = Union[
-    _PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]
+    _PartialWrapper, type[ObserverBase], type[FakeQuantizeBase]
 ]
 
 
