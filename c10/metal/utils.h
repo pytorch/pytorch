@@ -29,6 +29,14 @@ struct vectypes<bfloat> {
   using type2 = bfloat2;
 };
 #endif
+
+template <>
+struct vectypes<short> {
+  using type4 = short4;
+  using type3 = short3;
+  using type2 = short2;
+}
+
 } // namespace detail
 
 template <typename T>
