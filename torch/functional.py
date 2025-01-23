@@ -4,7 +4,7 @@ import operator
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: F401
 from torch import _VF, Tensor
 from torch._C import _add_docstr
 from torch._jit_internal import _overload as overload, boolean_dispatch
