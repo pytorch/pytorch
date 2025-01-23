@@ -327,7 +327,12 @@ class TunableOp {
         auto s_stddev = s.stddev();
         // Assume normal distribution.
         // Solution with smallest mean + 2*sigma will be a better solution
-        if ((s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
+        // Additionally, assume there is 15% overhead in the non-default code path.
+        auto alpha = 1.0;
+        if (i != 0 || i != op_names_.size()) { // Default is first and last solution tested
+          alpha = 1.15;
+        }
+        if (alpha*(s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
           TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
                 " min ", s._min,
                 " max ", s._max,
