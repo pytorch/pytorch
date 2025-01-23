@@ -282,7 +282,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
     "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
