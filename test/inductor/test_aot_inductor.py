@@ -2089,6 +2089,28 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_profile_benchmark_harness(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def create_test_fn():
+            def test_fn():
+                inp = torch.randn(
+                    batch_size, seq_length, hidden_size, device=self.device
+                )
+                weight = torch.randn(hidden_size, hidden_size, device=self.device)
+                matmul_output = inp @ weight
+                torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+                return True
+
+            return test_fn
+
+        fn = torch.compile(
+            options={"profile_bandwidth_output": "foo", "benchmark_harness": False}
+        )(create_test_fn())
+        fn()
+
     def test_with_profiler(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

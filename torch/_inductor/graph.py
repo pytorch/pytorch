@@ -2061,7 +2061,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
 
-        if config.profile_bandwidth_output:
+        if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
             mod.benchmark_compiled_module(times=1, repeat=1)
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
