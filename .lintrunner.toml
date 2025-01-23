@@ -261,7 +261,6 @@ exclude_patterns = [
     'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
