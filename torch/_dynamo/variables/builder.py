@@ -2935,10 +2935,10 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
-    @classmethod
-    def create(cls, tx: "InstructionTranslator", value) -> VariableTracker:
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
         value_type = type(value)
-        fast_handler = cls._type_handlers.get(value_type)
+        fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
             return fast_handler(tx, value)
 

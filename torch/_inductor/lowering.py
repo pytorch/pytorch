@@ -1009,7 +1009,7 @@ def squeeze(x, dim=None):
     for d, s in enumerate(x.get_size()):
         if not (
             d in dims
-            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
         ):
             new_shape.append(s)
 
