@@ -655,6 +655,10 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
     def fn(match):
+        x_meta_value = match.kwargs["x"].meta.get("val")
+        is_xpu_match = x_meta_value.device.type == "xpu"
+        if is_xpu_match:
+            return False
         output_dtype = _get_pattern_output_dtype(match)
         compute_node = filter_nodes(match.nodes, qop)[0]
         # qop_pointwise should only have one user
