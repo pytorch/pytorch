@@ -1,20 +1,25 @@
 name: post-test-job-process
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-        workflow_runner_id:
-          description: 'workflow (runner) id of the workflow the test is running'
+        workflow_run_id:
+          type: string
+          description: 'workflow (run) id of the workflow the test is running'
           required: True
         workflow_attempt:
-          description: 'the workflow (runner) attempt'
+          type: string
+          description: 'the workflow (run) attempt'
           required: True
         workflow_name:
           description: 'name of the workflow'
+          type: string
           required: True
         job_id:
-          description: 'the job (runner) id for the test'
+          type: string
+          description: 'the job (run) id for the test'
           required: True
         job_name:
+          type: string
           description: 'the job name of the test'
           required: True
 
