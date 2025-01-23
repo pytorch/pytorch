@@ -194,5 +194,4 @@ instantiate_rms(float)
 instantiate_rms(half)
 #if __METAL_VERSION__ >= 310
 instantiate_rms(bfloat)
-#endif
-// clang-format on
+#endif // clang-format on
