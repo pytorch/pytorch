@@ -23,10 +23,6 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
         kwargs = {} if kwargs is None else kwargs
         return func(*args, **kwargs)
 
-    @classmethod
-    def is_infra_mode(cls):
-        return True
-
 
 class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
     def __init__(
@@ -47,10 +43,6 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
             torch.cuda.cudart().cudaStreamCaptureMode.Relaxed
         ):
             return func(*args, **kwargs)
-
-    @classmethod
-    def is_infra_mode(cls):
-        return True
 
 
 def _is_boolean_scalar_cuda_tensor(pred: Any) -> bool:

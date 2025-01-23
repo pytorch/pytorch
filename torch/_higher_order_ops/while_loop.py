@@ -3,7 +3,6 @@ import contextlib
 from typing import Callable, Union
 
 import torch
-from torch.cuda.graphs import _graph_no_gc
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
@@ -24,6 +23,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.cuda.graphs import _graph_no_gc
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     ProxyTorchDispatchMode,
@@ -229,19 +229,25 @@ def cond_op_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs)
     # Re-enter this mode because addition torch.cond() and
     # torch.while_loop() calls may be nested inside cond_fn or body_fn
     with mode:
-        return while_loop_node(
-            cond_fn, body_fn, carried_inputs, additional_inputs
-        )
+        return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 # WAR for https://github.com/pytorch/pytorch/issues/140322
 @while_loop_op.py_impl(ControlFlowOpWarmupDispatchMode)
 def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
-    with _graph_no_gc(torch.cuda.CUDAGraph(),
-                      pool=None,
-                      stream=mode.capture_stream,
-                      capture_error_mode="relaxed"):
-        while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+    if torch.cuda.is_current_stream_capturing():
+        # This is a call to torch.while_loop() nested within either
+        # torch.while_loop() or another torch.cond() function.
+        with mode:
+            return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+    else:
+        with _graph_no_gc(
+            torch.cuda.CUDAGraph(),
+            pool=None,
+            stream=mode.capture_stream,
+            capture_error_mode="relaxed",
+        ), mode:
+            while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
     # Since ControlFlowOpWarmupDispatchMode has been popped, this call
     # will fall back to while_loop_dense
     return while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs)

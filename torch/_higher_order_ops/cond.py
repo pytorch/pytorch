@@ -373,16 +373,22 @@ def cond_op_cudagraph(mode, pred, true_fn, false_fn, operands):
 # WAR for https://github.com/pytorch/pytorch/issues/140322
 @cond_op.py_impl(ControlFlowOpWarmupDispatchMode)
 def cond_op_warmup(mode, pred, true_fn, false_fn, operands):
-    with _graph_no_gc(
-        torch.cuda.CUDAGraph(),
-        pool=None,
-        stream=mode.capture_stream,
-        capture_error_mode="relaxed",
-    ):
-        if_else_node(pred, true_fn, false_fn, operands)
-    # Since ControlFlowOpWarmupDispatchMode has been popped, this call
-    # will fall back to cond_op_dense
-    return cond_op_dense(pred, true_fn, false_fn, operands)
+    if torch.cuda.is_current_stream_capturing():
+        # This is a call to torch.cond() nested within either
+        # torch.while_loop() or another torch.cond() function.
+        with mode:
+            return if_else_node(pred, true_fn, false_fn, operands)
+    else:
+        with _graph_no_gc(
+            torch.cuda.CUDAGraph(),
+            pool=None,
+            stream=mode.capture_stream,
+            capture_error_mode="relaxed",
+        ), mode:
+            if_else_node(pred, true_fn, false_fn, operands)
+        # Since ControlFlowOpWarmupDispatchMode has been popped, this call
+        # will fall back to cond_op_dense
+        return cond_op_dense(pred, true_fn, false_fn, operands)
 
 
 # return torch.cond(pred, true_fn, false_fn, operands)
