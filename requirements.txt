@@ -14,9 +14,9 @@ optree>=0.13.0
 packaging
 psutil
 pyyaml
+pyzstd
 requests
 setuptools
 sympy==1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
-pyzstd

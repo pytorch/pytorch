@@ -362,8 +362,8 @@ pwlf==2.2.1 ; python_version >= "3.8"
 # To build PyTorch itself
 astunparse
 PyYAML
-setuptools
 pyzstd
+setuptools
 
 ninja==1.11.1 ; platform_machine == "aarch64"
 scons==4.5.2 ; platform_machine == "aarch64"

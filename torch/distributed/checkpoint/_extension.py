@@ -27,6 +27,18 @@ else:
     pyzstd = None
 
 
+zstandard_module_name = "zstandard"
+
+if (zstandard := sys.modules.get(zstandard_module_name, None)) is not None:
+    pass
+elif (zstandard_spec := importlib.util.find_spec(zstandard_module_name)) is not None:
+    zstandard = importlib.util.module_from_spec(zstandard_spec)
+    sys.modules[zstandard_module_name] = zstandard
+    zstandard_spec.loader.exec_module(zstandard)  # type: ignore[union-attr]
+else:
+    zstandard = None
+
+
 __all__ = [
     "Extension",
     "StreamTransformExtension",
@@ -98,7 +110,7 @@ class StreamTransformExtension(Extension):
 class ZStandard(StreamTransformExtension):
     @staticmethod
     def is_available() -> bool:
-        return pyzstd is not None
+        return zstandard is not None or pyzstd is not None
 
     @staticmethod
     def from_descriptor(version: str) -> "ZStandard":
@@ -106,7 +118,8 @@ class ZStandard(StreamTransformExtension):
             raise ValueError(f"Unknown extension {version=}")
         if not ZStandard.is_available():
             raise ValueError(
-                f"Stream with ZStandard compression cannot be processed because no module named '{pyzstd_module_name}'"
+                f"Stream with ZStandard compression cannot be processed because "
+                f"no module named '{zstandard_module_name}' or '{pyzstd_module_name}'"
             )
         return ZStandard()
 
@@ -118,13 +131,17 @@ class ZStandard(StreamTransformExtension):
         super().__init__()
         if not ZStandard.is_available():
             raise ValueError(
-                f"ZStandard extension is unavailable because no module named '{pyzstd_module_name}'"
+                f"ZStandard extension is unavailable because no module named '{zstandard_module_name}' or '{pyzstd_module_name}'"
             )
 
     def get_descriptor(self) -> str:
         return f"{self.registry_name()}/1"
 
     def transform_to(self, output: IO[bytes]) -> IO[bytes]:
+        if zstandard is not None:
+            compressor = zstandard.ZstdCompressor()  # type: ignore[union-attr]
+            return compressor.stream_writer(output)
+
         class Writer(io.RawIOBase):
             def __init__(self, output: IO[bytes]) -> None:
                 self.output = output
@@ -148,6 +165,10 @@ class ZStandard(StreamTransformExtension):
         return cast(IO[bytes], Writer(output))
 
     def transform_from(self, input: IO[bytes]) -> IO[bytes]:
+        if zstandard is not None:
+            decompressor = zstandard.ZstdDecompressor()  # type: ignore[union-attr]
+            return decompressor.stream_reader(input)
+
         class Reader(io.RawIOBase):
             def __init__(self, input: IO[bytes]) -> None:
                 self.input = input
