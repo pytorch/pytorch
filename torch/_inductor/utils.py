@@ -856,15 +856,20 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            shutil.rmtree(inductor_cache_dir)
+            shutil.rmtree(
+                inductor_cache_dir,
+                # Let's not fail if we can't clean up the temp dir. Also note that for
+                # Windows, we can't delete the loaded modules because the module binaries
+                # are open.
+                onerror=lambda func, path, exc_info: log.warning(
+                    "Failed to remove temporary cache dir at %s",
+                    inductor_cache_dir,
+                    exc_info=exc_info,
+                ),
+            )
     except Exception:
-        if not _IS_WINDOWS:
-            """
-            Windows can't delete the loaded modules, because the modules binaries are opened.
-            TODO: discuss if have better solution to handle this issue.
-            """
-            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-            raise
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
     finally:
         clear_inductor_caches()
 
