@@ -32,9 +32,14 @@ Tensor q_linear_pointwise(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  auto out_dtype =
-      output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, act.options().dtype(out_dtype));
+
+  bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  Tensor qout = at::empty(dst_dims, act.options().dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -85,9 +90,14 @@ Tensor q_linear_pointwise_tensor(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  auto out_dtype =
-      output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, act.options().dtype(out_dtype));
+
+  bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  Tensor qout = at::empty(dst_dims, act.options().dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -142,9 +152,13 @@ Tensor q_linear_pointwise_binary(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  auto out_dtype =
-      output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
+  bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
@@ -199,9 +213,13 @@ Tensor q_linear_pointwise_binary_tensor(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  auto out_dtype =
-      output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
+  bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(dst_dtype));
 
   quantized_matmul(
       act.contiguous(),
