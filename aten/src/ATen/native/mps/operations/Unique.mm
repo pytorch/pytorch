@@ -263,7 +263,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
     Tensor length = at::empty({1}, ScalarType::Int, std::nullopt, kMPS, std::nullopt, std::nullopt);
 
     if (input.numel() == 0) {
-      return std::make_tuple(output, inverse_indices, counts);
+      return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
     }
 
     mps::UniqueCachedGraph* uniqueGraph =
