@@ -250,11 +250,8 @@ constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 constexpr int MZ_ZIP_DATA_DESCRIPTOR_ID = 0x08074b50;
 
 namespace detail {
-size_t getPadding(
-    size_t cursor,
-    size_t filename_size,
-    size_t size,
-    std::string& padding_buf) {
+
+std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t size) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -268,6 +265,18 @@ size_t getPadding(
   }
   size_t mod = start % kFieldAlignment;
   size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
+  std::tuple<size_t, size_t> result(next_offset, start);
+  return result;
+}
+
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf) {
+  std::tuple<size_t, size_t> result = getOffset(cursor, filename_size, size);
+  size_t next_offset = std::get<0>(result);
+  size_t start = std::get<1>(result);
   size_t padding_size = next_offset - start;
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {
@@ -279,24 +288,6 @@ size_t getPadding(
   padding_buf[2] = (uint8_t)padding_size;
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
-}
-
-size_t getOffset(size_t cursor, std::string filename, size_t size) {
-  size_t filename_size = filename.size();
-  size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
-      sizeof(mz_uint16) * 2;
-  if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
-    start += sizeof(mz_uint16) * 2;
-    if (size >= MZ_UINT32_MAX) {
-      start += 2 * sizeof(mz_uint64);
-    }
-    if (cursor >= MZ_UINT32_MAX) {
-      start += sizeof(mz_uint64);
-    }
-  }
-  size_t mod = start % kFieldAlignment;
-  size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
-  return next_offset;
 }
 } // namespace detail
 
@@ -420,7 +411,8 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
         }
         readSizes[i] = size;
         LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
-                  << "] " << "from " << name << " of size " << n;
+                  << "] "
+                  << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
             "record size ",
@@ -632,7 +624,10 @@ size_t PyTorchStreamReader::getRecordOffsetNoRead(
     std::string filename,
     size_t size) {
   std::string full_name = archive_name_plus_slash_ + filename;
-  return detail::getOffset(cursor, full_name, size);
+  size_t full_name_size = full_name.size();
+  std::tuple<size_t, size_t> result = detail::getOffset(cursor, full_name_size, size);
+  size_t offset = std::get<0>(result);
+  return offset;
 }
 
 PyTorchStreamReader::~PyTorchStreamReader() {
