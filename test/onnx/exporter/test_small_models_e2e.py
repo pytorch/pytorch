@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import onnxruntime
 import torchvision
 
 import torch
@@ -143,6 +144,55 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_program = torch.onnx.export(VisionModel(), args, dynamo=True)
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_slice_4d(self):
+        # from https://github.com/onnx/onnx/issues/6420
+        class DummySlice(torch.nn.Module):
+            def forward(self, x):
+                x1 = x[:, :, 0:1, :]
+                x2 = x[:, :, 1:2, :]
+                return x1 + x2
+
+        example_input = torch.ones((3, 4, 2, 5)).to(torch.float16)
+        model = DummySlice().eval()
+        expected_output = model(example_input)
+
+        for dynamo in [False, True]:
+            onnx_file_path = f"test_slice_4d_{'dynamo' if dynamo else 'script'}.onnx"
+
+            if dynamo:
+                batch = torch.export.Dim("batch", min=1, max=1024)
+                torch.onnx.export(
+                    model,
+                    (example_input,),
+                    onnx_file_path,
+                    input_names=["input"],
+                    output_names=["output"],
+                    dynamo=True,
+                    dynamic_shapes={"input": {0: batch}},
+                    fallback=False,
+                )
+            else:
+                torch.onnx.export(
+                    model,
+                    (example_input,),
+                    onnx_file_path,
+                    input_names=["input0"],
+                    output_names=["output"],
+                    opset_version=13,
+                    dynamic_axes={"input0": {0: "batch_size"}},
+                    do_constant_folding=True,
+                    export_params=True,
+                )
+
+            session = onnxruntime.InferenceSession(
+                onnx_file_path,
+                providers=[("CPUExecutionProvider")],
+            )
+            inputs_names = [i.name for i in session.get_inputs()]
+            output = session.run(None, dict(zip(inputs_names, (example_input.numpy(),))))
+            self.assertEqual(expected_output.shape, output[0].shape)
+            torch.testing.assert_close(expected_output, torch.from_numpy(output[0]), atol=1e-4, rtol=1e-4)
 
     # TODO(justinchuby): Test multi-output HOPs
 
