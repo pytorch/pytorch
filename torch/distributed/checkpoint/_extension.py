@@ -154,7 +154,7 @@ class ZStandard(StreamTransformExtension):
                 outdata = self.compressor.compress(b)
                 if outdata:
                     self.output.write(outdata)
-                return len(b.__buffer__(0))
+                return len(memoryview(b))
 
             def flush(self) -> None:
                 outdata = self.compressor.flush()
@@ -189,7 +189,7 @@ class ZStandard(StreamTransformExtension):
                 else:
                     indata = b""
 
-                bview = b.__buffer__(0)
+                bview = memoryview(b)
                 blen = len(bview)
                 outdata = self.decompressor.decompress(indata, blen)
                 if outdata is None:
