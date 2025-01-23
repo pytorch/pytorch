@@ -187,6 +187,7 @@ class ConstDictVariable(VariableTracker):
         )
 
     def as_python_constant(self):
+        self.install_dict_keys_match_guard()
         return {
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()

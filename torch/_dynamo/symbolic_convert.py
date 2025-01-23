@@ -582,9 +582,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
-            # TODO install guards for more types.
-            if istype(value, ConstDictVariable) and value.source:
-                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
