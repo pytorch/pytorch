@@ -9,7 +9,14 @@ from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
+from .common import (
+    ConstexprArg,
+    KernelArgType,
+    SizeArg,
+    TensorArg,
+    TMADescriptorArg,
+    WorkspaceArg,
+)
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -73,7 +80,18 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
         return "nvTmaDesc"
+    if isinstance(arg, ConstexprArg):
+        return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
+
+
+def non_constexpr_signature(signature):
+    new_signature = []
+    for arg in signature:
+        if not isinstance(arg, ConstexprArg):
+            new_signature.append(arg)
+
+    return new_signature
 
 
 def signature_to_meta(
@@ -152,7 +170,7 @@ def config_of(
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True
-        if isinstance(x, TMADescriptorArg):
+        if isinstance(x, (TMADescriptorArg, ConstexprArg)):
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
