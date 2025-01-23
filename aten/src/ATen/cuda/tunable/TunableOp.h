@@ -155,6 +155,13 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       StreamTimer timer{};
+
+      // Small Mandatory Warmup
+      // Reduces outliers
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+      }
+
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
@@ -170,6 +177,13 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       std::vector<StreamTimerNoSync> timer(num_iter);
+
+      // Small Mandatory Warmup
+      // Reduces outliers
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+      }
+
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
           at::cuda::flush_icache();
