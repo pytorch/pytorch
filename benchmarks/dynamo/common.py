@@ -23,18 +23,7 @@ import time
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    List,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import MagicMock
 
@@ -97,6 +86,8 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping, Sequence
+
     from torch.onnx._internal.fx import diagnostics
 
 
@@ -541,6 +532,8 @@ def output_signpost(data, args, suite, error=None):
 
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
+    wall_time_by_phase = calculate_time_spent()
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
@@ -553,7 +546,7 @@ def output_signpost(data, args, suite, error=None):
                 # NB: Externally, compilation_metrics colloquially refers to
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
-                "compilation_metrics": calculate_time_spent(),
+                "compilation_metrics": wall_time_by_phase,
                 "agg_compilation_metrics": {
                     k: sum(v) for k, v in compilation_time_metrics.items()
                 },
@@ -566,10 +559,7 @@ def output_signpost(data, args, suite, error=None):
         ),
     )
 
-    if args.print_compilation_time:
-        print(
-            f"Compilation time (dynamo_timed): {calculate_time_spent()['total_wall_time']}"
-        )
+    return wall_time_by_phase["total_wall_time"]
 
 
 def nothing(f):
@@ -1784,7 +1774,7 @@ class OnnxModel(abc.ABC):
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: list[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -2222,11 +2212,11 @@ class OnnxExportErrorRow:
         )
 
     @property
-    def headers(self) -> List[str]:
+    def headers(self) -> list[str]:
         return [field.name for field in dataclasses.fields(self)]
 
     @property
-    def row(self) -> List[str]:
+    def row(self) -> list[str]:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
@@ -2276,7 +2266,7 @@ class OnnxContext:
 
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
@@ -2921,13 +2911,17 @@ class BenchmarkRunner:
                 headers.append(k)
                 fields.append(v)
 
-            write_outputs(output_filename, headers, fields)
-
-            output_signpost(
+            total_wall_time = output_signpost(
                 dict(zip(o_headers, o_fields)),
                 self.args,
                 self.suite_name,
             )
+            headers.append("compilation_latency")
+            fields.append(total_wall_time)
+            write_outputs(output_filename, headers, fields)
+
+            if self.args.print_compilation_time:
+                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
 
             return accuracy_status
 
