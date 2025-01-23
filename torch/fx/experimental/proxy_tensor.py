@@ -20,6 +20,7 @@ from collections import defaultdict
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
+from torch.fx.node import Argument, Target
 from typing import (
     Any,
     Callable,
@@ -1086,6 +1087,28 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e)
         else:
             return e
+
+    def create_node(
+        self,
+        kind: str,
+        target: Target,
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
+    ) -> torch.fx.Node:
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
+
+        def map_fn(v):
+            if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
+                return None
+            return extract_val(v.meta["val"])
+        
+        if isinstance(target, torch._ops.HigherOrderOperator):
+            arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)
+            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp) 
+
+        return node
 
 
 def _make_temp_remove_mode_context_manager(

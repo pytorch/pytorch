@@ -620,6 +620,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
+            breakpoint()
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg) and inplaceable_op.extra_check(node):
                 # TODO(yifu): this doesn't properly remove copy epilogues for
@@ -630,6 +631,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target == torch.ops.higher_order.auto_functionalized_v2:
+            breakpoint()
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
@@ -647,6 +649,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_tensors"] = new_bases_to_clone
         elif node.target == torch.ops.higher_order.auto_functionalized:
+            breakpoint()
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
@@ -667,6 +670,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_tensors"] = tensors_to_clone
         elif node.target in inplaceable_triton_ops:
+            # breakpoint()
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)
             from triton.runtime.autotuner import Autotuner
@@ -703,6 +707,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         elif (
             inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
         ) is not None:
+            breakpoint()
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
