@@ -350,8 +350,10 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
     # Special case cpu and cuda as using the method below
     # to determine if the scheduler is a triton scheduler subclass
     # requires instantiating a scheduler for them
-    if device in ["cpu", "cuda"] and getattr(config, f"{device}_backend") == "triton":
-        return True
+    if device in ["cpu", "cuda"]:
+        if getattr(config, f"{device}_backend") == "triton":
+            return True
+        return False
     if (
         device is None
         or (device_scheduling := get_scheduling_for_device(device)) is None
