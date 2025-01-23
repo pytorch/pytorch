@@ -1107,7 +1107,14 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        if isinstance(target, torch._ops.HigherOrderOperator):
+        # TODO: opt-in mechanism ?
+        if isinstance(
+            target,
+            (
+                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
+                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+            ),
+        ):
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
             node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
 
