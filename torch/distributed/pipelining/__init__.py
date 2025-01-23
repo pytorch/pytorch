@@ -7,6 +7,7 @@ from .schedules import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from .stage import build_stage, PipelineStage
 
@@ -23,4 +24,5 @@ __all__ = [
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
+    "ScheduleZBVZeroBubble",
 ]

@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable, Tuple
+from typing import NamedTuple, Optional, Union, Any, Callable
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log
@@ -29,6 +29,8 @@ import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
+from torch._C._autograd import DeviceType
+from torch._C._distributed_c10d import _SymmetricMemory
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -348,6 +350,17 @@ def requires_mpi():
     )
 
 
+def requires_multicast_support():
+    has_multicast_support = (
+        torch.cuda.is_available()
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not has_multicast_support,
+        "multicast support is not available",
+    )
+
+
 def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm_multiprocess = True
@@ -564,6 +577,15 @@ class MultiProcessTestCase(TestCase):
     def _should_stop_test_suite(self) -> bool:
         return False
 
+    # Many test cases init a process group but do not destroy it.  This property
+    # determines whether this base test class should call
+    # `destroy_process_group` on behalf of the test. Its value is customizable
+    # by derived TestCase's but it is a pan-TestCase value (cannot be customized
+    # for each test).
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return True
+
     @property
     def world_size(self) -> int:
         return DEFAULT_WORLD_SIZE
@@ -682,7 +704,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
 
-    def run_test(self, test_name: str, parent_pipe, destroy_process_group=True) -> None:
+    def run_test(self, test_name: str, parent_pipe) -> None:
         # Start event listener thread.
         signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
@@ -725,9 +747,8 @@ class MultiProcessTestCase(TestCase):
             # Close pipe after done with test.
             parent_pipe.close()
 
-        if destroy_process_group:
+        if self.destroy_pg_upon_exit:
             try:
-                # Many test cases init a process group but do not destroy it.
                 # Some tests do destroy the pgs, and destroy can't be called twice.
                 # This avoids spewing warnings about improperly shutting down.
                 c10d.destroy_process_group()
@@ -942,7 +963,7 @@ class DistributedTestBase(MultiProcessTestCase):
 
 def run_subtests(
     cls_inst,
-    subtest_config: Dict[str, List[Any]],
+    subtest_config: dict[str, list[Any]],
     test_fn: Callable,
     *test_args,
     **test_kwargs: Any,
@@ -961,9 +982,9 @@ def run_subtests(
         test_kwargs: Keyword arguments to pass to ``test_fn``.
     """
     # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
-    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    subtest_config_items: list[tuple[str, list[Any]]] = list(subtest_config.items())
+    subtest_config_keys: list[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))
@@ -1293,7 +1314,7 @@ class MultiThreadedTestCase(TestCase):
 class SaveForwardInputsModule(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
@@ -1309,7 +1330,7 @@ class SaveForwardInputsModule(nn.Module):
 class SaveForwardInputsModel(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
@@ -1427,6 +1448,9 @@ class MultiProcContinousTest(TestCase):
     rank: int = -1  # unset state
     # Rendezvous file
     rdvz_file: Optional[str] = None
+    # timeout configured per class
+    timeout: timedelta = timedelta(seconds=120)
+
 
     @classmethod
     @abc.abstractmethod
@@ -1474,6 +1498,7 @@ class MultiProcContinousTest(TestCase):
             rank=cls.rank,
             store=store,
             pg_options=opts,
+            timeout=cls.timeout,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
         print(f"Rank {cls.rank} setup complete")

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import warnings
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -29,13 +29,13 @@ class ConstantAttrMap(collections.abc.MutableMapping):
 
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
-        self._constant_attrs: Dict[
-            Union[int, torch.Tensor, FakeScriptObject], List[Any]
+        self._constant_attrs: dict[
+            Union[int, torch.Tensor, FakeScriptObject], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
-        self._script_object_map: Dict[int, torch.ScriptObject] = {}
+        self._script_object_map: dict[int, torch.ScriptObject] = {}
 
     def __getitem__(
         self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
@@ -113,7 +113,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -131,7 +131,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: Dict[
+    all_constants: dict[
         str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
     ] = {}
 
@@ -149,10 +149,18 @@ def lift_constants_pass(
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and node.name in graph_signature.user_inputs:
+        if node.op == "placeholder":
+            if node.name in graph_signature.user_inputs:
+                first_user_input = node
+                break
+            first_user_input_loc += 1
+        # If we ever hit here, it means that
+        # there was no user input so the constants
+        # should be inserted right before the first
+        # non-placeholder node.
+        if node.op != "placeholder":
             first_user_input = node
             break
-        first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
     renamed_targets = {}
@@ -191,7 +199,7 @@ def lift_constants_pass(
                 # Remove the parameterness of constant_val
                 if isinstance(constant_val, torch.nn.Parameter):
                     warnings.warn(
-                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"{node.target} created when tracing {node.meta.get('stack_trace', '<unknown stack>')} is a parameter. But"
                         f"it's not registered with register_parameter(). export will treat it as a constant tensor"
                     )
                     # We get the real data out of the parameter by disabling the surrounding fake mode.
@@ -292,13 +300,13 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
+) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
     For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
-    constants: Dict[
+    constants: dict[
         str,
         Union[
             torch.Tensor,

@@ -131,6 +131,3 @@
 	path = third_party/composable_kernel
 	url = https://github.com/ROCm/composable_kernel.git
 	branch = develop
-[submodule "third_party/x86-simd-sort"]
-	path = third_party/x86-simd-sort
-	url = https://github.com/intel/x86-simd-sort.git

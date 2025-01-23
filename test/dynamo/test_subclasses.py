@@ -126,7 +126,6 @@ def get_view_test_cases():
     def mk_dense_subclass_dense_subclass():
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 3, 6, 10])
-        offsets2 = offsets.detach().clone()
         return nested_view_from_values_offsets(
             nested_view_from_values_offsets(values, offsets).values(), offsets
         )
@@ -136,7 +135,7 @@ def get_view_test_cases():
     def mk_subclass_dense_subclass_dense():
         x = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         offsets2 = x.offsets().detach().clone()
-        nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
+        nested_view_from_values_offsets(x.values(), offsets2).values()
 
     yield mk_subclass_dense_subclass_dense, "subclass_dense_subclass_dense"
 
@@ -544,7 +543,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         input = torch.ones(2, 2)
 
-        res = fn(input)
+        fn(input)
 
     def test_torch_function_state_guards(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -556,9 +555,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         input = torch.ones(2, 2)
 
         with torch._C.DisableTorchFunctionSubclass():
-            res = fn(input)
+            fn(input)
 
-        res = fn(input)
+        fn(input)
 
         self.assertEqual(cnt.frame_count, 2)
 
@@ -1160,7 +1159,7 @@ class GraphModule(torch.nn.Module):
         )
 
         ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)
+        ff_out = ff(t_clone)  # noqa: F841
         # frame count and op count are incremented due to re-compilation
         check_count_and_graph(
             2,
@@ -1187,7 +1186,7 @@ class GraphModule(torch.nn.Module):
             x = torch._to_functional_tensor(t_clone2)
             torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
-            aot_f_out = f(x)
+            aot_f_out = f(x)  # noqa: F841
         finally:
             torch._disable_functionalization()
 
@@ -1334,7 +1333,7 @@ class GraphModule(torch.nn.Module):
 
         x = DoubleSizeMaybeAddGeThreeTensor(inp)
         torch._dynamo.mark_dynamic(x, 0)
-        res = fn(x)
+        res = fn(x)  # noqa: F841
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
         expected_var_to_val = {
@@ -1823,7 +1822,7 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
-        from typing import Any, Callable, List, Optional
+        from typing import Any, Callable, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -1836,9 +1835,9 @@ class GraphModule(torch.nn.Module):
 
         def inner_compile(
             gm: torch.fx.GraphModule,
-            example_inputs: List[torch.Tensor],
+            example_inputs: list[torch.Tensor],
             cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[List[int]] = None,
+            static_input_idxs: Optional[list[int]] = None,
             is_backward: bool = False,
             graph_id: Optional[int] = None,
             cpp_wrapper: bool = False,
@@ -1846,7 +1845,7 @@ class GraphModule(torch.nn.Module):
             is_inference: bool = False,
             boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
             layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
+            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -3270,7 +3269,7 @@ Eq(s12, s10)""",
         x_inner = torch.ones(4)
         x = TwoTensor(x_inner, x_inner)
         x_view = x.view(2, 2)
-        out = f(x_view)
+        out = f(x_view)  # noqa: F841
 
     # NJT1 -> Dense -> NJT2 -> Dense view
     # During view replay, the Dense -> NJT2 part will construct an intermediate,

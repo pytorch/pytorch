@@ -174,13 +174,13 @@ The kernel function can take any of the following types as inputs or outputs:
 * `double` (note: `float` is not supported)
 * `int64_t` (note: other integer types like `int`, `uint64_t`, `int32_t`, `...` are not supported)
 * `bool`
-* `c10::string_view`
+* `std::string_view`
 * `at::Scalar` (this is a type that can hold either an integer or a floating point value)
 * `std::optional<T>` with T being any type from the list above
 
 The kernel function can take and return list inputs by using `torch::List<T>`. `T` must be one of the supported types from above excluding `at::Scalar`.
 
-The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `c10::string_view`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
+The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `std::string_view`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
 
 When taken as input, any of these types can be taken by value (i.e. `Tensor`) or by const-reference (i.e. `const Tensor&`). We recommend taking all arguments by value, even Tensors. They will be moved in, so there is no performance overhead.
 

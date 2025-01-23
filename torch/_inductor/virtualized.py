@@ -59,7 +59,9 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar, Union
+
+from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
     KernelFormatterHandler,
@@ -106,7 +108,7 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
+    def __init__(self, vname: str, default: Union[Callable[[], T], type[NullHandler]]):
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
@@ -147,14 +149,14 @@ class NullKernelHandler(NullHandler):
 
     def __init__(self):
         super().__init__()
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet[Any]()
+        self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
 
 
 _ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
     "kernel", NullKernelHandler
@@ -365,7 +367,7 @@ class _V:
 
     @property
     def aot_compilation(self):
-        return _aot_compilation._get_handler()
+        return _aot_compilation._get_handler() is True
 
     @property
     def current_node(self):

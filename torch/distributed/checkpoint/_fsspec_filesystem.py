@@ -3,19 +3,23 @@
 
 import io
 import os
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
-import fsspec
-from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
 
+from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
     FileSystemWriter,
 )
+
+
+if TYPE_CHECKING:
+    from fsspec import AbstractFileSystem
 
 
 __all__ = [
@@ -33,9 +37,21 @@ class FileSystem(FileSystemBase):
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
         assert self.fs is not None
-        with self.fs.transaction:
-            with fsspec.open(str(path), mode) as stream:
+        path = os.fspath(path)
+
+        # fsspec does not support concurrent transactions, and not all
+        # AbstractFileSystem have working rollback implementations, so
+        # just manually delete the file if necessary on errors.
+        with self.fs.open(path, mode) as stream:
+            try:
                 yield stream
+            except:  # noqa: B001,E722
+                if any(ch in mode for ch in "w+a"):  # cleanup file if not read-only
+                    try:
+                        self.rm_file(path)
+                    except:  # noqa: B001,E722
+                        pass
+                raise
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
@@ -51,7 +67,7 @@ class FileSystem(FileSystemBase):
     ) -> None:
         self.fs.rename(path, new_path)
 
-    def mkdir(self, path: [str, os.PathLike]) -> None:
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
     @classmethod
@@ -96,6 +112,7 @@ class FsspecWriter(FileSystemWriter):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
+        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -107,6 +124,7 @@ class FsspecWriter(FileSystemWriter):
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -117,6 +135,7 @@ class FsspecWriter(FileSystemWriter):
             thread_count,
             per_thread_copy_ahead,
             overwrite=overwrite,
+            _extensions=_extensions,
         )
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)

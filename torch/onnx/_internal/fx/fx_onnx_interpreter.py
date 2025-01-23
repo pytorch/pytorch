@@ -5,16 +5,17 @@ import inspect
 import logging
 import operator
 import re
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
-import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+import onnxscript
+from onnxscript.function_libs.torch_lib import (
     graph_building as onnxscript_graph_building,
 )
 
 import torch
 import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.fx import (
     _pass,
     diagnostics,
@@ -22,6 +23,10 @@ from torch.onnx._internal.fx import (
     type_utils as fx_type_utils,
 )
 from torch.utils import _pytree
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _fx_node_to_onnx_message_formatter(
@@ -144,7 +149,9 @@ def _retrieve_or_adapt_input_to_graph_set(
                     # Since tensors with rank=0 (i.e., scalar) cannot be concated, all
                     # scalars are promoted to tensors with shape (1,).
                     with onnxscript.evaluator.default_as(tracer):
-                        element_value = onnxscript.opset18.Reshape(element_value, [1])  # type: ignore[arg-type, type-var]
+                        element_value = onnxscript_apis.torchlib_opset().Reshape(
+                            element_value, [1]
+                        )  # type: ignore[arg-type, type-var]
                 sequence_mixed_elements.append(element_value)
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
@@ -165,7 +172,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with onnxscript.evaluator.default_as(tracer):
-            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)  # type: ignore[type-var]
+            output = onnxscript_apis.torchlib_opset().Concat(
+                *sequence_mixed_elements, axis=0
+            )  # type: ignore[type-var]
         output.dtype = torch.int64  # type: ignore[union-attr]
         output.shape = [len(sequence_mixed_elements)]  # type: ignore[union-attr]
         return output
@@ -179,7 +188,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         ] = []
         for tensor in onnx_tensor:
             sequence_elements.append(
-                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None
+                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None  # type: ignore[index, union-attr]
             )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):

@@ -382,6 +382,9 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @skipIfTorchDynamo(
+        "Not applicable; see https://github.com/pytorch/pytorch/issues/127738"
+    )
     @swap([True, False])
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
@@ -932,6 +935,9 @@ class TestNNParametrization(NNTestCase):
             parametrize.type_before_parametrizations(model) == original_type
         )
 
+    @skipIfTorchDynamo(
+        "Not applicable; see https://github.com/pytorch/pytorch/issues/127738"
+    )
     @swap([True, False])
     def test_deepcopy_after_parametrization(self):
         r"""Test that we are able to create a deepcopy of the module when it's parametrized."""
@@ -1520,7 +1526,7 @@ class TestNNParametrization(NNTestCase):
         m = torch.nn.utils.parametrizations.spectral_norm(m)
         snm = m.parametrizations.weight[0]
         # this should not run into incompatible shapes
-        x = m(inp)
+        m(inp)
         # check that u refers to the same dimension
         self.assertEqual(
             snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape

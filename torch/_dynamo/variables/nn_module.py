@@ -5,7 +5,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch.nn
 
@@ -21,6 +21,7 @@ from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
     ConstDictKeySource,
+    DictGetItemSource,
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
@@ -131,18 +132,18 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = {
         "module_type",
         "module_key",
-        "module",
+        "value",
         "nn_module_stack_source",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
+        self, module_type: type, module_key: str, value: torch.nn.Module, **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
-        self.module = module
+        self.value = value
         assert self.source
         self.nn_module_stack_source = self.source
 
@@ -342,8 +343,8 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
 
@@ -450,8 +451,8 @@ class NNModuleVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
@@ -851,8 +852,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
@@ -915,68 +916,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 tx, [self] + list(args), kwargs
             )
 
-    def trace_supported_methods(
-        self, tx: "InstructionTranslator", method, name, args, kwargs
-    ):
-        def get_kwargs(*names):
-            fn = getattr(self.value, name)
-            bound_args = inspect.signature(fn).bind(
-                *([x.as_python_constant() for x in args]),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            bound_args.apply_defaults()
-            bound_args = bound_args.arguments
-            return {k: bound_args[k] for k in names}
-
-        def get_current_parameters(module_var):
-            params_dict = module_var.var_getattr(tx, "_parameters").realize().items
-            assert isinstance(params_dict, dict)
-            params_list = list(params_dict.values())
-            params_list = [param.realize() for param in params_list]
-            # Account for mod.param = None
-            params_list = [
-                param
-                for param in params_list
-                if isinstance(param, variables.TensorVariable)
-            ]
-            return params_list
-
-        def collect_parameters(module_var, recurse):
-            params_list = []
-            assert isinstance(module_var, UnspecializedNNModuleVariable)
-            params_list = get_current_parameters(module_var)
-            modules_dict = module_var.var_getattr(tx, "_modules").realize()
-            if recurse:
-                for submodule_var in modules_dict.items.values():
-                    assert isinstance(submodule_var, UnspecializedNNModuleVariable)
-                    params_list.extend(collect_parameters(submodule_var, recurse))
-            return params_list
-
-        if method is torch.nn.Module.parameters:
-            if self.source:
-                tx.output.guard_on_key_order.add(
-                    AttrSource(self.source, "_parameters").name()
-                )
-            recurse = get_kwargs("recurse")["recurse"]
-            params_list = collect_parameters(self, recurse=recurse)
-
-            # Account for duplicated params
-            deduplicated_params = list(dict.fromkeys(params_list).keys())
-
-            return variables.ListIteratorVariable(
-                deduplicated_params, mutation_type=ValueMutationNew()
-            )
-        else:
-            raise AssertionError(
-                "Discrepancy between is_supported_nn_module_method and trace_supported_methods"
-            )
-
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
@@ -994,9 +939,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
-
-            if self.is_supported_nn_module_method(method):
-                return self.trace_supported_methods(tx, method, name, args, kwargs)
 
             if isinstance(method, staticmethod):
                 source = AttrSource(
@@ -1097,7 +1039,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
         # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
-        # ConstDictVariable to avoid any guard on the keys.
+        # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
         if (
             self.source
             and name
@@ -1119,7 +1061,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
                 # value. This removes the reliance on the actual key value.
                 source_key = ConstDictKeySource(hooks_dict_source, i)
-                source_value = GetItemSource(hooks_dict_source, source_key)
+                source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value)
                 return key, value
 
@@ -1127,7 +1069,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
             )
 
-            return variables.ConstDictVariable(
+            return variables.NNModuleHooksDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
         return super().var_getattr(tx, name)

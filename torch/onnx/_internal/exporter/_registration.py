@@ -13,6 +13,7 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import logging
 import math
 import operator
@@ -24,9 +25,7 @@ import torch
 import torch._ops
 from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
-
-
-_DEFAULT_OPSET_VERSION = 18
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
 TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Callable]
@@ -63,18 +62,9 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
     if namespace == "math":
         return getattr(math, op_name)
     if namespace == "torchvision":
-        try:
-            import torchvision.ops  # type: ignore[import-untyped]
-        except ImportError:
+        if importlib.util.find_spec("torchvision") is None:
             logger.warning("torchvision is not installed. Skipping %s", qualified_name)
             return None
-        try:
-            return getattr(torchvision.ops, op_name)
-        except AttributeError:
-            logger.warning("Failed to find torchvision op '%s'", qualified_name)
-            return None
-        except Exception:
-            logger.exception("Failed to find torchvision op '%s'", qualified_name)
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
         if maybe_overload:
@@ -114,20 +104,12 @@ class ONNXRegistry:
 
     def __init__(self) -> None:
         """Initializes the registry"""
-
-        # TODO: Design multi-opset version support
-        self._opset_version = _DEFAULT_OPSET_VERSION
-
+        self._opset_version = onnxscript_apis.torchlib_opset_version()
         self.functions: dict[TorchOp | str, list[OnnxDecompMeta]] = {}
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target.
-
-        Defaults to the latest supported ONNX opset version: 18.
-        The default version will increment over time as ONNX continues to evolve.
-        """
-
+        """The ONNX opset version the exporter should target."""
         return self._opset_version
 
     @classmethod
@@ -153,10 +135,16 @@ class ONNXRegistry:
                 if target is None:
                     continue
 
+                if isinstance(overload_func, onnxscript.OnnxFunction):
+                    opset_version = overload_func.opset.version
+                else:
+                    opset_version = 1
+
                 overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,
+                    opset_version=opset_version,
                 )
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=overload_func,
@@ -168,6 +156,21 @@ class ONNXRegistry:
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
+        # Gather ops from the internal torchlib registry
+        # TODO(justinchuby): Make this the main registry after torchlib is migrated to PyTorch
+        # Trigger registration
+        from torch.onnx._internal.exporter._torchlib import ops
+
+        del ops
+        for target, implementations in _torchlib_registry.registry.items():  # type: ignore[assignment]
+            for impl in implementations:
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=impl,
+                    fx_target=target,  # type: ignore[arg-type]
+                )
+                registry._register(target, onnx_decomposition)  # type: ignore[arg-type]
+
         return registry
 
     def _register(
@@ -211,7 +214,10 @@ class ONNXRegistry:
                 # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
                 if isinstance(function, onnxscript.OnnxFunction):
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
-                        function, function.function_ir.domain, function.name
+                        function,
+                        function.function_ir.domain,
+                        function.name,
+                        opset_version=function.opset.version,
                     )
                 else:
                     function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]

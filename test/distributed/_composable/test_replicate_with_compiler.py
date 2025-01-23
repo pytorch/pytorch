@@ -178,7 +178,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
                     bwd_context = (
                         contextlib.nullcontext()
                         if model_idx == 0
-                        else compiled_autograd.enable(compiler_fn(no_inductor))
+                        else compiled_autograd._enable(compiler_fn(no_inductor))
                     )
                     with bwd_context:
                         loss = models[model_idx](input).sum()
@@ -295,7 +295,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
 
         def bwd(loss):
-            with compiled_autograd.enable(compiler_fn()):
+            with compiled_autograd._enable(compiler_fn()):
                 loss.backward()
 
         for i in range(loop):
@@ -329,11 +329,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -342,11 +342,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -371,11 +371,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
@@ -383,11 +383,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for i in range(3):
+        for _ in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for i in range(3):
+        for _ in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
@@ -439,7 +439,7 @@ class DDP_TP_Test(InductorTestCase):
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
-        with compiled_autograd.enable(compiler_fn()):
+        with compiled_autograd._enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474

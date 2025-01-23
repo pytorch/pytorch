@@ -3,13 +3,14 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Optional
 
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_load_const,
     Instruction,
     overwrite_instruction,
     transform_code_object,
@@ -88,9 +89,9 @@ def _try_except_tf_mode_template(dummy, stack_var_name):
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: Optional[Tuple[Any, ...]] = None
+    target_values: Optional[tuple[Any, ...]] = None
 
-    def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
+    def try_except_torch_function_mode(self, code_options, cleanup: list[Instruction]):
         """
         Codegen based off of:
         try:
@@ -112,7 +113,7 @@ class ReenterWith:
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
-    def try_finally(self, code_options, cleanup: List[Instruction]):
+    def try_finally(self, code_options, cleanup: list[Instruction]):
         """
         Codegen based off of:
         load args
@@ -125,10 +126,7 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
@@ -136,7 +134,7 @@ class ReenterWith:
             if name not in code_options["co_names"]:
                 code_options["co_names"] += (name,)
 
-        create_ctx: List[Instruction] = []
+        create_ctx: list[Instruction] = []
         _initial_push_null(create_ctx)
         create_ctx.extend(
             [
@@ -168,12 +166,9 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
 
-        create_ctx: List[Instruction] = []
+        create_ctx: list[Instruction] = []
         _initial_push_null(create_ctx)
         create_ctx.extend(
             [
@@ -217,17 +212,17 @@ class ReenterWith:
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
-    instructions: List[Instruction] = dataclasses.field(default_factory=list)
+    instructions: list[Instruction] = dataclasses.field(default_factory=list)
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
 
     # map from PUSH_EXC_INFO's in the prefix to original block target offset
-    prefix_block_target_offset_remap: List[int] = dataclasses.field(
+    prefix_block_target_offset_remap: list[int] = dataclasses.field(
         default_factory=list
     )
     # map from new block target offsets to original block target offsets
-    block_target_offset_remap: Optional[Dict[int, int]] = None
+    block_target_offset_remap: Optional[dict[int, int]] = None
 
 
 def _filter_iter(l1, l2, cond):
@@ -237,7 +232,7 @@ def _filter_iter(l1, l2, cond):
     returns the instructions with offsets in sorted_offsets
     """
     it = iter(l2)
-    res: List[Instruction] = []
+    res: list[Instruction] = []
     try:
         cur = next(it)
         for val in l1:
@@ -250,10 +245,9 @@ def _filter_iter(l1, l2, cond):
 
 
 def _load_tuple_and_call(tup):
-    insts: List[Instruction] = []
+    insts: list[Instruction] = []
     _initial_push_null(insts)
-    for val in tup:
-        insts.append(create_instruction("LOAD_CONST", argval=val))
+    insts.extend(create_load_const(val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
     return insts
 
@@ -277,14 +271,14 @@ class ContinueExecutionCache:
         code,
         lineno,
         offset: int,
-        setup_fn_target_offsets: Tuple[int, ...],  # only used in Python 3.11+
+        setup_fn_target_offsets: tuple[int, ...],  # only used in Python 3.11+
         nstack: int,
-        argnames: Tuple[str, ...],
-        argnames_null: Tuple[str, ...],
-        setup_fns: Tuple[ReenterWith, ...],
-        stack_ctx_vars: Tuple[Tuple[int, Tuple[Any]], ...],
-        argnames_ctx_vars: Tuple[Tuple[str, Tuple[Any]], ...],
-        null_idxes: Tuple[int, ...],
+        argnames: tuple[str, ...],
+        argnames_null: tuple[str, ...],
+        setup_fns: tuple[ReenterWith, ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[Any]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[Any]], ...],
+        null_idxes: tuple[int, ...],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -310,7 +304,7 @@ class ContinueExecutionCache:
         is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
 
-        def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+        def update(instructions: list[Instruction], code_options: dict[str, Any]):
             meta.instructions = copy.deepcopy(instructions)
 
             args = [f"___stack{i}" for i in range(nstack)]
@@ -341,7 +335,11 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [
+                    v
+                    for v in code_options["co_varnames"]
+                    if v not in args and v not in freevars
+                ]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -356,7 +354,7 @@ class ContinueExecutionCache:
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
 
-            cleanup: List[Instruction] = []
+            cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             hook_target_offsets = {
                 fn.stack_index: setup_fn_target_offsets[i]
@@ -454,16 +452,16 @@ class ContinueExecutionCache:
         return new_code
 
     @staticmethod
-    def unreachable_codes(code_options) -> List[Instruction]:
+    def unreachable_codes(code_options) -> list[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
-            create_instruction("LOAD_CONST", argval=None),
+            create_load_const(None),
             create_instruction("RAISE_VARARGS", arg=1),
         ]
 
     @classmethod
     def generate_based_on_original_code_object(
-        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int, ...], *args
+        cls, code, lineno, offset: int, setup_fn_target_offsets: tuple[int, ...], *args
     ):
         """
         This handles the case of generating a resume into code generated
@@ -479,7 +477,7 @@ class ContinueExecutionCache:
         new_offset = None
 
         def find_new_offset(
-            instructions: List[Instruction], code_options: Dict[str, Any]
+            instructions: list[Instruction], code_options: dict[str, Any]
         ):
             nonlocal new_offset
             (target,) = (i for i in instructions if i.offset == offset)
@@ -503,14 +501,14 @@ class ContinueExecutionCache:
                 block_target_offset_remap = meta.block_target_offset_remap = {}
 
                 def remap_block_offsets(
-                    instructions: List[Instruction], code_options: Dict[str, Any]
+                    instructions: list[Instruction], code_options: dict[str, Any]
                 ):
                     # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
                     # so we can tell which block a prefix PUSH_EXC_INFO belongs to,
                     # by counting. Then we can use meta.prefix_block-target_offset_remap
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
-                    prefix_blocks: List[Instruction] = []
+                    prefix_blocks: list[Instruction] = []
                     for inst in instructions:
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap

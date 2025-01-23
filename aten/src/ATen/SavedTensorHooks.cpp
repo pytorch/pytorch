@@ -17,6 +17,7 @@ namespace {
 }
 
 static void assertSavedTensorHooksNotDisabled() {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   TORCH_CHECK(SavedTensorDefaultHooks::is_enabled(), tls.disabled_error_message.value());
 }
 

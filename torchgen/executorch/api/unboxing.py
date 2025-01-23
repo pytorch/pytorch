@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.model import (
     Argument,
@@ -15,6 +15,8 @@ from torchgen.model import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.api.types import Binding, CType, NamedCType
 
 

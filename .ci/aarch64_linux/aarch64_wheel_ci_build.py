@@ -4,12 +4,9 @@
 import os
 import shutil
 from subprocess import check_call, check_output
-from typing import List
-
-from pygit2 import Repository
 
 
-def list_dir(path: str) -> List[str]:
+def list_dir(path: str) -> list[str]:
     """'
     Helper for getting paths for Python
     """
@@ -80,7 +77,7 @@ def update_wheel(wheel_path) -> None:
         "/usr/local/cuda/lib64/libnvToolsExt.so.1",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
-        "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.4",
+        "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",
@@ -171,10 +168,9 @@ if __name__ == "__main__":
     args = parse_arguments()
     enable_mkldnn = args.enable_mkldnn
     enable_cuda = args.enable_cuda
-    repo = Repository("/pytorch")
-    branch = repo.head.name
-    if branch == "HEAD":
-        branch = "master"
+    branch = check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd="/pytorch"
+    ).decode()
 
     print("Building PyTorch wheel")
     build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
@@ -186,7 +182,7 @@ if __name__ == "__main__":
         build_vars += (
             f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version} PYTORCH_BUILD_NUMBER=1 "
         )
-    elif branch in ["nightly", "master"]:
+    elif branch in ["nightly", "main"]:
         build_date = (
             check_output(["git", "log", "--pretty=format:%cs", "-1"], cwd="/pytorch")
             .decode()
