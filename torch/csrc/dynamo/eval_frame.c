@@ -9,13 +9,14 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 typedef struct {
-    int active_dynamo_threads;
+  int active_dynamo_threads;
 } ModuleState;
 
 // static int active_dynamo_threads = 0;
@@ -278,6 +279,11 @@ static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
+// dynamo-owned random object for system random calls in order
+// to prevent pollution from rogue random calls (e.g. from third-party
+// functions) made from within dynamo tracing
+static PyObject* dynamo_random_obj;
+
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static PyObject* dynamo_call_callback(
@@ -293,8 +299,35 @@ static PyObject* dynamo_call_callback(
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
+
+  // preserve python random state
+  PyObject* prev_rng_state = random_getstate(random_module());
+  random_setstate(dynamo_random_obj, prev_rng_state);
+
   PyObject* res = PyObject_CallFunction(
       callable, "OOO", frame, cache_entry_pyobj, frame_state);
+
+  // store error if there was one
+#if IS_PYTHON_3_12_PLUS
+  PyObject* exc = PyErr_GetRaisedException();
+#else
+  PyObject *exc_type, *exc_value, *exc_traceback;
+  PyErr_Fetch(&exc_type, &exc_value, &exc_traceback);
+#endif
+
+  // restore python random state
+  random_setstate(random_module(), prev_rng_state);
+  Py_DECREF(prev_rng_state);
+
+  // restore error if there was one
+#if IS_PYTHON_3_12_PLUS
+  if (exc) {
+    PyErr_SetRaisedException(exc);
+  }
+#else
+  PyErr_Restore(exc_type, exc_value, exc_traceback);
+#endif
+
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -831,7 +864,9 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* increment_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
@@ -844,11 +879,13 @@ static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
+static PyObject* decrement_working_threads(
+    PyThreadState* tstate,
+    PyObject* module) {
   ModuleState* state = PyModule_GetState(module);
 
   if (state != NULL) {
-      if (state->active_dynamo_threads > 0) {
+    if (state->active_dynamo_threads > 0) {
       state->active_dynamo_threads = state->active_dynamo_threads - 1;
       if (state->active_dynamo_threads == 0) {
         enable_eval_frame_default(tstate);
@@ -859,7 +896,10 @@ static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* modu
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate, PyObject* module) {
+static PyObject* set_eval_frame(
+    PyObject* new_callback,
+    PyThreadState* tstate,
+    PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -982,13 +1022,13 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static int clear_state(PyObject *module) {
-    ModuleState* state = PyModule_GetState(module);
-    if (state) {
-        state->active_dynamo_threads = 0;
-        return 0;
-    }
-    return -1;
+static int clear_state(PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+  if (state) {
+    state->active_dynamo_threads = 0;
+    return 0;
+  }
+  return -1;
 }
 
 static PyMethodDef _methods[] = {
@@ -1063,6 +1103,14 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   }
   if (PyModule_AddObject(
           module, "cache_limit_hit_flag", cache_limit_hit_flag) != 0) {
+    return NULL;
+  }
+
+  dynamo_random_obj = new_random_object();
+  if (dynamo_random_obj == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "dynamo_random", dynamo_random_obj) != 0) {
     return NULL;
   }
 

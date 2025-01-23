@@ -1,3 +1,4 @@
+import random
 import types
 from typing import Dict, NewType, Tuple
 
@@ -9,6 +10,8 @@ CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
 # Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
 skip_code_recursive_flag: SkipCodeRecursiveFlag
 cache_limit_hit_flag: CacheLimitHitFlag
+
+dynamo_random: random.Random
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...

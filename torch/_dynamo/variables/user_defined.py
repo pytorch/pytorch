@@ -18,6 +18,7 @@ from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
+from torch._C._dynamo.eval_frame import dynamo_random
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -651,15 +652,17 @@ class NO_SUCH_SUBOBJ:
     pass
 
 
-def call_random_fn(tx, fn, args, kwargs):
+def call_random_fn(tx, example_fn, runtime_fn, args, kwargs):
+    # example_fn: function called at compile time to generate example_value
+    # runtime_fn: function called to generate random number at runtime
     from .builder import VariableBuilder
 
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
-    example_value = fn(*args, **kwargs)
+    example_value = example_fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))
+    tx.output.random_calls.append((runtime_fn, args, kwargs))
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
@@ -734,10 +737,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     @functools.lru_cache(None)
     def _supported_random_functions():
         fns = {
-            random.random,
-            random.randint,
-            random.randrange,
-            random.uniform,
+            random.random: dynamo_random.random,
+            random.randint: dynamo_random.randint,
+            random.randrange: dynamo_random.randrange,
+            random.uniform: dynamo_random.uniform,
         }
         return fns
 
@@ -853,7 +856,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            return call_random_fn(tx, self.value, args, kwargs)
+            return call_random_fn(
+                tx,
+                self._supported_random_functions()[self.value],
+                self.value,
+                args,
+                kwargs,
+            )
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__

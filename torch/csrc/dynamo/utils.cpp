@@ -2,6 +2,43 @@
 
 namespace torch::dynamo {
 
+// random utilities for C dynamo
+
+// random module reference
+py::object _random = py::module::import("random");
+
+// random.Random()
+// returns new reference
+PyObject* new_random_object() {
+  py::object rng = py::module::import("random").attr("Random")();
+  return rng.release().ptr();
+}
+
+// random
+// returns borrowed reference
+PyObject* random_module() {
+  return _random.ptr();
+}
+
+// rng.getstate()
+// rng can be random module or random.Random object
+// rng: borrowed reference
+// returns new reference
+PyObject* random_getstate(PyObject* rng) {
+  py::handle rng_h(rng);
+  py::object state = rng_h.attr("getstate")();
+  return state.release().ptr();
+}
+
+// rng.setstate(state)
+// rng can be random module or random.Random object
+// rng, state: borrowed references
+// no return value
+void random_setstate(PyObject* rng, PyObject* state) {
+  py::handle rng_h(rng), state_h(state);
+  rng_h.attr("setstate")(state_h);
+}
+
 static std::array<PyMethodDef, 1> _methods = {{
     {nullptr,
      nullptr,
