@@ -7,13 +7,13 @@ import json
 import logging
 import os
 import os.path
+import pathlib
 import re
 import sys
 import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
@@ -768,7 +768,7 @@ def make_module_path_relative(abs_path):
     a relative path relative to one of the Python search paths.
     """
 
-    abs_path = Path(abs_path).absolute()
+    abs_path = pathlib.Path(abs_path).resolve()
 
     for path in sys.path:
         try:
@@ -1224,8 +1224,17 @@ def trace_structured(
                     # special case to look better
                     payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
                 else:
+
+                    def json_default(obj):
+                        # Sets aren't json serializable
+                        if isinstance(obj, set):
+                            return list(obj)
+                        raise TypeError(
+                            f"Object of type {type(obj)} is not JSON serializable"
+                        )
+
                     # force newlines so we are unlikely to overflow line limit
-                    payload = json.dumps(payload, indent=0)
+                    payload = json.dumps(payload, default=json_default, indent=0)
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()

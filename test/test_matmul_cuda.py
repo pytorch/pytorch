@@ -1,5 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
+import contextlib
 import unittest
 from itertools import product
 from functools import partial
@@ -351,20 +352,20 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        # hipblaslt does not yet support mixed e4m3_type input
-        if torch.version.hip is None:
-            self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-            self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        with self.assertRaises(RuntimeError):
+        # supported on ROCm but fails on CUDA
+        ctx = self.assertRaises(RuntimeError) if torch.version.hip is None else contextlib.nullcontext()
+        with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
+
+        self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+        self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
-        if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
-        with self.assertRaises(RuntimeError):
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
+        with self.assertRaises(AssertionError if torch.version.hip else RuntimeError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -374,9 +375,10 @@ class TestFP8MatmulCuda(TestCase):
         # hipblaslt does not yet support mixed e4m3_type input
         y_type = e4m3_type if torch.version.hip else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
+        scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
@@ -566,7 +568,6 @@ class TestFP8MatmulCuda(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
-    @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -577,8 +578,8 @@ class TestFP8MatmulCuda(TestCase):
         x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
         y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         out_fp8 = torch._scaled_mm(
             x_fp8,
@@ -600,8 +601,8 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_fp8 = x.to(torch.float8_e4m3fn)
-        y_fp8 = y.to(torch.float8_e4m3fn).t()
+        x_fp8 = x.to(e4m3_type)
+        y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -658,13 +659,14 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape("Expected b.dtype() == at::kFloat8_e4m3fn to be true, but got false."),
+            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
         ):
             torch._scaled_mm(
                 x_fp8,
-                y_fp8.to(torch.float8_e5m2),
+                y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
@@ -672,7 +674,6 @@ class TestFP8MatmulCuda(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
-    @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)

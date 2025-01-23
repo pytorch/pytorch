@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
@@ -49,6 +48,14 @@ class AdamW(Adam):
             fused=fused,
             decoupled_weight_decay=True,
         )
+
+    # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
+    # guarantees that decoupled_weight_decay will always be True for loading any state into
+    # AdamW
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group["decoupled_weight_decay"] = True
 
 
 AdamW.__doc__ = (
