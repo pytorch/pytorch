@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - patch-5
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
