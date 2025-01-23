@@ -164,12 +164,22 @@ void DebugInfoWriter::write(const std::string& trace) {
     return;
   }
 
-  file.write(trace.data(), static_cast<std::streamsize>(trace.size()));
-  if (!file) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
+  if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
+    if (file.bad()) {
+      LOG(ERROR) << "Serious error writing to file: " << filename_;
+    } else {
+      LOG(ERROR) << "Error writing to file: " << filename_;
+    }
     return;
   }
+
+  // Flush the buffer to ensure data is written to the file
+  file.flush();
+  if (file.bad()) {
+    LOG(ERROR) << "Serious error flushing file buffer: " << filename_;
+    return;
+  }
+
   LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
 
