@@ -126,6 +126,8 @@ struct TORCH_API AutogradContext {
   AutogradContext& operator=(AutogradContext&& other) = delete;
   ~AutogradContext() = default;
 
+  AutogradContext(PackedArgs& packed_args);
+
   /// Can be used to save non-variable data for `backward`.
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
@@ -169,11 +171,102 @@ struct TORCH_API AutogradContext {
   std::weak_ptr<Node> grad_fn_;
   bool has_freed_buffers_{false};
 
+  // Compiled autograd overrides saved_variables() and needs_input_grad().
+  // We store the values we want to return here.
+  std::optional<variable_list> saved_variables_override_;
+  std::optional<std::vector<bool>> needs_input_grad_override_;
+
   void save_variables();
 
   template <class T>
   friend struct CppNode;
+  template <class T>
+  friend variable_list CppNode_apply_functional(
+      variable_list&& inputs,
+      AutogradContext& ctx_,
+      const std::vector<bool>& is_variable_input_,
+      const std::vector<VariableInfo>& output_info_,
+      const std::string& name);
 };
+
+template <typename T>
+inline variable_list CppNode_apply_functional(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+    variable_list&& inputs,
+    AutogradContext& ctx_,
+    const std::vector<bool>& is_variable_input_,
+    const std::vector<VariableInfo>& output_info_,
+    const std::string& name) {
+  at::OptionalDeviceGuard _device_guard;
+
+  auto num_inputs = inputs.size();
+  variable_list backward_inputs;
+  backward_inputs.reserve(num_inputs);
+  for (const auto i : c10::irange(num_inputs)) {
+    if (inputs[i].defined() || !ctx_.materialize_grads_) {
+      backward_inputs.emplace_back(std::move(inputs[i]));
+    } else {
+      backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
+    }
+  }
+
+  auto outputs = T::backward(&ctx_, backward_inputs);
+
+  const auto num_forward_inputs =
+      static_cast<int64_t>(is_variable_input_.size());
+  auto num_outputs = static_cast<int64_t>(outputs.size());
+  // Returning too many results is ok, but only as long as they're all
+  // undefined. Truncate the result vector in that case.
+  if (num_outputs > num_forward_inputs) {
+    bool all_undef = true;
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
+      all_undef &= (!outputs[i].defined());
+    }
+    if (all_undef) {
+      outputs.resize(num_forward_inputs);
+      num_outputs = num_forward_inputs;
+    }
+  }
+
+  if (num_outputs != num_forward_inputs) {
+    std::string msg("function ");
+    msg += name + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(num_forward_inputs) + ", got ";
+    msg += std::to_string(num_outputs) + ")";
+    throw std::runtime_error(msg);
+  }
+
+  variable_list results;
+  results.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    if (!is_variable_input_[i]) {
+      if (outputs[i].defined()) {
+        std::string msg("function ");
+        msg += name +
+            " returned a gradient different that is defined at position ";
+        msg += std::to_string(i + 1) +
+            ", std the corresponding forward input was not a Variable";
+        throw std::runtime_error(msg);
+      }
+      continue;
+    }
+    results.emplace_back(outputs[i]);
+  }
+  return results;
+}
+
+template <typename T>
+inline variable_list CppNode_apply_functional_ivalue(
+    const variable_list& inputs,
+    const std::vector<c10::IValue>& args) {
+  auto packed_args = PackedArgs(args);
+  auto ctx = AutogradContext(packed_args);
+  auto output_info = packed_args.unpack<std::vector<VariableInfo>>();
+  auto is_variable_input = packed_args.unpack<std::vector<bool>>();
+  auto name = packed_args.unpack<std::string>();
+  return CppNode_apply_functional<T>(
+      variable_list(inputs), ctx, is_variable_input, output_info, name);
+}
 
 // CppNode<T> is the Node in the autograd graph that represents the user defined
 // backward function for Function<T>. Calls to CppNode::apply are forward to
@@ -232,7 +325,64 @@ struct CppNode : public Node {
     saved.before(ctx_.has_freed_buffers_);
     saved.before(input_info_);
     saved.before(output_info_);
-    auto results = apply(variable_list(inputs));
+
+    PackedArgs packed_args;
+    packed_args.pack_saved_data(ctx_.saved_data);
+    variable_list saved_variables = ctx_.get_saved_variables();
+    packed_args.pack(saved_variables);
+    packed_args.pack(ctx_.materialize_grads_);
+    packed_args.pack(ctx_.has_freed_buffers_);
+
+    std::vector<bool> needs_input_grad;
+    {
+      auto ptr = ctx_.grad_fn_.lock();
+      TORCH_INTERNAL_ASSERT(ptr);
+      for (const auto i : c10::irange(ptr->next_edges().size())) {
+        needs_input_grad.push_back(ptr->task_should_compute_output(i));
+      }
+    }
+    packed_args.pack(needs_input_grad);
+
+    packed_args.pack(output_info_);
+    packed_args.pack(is_variable_input_);
+    packed_args.pack(name());
+    auto args = std::move(packed_args).vec();
+
+    auto output_metadata = torch::dynamo::autograd::
+        IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
+            torch::dynamo::autograd::get_input_metadata(next_edges()));
+
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+
+    // Each time apply_with_saved is called, we bind a new function to Python.
+    // This is because the schema might be different on compiled autograd cache
+    // misses. An alternative is to pass the schema to Python so that it can be
+    // an input to a function, but the schema can't be put into an FX graph
+    // right now.
+    std::vector<at::TypePtr> schema;
+    schema.reserve(args.size());
+    for (const auto& ivalue : args) {
+      if (ivalue.isTensor()) {
+        schema.emplace_back(at::TensorType::get());
+      } else {
+        schema.emplace_back(ivalue.type());
+      }
+    }
+    auto fn_name = interface->bind_function(
+        saved.get_py_compiler(),
+        std::string(typeid(T).name()),
+        CppNode_apply_functional_ivalue<T>,
+        schema,
+        /*is_custom_function*/ true);
+
+    auto results = interface->call_function(
+        saved.get_py_compiler(),
+        "apply_functional",
+        fn_name,
+        inputs,
+        args,
+        output_metadata);
+
     saved.after(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
@@ -403,68 +553,13 @@ auto Function<T>::apply(Args&&... args)
 template <class T>
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 variable_list CppNode<T>::apply(variable_list&& inputs) {
-  at::OptionalDeviceGuard _device_guard;
-
-  auto num_inputs = inputs.size();
-  variable_list backward_inputs;
-  backward_inputs.reserve(num_inputs);
-  for (const auto i : c10::irange(num_inputs)) {
-    if (inputs[i].defined() || !ctx_.materialize_grads_) {
-      backward_inputs.emplace_back(std::move(inputs[i]));
-    } else {
-      backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
-    }
-  }
-
   // Acquire lock to here protect thread safety on custom C++ Autograd Node
   // This is needed for the custom Autograd Node since we don't know if the
   // user defined Node will write to the shared data during backward.
   // see Note [Thread Safety on Autograd Node]
   std::lock_guard<std::mutex> lock(mutex_);
-
-  auto outputs = T::backward(&ctx_, backward_inputs);
-
-  const auto num_forward_inputs =
-      static_cast<int64_t>(is_variable_input_.size());
-  auto num_outputs = static_cast<int64_t>(outputs.size());
-  // Returning too many results is ok, but only as long as they're all
-  // undefined. Truncate the result vector in that case.
-  if (num_outputs > num_forward_inputs) {
-    bool all_undef = true;
-    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
-      all_undef &= (!outputs[i].defined());
-    }
-    if (all_undef) {
-      outputs.resize(num_forward_inputs);
-      num_outputs = num_forward_inputs;
-    }
-  }
-
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
-
-  variable_list results;
-  results.reserve(num_outputs);
-  for (const auto i : c10::irange(num_outputs)) {
-    if (!is_variable_input_[i]) {
-      if (outputs[i].defined()) {
-        std::string msg("function ");
-        msg += name() +
-            " returned a gradient different that is defined at position ";
-        msg += std::to_string(i + 1) +
-            ", std the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
-      continue;
-    }
-    results.emplace_back(outputs[i]);
-  }
-  return results;
+  return CppNode_apply_functional<T>(
+      std::move(inputs), ctx_, is_variable_input_, output_info_, name());
 }
 
 template <class T>
