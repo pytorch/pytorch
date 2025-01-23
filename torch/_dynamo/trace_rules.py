@@ -183,6 +183,9 @@ manual_torch_name_rule_map = {
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
+    # torch.fx map utils
+    "torch.fx.node.map_aggregate": UserFunctionVariable,
+    "torch.fx.node.map_arg": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -358,6 +361,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.fabs",
         "math.factorial",
         "math.floor",
+        "math.fma",
         "math.fmod",
         "math.frexp",
         "math.fsum",
@@ -655,6 +659,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_cpu_capability",
         "torch._C._get_cublas_allow_bf16_reduced_precision_reduction",
         "torch._C._get_cublas_allow_fp16_reduced_precision_reduction",
+        "torch._C._get_cublas_allow_fp16_accumulation",
         "torch._C._get_cublas_allow_tf32",
         "torch._C._get_cudnn_allow_tf32",
         "torch._C._get_cudnn_benchmark",
@@ -681,7 +686,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_mkldnn_enabled",
         "torch._C._get_cudnn_sdp_enabled",
         "torch._C._set_sdp_use_cudnn",
-        "torch._C._set_cpu_allow_fp16_reduced_precision_reduction",
+        "torch._C._set_cublas_allow_fp16_accumulation",
         "torch._C._set_mkldnn_deterministic",
         "torch._C._set_only_lift_cpu_tensors",
         "torch._C._set_sdp_priority_order",
@@ -1055,6 +1060,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._mtia_getCurrentStream",
         "torch._C._mtia_getDefaultStream",
         "torch._C._mtia_getDeviceCapability",
+        "torch._C._mtia_getDeviceCount",
         "torch._C._mtia_init",
         "torch._C._mtia_isBuilt",
         "torch._C._mtia_isInBadFork",
@@ -1461,8 +1467,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
-        "torch._dyn_quant_matmul_4bit",
-        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -3382,6 +3386,7 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
@@ -3887,6 +3892,10 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("get_torch_obj_rule_map")
             return rule
+    elif name == "<listcomp>":
+        if reasons is not None:
+            reasons.add("inlining frame from list comprehension")
+        return UserFunctionVariable
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:

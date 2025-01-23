@@ -7,7 +7,7 @@ import math
 import types
 import unittest
 import warnings
-from typing import Any, Dict, Set
+from typing import Any
 
 import torch
 import torch._dynamo.config as config
@@ -73,6 +73,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._storage_address",
     "torch._C._pickle_load_obj",
     "torch._C._pickle_save",
+    "torch._C._set_cpu_allow_fp16_reduced_precision_reduction",
     "torch._C._to_dlpack",
     "torch._validate_sparse_compressed_tensor_args",
     "torch._validate_sparse_csr_tensor_args",
@@ -106,10 +107,10 @@ class AllowedObjects:
     from the heuristic defined in `gen_allowed_objs_and_ids`.
     """
 
-    object_ids: Dict[int, str]
-    c_binding_in_graph_functions: Set[Any]
-    non_c_binding_in_graph_functions: Set[Any]
-    name_rule_map: Dict[str, Any]
+    object_ids: dict[int, str]
+    c_binding_in_graph_functions: set[Any]
+    non_c_binding_in_graph_functions: set[Any]
+    name_rule_map: dict[str, Any]
 
 
 def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
