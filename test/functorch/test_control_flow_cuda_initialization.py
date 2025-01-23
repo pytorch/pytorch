@@ -2,9 +2,7 @@
 import unittest
 
 import torch
-from torch._higher_order_ops.cudagraph_conditional_nodes import ControlFlowOpWarmupDispatchMode
 from torch.testing._internal.common_utils import (
-    parametrize,
     run_tests,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TestCase,
@@ -37,7 +35,7 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
 
         for p in [pred, torch.logical_not(pred)]:
             for i in range(3):
-                outputs.append(f(pred, *other_args))
+                outputs.append(f(pred, *other_args).clone())
 
             # We compute the eager output only after running cudagraphs
             # backend compiled function, in order to make sure that
@@ -47,7 +45,6 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
 
             for output in outputs:
                 self.assertEqual(output, eager_output)
-
 
     def test_cond_cudnn(self):
         # Tests that cublasCreate() does not break stream capture
@@ -89,6 +86,7 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
         self._check_compile_cudagraphs(f, pred, x)
 
         self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+
 
 if __name__ == "__main__":
     run_tests()

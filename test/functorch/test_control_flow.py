@@ -13,10 +13,6 @@ from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
 )
-from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    ControlFlowOpWarmupDispatchMode,
-    CUDAGraphCaptureControlFlowOpDispatchMode
-    )
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -60,7 +56,7 @@ def _check_compile_cudagraph(test_case, fn, args):
     # So we need to get to iteration 3 to test all ways of running.
     outputs = []
     for i in range(3):
-        outputs.append(cudagraphs_compiled_fn(*args))
+        outputs.append(cudagraphs_compiled_fn(*args).clone())
     eager_res = fn(*args)
     for output in outputs:
         test_case.assertEqual(eager_res, output)
