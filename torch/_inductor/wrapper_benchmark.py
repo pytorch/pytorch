@@ -6,7 +6,6 @@ from types import ModuleType
 from typing import Any, Callable, Dict, Optional
 
 import torch
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner, LauncherType
 from torch.autograd import DeviceType
 from torch.utils._ordered_set import OrderedSet
 
@@ -56,7 +55,7 @@ def get_kernel_category(kernel_mod: ModuleType) -> str:
         return "unknown"
 
 
-def get_triton_kernel(mod: ModuleType) -> CachingAutotuner:
+def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     cand_list = [
@@ -104,9 +103,9 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: LauncherType,
-            n_spills: LauncherType,
-            shared: LauncherType,
+            n_regs: Any,
+            n_spills: Any,
+            shared: Any,
             prefix: str = "",
         ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):

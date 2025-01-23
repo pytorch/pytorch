@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-from torch._inductor.codegen.common import BackendFeature
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -11,6 +10,7 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
+from .common import BackendFeature
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
