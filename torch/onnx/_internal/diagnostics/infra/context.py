@@ -7,12 +7,16 @@ import contextlib
 import dataclasses
 import gzip
 import logging
-from typing import Callable, Generator, Generic, Literal, Mapping, TypeVar
+from typing import Callable, Generic, Literal, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
 from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping
 
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
