@@ -92,6 +92,8 @@ aten::_dimI
 aten::_dimV
 aten::_dirichlet_grad
 aten::_dirichlet_grad.out
+aten::_dyn_quant_matmul_4bit
+aten::_dyn_quant_pack_4bit_weight
 aten::_efficient_attention_backward
 aten::_efficient_attention_forward
 aten::_efficientzerotensor
