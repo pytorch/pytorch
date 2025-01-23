@@ -1026,21 +1026,10 @@
     "randn"
   ],
   "torch.types": [
-    "Device",
-    "DispatchKey",
-    "Size",
-    "SymBool",
-    "SymFloat",
-    "SymInt",
-    "Tensor",
-    "IntLikeType",
-    "FloatLikeType",
-    "BoolLikeType",
     "Any",
-    "List",
+    "Device",
     "Number",
     "Sequence",
-    "Tuple",
     "Union"
   ],
   "torch.utils.benchmark.utils.compare": [

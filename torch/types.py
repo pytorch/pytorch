@@ -17,15 +17,15 @@ from typing_extensions import Self, TypeAlias
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
 from torch import (  # noqa: F401
     device as _device,
-    DispatchKey,
+    DispatchKey as DispatchKey,
     dtype as _dtype,
     layout as _layout,
     qscheme as _qscheme,
-    Size,
-    SymBool,
-    SymFloat,
-    SymInt,
-    Tensor,
+    Size as Size,
+    SymBool as SymBool,
+    SymFloat as SymFloat,
+    SymInt as SymInt,
+    Tensor as Tensor,
 )
 
 
@@ -33,20 +33,7 @@ if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
 
-__all__ = [
-    "Number",
-    "Device",
-    "DispatchKey",
-    "Size",
-    "SymBool",
-    "SymFloat",
-    "SymInt",
-    "Tensor",
-    "Storage",
-    "IntLikeType",
-    "FloatLikeType",
-    "BoolLikeType",
-]
+__all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
