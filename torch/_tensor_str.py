@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from torch import inf
@@ -95,7 +95,7 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 
-def get_printoptions() -> Dict[str, Any]:
+def get_printoptions() -> dict[str, Any]:
     r"""Gets the current options for printing, as a dictionary that
     can be passed as ``**kwargs`` to set_printoptions().
     """

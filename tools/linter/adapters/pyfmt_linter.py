@@ -160,6 +160,7 @@ def run_ruff_format(content: str, path: Path) -> str:
                 "format",
                 "--config",
                 str(REPO_ROOT / "pyproject.toml"),
+                "--target-version=py39",
                 "--stdin-filename",
                 str(path),
                 "-",

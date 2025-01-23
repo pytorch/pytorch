@@ -20,7 +20,7 @@ import dataclasses
 import logging
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._ops
@@ -42,6 +42,7 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import io
+    from collections.abc import Mapping, Sequence
 
     import onnxruntime
     import onnxscript
@@ -540,9 +541,13 @@ class Exporter:
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
-        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
-            self.options
-        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        with (
+            self.options.diagnostic_context,
+            decomposition_skip.enable_decomposition_skips(self.options),
+            torch._dynamo.config.patch(
+                dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+            ),
+        ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )

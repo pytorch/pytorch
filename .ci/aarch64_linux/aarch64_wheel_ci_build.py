@@ -4,10 +4,9 @@
 import os
 import shutil
 from subprocess import check_call, check_output
-from typing import List
 
 
-def list_dir(path: str) -> List[str]:
+def list_dir(path: str) -> list[str]:
     """'
     Helper for getting paths for Python
     """
