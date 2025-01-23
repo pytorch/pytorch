@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import os
 import sys
 
@@ -27,11 +28,9 @@ from tools.stats.utilization_stats_lib import (
     UtilizationRecord,
 )
 
-
 USAGE_LOG_FILENAME = "usage_log.txt"
 CMD_PYTHON_LEVEL = "CMD_PYTHON"
 UTILIZATION_BUCKET = "ossci-utilization"
-
 
 class SegmentGenerator:
     def generate(self, records: list[UtilizationRecord]) -> list[OssCiSegmentV1]:
@@ -390,8 +389,12 @@ class UploadUtilizationData:
             print("[dry-run-mode]: no upload in dry run mode")
             return
 
+        collection = f"utilization_v{db_metadata.data_model_version}"
+        if self.debug_mode:
+            collection = f"debug_util_v{db_metadata.data_model_version}"
+            
         self._upload_utilization_data_to_s3(
-            f"utilization_v{db_metadata.data_model_version}",
+            collection,
             self.workflow_run_id,
             self.workflow_run_attempt,
             self.job_id,
@@ -400,7 +403,7 @@ class UploadUtilizationData:
         )
 
         self._upload_utilization_data_to_s3(
-            f"utilization_v{db_metadata.data_model_version}",
+            collection,
             self.workflow_run_id,
             self.workflow_run_attempt,
             self.job_id,
