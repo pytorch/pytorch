@@ -123,6 +123,8 @@ class UvTcpSocket : public UvHandle {
           uv_err_name(nread),
           uv_strerror(nread));
       uv_socket->close();
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      free(buf->base);
       return;
     }
     if (nread > 0) {

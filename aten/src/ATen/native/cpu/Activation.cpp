@@ -847,7 +847,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val0 * ((self_val0 / kThreeVec) + kOneHalfVec),
             grad_val0,
-            self_val0 >= kThreeVec
+            self_val0 > kThreeVec
           ),
           kZeroVec,
           self_val0 < kNegThreeVec
@@ -856,7 +856,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val1 * ((self_val1 / kThreeVec) + kOneHalfVec),
             grad_val1,
-            self_val1 >= kThreeVec
+            self_val1 > kThreeVec
           ),
           kZeroVec,
           self_val1 < kNegThreeVec
@@ -891,7 +891,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val * ((self_val / kThreeVec) + kOneHalfVec),
             grad_val,
-            self_val >= kThreeVec
+            self_val > kThreeVec
           ),
           kZeroVec,
           self_val < kNegThreeVec

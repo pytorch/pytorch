@@ -212,6 +212,8 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        # guard_latency_us is not deterministic
+        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -292,6 +294,7 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -412,12 +415,12 @@ class TestInductorConfigParsingForLogging(TestCase):
             },
         }
         expected = (
-            """{"some": {"name": "Value is not JSON serializable", "some": true}, """
-            """"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """{"data": {"name": "Value is not JSON serializable", "some": true}, """
             """"list": [{"name": "Value is not JSON serializable", "some": true}, """
             """{"name": "Value is not JSON serializable", "some": true}], """
-            """"object": {"name": "Value is not JSON serializable", "some": true, """
-            """"data": {"name": "Value is not JSON serializable", "some": true}}}"""
+            """"object": {"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"name": "Value is not JSON serializable", "some": true}, """
+            """"some": {"name": "Value is not JSON serializable", "some": true}}"""
         )
         mocked_inductor_config.get_config_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
