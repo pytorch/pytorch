@@ -166,10 +166,11 @@ void DebugInfoWriter::write(const std::string& trace) {
 
   if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
     if (file.bad()) {
-      LOG(ERROR) << "Serious error writing Flight Recorder Data to file: "
+      LOG(ERROR) << "Serious error writing Flight Recorder debug info to file: "
                  << filename_;
     } else {
-      LOG(ERROR) << "Error writing Flight Recorder Data to file: " << filename_;
+      LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
+                 << filename_;
     }
     return;
   }
