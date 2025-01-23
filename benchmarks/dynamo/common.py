@@ -532,6 +532,8 @@ def output_signpost(data, args, suite, error=None):
 
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
+    wall_time_by_phase = calculate_time_spent()
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
@@ -544,7 +546,7 @@ def output_signpost(data, args, suite, error=None):
                 # NB: Externally, compilation_metrics colloquially refers to
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
-                "compilation_metrics": calculate_time_spent(),
+                "compilation_metrics": wall_time_by_phase,
                 "agg_compilation_metrics": {
                     k: sum(v) for k, v in compilation_time_metrics.items()
                 },
@@ -556,6 +558,8 @@ def output_signpost(data, args, suite, error=None):
             }
         ),
     )
+
+    return wall_time_by_phase["total_wall_time"]
 
 
 def nothing(f):
@@ -2907,13 +2911,17 @@ class BenchmarkRunner:
                 headers.append(k)
                 fields.append(v)
 
-            write_outputs(output_filename, headers, fields)
-
-            output_signpost(
+            total_wall_time = output_signpost(
                 dict(zip(o_headers, o_fields)),
                 self.args,
                 self.suite_name,
             )
+            headers.append("compilation_latency")
+            fields.append(total_wall_time)
+            write_outputs(output_filename, headers, fields)
+
+            if self.args.print_compilation_time:
+                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
 
             return accuracy_status
 
