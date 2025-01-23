@@ -10762,6 +10762,17 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
 
+    def test_gru_cell_weight_shape(self, device):
+        input = torch.full((0, 8,), 0, dtype=torch.float)
+        hx = torch.full((0, 9,), 0, dtype=torch.float)
+        w_ih = torch.full((1, 8,), 1.251e+12, dtype=torch.float)
+        w_hh = torch.full((1, 9,), 1.4013e-45, dtype=torch.float)
+        b_ih = None
+        b_hh = None
+        if device == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "expect w_ih.size(0)"):
+                torch.gru_cell(input, hx, w_ih, w_hh, b_ih, b_hh)
+
     @skipMeta
     @dtypes(torch.float32, torch.bfloat16)
     @onlyCPU

@@ -1643,9 +1643,9 @@ Tensor gru_cell(
   const Tensor& b_ih = *b_ih_maybe_owned;
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
-  TORCH_CHECK_VALUE(
-    w_ih.size(0) >= 3 && w_hh.size(0) >= 3,
-      "The first dimension of w_ih and w_hh must be greater than or equal to 3 in order to be chunked into 3 parts later.")
+  TORCH_CHECK(
+    w_ih.size(0) == 3*w_hh.size(1) && w_hh.size(0) == 3*w_hh.size(1),
+      "expect w_ih.size(0)=", 3*w_hh.size(1), ", got ", w_ih.size(0), ", expect w_hh.size(0)=", 3*w_hh.size(1), ", got ", w_hh.size(0))
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   static at::Tensor undefined;
