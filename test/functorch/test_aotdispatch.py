@@ -3960,6 +3960,10 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
             y = torch.ops.aten.dropout.default(x, 0.1, train=False)
