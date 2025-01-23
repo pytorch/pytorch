@@ -1105,6 +1105,11 @@ class PythonKeyTracer(Tracer):
         def map_fn(v: Any) -> Optional[_ExtractValType]:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
                 return None
+            val = v.meta["val"]
+            # other subclasses like FunctionalTensor error on `extract_val`
+            # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
+            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
+                return None
             return extract_val(v.meta["val"])
 
         # TODO: opt-in mechanism ?
