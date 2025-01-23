@@ -176,7 +176,7 @@ class TunableOp {
     static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
-      std::vector<StreamTimerNoSync> timer(num_iter);
+      std::vector<StreamTimer> timer(num_iter);
 
       // Small Mandatory Warmup
       // Reduces outliers
