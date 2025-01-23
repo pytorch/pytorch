@@ -688,8 +688,8 @@ class OpOverload(OperatorBase):
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
-        if tags:
-            self._nondeterministic_seeded = torch.Tag.nondeterministic_seeded in tags
+        if tags and torch.Tag.nondeterministic_seeded in tags:
+            self._nondeterministic_seeded = True
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name

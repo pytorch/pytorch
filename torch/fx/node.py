@@ -764,7 +764,8 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
+            # intentionally avoiding getattr overhead here: https://github.com/pytorch/pytorch/issues/144775
+            if "_nondeterministic_seeded" in self.__dict__:
                 # impure since it mutates RNG state
                 return True
 
