@@ -566,6 +566,11 @@ def output_signpost(data, args, suite, error=None):
         ),
     )
 
+    if args.print_compilation_time:
+        print(
+            f"Compilation time (dynamo_timed): {calculate_time_spent()['total_wall_time']}"
+        )
+
 
 def nothing(f):
     return f
