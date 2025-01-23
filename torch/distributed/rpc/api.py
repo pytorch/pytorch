@@ -7,7 +7,7 @@ import functools
 import inspect
 import logging
 import threading
-from typing import Any, Dict, Generic, Set, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._C._distributed_rpc import (
@@ -115,9 +115,9 @@ class AllGatherStates:
 
 # States used by `def _all_gather()`.
 # `_ALL_WORKER_NAMES` is initialized on initializing RPC layer.
-_ALL_WORKER_NAMES: Set[Any] = set()
+_ALL_WORKER_NAMES: set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
-_all_gather_sequence_id: Dict[str, int] = {}
+_all_gather_sequence_id: dict[str, int] = {}
 _all_gather_sequence_id_to_states: collections.defaultdict = collections.defaultdict(
     AllGatherStates
 )
