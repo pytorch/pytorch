@@ -141,6 +141,7 @@ from .distributed import (
     WorldMetaClassVariable,
 )
 from .functions import (
+    CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
@@ -1025,6 +1026,9 @@ class VariableBuilder:
         elif value is functools.wraps:
             self.install_guards(GuardBuilder.ID_MATCH)
             return FunctoolsWrapsVariable(value, source=self.source)
+        elif value is collections.namedtuple:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CollectionsNamedTupleFunction(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
