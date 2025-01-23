@@ -1041,6 +1041,25 @@ class BuiltinVariable(VariableTracker):
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if self.fn is tuple:
+            resolved_fn = getattr(self.fn, name)
+            if (
+                resolved_fn is tuple.__new__
+                and len(args) == 2
+                and args[1].has_unpack_var_sequence(tx)
+                and not kwargs
+            ):
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+                    return variables.TupleVariable(
+                        args[1].unpack_var_sequence(tx),
+                        mutation_type=ValueMutationNew(),
+                    )
+                return variables.UserDefinedTupleVariable(
+                    args[1].unpack_var_sequence(tx),
+                    tuple_cls_vt=args[0],
+                    mutation_type=ValueMutationNew(),
+                )
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):

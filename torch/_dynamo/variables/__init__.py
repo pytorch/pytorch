@@ -31,6 +31,7 @@ from .dicts import (
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
@@ -70,6 +71,7 @@ from .lists import (
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
+    UserDefinedTupleVariable,
 )
 from .misc import (
     AutogradFunctionContextVariable,

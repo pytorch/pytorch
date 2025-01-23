@@ -2301,6 +2301,8 @@ dict_methods = {
     if callable(method)
 }
 
+tuple_new = tuple.__new__
+
 
 def builtin_dict_keys(d):
     # Avoids overridden keys method of the dictionary

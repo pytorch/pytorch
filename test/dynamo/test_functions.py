@@ -4454,6 +4454,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
+    def test_udf_list(self):
+        class MyTuple(tuple):
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            return tuple.__new__(klass, [x])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyTuple)
+        res = opt_fn(x, MyTuple)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyTuple))
+
+        ref = fn(x, tuple)
+        res = opt_fn(x, tuple)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, tuple))
+
 
 instantiate_parametrized_tests(FunctionTests)
 
