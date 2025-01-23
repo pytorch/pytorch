@@ -159,16 +159,17 @@ void DebugInfoWriter::write(const std::string& trace) {
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+    LOG(ERROR) << "Error opening file for writing Flight Recorder debug info: "
                << filename_;
     return;
   }
 
   if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
     if (file.bad()) {
-      LOG(ERROR) << "Serious error writing to file: " << filename_;
+      LOG(ERROR) << "Serious error writing Flight Recorder Data to file: "
+                 << filename_;
     } else {
-      LOG(ERROR) << "Error writing to file: " << filename_;
+      LOG(ERROR) << "Error writing Flight Recorder Data to file: " << filename_;
     }
     return;
   }
@@ -176,11 +177,12 @@ void DebugInfoWriter::write(const std::string& trace) {
   // Flush the buffer to ensure data is written to the file
   file.flush();
   if (file.bad()) {
-    LOG(ERROR) << "Serious error flushing file buffer: " << filename_;
+    LOG(ERROR) << "Serious error flushing Flight Recorder file buffer: "
+               << filename_;
     return;
   }
 
-  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
+  LOG(INFO) << "Finished writing Flight Recorder debug info to " << filename_;
 }
 
 DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
