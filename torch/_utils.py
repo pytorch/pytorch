@@ -1023,11 +1023,15 @@ def try_import(module_name: str) -> Optional[ModuleType]:
     if (spec := importlib.util.find_spec(module_name)) is not None:
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        assert spec.loader is not None, "The loader attribute should always be set"
         spec.loader.exec_module(module)
         return module
 
     return None
-    
+
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
 # for use in the weights_only Unpickler.
