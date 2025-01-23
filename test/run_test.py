@@ -531,6 +531,7 @@ XPU_TEST = [
 
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
+    "test_extension_utils",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
