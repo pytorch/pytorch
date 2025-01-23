@@ -222,7 +222,7 @@ def logcumsumexp(self, dim):
 
 
 # Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
-def _exec_fft(out, self, out_sizes, dim, forward):
+def _exec_fft(out, self, out_sizes, dim, *, forward):
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
@@ -256,12 +256,12 @@ def _exec_fft(out, self, out_sizes, dim, forward):
 
     batch_size = input.size(0)
     batched_sizes[0] = batch_size
-    batched_out_sizes = batched_sizes
+    batched_out_sizes = list(batched_sizes)
     for i in range(len(dim)):
         batched_out_sizes[i + 1] = out_sizes[dim[i]]
-    out = out.reshape(batched_out_sizes)
+    out.resize_(batched_out_sizes, memory_format=torch.contiguous_format)
 
-    # Reshaping to original batch shape and inverting the dimension permutation
+    # Inplace reshaping to original batch shape and inverting the dimension permutation
     out_strides = [0 for _ in range(ndim)]
     batch_numel = 1
     i = batch_dims - 1
@@ -271,7 +271,16 @@ def _exec_fft(out, self, out_sizes, dim, forward):
         i -= 1
     for i in range(batch_dims, ndim):
         out_strides[dim_permute[i]] = out.stride(1 + (i - batch_dims))
-    return out.as_strided(out_sizes, out_strides, out.storage_offset())
+    out.as_strided_(out_sizes, out_strides, out.storage_offset())
+
+    return out
+
+
+def _sort_dims(self: Tensor, dim: list[int], exclude_last: bool=False):
+    sorted_dims = list(dim)
+    self_strides = self.stride()
+    sorted_dims[: len(sorted_dims) - int(exclude_last)].sort(key=lambda i: self_strides[i])
+    return sorted_dims
 
 
 # See _fft_c2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
@@ -279,36 +288,30 @@ def _exec_fft(out, self, out_sizes, dim, forward):
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
-    assert self.dtype.is_complex
-
-    out_sizes = self.shape
-    output = self.new_empty(out_sizes)
-
+    torch._check(self.dtype.is_complex)
     if not dim:
-        return output
+        return self.clone()
 
-    sorted_dims = dim[:]
-    self_strides = self.stride()
-    sorted_dims.sort(key=lambda x: self_strides[x], reverse=True)
-    output = _exec_fft(output, self, out_sizes, sorted_dims, forward)
-
-    return output
+    sorted_dims = _sort_dims(self, dim)
+    out = self.new_empty(self.size())
+    return _exec_fft(out, self, self.size(), sorted_dims, forward=forward)
 
 
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
 @out_wrapper()
 def meta_fft_r2c(self, dim, normalization, onesided):
-    assert self.dtype.is_floating_point
-    output_sizes = list(self.size())
-
+    torch._check(self.dtype.is_floating_point)
+    input_sizes = list(self.size())
+    out_sizes = list(input_sizes)
+    last_dim = dim[-1]
+    last_dim_halfsize = input_sizes[last_dim] // 2 + 1
     if onesided:
-        last_dim = dim[-1]
-        last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
-        output_sizes[last_dim] = last_dim_halfsize
+        out_sizes[last_dim] = last_dim_halfsize
 
-    return self.new_empty(
-        output_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+    out = self.new_empty(
+        out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
     )
+    return out
 
 
 @register_meta(aten.randperm.generator_out)
@@ -371,13 +374,29 @@ def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=
     )
 
 
-@register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
-@out_wrapper()
-def meta_fft_c2r(self, dim, normalization, lastdim):
-    assert self.dtype.is_complex
-    output_sizes = list(self.size())
-    output_sizes[dim[-1]] = lastdim
-    return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+@register_meta([aten._fft_c2r.default])
+def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):
+    # _fft_c2r_mkl
+    torch._check(self.dtype.is_complex)
+
+    input = self
+    if len(dim) > 1:
+        c2c_dims = dim[:-1]
+        input = meta_fft_c2c(self, c2c_dims, normalization, forward=False)
+        dim = dim[-1:]
+
+    out_sizes = list(input.size())
+    out_sizes[dim[-1]] = lastdim
+    out = self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
+    return _exec_fft(out, input, out_sizes, dim, forward=False)
+
+
+# TODO: out_wrapper should be ok here
+@register_meta([aten._fft_c2r.out])
+def meta_fft_c2r_out(self: Tensor, dim: list[int], normalization: int, lastdim: int, out: Tensor):
+    result = meta_fft_c2r(self, dim, normalization, lastdim)
+    _maybe_resize_out(out, result.size())
+    return out.copy_(result)
 
 
 @register_meta(aten.copy_.default)

@@ -626,6 +626,11 @@ class NativeFunction:
         )
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
+        if use_const_ref_for_mutable_tensors:
+            assert (
+                not func.arguments.out
+            ), "see https://github.com/pytorch/pytorch/issues/145522"
+
         variants_s = e.pop("variants", "function")
         assert isinstance(variants_s, str)
         variants: set[Variant] = set()
