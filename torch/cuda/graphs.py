@@ -1,9 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
-import ctypes
 import gc
 import typing
-import weakref
 
 import torch
 
@@ -155,11 +153,7 @@ class graph:
     default_capture_stream: typing.Optional["torch.cuda.Stream"] = None
 
     def __init__(
-        self,
-        cuda_graph,
-        pool=None,
-        stream=None,
-        capture_error_mode: str = "global"
+        self, cuda_graph, pool=None, stream=None, capture_error_mode: str = "global"
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -197,25 +191,23 @@ class graph:
 
 
 @contextlib.contextmanager
-def _graph_no_gc(
-        cuda_graph,
-        pool,
-        stream,
-        capture_error_mode
-):
+def _graph_no_gc(cuda_graph, pool, stream, capture_error_mode):
     """This is an internal function used to do stream capture without
-        calling torch.cuda.synchronize(), gc.collect(),
-        and torch.cuda.empty_cache(). Unfortunately,
-        cudagraph trees runs its eager warmup inside of
-        the context manager _use_cuda_memory_pool_manager(), which makes captures_underway in CUDACachingAllocator.cpp non-empty. We need this in order to warmup conditional higher order operators, like torch.cond() and torhc.while_loop(). torch.cuda.empty_cache() will fail if captures_underway is non-empty. Removing torch.cuda.synchronize() and gc.collect() is not strictly speaking required, but they are expensive an unnecessary operations.
-
+    calling torch.cuda.synchronize(), gc.collect(), and
+    torch.cuda.empty_cache(). Unfortunately, cudagraph trees runs its
+    eager warmup inside of the context manager
+    _use_cuda_memory_pool_manager(), which makes captures_underway in
+    CUDACachingAllocator.cpp non-empty. We need this in order to
+    warmup conditional higher order operators, like torch.cond() and
+    torch.while_loop(). torch.cuda.empty_cache() will fail if
+    captures_underway is non-empty. Removing torch.cuda.synchronize()
+    and gc.collect() is not strictly speaking required, but they are
+    expensive an unnecessary operations.
     """
     stream_ctx = torch.cuda.stream(stream)
     pool = () if pool is None else (pool,)
     with stream_ctx:
-        cuda_graph.capture_begin(
-            *pool, capture_error_mode=capture_error_mode
-        )
+        cuda_graph.capture_begin(*pool, capture_error_mode=capture_error_mode)
         try:
             yield
         finally:
