@@ -2234,19 +2234,14 @@ def clone_preserve_strides(x: torch.Tensor, device=None):
     if not isinstance(x, torch.Tensor):
         return x
 
-    if 0 in x.size():
-        # Short-circuits if the shape has no elements
-        needed_size = 0
-    else:
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-        )
-    buffer = torch.as_strided(x, (needed_size,), (1,))
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    )
     if not device:
         buffer = buffer.clone()
     else:
         buffer = buffer.to(device, copy=True)
-    return torch.as_strided(buffer, x.size(), x.stride())
+    return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
 
 
 def copy_misaligned_inputs(
