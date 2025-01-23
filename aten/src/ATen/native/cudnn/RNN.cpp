@@ -1275,7 +1275,6 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
       promote_rnn_math_type(flat_buf_datatype),
       flat_buf_datatype);
 
-  // auto rnn_desc_ = rnn.descriptor(handle);
   rnn_desc = rnn.descriptor(handle);
 
   // Why do we pad to 5 dims here (and elsewhere)?
