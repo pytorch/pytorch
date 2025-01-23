@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C as _C
@@ -173,8 +173,8 @@ class Tensor(torch._C.TensorBase):
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
-                        Tuple[torch.qscheme, float, int],
-                        Tuple[torch.qscheme, Tensor, Tensor, int],
+                        tuple[torch.qscheme, float, int],
+                        tuple[torch.qscheme, Tensor, Tensor, int],
                     ]
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
@@ -317,7 +317,7 @@ class Tensor(torch._C.TensorBase):
 
         # See Note [Don't serialize hooks]
         warn_if_has_hooks(self)
-        backward_hooks: Dict[Any, Any] = OrderedDict()
+        backward_hooks: dict[Any, Any] = OrderedDict()
 
         skip_data = torch.serialization._serialization_tls.skip_data
         materialize_fake_tensors = (
@@ -386,7 +386,7 @@ class Tensor(torch._C.TensorBase):
                 )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
-                Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
+                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
             ]
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
@@ -750,7 +750,7 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
 
         from torch.utils.hooks import RemovableHandle
 
@@ -1493,7 +1493,7 @@ class Tensor(torch._C.TensorBase):
         return self.to_sparse()
 
     def dim_order(
-        self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
+        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
     ):
         """
         dim_order(ambiguity_check=False) -> tuple
@@ -1725,7 +1725,7 @@ class Tensor(torch._C.TensorBase):
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+    def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
 
