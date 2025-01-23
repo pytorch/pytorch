@@ -45,6 +45,20 @@ struct DevicePool {
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
+  // Enumerated GPU devices from the specific platform.
+  for (const auto& platform : platform_list) {
+    if (platform.get_backend() != sycl::backend::ext_oneapi_level_zero) {
+      continue;
+    }
+    auto device_list = platform.get_devices();
+    for (const auto& device : device_list) {
+      if (device.is_gpu()) {
+        devices.push_back(std::make_unique<sycl::device>(device));
+      }
+    }
+    break;
+  }
+  return;
   auto is_igpu = [](const sycl::device& device) {
     // Generally, iGPUs share a unified memory subsystem with the host.
     return device.get_info<sycl::info::device::host_unified_memory>();
