@@ -9,7 +9,11 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_cuda_with_enough_memory,
+)
 
 
 # Make the helper files in test/ importable
@@ -205,11 +209,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < 2e10,
-        "Only if the GPU has at least 20GB memory to be safe",
-    )
+    @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     def test_linear_and_cel(self):
         # Use nan for torch.empty
