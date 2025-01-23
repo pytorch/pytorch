@@ -205,6 +205,7 @@ torch.backends.openmp
 .. add anything to the rendered page for now.
 .. py:module:: torch.backends.quantized
 .. py:module:: torch.backends.xnnpack
+.. py:module:: torch.backends.kleidiai
 
 
 torch.backends.opt_einsum
