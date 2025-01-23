@@ -14,7 +14,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import MI300_ARCH, IS_LINUX, skipIfRocm, skipIfRocmArch
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    MI300_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 

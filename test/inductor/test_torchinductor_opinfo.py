@@ -31,9 +31,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
-    MI300_ARCH,
     IS_MACOS,
     IS_X86,
+    MI300_ARCH,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,

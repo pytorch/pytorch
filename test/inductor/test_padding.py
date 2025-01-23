@@ -16,11 +16,10 @@ from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
-    MI300_ARCH,
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     serialTest,
-    skipIfRocmArch,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 

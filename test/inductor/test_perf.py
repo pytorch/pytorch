@@ -11,6 +11,7 @@ from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import MI300_ARCH, skipIfRocmArch
 
 ########################
 # Explanation of Tests #
@@ -30,10 +31,6 @@ from torch._inductor.utils import run_and_get_code
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
-from torch.testing._internal.common_utils import (
-    MI300_ARCH,
-    skipIfRocmArch,
-)
 
 if HAS_CUDA:
     import triton  # @manual

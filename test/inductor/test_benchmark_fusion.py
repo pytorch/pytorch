@@ -9,7 +9,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import MI300_ARCH, skipIfRocmArch, slowTest, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+    slowTest,
+    TEST_WITH_ASAN,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -272,7 +277,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
-        @skipIfRocmArch(MI300_ARCH) # Flakey on new MI300 CI
+        @skipIfRocmArch(MI300_ARCH)  # Flakey on new MI300 CI
         @fresh_inductor_cache()
         @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):

@@ -28,7 +28,12 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import MI300_ARCH, TEST_WITH_ASAN, TEST_WITH_ROCM, skipIfRocmArch
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    skipIfRocmArch,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 
 
 importlib.import_module("functorch")
@@ -261,7 +266,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @skipIfRocmArch(MI300_ARCH) # Flakey on MI300 CI
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on MI300 CI
     @torch._inductor.config.patch("cpp.enable_concat_linear", True)
     def test_mm_concat(self):
         class MM(torch.nn.Module):

@@ -39,11 +39,11 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    MI300_ARCH,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    MI300_ARCH,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -1801,7 +1801,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(result_cpu, result_gpu_0.cpu()))
         self.assertTrue(same(result_cpu, result_gpu_1.cpu()))
 
-    @skipIfRocmArch(MI300_ARCH) # Flakey on new MI300 CI
+    @skipIfRocmArch(MI300_ARCH)  # Flakey on new MI300 CI
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

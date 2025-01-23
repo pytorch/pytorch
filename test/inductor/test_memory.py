@@ -8,12 +8,9 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch.testing._internal.common_utils import MI300_ARCH, skipIfRocmArch
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
-from torch.testing._internal.common_utils import (
-    MI300_ARCH,
-    skipIfRocmArch,
-)
 
 class Foo(torch.nn.Module):
     """

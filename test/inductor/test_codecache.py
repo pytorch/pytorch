@@ -33,8 +33,8 @@ from torch.compiler._cache import CacheArtifactManager
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
-    MI300_ARCH,
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     skipIfRocmArch,
 )
