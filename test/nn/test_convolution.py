@@ -3283,7 +3283,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = torch.rand_like(y_cpu)
         y_cpu.backward(y)
 
-        with cudnn.flags(enabled=False):
+        with cudnn.flags(enabled=False, allow_tf32=torch.backends.cudnn.allow_tf32):
             conv_cuda = torch.nn.Conv2d(3, 3, kernel_size=1).to(device)
             conv_cuda.bias.data.copy_(conv_cpu.bias.data)
             conv_cuda.weight.data.copy_(conv_cpu.weight.data)
@@ -3315,7 +3315,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = torch.rand_like(y_cpu)
         y_cpu.backward(y)
 
-        with cudnn.flags(enabled=False):
+        with cudnn.flags(enabled=False, allow_tf32=torch.backends.cudnn.allow_tf32):
             conv_cuda = torch.nn.ConvTranspose2d(3, 3, kernel_size=1).to(device)
             conv_cuda.bias.data.copy_(conv_cpu.bias.data)
             conv_cuda.weight.data.copy_(conv_cpu.weight.data)
