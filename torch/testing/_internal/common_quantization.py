@@ -74,7 +74,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Dict, Any, Union, Type, Optional
+from typing import Callable, Any, Union, Optional
 import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.ao.quantization.quantizer.xpu_inductor_quantizer as xpuiq
@@ -498,39 +498,6 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     return out, scales_and_zeros
 
 
-def _group_quantize_tensor_symmetric(
-    w, n_bit=4, groupsize=32
-):
-    # W is of shape [K x N]
-    # We transpose W as Quantization is applied on [N x K]
-    w = w.transpose(0, 1).contiguous()
-    assert w.dim() == 2
-    assert groupsize > 1
-    assert w.shape[-1] % groupsize == 0
-    # Calculate scale and zeros
-    to_quant = w.reshape(-1, groupsize)
-    max_val = to_quant.abs().amax(dim=1, keepdim=True)
-    eps = torch.finfo(max_val.dtype).eps
-    max_int = 2 ** (n_bit - 1) - 1  # For 4-bit, this is 7
-    scales = max_val.clamp(min=eps) / max_int
-    zeros = torch.zeros_like(scales)
-
-    # Quantize the weight
-    scales = scales.to(torch.float32).reshape(w.shape[0], -1)
-    zeros = zeros.to(torch.float32).reshape(w.shape[0], -1)
-    scales = scales.reshape(-1, 1)
-    zeros = zeros.reshape(-1, 1)
-    max_int = 2**n_bit - 1
-    w_int8 = to_quant.div(scales).add(8.5).to(torch.int8).clamp(max=max_int)
-    # We pack 2 signed int4 values in unsigned uint8 container.
-    # This reduces the weight size by half and improves load perf
-    out_uint8 = (w_int8[::, 1::2] << 4 | w_int8[::, ::2]).to(torch.uint8)
-
-    scales_and_zeros = scales.squeeze().contiguous()
-
-    return out_uint8, scales_and_zeros
-
-
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
     # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
     # default setup for affine quantization of activations
@@ -561,6 +528,7 @@ def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
     quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
 
     return quant, scales.to(x_dtype), zero_points
+
 
 
 # QuantizationTestCase used as a base class for testing quantization on modules
@@ -898,8 +866,8 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, tuple[NSSubgraph, NSSubgraph]],
-            expected_types: Dict[str, tuple[tuple[Callable, Callable], tuple[Callable, Callable]]],
+            matched_subgraph_pairs: dict[str, tuple[NSSubgraph, NSSubgraph]],
+            expected_types: dict[str, tuple[tuple[Callable, Callable], tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
         ) -> None:
@@ -952,7 +920,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_ns_compare_dict_valid(
             self,
-            act_compare_dict: Dict[str, Dict[str, Dict[str, Any]]],
+            act_compare_dict: dict[str, dict[str, dict[str, Any]]],
         ) -> None:
             """
             Verifies that the act_compare_dict (output of Numeric Suite APIs) is valid:
@@ -1214,7 +1182,7 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 class QuantizationLiteTestCase(QuantizationTestCase):
-    def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
+    def _create_quantized_model(self, model_class: type[torch.nn.Module], **kwargs):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
