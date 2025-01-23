@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -14,7 +14,6 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     first_slice_copy,
     reenter_make_fx,
-    shift_source_dim_to_target_dim,
     unique_graph_id,
 )
 from torch._inductor.utils import is_pointwise_use
@@ -168,7 +167,7 @@ def associative_scan(
     ndim = leaves[0].ndim
     orig_scan_dim = utils.canonicalize_dim(ndim, dim)
     # leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
-    leaves = [shift_source_dim_to_target_dim(elem, dim, 0) for elem in leaves]
+    leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
@@ -239,9 +238,7 @@ def associative_scan(
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
 
     # result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
-    result_flat = [
-        shift_source_dim_to_target_dim(elem, 0, orig_scan_dim) for elem in result_flat
-    ]
+    result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -343,7 +340,7 @@ def generic_associative_scan(operator, leaves, dim=0):
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor]
+    proxy_mode, func_overload, combine_fn: Callable, xs: list[torch.Tensor]
 ):
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
@@ -423,7 +420,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs):
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(xs)
-    result_flat: List[Any] = []
+    result_flat: list[Any] = []
     num_leaves = len(inp_leaves)
     op = reversed if reverse else lambda x: x
 

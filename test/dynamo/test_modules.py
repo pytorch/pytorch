@@ -12,7 +12,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -27,6 +27,8 @@ from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import skipIfHpu
 
 
 try:
@@ -600,7 +602,7 @@ class LazyMLP(torch.nn.Module):
 
 
 class MyInput(NamedTuple):
-    x: Dict[str, Dict[str, torch.Tensor]]
+    x: dict[str, dict[str, torch.Tensor]]
     y: torch.Tensor
 
 
@@ -1588,26 +1590,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_lazy_module3(self):
-        m = LazyMLP()
-        x = torch.rand([10, 10])
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch.compile(m, backend=cnt, fullgraph=True)
-        # first iteration
-        res = opt_m(x)
-        ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
-        # move to cuda and second iteration
-        m = m.to("cuda")
-        x = x.to("cuda")
-        res = opt_m(x)
-        ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
-        self.assertEqual(cnt.frame_count, 2)
-
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1799,6 +1781,27 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+
+class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
+    @expectedFailureDynamic
+    @skipIfHpu
+    def test_lazy_module3(self, device):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to device and second iteration
+        m = m.to(device)
+        x = x.to(device)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class MockModule(torch.nn.Module):
@@ -2308,7 +2311,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2355,7 +2358,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2404,7 +2407,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
 
         def new_forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 2
 
@@ -2423,7 +2426,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -3260,6 +3263,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check that we have recompiled twice, which leads to 3 frames
         self.assertEqual(cnt.frame_count, 3)
 
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
