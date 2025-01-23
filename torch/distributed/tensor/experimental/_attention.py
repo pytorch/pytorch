@@ -16,6 +16,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
+from torch._logging import warning_once
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
@@ -225,8 +226,15 @@ def _scaled_dot_product_ring_efficient_attention(
 ) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
+
     if not compute_log_sumexp:
-        raise NotImplementedError("compute_log_sumexp must be set")
+        warning_once(
+            logger,
+            "_scaled_dot_product_ring_efficient_attention requires compute_log_sumexp "
+            f"be True but received {compute_log_sumexp}. "
+            "Override compute_log_sumexp to True.",
+        )
+        compute_log_sumexp = True
 
     seq_dim = 2
     return _templated_ring_attention(
