@@ -1033,19 +1033,20 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        compiled_out1 = torch.compile(sdpa_partial1)(q1, k1, v1)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_out1 = torch.compile(sdpa_partial1, backend=backend)(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # The second batch (automatic dynamic).
-        compiled_out2 = torch.compile(sdpa_partial2)(q2, k2, v2)
+        compiled_out2 = torch.compile(sdpa_partial2, backend=backend)(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
         # The third batch (no re-compilation).
-        compiled_out3 = torch.compile(sdpa_partial3)(q3, k3, v3)
+        compiled_out3 = torch.compile(sdpa_partial3, backend=backend)(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
