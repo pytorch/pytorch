@@ -1,5 +1,4 @@
 # syntax = docker/dockerfile:experimental
-ARG ROCM_VERSION=3.7
 ARG BASE_CUDA_VERSION=11.8
 ARG GPU_IMAGE=amd64/almalinux:8
 FROM quay.io/pypa/manylinux_2_28_x86_64 as base
@@ -130,10 +129,10 @@ RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
     done;
 
 
-# cmake-3.18.4 from pip
+# cmake-3.18.4 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
-    ln -s /usr/local/bin/cmake /usr/bin/cmake3
+    ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 
 FROM cpu_final as cuda_final
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
@@ -142,17 +141,24 @@ COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BAS
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-
-FROM common as rocm_final
-ARG ROCM_VERSION=3.7
-# Install ROCm
-ADD ./common/install_rocm.sh install_rocm.sh
-RUN bash ./install_rocm.sh ${ROCM_VERSION} && rm install_rocm.sh
-# cmake is already installed inside the rocm base image, but both 2 and 3 exist
-# cmake3 is needed for the later MIOpen custom build, so that step is last.
-RUN yum install -y cmake3 && \
-    rm -f /usr/bin/cmake && \
-    ln -s /usr/bin/cmake3 /usr/bin/cmake
+FROM cpu_final as rocm_final
+ARG ROCM_VERSION=6.0
+ARG PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+ARG DEVTOOLSET_VERSION=11
+ENV LDFLAGS="-Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64 -Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib"
+# Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
+# below workaround helps avoid error
+ENV ROCM_PATH /opt/rocm
+# cmake-3.28.4 from pip to get enable_language(HIP)
+# and avoid 3.21.0 cmake+ninja issues with ninja inserting "-Wl,--no-as-needed" in LINK_FLAGS for static linker
+RUN python3 -m pip install --upgrade pip && \
+    python3 -mpip install cmake==3.28.4
+ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
+RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+ENV MKLROOT /opt/intel
+ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
@@ -163,5 +169,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
+ENV XPU_VERSION 2025.0
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

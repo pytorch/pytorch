@@ -436,7 +436,7 @@ def forward(self, x, y):
             def forward(self, a, b):
                 return (CustomOutput(a * a, b * b), CustomOutput(a * b.T, a + b.T))
 
-        ep = export(Foo(), (torch.randn(2, 3), torch.randn(3, 2)))
+        ep = export(Foo(), (torch.randn(2, 3), torch.randn(3, 2)), strict=True)
         swapped = _swap_modules(ep, {})
         inp = (torch.randn(2, 3), torch.randn(3, 2))
         res1 = torch.fx.Interpreter(swapped).run(*inp)

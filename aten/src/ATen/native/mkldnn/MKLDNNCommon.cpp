@@ -7,7 +7,7 @@
 
 #include <ideep.hpp>
 
-namespace at { namespace native {
+namespace at::native {
 
 /**
  * `IntrusivePtrTargetWrapper` wraps a custom storage handle  of a tensor
@@ -209,6 +209,6 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_FN(nbytes_from_mkldnn));
 }
 
-}}
+}
 
 #endif // AT_MKLDNN_ENABLED()

@@ -8,7 +8,7 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -30,6 +30,7 @@ __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
     "caching_allocator_enable",
+    "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -186,6 +187,22 @@ def set_per_process_memory_fraction(
     torch._C._cuda_setMemoryFraction(fraction, device)
 
 
+def get_per_process_memory_fraction(device: Union[Device, int] = None) -> float:
+    r"""Get memory fraction for a process.
+
+    Args:
+        device (torch.device or int, optional): selected device. If it is
+            ``None`` the default CUDA device is used.
+    Returns:
+        memory fraction, in range 0~1. Allowed memory equals total_memory * fraction.
+    """
+    _lazy_init()
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    return torch._C._cuda_getMemoryFraction(device)
+
+
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
@@ -201,7 +218,7 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
-def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -306,7 +323,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
+def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -702,7 +719,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 
-def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
+def mem_get_info(device: Union[Device, int] = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device using cudaMemGetInfo.
 
     Args:
@@ -738,7 +755,9 @@ def _record_memory_history_legacy(
     )
 
 
-def _record_memory_history(enabled="all", *args, **kwargs):
+def _record_memory_history(
+    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
@@ -1016,7 +1035,7 @@ class MemPool(_MemPool):
         super().__init__(allocator, True)
 
     @property
-    def id(self) -> Tuple[int, int]:
+    def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 

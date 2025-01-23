@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 
-C10_DECLARE_bool(ltc_enable_symbolic_shapes);
+TORCH_DECLARE_bool(ltc_enable_symbolic_shapes);
 
 namespace torch::lazy {
 

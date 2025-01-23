@@ -2,6 +2,10 @@
 
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include "ATen/CPUGeneratorImpl.h"
+#include "ATen/core/GeneratorForPrivateuseone.h"
+#include "c10/core/Device.h"
+#include <c10/util/CallOnce.h>
 
 #include <iostream>
 
@@ -47,6 +51,41 @@ struct HostAllocator final : at::Allocator {
 };
 static HostAllocator global_host_alloc;
 
+static c10::DeviceIndex device_count() {
+  py::gil_scoped_acquire acquire;
+  return get_method("deviceCount")().cast<c10::DeviceIndex>();
+}
+
+static c10::DeviceIndex current_device_idx() {
+  py::gil_scoped_acquire acquire;
+  return get_method("getDevice")().cast<c10::DeviceIndex>();
+}
+
+class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
+ public:
+  OpenRegGeneratorImpl(c10::DeviceIndex device_index) {
+    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
+    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
+  }
+  ~OpenRegGeneratorImpl() override = default;
+};
+
+static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
+  return at::make_generator<OpenRegGeneratorImpl>(device_index);
+}
+REGISTER_GENERATOR_PRIVATEUSE1(make_openreg_generator)
+
+// Default, global generators, one per device.
+static std::vector<at::Generator> default_generators;
+
+static void initGenerators() {
+  auto deivce_nums = device_count();
+  default_generators.resize(deivce_nums);
+  for (auto i = 0; i < deivce_nums; i++) {
+    default_generators[i] = make_openreg_generator(i);
+    default_generators[i].seed();
+  }
+}
 
 // C++ hooks implementation
 struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
@@ -56,6 +95,7 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   ~OpenRegHooksInterface() override = default;
 
   bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+    py::gil_scoped_acquire acquire;
     return get_method("hasPrimaryContext")(device_index).cast<bool>();
   }
 
@@ -66,6 +106,19 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   bool isPinnedPtr(const void* data) const override {
     py::gil_scoped_acquire acquire;
     return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data)).cast<bool>();
+  }
+
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    static c10::once_flag generator_init_flag;
+    c10::call_once(generator_init_flag, initGenerators);
+    c10::DeviceIndex idx = device_index;
+    if (idx == -1) {
+      idx = current_device_idx();
+    } else {
+      TORCH_CHECK(idx >= 0 && idx < device_count());
+    }
+    return default_generators[idx];
   }
 };
 
@@ -110,9 +163,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Get the current device.
    */
   c10::Device getDevice() const override {
-    py::gil_scoped_acquire acquire;
-    auto device = get_method("getDevice")().cast<c10::DeviceIndex>();
-    return c10::Device(static_type, device);
+    return c10::Device(static_type, current_device_idx());
   }
 
   /**
@@ -186,7 +237,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
     py::gil_scoped_acquire acquire;
-    get_method("destroyEvent")(event, device_index);
+    get_method("destroyEvent")((int64_t)event, device_index);
   }
 
   /**
@@ -201,7 +252,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
     py::gil_scoped_acquire acquire;
-    get_method("record")(event, stream, device_index, flag);
+    get_method("record")((int64_t)event, stream, device_index, (int64_t)flag);
   }
 
   /**
@@ -214,7 +265,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void block(void* event, const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
-    get_method("block")(event, stream);
+    get_method("block")((int64_t)event, stream);
   }
 
   /**
@@ -225,7 +276,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   bool queryEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("queryEvent")(event).cast<bool>();
+    return get_method("queryEvent")((int64_t)event).cast<bool>();
   }
 
   /**
@@ -234,8 +285,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * you should report that there are zero available devices.
    */
   c10::DeviceIndex deviceCount() const noexcept override {
-    py::gil_scoped_acquire acquire;
-    return get_method("deviceCount")().cast<c10::DeviceIndex>();
+    return device_count();
   }
   /**
    * Return true if all the work previously enqueued on the stream for
@@ -261,7 +311,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void synchronizeEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    get_method("synchronizeEvent")(event);
+    get_method("synchronizeEvent")((int64_t)event);
   }
 
   /**
@@ -281,7 +331,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index)
       const override {
     py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")(event1, event2, device_index).cast<double>();
+    return get_method("elapsedTime")((int64_t)event1, (int64_t)event2, device_index).cast<double>();
   }
 };
 

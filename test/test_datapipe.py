@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+# ruff: noqa: F841
 
 # Owner(s): ["module: dataloader"]
 
@@ -15,19 +16,13 @@ import warnings
 from functools import partial
 from typing import (
     Any,
-    Awaitable,
-    Dict,
     Generic,
-    Iterator,
-    List,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
+from collections.abc import Awaitable, Iterator
 
 if not TYPE_CHECKING:
     # pyre isn't treating this the same as a typing.NamedTuple
@@ -138,7 +133,7 @@ def create_temp_dir_and_files():
 
 def reset_after_n_next_calls(
     datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_co]], n: int
-) -> Tuple[List[T_co], List[T_co]]:
+) -> tuple[list[T_co], list[T_co]]:
     """
     Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
     Then, reset the DataPipe and return a tuple of two lists
@@ -177,7 +172,7 @@ class TestDataChunk(TestCase):
         self.assertEqual(str(self.chunk), str(self.elements))
 
         batch = [self.elements] * 3
-        chunks: List[DataChunk[int]] = [DataChunk(self.elements)] * 3
+        chunks: list[DataChunk[int]] = [DataChunk(self.elements)] * 3
         self.assertEqual(str(batch), str(chunks))
 
     def test_sort(self):
@@ -804,7 +799,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self._serialization_test_helper(dp2, use_dill)
 
     def test_serializable(self):
-        picklable_datapipes: List = [
+        picklable_datapipes: list = [
             (
                 dp.iter.Batcher,
                 None,
@@ -860,8 +855,8 @@ class TestFunctionalIterDataPipe(TestCase):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
 
-        datapipes_with_lambda_fn: List[
-            Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]
+        datapipes_with_lambda_fn: list[
+            tuple[type[IterDataPipe], tuple, dict[str, Any]]
         ] = [
             (dp.iter.Collator, (lambda_fn1,), {}),
             (
@@ -891,8 +886,8 @@ class TestFunctionalIterDataPipe(TestCase):
 
         fn1, fn2, fn3 = _local_fns()
 
-        datapipes_with_local_fn: List[
-            Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]
+        datapipes_with_local_fn: list[
+            tuple[type[IterDataPipe], tuple, dict[str, Any]]
         ] = [
             (dp.iter.Collator, (fn1,), {}),
             (
@@ -960,14 +955,9 @@ class TestFunctionalIterDataPipe(TestCase):
             "unbatch",
             "zip",
         ]:
-            if sys.version_info >= (3, 9):
-                docstring = pydoc.render_doc(
-                    thing=getattr(input_dp, dp_funcname), forceload=True
-                )
-            elif sys.version_info < (3, 9):
-                # pydoc works differently on Python 3.8, see
-                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
-                docstring = getattr(input_dp, dp_funcname).__doc__
+            docstring = pydoc.render_doc(
+                thing=getattr(input_dp, dp_funcname), forceload=True
+            )
 
             assert f"(functional name: ``{dp_funcname}``)" in docstring
             assert "Args:" in docstring
@@ -2129,7 +2119,7 @@ class TestFunctionalMapDataPipe(TestCase):
         self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
-        picklable_datapipes: List = [
+        picklable_datapipes: list = [
             (dp.map.Batcher, None, (2,), {}),
             (dp.map.Concater, None, (dp.map.SequenceWrapper(range(10)),), {}),
             (dp.map.Mapper, None, (), {}),
@@ -2149,8 +2139,8 @@ class TestFunctionalMapDataPipe(TestCase):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
 
-        datapipes_with_lambda_fn: List[
-            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
+        datapipes_with_lambda_fn: list[
+            tuple[type[MapDataPipe], tuple, dict[str, Any]]
         ] = [
             (dp.map.Mapper, (lambda_fn1,), {}),
         ]
@@ -2163,8 +2153,8 @@ class TestFunctionalMapDataPipe(TestCase):
 
         fn1 = _local_fns()
 
-        datapipes_with_local_fn: List[
-            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
+        datapipes_with_local_fn: list[
+            tuple[type[MapDataPipe], tuple, dict[str, Any]]
         ] = [
             (dp.map.Mapper, (fn1,), {}),
         ]
@@ -2204,14 +2194,9 @@ class TestFunctionalMapDataPipe(TestCase):
             "shuffle",
             "zip",
         ]:
-            if sys.version_info >= (3, 9):
-                docstring = pydoc.render_doc(
-                    thing=getattr(input_dp, dp_funcname), forceload=True
-                )
-            elif sys.version_info < (3, 9):
-                # pydoc works differently on Python 3.8, see
-                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
-                docstring = getattr(input_dp, dp_funcname).__doc__
+            docstring = pydoc.render_doc(
+                thing=getattr(input_dp, dp_funcname), forceload=True
+            )
             assert f"(functional name: ``{dp_funcname}``)" in docstring
             assert "Args:" in docstring
             assert "Example:" in docstring or "Examples:" in docstring
@@ -2473,25 +2458,25 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar("T", int, str)
-        S = TypeVar("S", bool, Union[str, int], Tuple[int, T])  # type: ignore[valid-type]
+        S = TypeVar("S", bool, Union[str, int], tuple[int, T])  # type: ignore[valid-type]
         types = (
             (int, Optional[int]),
-            (List, Union[int, list]),
-            (Tuple[int, str], S),
-            (Tuple[int, str], tuple),
+            (list, Union[int, list]),
+            (tuple[int, str], S),
+            (tuple[int, str], tuple),
             (T, S),
             (S, T_co),
-            (T, Union[S, Set]),
+            (T, Union[S, set]),
         )
         for sub, par in types:
             self.assertTrue(issubtype(sub, par))
             self.assertFalse(issubtype(par, sub))
 
         subscriptable_types = {
-            List: 1,
-            Tuple: 2,  # use 2 parameters
-            Set: 1,
-            Dict: 2,
+            list: 1,
+            tuple: 2,  # use 2 parameters
+            set: 1,
+            dict: 2,
         }
         for subscript_type, n in subscriptable_types.items():
             for ts in itertools.combinations(types, n):
@@ -2523,7 +2508,7 @@ class TestTyping(TestCase):
                 else:
                     self.assertFalse(issubinstance(d, t))
         # list/set
-        dt = (([1, "1", 2], List), (set({1, "1", 2}), Set))
+        dt = (([1, "1", 2], list), (set({1, "1", 2}), set))
         for d, t in dt:
             self.assertTrue(issubinstance(d, t))
             self.assertTrue(issubinstance(d, t[T_co]))  # type: ignore[index]
@@ -2531,16 +2516,16 @@ class TestTyping(TestCase):
 
         # dict
         d = {"1": 1, "2": 2.0}
-        self.assertTrue(issubinstance(d, Dict))
-        self.assertTrue(issubinstance(d, Dict[str, T_co]))
-        self.assertFalse(issubinstance(d, Dict[str, int]))
+        self.assertTrue(issubinstance(d, dict))
+        self.assertTrue(issubinstance(d, dict[str, T_co]))
+        self.assertFalse(issubinstance(d, dict[str, int]))
 
         # tuple
         d = (1, "1", 2)
-        self.assertTrue(issubinstance(d, Tuple))
-        self.assertTrue(issubinstance(d, Tuple[int, str, T_co]))
-        self.assertFalse(issubinstance(d, Tuple[int, Any]))
-        self.assertFalse(issubinstance(d, Tuple[int, int, int]))
+        self.assertTrue(issubinstance(d, tuple))
+        self.assertTrue(issubinstance(d, tuple[int, str, T_co]))
+        self.assertFalse(issubinstance(d, tuple[int, Any]))
+        self.assertFalse(issubinstance(d, tuple[int, int, int]))
 
     # Static checking annotation
     @skipTyping
@@ -2553,13 +2538,13 @@ class TestTyping(TestCase):
 
         with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
 
-            class InvalidDP2(IterDataPipe[Tuple]):
+            class InvalidDP2(IterDataPipe[tuple]):
                 def __iter__(self) -> Iterator[int]:  # type: ignore[override]
                     yield 0
 
         with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
 
-            class InvalidDP3(IterDataPipe[Tuple[int, str]]):
+            class InvalidDP3(IterDataPipe[tuple[int, str]]):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0,)
 
@@ -2571,11 +2556,11 @@ class TestTyping(TestCase):
                 class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
                     pass
 
-        class DP1(IterDataPipe[Tuple[int, str]]):
+        class DP1(IterDataPipe[tuple[int, str]]):
             def __init__(self, length):
                 self.length = length
 
-            def __iter__(self) -> Iterator[Tuple[int, str]]:
+            def __iter__(self) -> Iterator[tuple[int, str]]:
                 for d in range(self.length):
                     yield d, str(d)
 
@@ -2601,13 +2586,13 @@ class TestTyping(TestCase):
         dp2_ = DP2()  # type: ignore[var-annotated]
         self.assertEqual(dp2.type, dp2_.type)
 
-        class DP3(IterDataPipe[Tuple[T_co, str]]):
+        class DP3(IterDataPipe[tuple[T_co, str]]):
             r"""DataPipe without fixed type with __init__ function"""
 
             def __init__(self, datasource):
                 self.datasource = datasource
 
-            def __iter__(self) -> Iterator[Tuple[T_co, str]]:
+            def __iter__(self) -> Iterator[tuple[T_co, str]]:
                 for d in self.datasource:
                     yield d, str(d)
 
@@ -2665,18 +2650,18 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_construct_time(self):
-        class DP0(IterDataPipe[Tuple]):
+        class DP0(IterDataPipe[tuple]):
             @argument_validation
             def __init__(self, dp: IterDataPipe):
                 self.dp = dp
 
-            def __iter__(self) -> Iterator[Tuple]:
+            def __iter__(self) -> Iterator[tuple]:
                 for d in self.dp:
                     yield d, str(d)
 
         class DP1(IterDataPipe[int]):
             @argument_validation
-            def __init__(self, dp: IterDataPipe[Tuple[int, str]]):
+            def __init__(self, dp: IterDataPipe[tuple[int, str]]):
                 self.dp = dp
 
             def __iter__(self) -> Iterator[int]:
@@ -2698,12 +2683,12 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_runtime(self):
-        class DP(IterDataPipe[Tuple[int, T_co]]):
+        class DP(IterDataPipe[tuple[int, T_co]]):
             def __init__(self, datasource):
                 self.ds = datasource
 
             @runtime_validation
-            def __iter__(self) -> Iterator[Tuple[int, T_co]]:
+            def __iter__(self) -> Iterator[tuple[int, T_co]]:
                 yield from self.ds
 
         dss = ([(1, "1"), (2, "2")], [(1, 1), (2, "2")])
@@ -2805,7 +2790,7 @@ class TestGraph(TestCase):
         sharded_dp = shuffled_dp.sharding_filter()
         mapped_dp = sharded_dp.map(lambda x: x * 10)
         graph = traverse_dps(mapped_dp)
-        expected: Dict[Any, Any] = {
+        expected: dict[Any, Any] = {
             id(mapped_dp): (
                 mapped_dp,
                 {
@@ -2914,7 +2899,7 @@ class TestGraph(TestCase):
         source_dp = dp.map.SequenceWrapper(range(10))
         map_dp = source_dp.map(partial(_fake_add, 1))
         graph = traverse_dps(map_dp)
-        expected: Dict[Any, Any] = {
+        expected: dict[Any, Any] = {
             id(map_dp): (map_dp, {id(source_dp): (source_dp, {})})
         }
         self.assertEqual(expected, graph)
@@ -2923,7 +2908,7 @@ class TestGraph(TestCase):
         source_map_dp = dp.map.SequenceWrapper(range(10))
         iter_dp = dp.iter.IterableWrapper(source_map_dp)
         graph = traverse_dps(iter_dp)
-        expected: Dict[Any, Any] = {
+        expected: dict[Any, Any] = {
             id(iter_dp): (iter_dp, {id(source_map_dp): (source_map_dp, {})})
         }
         self.assertEqual(expected, graph)
@@ -2933,7 +2918,7 @@ class TestGraph(TestCase):
         circular_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
         graph = traverse_dps(circular_dp)
         # See issue: https://github.com/pytorch/data/issues/535
-        expected: Dict[Any, Any] = {
+        expected: dict[Any, Any] = {
             id(circular_dp): (
                 circular_dp,
                 {
@@ -2957,7 +2942,7 @@ class TestGraph(TestCase):
         graph = traverse_dps(unhashable_dp)
         with self.assertRaises(NotImplementedError):
             hash(unhashable_dp)
-        expected: Dict[Any, Any] = {
+        expected: dict[Any, Any] = {
             id(unhashable_dp): (
                 unhashable_dp,
                 {

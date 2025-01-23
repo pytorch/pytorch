@@ -6,8 +6,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -85,16 +85,15 @@ void mkldnn_matmul_i8i8i32(
   TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool use_mkldnn_bf16_matmul() {
   return at::globalContext().userEnabledMkldnn() && mkldnn_bf16_device_check();
@@ -237,15 +236,27 @@ void mkldnn_matmul(
               "mkldnn_matmul:  unsupported dims for mat and mat2");
 
 #if defined(__aarch64__)
-  // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
-  // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
-  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  // oneDNN fast-maths mode (enabled by setting the environment variable
+  // ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch fp32 inputs to bf16 kernels
+  // where HW permits. So, both fp32 and bf16 inputs are permitted.
+  TORCH_CHECK(
+      (mat1.scalar_type() == mat2.scalar_type()) &&
+          (mat1.scalar_type() == result.scalar_type()) &&
+          ((mat1.scalar_type() == at::kFloat) ||
+           (mat1.scalar_type() == at::kBFloat16) ||
+           (mat1.scalar_type() == at::kHalf)),
+      "mkldnn_matmul:  only enabled for fp32, bf16 and fp16 path");
   // device needs to support bf16 if the inputs are of bf16 type
   if (mat1.scalar_type() == at::kBFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
-                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+    TORCH_CHECK(
+        mkldnn_bf16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+  }
+  // device needs to support fp16 if the inputs are of fp16 type
+  if (mat1.scalar_type() == at::kHalf) {
+    TORCH_CHECK(
+        mkldnn_fp16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul fp16 path needs a cpu with fp16 support");
   }
 #else
   TORCH_CHECK(
@@ -513,7 +524,6 @@ void mkldnn_matmul_i8i8i32(
   }
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

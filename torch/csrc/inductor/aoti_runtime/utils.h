@@ -119,6 +119,18 @@ class RAIIAtenTensorHandle {
     return result;
   }
 
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_.get(), &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_.get(), &result));
+    return result;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -134,6 +146,34 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     handles[i] = nullptr;
   }
   return result;
+}
+
+inline AtenTensorHandle reinterpret_tensor_wrapper(
+    AtenTensorHandle self,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset) {
+  AtenTensorHandle result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+      self, ndim, sizes_ptr, strides_ptr, storage_offset, &result));
+  return result;
+}
+
+inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
+  void* result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor, &result));
+  return result;
+}
+
+inline AtenTensorHandle unwrap_raii_handle_if_needed(
+    const RAIIAtenTensorHandle& handle) {
+  return handle.get();
+}
+
+inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle);
 }
 
 class ConstantHandle {
@@ -158,6 +198,18 @@ class ConstantHandle {
 
   void* data_ptr() const {
     return data_;
+  }
+
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_, &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_, &result));
+    return result;
   }
 
  private:
@@ -187,5 +239,9 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 
 #define CACHE_TORCH_LAYOUT(layout) \
   static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
+
+#define CACHE_TORCH_MEMORY_FORMAT(format)           \
+  static auto cached_torch_memory_format_##format = \
+      aoti_torch_memory_format_##format()
 
 } // namespace torch::aot_inductor

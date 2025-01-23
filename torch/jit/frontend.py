@@ -4,7 +4,6 @@ import dataclasses
 import inspect
 import re
 import string
-import sys
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
@@ -344,10 +343,10 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     fn_def = parsed_def.ast.body[0]
 
     if is_classmethod:
-        arg_name = fn_def.args.args[0].arg
+        arg_name = fn_def.args.args[0].arg  # type:ignore[union-attr]
         # Insert a statement that assigns the first argument to the class
         assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
-        fn_def.body.insert(0, assign_stmt)
+        fn_def.body.insert(0, assign_stmt)  # type:ignore[union-attr]
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
@@ -361,16 +360,16 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
                 f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}"
             )
         unused_def = unused_fn_def.body[0]
-        fn_def.body = unused_def.body
+        fn_def.body = unused_def.body  # type:ignore[union-attr]
         # kwarg/vararg not supported by `build_def`
-        fn_def.args.kwarg = fn_def.args.vararg = None
-        for arg in fn_def.args.args + fn_def.args.kwonlyargs:
+        fn_def.args.kwarg = fn_def.args.vararg = None  # type:ignore[union-attr]
+        for arg in fn_def.args.args + fn_def.args.kwonlyargs:  # type:ignore[union-attr]
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_def.args.args[0].annotation
         if _is_drop_fn(fn):
             # Dropping potentially unsupported return type annotation for jit._drop
-            fn_def.returns = None
-            fn_def.type_comment = None
+            fn_def.returns = None  # type:ignore[union-attr]
+            fn_def.type_comment = None  # type:ignore[union-attr]
 
     # If MonkeyType is installed, get all the consolidated type traces
     # for the arguments from type_trace_db
@@ -1128,10 +1127,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        elif sys.version_info >= (
-            3,
-            9,
-        ):  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -1150,8 +1146,6 @@ class ExprBuilder(Builder):
                     indices.append(tup)
                 return Subscript(base, indices)
             return Subscript(base, [build_expr(ctx, expr.slice)])
-        else:  # Ellipsis (can only happen in Python 2)
-            raise NotSupportedError(base.range(), "ellipsis is not supported")
 
     @staticmethod
     def build_List(ctx, expr):

@@ -30,12 +30,14 @@ Creating new custom ops in Python
 Use :func:`torch.library.custom_op` to create new custom ops.
 
 .. autofunction:: custom_op
+.. autofunction:: triton_op
+.. autofunction:: wrap_triton
 
 Extending custom ops (created from Python or C++)
 -------------------------------------------------
 
 Use the register.* methods, such as :func:`torch.library.register_kernel` and
-func:`torch.library.register_fake`, to add implementations
+:func:`torch.library.register_fake`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
@@ -50,6 +52,7 @@ via PyTorch's C++ operator registration APIs).
 .. autoclass:: torch._library.custom_ops.CustomOpDef
 
     .. automethod:: set_kernel_enabled
+
 
 Low-level APIs
 --------------

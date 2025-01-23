@@ -13,18 +13,15 @@ export VC_YEAR=2019
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
     export VC_YEAR=2022
     export USE_SCCACHE=0
+    export XPU_VERSION=2025.0
 fi
 
 echo "Free space on filesystem before build:"
 df -h
 
-pushd "$BUILDER_ROOT"
-if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-    ./windows/internal/build_conda.bat
-elif [[ "$PACKAGE_TYPE" == 'wheel' || "$PACKAGE_TYPE" == 'libtorch' ]]; then
-    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
-    ./windows/internal/build_wheels.bat
-fi
+pushd "$PYTORCH_ROOT/.ci/pytorch/"
+export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
+./windows/internal/build_wheels.bat
 
 echo "Free space on filesystem after build:"
 df -h

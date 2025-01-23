@@ -9,20 +9,11 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
+from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import (
-    Any,
-    ClassVar,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
@@ -61,6 +52,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 try:
     import psutil  # type: ignore[import]
@@ -500,7 +494,7 @@ class DeviceTypeTestBase(TestCase):
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
-                    param_kwargs: Dict[str, Any] = {}
+                    param_kwargs: dict[str, Any] = {}
                     _update_param_kwargs(param_kwargs, "dtype", dtype)
 
                     # Note that an empty test suffix is set here so that the dtype can be appended
@@ -723,7 +717,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = []
+    test_bases: list[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -1084,7 +1078,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[Set[torch.dtype], Set[None]]
+            dtypes: Union[set[torch.dtype], set[None]]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1135,6 +1129,16 @@ class ops(_TestParametrizer):
             # See [Note: device and dtype suffix placement]
             test_name = op.formatted_name
 
+            # Filter sample skips / xfails to only those that apply to the OpInfo.
+            # These are defined on the test function via decorators.
+            sample_skips_and_xfails = getattr(test, "sample_skips_and_xfails", None)
+            if sample_skips_and_xfails is not None:
+                sample_skips_and_xfails = [
+                    rule
+                    for rule in sample_skips_and_xfails
+                    if rule.op_match_fn(device_cls.device_type, op)
+                ]
+
             for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
@@ -1183,6 +1187,9 @@ class ops(_TestParametrizer):
                         device_cls.device_type,
                         dtype,
                     )
+
+                    if sample_skips_and_xfails is not None:
+                        test_wrapper.sample_skips_and_xfails = sample_skips_and_xfails
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
@@ -1299,7 +1306,10 @@ def _has_sufficient_memory(device, size):
         # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
         if device == "cuda":
             device = "cuda:0"
-        return torch.cuda.memory.mem_get_info(device)[0] >= size
+        return (
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        ) >= size
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
@@ -1424,9 +1434,9 @@ class deviceCountAtLeast:
 
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta and PRIVATEUSE1)
-def onlyNativeDeviceTypes(fn):
+def onlyNativeDeviceTypes(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @wraps(fn)
-    def only_fn(self, *args, **kwargs):
+    def only_fn(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         if self.device_type not in NATIVE_DEVICES:
             reason = f"onlyNativeDeviceTypes: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
@@ -1833,7 +1843,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
+def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1851,7 +1861,7 @@ def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Tuple[int, int] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1948,7 +1958,7 @@ def skipPRIVATEUSE1(fn):
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.
-def get_all_device_types() -> List[str]:
+def get_all_device_types() -> list[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 
