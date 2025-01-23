@@ -196,6 +196,7 @@ _SYM_OPS = {
     torch.sym_min,
     torch.sym_sqrt,
     operator.truediv,
+    operator.and_,
 }
 
 
