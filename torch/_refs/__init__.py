@@ -3479,16 +3479,16 @@ def istft(
     return_complex=False,
     align_to_window: Optional[bool] = None,
 ) -> Tensor:
-    torch._check(
+    torch._check_value(
         window is None or window.device == input.device,
         lambda: (
             f"istft input and window must be on the same device but got self on {input.device}"
             + f" and window on {window.device}"  # type: ignore[union-attr]
         ),
     )
-    torch._check(
+    torch._check_value(
         not center or align_to_window is None,
-        "stft only supports align_to_window for center = False.",
+        "istft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4

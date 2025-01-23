@@ -1060,7 +1060,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
               "istft input and window must be on the same device but got self on ",
               self.device(), " and window on ", window.device())
   TORCH_CHECK(!center || !align_to_windowOpt.has_value(),
-          "stft align_to_window should only be set when center = false.")
+          "istft align_to_window should only be set when center = false.")
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
