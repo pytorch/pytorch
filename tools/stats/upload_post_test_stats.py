@@ -10,7 +10,7 @@ import datetime
 import json
 from dataclasses import asdict, dataclass
 
-# python script is mainly for uploading test stats to s3 for a test job
+# python script is mainly for uploading test logs to s3 for a test job
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
