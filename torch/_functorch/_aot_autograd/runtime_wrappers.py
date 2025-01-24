@@ -519,8 +519,7 @@ class FakifiedOutWrapper(CompilerWrapper):
     out_metas: list[torch.Tensor] = field(default_factory=list)
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
-    # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: Optional[list[Optional[list[int]]]] = None
+    fwd_output_strides: Optional[list[list[int]]] = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -551,23 +550,12 @@ class FakifiedOutWrapper(CompilerWrapper):
         for i in range(len(out)):
             if not isinstance(out[i], Tensor):
                 continue
-            strides = fwd_output_strides[i]
-            # fwd_output_strides is best effort by Inductor.  When an output
-            # Tensor has unbacked SymInts, Inductor may sometimes be unable
-            # to compute what the output stride would be.  If Inductor doesn't
-            # have any clear direction on the layout, we don't have to run
-            # as_strided.  To repro without this, run:
-            #
-            # python test/distributed/test_dynamo_distributed.py
-            # TestFakeDistributedSingleProc.test_unbacked_symbol_splitting_no_binding
-            if strides is None:
-                continue
             if all(
                 statically_known_true(s1 == s2)
-                for s1, s2 in zip(out[i].stride(), strides)
+                for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
             ):
                 continue
-            out[i] = out[i].as_strided(out[i].shape, strides)
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
         return out
 
     # To be called post compile

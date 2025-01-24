@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 import torch._inductor
@@ -267,6 +267,12 @@ class AOTICompiledModel:
 
     def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
+
+    def __deepcopy__(self, memo: Optional[Dict[Any, Any]]) -> "AOTICompiledModel":
+        log.warning(
+            "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
+        )
+        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
 
 
 def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
