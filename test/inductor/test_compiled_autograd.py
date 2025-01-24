@@ -2922,11 +2922,11 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
+            "code: CompiledFunctionBackward0 (NodeCall 2)",
             "aot0_primals_3",
             "aot0_relu",
             "aot0_le",
             "aot0_permute_2",
-            "code: CompiledFunctionBackward0 (NodeCall 2)",
             "aot0_full_default",
             "aot0_where",
             "aot0_mm",
@@ -3224,7 +3224,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # because we ignore all of these guards anyway in CA.
         # Once we stop using make_fx in CA, we won't have to worry about this specialization.
         view_nodes = graphs[1].graph.find_nodes(
-            op="call_function", target=torch.ops.aten.view.default
+            op="call_function", target=torch.ops.aten.reshape.default
         )
         # First 2 view nodes have a first argument that is a SymInt, not an int burned into the graph
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
