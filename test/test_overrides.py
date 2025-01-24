@@ -395,7 +395,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_dtype_override(self):
         class MyDtype:
-            def __torch_function__(*args, **kwargs):
+            def __torch_function__(self, *args, **kwargs):
                 return 4
 
         self.assertEqual(torch.empty(4).view(MyDtype()), 4)

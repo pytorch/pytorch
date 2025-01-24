@@ -2282,7 +2282,7 @@ class GuardManager {
   bool check_accessors_nopybind(T* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
-    if constexpr (std::is_same<T, PyObject>::value) {
+    if constexpr (std::is_same_v<T, PyObject>) {
       if (_is_dict) {
         // Check if the dict tag matches. If it does, propagate to the child
         // accessors. This will pass to the child manager via
@@ -3151,6 +3151,29 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
 
  private:
   std::vector<PyTypeObject*> _ref_stack;
+};
+
+class DISPATCH_KEY_SET_MATCH : public LeafGuard {
+ public:
+  DISPATCH_KEY_SET_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object value,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+    root_guard_manager->set_init_local_state_flag();
+    c10::DispatchKeySet value_ = value.cast<c10::DispatchKeySet>();
+    raw_repr = _root_guard_manager->_local_state.apply(value_).raw_repr();
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    py::handle handle = py::handle(value);
+    c10::DispatchKeySet value_ = handle.cast<c10::DispatchKeySet>();
+    return raw_repr ==
+        _root_guard_manager->_local_state.apply(value_).raw_repr();
+  }
+
+ private:
+  uint64_t raw_repr;
 };
 
 class TENSOR_MATCH : public LeafGuard {
@@ -4890,6 +4913,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_VERSION")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DICT_VERSION::check);
+  py::class_<
+      DISPATCH_KEY_SET_MATCH,
+      LeafGuard,
+      std::shared_ptr<DISPATCH_KEY_SET_MATCH>>(py_m, "DISPATCH_KEY_SET_MATCH")
+      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def("__call__", &DISPATCH_KEY_SET_MATCH::check);
   py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
       py_m, "TENSOR_MATCH")
       .def(py::init<
@@ -5122,6 +5151,17 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("NOT_NONE");
             self.add_leaf_guard(
                 std::make_shared<NOT_NONE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_dispatch_key_set_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("DISPATCH_KEY_SET_MATCH");
+            self.add_leaf_guard(std::make_shared<DISPATCH_KEY_SET_MATCH>(
+                self.get_root(),
+                std::move(value),
+                std::move(verbose_code_parts)));
           })
       .def(
           "add_global_state_guard",

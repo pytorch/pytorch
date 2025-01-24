@@ -22,8 +22,8 @@ Event = torch.Event
 Stream = torch.Stream
 
 _initialized = False
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
@@ -170,13 +170,13 @@ def record_memory_history(
     torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
 
 
-def snapshot() -> Dict[str, Any]:
+def snapshot() -> dict[str, Any]:
     r"""Return a dictionary of MTIA memory allocator history"""
 
     return torch._C._mtia_memorySnapshot()
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:

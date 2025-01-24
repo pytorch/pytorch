@@ -3036,6 +3036,13 @@ def _assert_scalar(data, msg):
     return None
 
 
+@register_lowering(aten._assert_tensor_metadata)
+def _assert_tensor_metadata(
+    a, size=None, stride=None, dtype=None, *, device=None, layout=None
+):
+    return None
+
+
 def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):

@@ -32,7 +32,7 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -305,6 +305,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
     # everything else
+    "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
@@ -2234,8 +2235,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-if sys.version_info >= (3, 9):
-    torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
+torch_c_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
@@ -2861,8 +2861,8 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 
 @functools.lru_cache(None)
-def get_torch_obj_rule_map() -> Dict[Any, Type["VariableTracker"]]:
-    d: Dict[Any, Type[VariableTracker]] = {}
+def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
+    d: dict[Any, type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2956,15 +2956,15 @@ class FunctionIdSet:
     added to the graph and what will cause a graph break.
     """
 
-    function_ids: Optional[Set[int]] = None
-    function_names: Optional[Dict[int, str]] = None
+    function_ids: Optional[set[int]] = None
+    function_names: Optional[dict[int, str]] = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+        self, lazy_initializer: Callable[[], Union[dict[int, str], set[int]]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self) -> Set[int]:
+    def __call__(self) -> set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -2994,19 +2994,19 @@ class FunctionIdSet:
 
 
 @FunctionIdSet
-def _allowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _allowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _disallowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
+def _disallowed_callable_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
     return rv
 
 
 @FunctionIdSet
-def _builtin_function_ids() -> Dict[int, str]:
+def _builtin_function_ids() -> dict[int, str]:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     rv = {
         id(v): f"builtins.{k}"
@@ -3030,13 +3030,13 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _polyfilled_function_ids() -> Set[int]:
+def _polyfilled_function_ids() -> set[int]:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
     return set()
 
 
 @FunctionIdSet
-def _numpy_function_ids() -> Dict[int, str]:
+def _numpy_function_ids() -> dict[int, str]:
     unsupported_funcs = {
         "seed",
         "ranf",
@@ -3070,7 +3070,7 @@ def _numpy_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _builtin_constant_ids() -> Dict[int, str]:
+def _builtin_constant_ids() -> dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
@@ -3082,7 +3082,7 @@ def _builtin_constant_ids() -> Dict[int, str]:
     return rv
 
 
-_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+_lazy_module_init: dict[str, list[Callable[[], None]]] = defaultdict(list)
 
 
 def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
@@ -3365,7 +3365,7 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS: Set[str] = set()
+FBCODE_SKIP_DIRS: set[str] = set()
 
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
@@ -3541,7 +3541,7 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
-    reasons: Set[str] = set()
+    reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
@@ -3619,7 +3619,7 @@ def lookup_inner(
     name=None,
     filename=None,
     is_direct_call=True,
-    reasons: Union[None, Set[str]] = None,
+    reasons: Union[None, set[str]] = None,
 ):
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:

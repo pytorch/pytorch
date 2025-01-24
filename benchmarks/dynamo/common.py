@@ -23,18 +23,7 @@ import time
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    List,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import MagicMock
 
@@ -97,6 +86,8 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping, Sequence
+
     from torch.onnx._internal.fx import diagnostics
 
 
@@ -1779,7 +1770,7 @@ class OnnxModel(abc.ABC):
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: list[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -2217,11 +2208,11 @@ class OnnxExportErrorRow:
         )
 
     @property
-    def headers(self) -> List[str]:
+    def headers(self) -> list[str]:
         return [field.name for field in dataclasses.fields(self)]
 
     @property
-    def row(self) -> List[str]:
+    def row(self) -> list[str]:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
@@ -2271,7 +2262,7 @@ class OnnxContext:
 
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
