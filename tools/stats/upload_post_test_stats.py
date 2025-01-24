@@ -22,13 +22,13 @@ import pandas as pd  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
-    WorkflowInfo,
     getDataModelVersion,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
     OssCiUtilizationTimeSeriesV1,
     UtilizationMetadata,
     UtilizationRecord,
+    WorkflowInfo,
 )
 
 
@@ -37,11 +37,11 @@ CMD_PYTHON_LEVEL = "CMD_PYTHON"
 UTILIZATION_BUCKET = "ossci-utilization"
 PYTORCH_REPO = "pytorch/pytorch"
 
+
 class SegmentGenerator:
     """
     generates test segment from utilization records, currently it only generate segments on python commands level
     """
-
     def generate(self, records: list[UtilizationRecord]) -> list[OssCiSegmentV1]:
         cmd_col_name = "cmd"
         time_col_name = "time"
@@ -198,9 +198,7 @@ class UploadUtilizationData:
 
     def start(self) -> None:
         metadata, valid_records, _ = self.get_log_data(
-            self.info.workflow_run_id,
-            self.info.job_id,
-            self.info.run_attempt
+            self.info.workflow_run_id, self.info.job_id, self.info.run_attempt
         )
 
         if not metadata:
@@ -212,7 +210,9 @@ class UploadUtilizationData:
             return None
         segments = self.segment_generator.generate(valid_records)
 
-        db_metadata, db_records = UtilizationDbConverter(self.info,metadata,valid_records,segments).convert()
+        db_metadata, db_records = UtilizationDbConverter(
+            self.info, metadata, valid_records, segments
+        ).convert()
         print(
             f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata),indent=4)}"
         )
@@ -410,14 +410,16 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    ud = UploadUtilizationData(
-        info= WorkflowInfo(
-            workflow_run_id=args.workflow_run_id,
+
+    workflow_info = WorkflowInfo(workflow_run_id=args.workflow_run_id,
             run_attempt=args.workflow_run_attempt,
             job_id=args.job_id,
             workflow_name=args.workflow_name,
             job_name=args.job_name,
-            repo=PYTORCH_REPO),
+            repo=PYTORCH_REPO,
+        )
+    ud = UploadUtilizationData(
+        info= workflow_info,
         dry_run=args.dry_run,
         debug=args.debug,
     )
