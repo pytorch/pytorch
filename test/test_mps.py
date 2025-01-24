@@ -808,7 +808,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'segment_reduce_': None,
-        '_upsample_bilinear2d_aa': None,
+         # '_upsample_bilinear2d_aa': None,
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
