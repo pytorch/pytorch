@@ -12,7 +12,8 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
@@ -46,7 +47,7 @@ _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Sequence["GradientEdge"],
 ]
 
-_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
+_size: TypeAlias = Union[Size, list[int], tuple[int, ...]]  # noqa: PYI042,PYI047
 _symsize: TypeAlias = Union[Size, Sequence[Union[int, SymInt]]]  # noqa: PYI042,PYI047
 _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
@@ -76,7 +77,7 @@ class Storage:
     dtype: _dtype
     _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: Dict[int, Any]) -> "Storage":
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Storage":
         raise NotImplementedError
 
     def _new_shared(self, size: int) -> "Storage":

@@ -889,6 +889,14 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
         )
 
 
+def sample_inputs_fill(op_info, device, dtype, requires_grad, **kwargs):
+    # scalar case
+    unary_func = partial(sample_inputs_elementwise_njt_unary, op_kwargs={"value": 42.0})
+    yield from unary_func(op_info, device, dtype, requires_grad)
+
+    # TODO: add Tensor case
+
+
 def sample_inputs_mvl_gamma(p):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"p": p})
 
@@ -1443,6 +1451,7 @@ njt_sample_inputs = {
     "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
+    "fill": sample_inputs_fill,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
