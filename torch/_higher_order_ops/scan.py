@@ -455,13 +455,13 @@ def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse, additional_input
             )
         )
         if _has_potential_branch_input_mutation(
-            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be modifying the input!"
             )
         if _has_potential_branch_input_alias(
-            functional_combine_fn, sample_inputs, pre_dispatch=pre_dispatch
+            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException(
                 "Combine_fn might be aliasing the input!"
