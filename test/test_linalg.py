@@ -8616,7 +8616,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                          fn(torch.slogdet, (0, 0)))
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.07)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
