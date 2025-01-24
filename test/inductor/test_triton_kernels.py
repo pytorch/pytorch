@@ -550,7 +550,6 @@ def forward(self, x_1, output_1):
         call_triton(output)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
@@ -669,7 +668,6 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @skipIfXpu
-    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -754,7 +752,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_gpu
-    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(
         torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
@@ -1727,19 +1724,17 @@ def forward(self, arg0_1, arg1_1):
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
-            ptrs = [t.data_ptr() for t in (a, b, out)]
-
             if after_data_ptr:
                 torch._dynamo.graph_break()
 
             descs = [
                 triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    ptr,
+                    t.data_ptr(),
                     n_elements,
                     BLOCK_SIZE,
                     t.element_size(),
                 )
-                for ptr in ptrs
+                for t in (a, b, out)
             ]
 
             if after_create_desc:
@@ -2434,7 +2429,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_inference_mode(self):
         def f(x, y, out):
             n_elements = x.numel()
