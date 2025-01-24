@@ -162,7 +162,7 @@ init_command = [
     'pyyaml==6.0.1',
     'optree==0.13.0',
     'dataclasses_json==0.6.7',
-    'pandas==2.2.3'
+    'pandas==2.2.3',
 ]
 
 [[linter]]

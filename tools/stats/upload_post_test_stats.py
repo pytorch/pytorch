@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import collections
 import os
 import sys
 
@@ -9,14 +8,14 @@ import sys
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
-import datetime
 import json
 import zipfile
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import pandas as pd  # type: ignore
+import pandas as pd  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
@@ -28,11 +27,17 @@ from tools.stats.utilization_stats_lib import (
     UtilizationRecord,
 )
 
+
 USAGE_LOG_FILENAME = "usage_log.txt"
 CMD_PYTHON_LEVEL = "CMD_PYTHON"
 UTILIZATION_BUCKET = "ossci-utilization"
 
+
 class SegmentGenerator:
+    """
+    generates test segment from utilization records, currently it only generate segments on python commands level
+    """
+
     def generate(self, records: list[UtilizationRecord]) -> list[OssCiSegmentV1]:
         cmd_col_name = "cmd"
         time_col_name = "time"
@@ -81,7 +86,7 @@ class SegmentGenerator:
         self,
         threshold: int,
         time_column_name: str,
-        df: pd.DataFrame,
+        df: Any,  # the lintrunner keep complaining about the type of df, but it's not a problem
     ) -> list[dict[str, Any]]:
         time_threshold = pd.Timedelta(seconds=threshold)
         df = df.sort_values(by=time_column_name).reset_index(drop=True)
@@ -95,11 +100,11 @@ class SegmentGenerator:
             )
             .reset_index(drop=True)
         )
-        return segments[["start_time", "end_time"]].to_dict(orient="records")  # type: ignore
+        return segments[["start_time", "end_time"]].to_dict(orient="records")  # type: ignore[no-any-return]
 
 
 def get_datetime_string(timestamp: float) -> str:
-    dt = datetime.datetime.fromtimestamp(timestamp)
+    dt = datetime.fromtimestamp(timestamp, timezone.utc)
     dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
     return dt_str
 
@@ -121,9 +126,8 @@ class UtilizationDbConverter:
         self.metadata = metadata
         self.records = records
         self.segments = segments
-        dt = datetime.datetime.now().timestamp()
-        dt_str = get_datetime_string(dt)
-        self.created_at = dt_str
+        dt = datetime.now().timestamp()
+        self.created_at = get_datetime_string(dt)
         self.run_attempt = run_attempt
         self.workflow_run_id = workflow_run_id
         self.workflow_name = workflow_name
@@ -367,15 +371,16 @@ class UploadUtilizationData:
             return None
         segments = self.segment_generator.generate(valid_records)
 
-
-        db_metadata, db_records = UtilizationDbConverter(self.workflow_run_id,
+        db_metadata, db_records = UtilizationDbConverter(
+            self.workflow_run_id,
             self.workflow_name,
             self.job_id,
             self.workflow_run_attempt,
             self.job_name,
             metadata,
             valid_records,
-            segments,).convert()
+            segments,
+        ).convert()
         print(
             f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata),indent=4)}"
         )
@@ -392,7 +397,7 @@ class UploadUtilizationData:
         collection = f"utilization_v{db_metadata.data_model_version}"
         if self.debug_mode:
             collection = f"debug_util_v{db_metadata.data_model_version}"
-            
+
         self._upload_utilization_data_to_s3(
             collection,
             self.workflow_run_id,
@@ -410,6 +415,7 @@ class UploadUtilizationData:
             "timeseries",
             [asdict(record) for record in db_records],
         )
+
 
 if __name__ == "__main__":
     args = parse_args()
