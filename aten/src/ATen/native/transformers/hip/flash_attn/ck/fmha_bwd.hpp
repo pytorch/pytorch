@@ -9,6 +9,7 @@
 #include <ck_tile/ops/epilogue.hpp>
 #include <mask.hpp>
 #include <bias.hpp>
+#include <launch_kernel_pt.hpp>
 
 #include <type_traits>
 #include <utility>

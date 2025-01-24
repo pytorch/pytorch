@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import math
+from collections.abc import Sequence
 from enum import Enum
 from functools import wraps
-from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -1054,7 +1055,7 @@ def linalg_ldl_factor_ex_meta(
     *,
     hermitian: bool = False,
     check_errors: bool = False,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     squareCheckInputs(self, "torch.linalg.ldl_factor_ex")
     checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex")
     LD = torch.empty_strided(
@@ -1114,7 +1115,7 @@ def linalg_ldl_solve_meta(
 
 @register_meta([aten.linalg_lu.default, aten.linalg_lu.out])
 @out_wrapper("P", "L", "U")
-def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
         A.ndim >= 2,
         lambda: f"linalg.lu: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
@@ -1147,7 +1148,7 @@ def linalg_lu_factor_ex_meta(
     *,
     pivot: bool = True,
     check_errors: bool = False,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
         A.ndim >= 2,
         lambda: f"torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
@@ -1240,7 +1241,7 @@ def lu_unpack_meta(
     pivots: Tensor,
     unpack_data: bool = True,
     unpack_pivots: bool = True,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
         LU.ndim >= 2,
         lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {LU.shape} instead",
@@ -1275,7 +1276,7 @@ def lu_unpack_meta(
 
 
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
+def _parse_qr_mode(mode: str) -> tuple[bool, bool]:
     if mode == "reduced":
         compute_q = True
         reduced = True
@@ -1298,7 +1299,7 @@ def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
 
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
 @out_wrapper("Q", "R")
-def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> Tuple[Tensor, Tensor]:
+def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
     checkIsMatrix(A, "linalg.qr")
     checkFloatingOrComplex(A, "linalg.qr")
 
@@ -1326,7 +1327,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> Tuple[Tensor, Tensor]:
 
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
 @out_wrapper("sign", "logabsdet", "LU", "pivots")
-def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+def _linalg_slogdet(A: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     squareCheckInputs(A, "linalg.slogdet")
     checkFloatingOrComplex(A, "linalg.slogdet", False)
     shape = A.shape
@@ -1385,7 +1386,7 @@ def _linalg_svd_meta(
 def _linalg_broadcast_batch_dims(
     arg1: Tensor,
     arg2: Tensor,
-) -> Tuple[List[int], List[int]]:
+) -> tuple[list[int], list[int]]:
     # broadcast the batch dimensions of arg1 and arg2.
     arg1_batch_sizes = arg1.shape[:-2]
     arg2_batch_sizes = arg2.shape[:-2]
@@ -1403,7 +1404,7 @@ def _linalg_broadcast_batch_dims_name(
     arg1: Tensor,
     arg2: Tensor,
     name: Optional[str],
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     # If there's no name we assume we don't want to check the errors
     if name:
         linearSolveCheckInputs(arg1, arg2, name)
@@ -1438,7 +1439,7 @@ def _linalg_solve_ex(
     LU: Optional[Tensor] = None,
     pivots: Optional[Tensor] = None,
     info: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     checkFloatingOrComplex(A, "linalg.solve")
     torch._check(
         A.dtype == B.dtype,
@@ -1520,7 +1521,7 @@ def triangular_solve_meta(
     upper: bool = True,
     transpose: bool = False,
     unitriangular: bool = False,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     torch._check(
         self.ndim >= 2,
         lambda: (
@@ -2159,12 +2160,12 @@ def device_hint(tensor) -> "str":
 def calc_conv_nd_return_shape(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    stride: Union[List[int], int],
-    padding: Union[List[int], int],
-    dilation: Union[List[int], int],
+    stride: Union[list[int], int],
+    padding: Union[list[int], int],
+    dilation: Union[list[int], int],
     is_transposed: bool,
     groups: int,
-    output_padding: Optional[Union[List[int], int]] = None,
+    output_padding: Optional[Union[list[int], int]] = None,
 ):
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
@@ -2227,7 +2228,7 @@ def calc_conv_nd_return_shape(
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
 
-    output_padding_list: Optional[List[int]] = None
+    output_padding_list: Optional[list[int]] = None
     if output_padding:
         if isinstance(output_padding, IntLike):
             output_padding_list = [output_padding] * len(dims)
@@ -2310,11 +2311,11 @@ def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     is_transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
 ):
     def pick_memory_format():
@@ -3176,7 +3177,7 @@ def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
-    result: List[Optional[Tensor]] = []
+    result: list[Optional[Tensor]] = []
     for i, index in enumerate(indices):
         if index is not None:
             torch._check(
@@ -3257,9 +3258,9 @@ def meta_index_Tensor(self, indices):
     # to put the input and indices in a form so that TensorIterator can
     # take them.  If we write a ref for this, probably that logic should
     # get implemented
-    before_shape: List[int] = []
-    after_shape: List[int] = []
-    replacement_shape: List[int] = []
+    before_shape: list[int] = []
+    after_shape: list[int] = []
+    replacement_shape: list[int] = []
     for dim, index in enumerate(indices):
         if index is None:
             if replacement_shape:
@@ -3379,7 +3380,7 @@ def meta__fused_adam_(
 ):
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         torch._check(
-            isinstance(l, List),
+            isinstance(l, list),
             lambda: f"exponent must be a tensor list but got {type(l)}",
         )
 
@@ -3405,7 +3406,7 @@ def meta__fused_adam(
 ):
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         torch._check(
-            isinstance(l, List),
+            isinstance(l, list),
             lambda: f"exponent must be a tensor list but got {type(l)}",
         )
 
@@ -5636,7 +5637,7 @@ def meta__scaled_dot_product_efficient_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
-    grad_input_mask: List[bool],
+    grad_input_mask: list[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -6887,8 +6888,8 @@ def meta_local_scalar_dense(self: Tensor):
 @register_meta(aten._jagged_to_padded_dense_forward.default)
 def meta__jagged_to_padded_dense_forward(
     values: Tensor,
-    offsets: List[Tensor],
-    max_lengths: List[int],
+    offsets: list[Tensor],
+    max_lengths: list[int],
     padding_value: float = 0.0,
 ):
     # only one jagged dim is supported for now
@@ -6971,10 +6972,11 @@ def lerp(start, end, weight):
     )
     args = [start, end]
     if isinstance(weight, TensorLike):
-        torch._check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
-        )
+        if weight.ndim != 0:
+            torch._check(
+                start.dtype == weight.dtype,
+                lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
+            )
         args.append(weight)
     return elementwise_meta(
         *args, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT

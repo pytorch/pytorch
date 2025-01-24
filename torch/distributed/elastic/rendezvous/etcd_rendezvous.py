@@ -14,7 +14,11 @@ import threading
 import time
 from typing import Optional
 
-import etcd  # type: ignore[import]
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,

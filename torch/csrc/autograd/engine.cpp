@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
