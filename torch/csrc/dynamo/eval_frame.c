@@ -14,7 +14,11 @@
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
-static int active_dynamo_threads = 0;
+typedef struct {
+    int active_dynamo_threads;
+} ModuleState;
+
+// static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -827,25 +831,35 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_14_PLUS)
 
-static PyObject* increment_working_threads(PyThreadState* tstate) {
-  active_dynamo_threads = active_dynamo_threads + 1;
-  if (active_dynamo_threads > 0) {
-    enable_eval_frame_shim(tstate);
-  }
-  Py_RETURN_NONE;
-}
+static PyObject* increment_working_threads(PyThreadState* tstate, PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
 
-static PyObject* decrement_working_threads(PyThreadState* tstate) {
-  if (active_dynamo_threads > 0) {
-    active_dynamo_threads = active_dynamo_threads - 1;
-    if (active_dynamo_threads == 0) {
-      enable_eval_frame_default(tstate);
+  if (state != NULL) {
+    state->active_dynamo_threads = state->active_dynamo_threads + 1;
+    if (state->active_dynamo_threads > 0) {
+      enable_eval_frame_shim(tstate);
     }
   }
+
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
+static PyObject* decrement_working_threads(PyThreadState* tstate, PyObject* module) {
+  ModuleState* state = PyModule_GetState(module);
+
+  if (state != NULL) {
+      if (state->active_dynamo_threads > 0) {
+      state->active_dynamo_threads = state->active_dynamo_threads - 1;
+      if (state->active_dynamo_threads == 0) {
+        enable_eval_frame_default(tstate);
+      }
+    }
+  }
+
+  Py_RETURN_NONE;
+}
+
+static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate, PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -856,9 +870,9 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   Py_INCREF(old_callback);
 
   if (old_callback != Py_None && new_callback == Py_None) {
-    decrement_working_threads(tstate);
+    decrement_working_threads(tstate, module);
   } else if (old_callback == Py_None && new_callback != Py_None) {
-    increment_working_threads(tstate);
+    increment_working_threads(tstate, module);
   }
 
   Py_INCREF(new_callback);
@@ -871,7 +885,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   return old_callback;
 }
 
-static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
+static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   if (callback != Py_None && callback != Py_False &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
@@ -882,7 +896,7 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET());
+  return set_eval_frame(callback, PyThreadState_GET(), module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
@@ -968,6 +982,15 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static int clear_state(PyObject *module) {
+    ModuleState* state = PyModule_GetState(module);
+    if (state) {
+        state->active_dynamo_threads = 0;
+        return 0;
+    }
+    return -1;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"set_skip_guard_eval_unsafe", set_skip_guard_eval_unsafe, METH_O, NULL},
@@ -981,10 +1004,11 @@ static PyMethodDef _methods[] = {
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
-    "torch._C._dynamo.eval_frame",
-    "Module containing hooks to override eval_frame",
-    -1,
-    _methods};
+    .m_name = "torch._C._dynamo.eval_frame",
+    .m_doc = "Module containing hooks to override eval_frame",
+    .m_size = sizeof(ModuleState),
+    .m_methods = _methods,
+    .m_clear = clear_state};
 
 #if IS_PYTHON_3_12_PLUS
 #define _PyEval_RequestCodeExtraIndex PyUnstable_Eval_RequestCodeExtraIndex

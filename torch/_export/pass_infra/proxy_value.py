@@ -1,5 +1,6 @@
 # pyre-strict
-from typing import Union, Iterator, Iterable, Generic
+from typing import Union, Generic
+from collections.abc import Iterator, Iterable
 import torch
 
 from typing import TypeVar
