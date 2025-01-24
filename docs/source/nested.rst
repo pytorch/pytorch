@@ -415,8 +415,8 @@ are considered to have the same ragged structure and are thus compatible.
 >>> nt3.shape
 torch.Size([2, j1, 128])
 
-Data dependent operatation within torch.compile
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Data dependent operation within torch.compile
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
