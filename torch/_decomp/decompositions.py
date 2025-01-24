@@ -164,7 +164,6 @@ def elu_backward(
 def fill_scalar(self, value):
     return torch.full_like(self, value)
 
-
 @register_decomposition([aten.fill.Tensor])
 def fill_tensor(self, value: Tensor):
     torch._check(
@@ -5012,15 +5011,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     return output, attn
 
 
-def register_inplace(aten_op, outplace_op):
-    @register_decomposition(aten_op)
-    def inplace_op(*args, **kwargs):
-        out = outplace_op(*args, **kwargs)
-        return args[0].copy_(out)
-
-    return inplace_op
-
-
 @register_decomposition([aten.baddbmm])
 @out_wrapper()
 @pw_cast_for_opmath
@@ -5177,6 +5167,12 @@ def resize_as(self, other, memory_format=None):
         memory_format = suggest_memory_format(other)
     return aten.resize(self, other.shape, memory_format=memory_format)
 
+def register_inplace(aten_op, outplace_op):
+    @register_decomposition(aten_op)
+    def inplace_op(*args, **kwargs):
+        return args[0]
+
+    return inplace_op
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
