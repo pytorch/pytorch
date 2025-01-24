@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import TYPE_CHECKING
 
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # python script is mainly for uploading test logs to s3 for a test job
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
@@ -12,7 +16,6 @@ import json
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd  # type: ignore[import]
@@ -184,11 +187,13 @@ class UtilizationDbConverter:
             json_data=str(asdict(record.data) if record.data else {}),
         )
 
+
 class UploadUtilizationData:
     """
-        main class to handle utilization data conversion and s3 upload
-        fetches raw log data from s3, convert to log model, then convert to db model, and upload to s3
+    main class to handle utilization data conversion and s3 upload
+    fetches raw log data from s3, convert to log model, then convert to db model, and upload to s3
     """
+
     def __init__(
         self,
         workflow_run_id: int,
@@ -309,7 +314,6 @@ class UploadUtilizationData:
         )
 
 
-
 def unzip_file(path: Path, file_name: str) -> str:
     try:
         with zipfile.ZipFile(path) as zip_file:
@@ -424,6 +428,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Enable dry-run mode")
 
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
