@@ -81,9 +81,9 @@ def bench(shape, layer_id, p, fusion_types=[""]):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         triton_mm_ms, _, _ = benchmarker.benchmark_gpu(fn)
-        assert (
-            torch._inductor.metrics.generated_kernel_count == 1
-        ), "codegen #kernel != 1"
+        assert torch._inductor.metrics.generated_kernel_count == 1, (
+            "codegen #kernel != 1"
+        )
         row.extend([tflops(torch_mm_ms), tflops(triton_mm_ms)])
 
     p.add_row(row)

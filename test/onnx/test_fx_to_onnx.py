@@ -172,15 +172,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 model, x, export_options=export_options
             )
 
-        assert (
-            onnx_program is not None
-        ), "ONNXProgram must be created on successful export"
+        assert onnx_program is not None, (
+            "ONNXProgram must be created on successful export"
+        )
 
         onnx_program.apply_weights(Model().state_dict())
 
-        assert (
-            onnx_program.model_proto is not None
-        ), "A model protobuf must be created on a successful export"
+        assert onnx_program.model_proto is not None, (
+            "A model protobuf must be created on a successful export"
+        )
         onnx.checker.check_model(onnx_program.model_proto, full_check=True)
 
     def test_exported_program_torch_distributions_normal_Normal(self):

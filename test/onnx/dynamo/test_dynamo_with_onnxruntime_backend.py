@@ -182,9 +182,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                             baseline_param.grad, param.grad, atol=atol, rtol=rtol
                         )
             else:
-                assert (
-                    test_backward is False
-                ), "Calculating backward with multiple outputs is not supported yet."
+                assert test_backward is False, (
+                    "Calculating backward with multiple outputs is not supported yet."
+                )
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(
                         baseline_elem, result_elem, atol=atol, rtol=rtol

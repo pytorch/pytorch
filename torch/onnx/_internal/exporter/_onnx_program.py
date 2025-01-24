@@ -80,10 +80,10 @@ class ONNXProgram:
         return f"""\
 ONNXProgram(
     model=
-{textwrap.indent(str(self.model), ' ' * 8)}
+{textwrap.indent(str(self.model), " " * 8)}
     ,
     exported_program=
-{textwrap.indent(str(self.exported_program), ' ' * 8)}
+{textwrap.indent(str(self.exported_program), " " * 8)}
 )
 """
 
