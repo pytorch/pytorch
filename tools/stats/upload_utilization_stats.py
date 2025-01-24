@@ -236,7 +236,7 @@ class UploadUtilizationData:
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
-            name="metadata",
+            file_name="metadata",
             docs=[asdict(db_metadata)],
         )
 
@@ -246,7 +246,7 @@ class UploadUtilizationData:
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
-            name="timeseries",
+            file_name="timeseries",
             docs=[asdict(record) for record in db_records],
         )
 
@@ -257,11 +257,11 @@ class UploadUtilizationData:
         workflow_run_id: int,
         workflow_run_attempt: int,
         job_id: int,
-        name: str,
+        file_name: str,
         docs: list[dict[str, Any]],
     ) -> None:
         bucket_name = UTILIZATION_BUCKET
-        key = f"{collection}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{name}"
+        key = f"{collection}/{version}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
         upload_to_s3(bucket_name, key, docs)
 
     def get_log_data(
