@@ -404,45 +404,7 @@ class TestPublicBindings(TestCase):
 
         # No new entries should be added to this list.
         # All public modules should be importable on all platforms.
-        public_allowlist = {
-            "torch.distributed.algorithms.ddp_comm_hooks",
-            "torch.distributed.algorithms.model_averaging.averagers",
-            "torch.distributed.algorithms.model_averaging.hierarchical_model_averager",
-            "torch.distributed.algorithms.model_averaging.utils",
-            "torch.distributed.checkpoint",
-            "torch.distributed.constants",
-            "torch.distributed.distributed_c10d",
-            "torch.distributed.elastic.agent.server",
-            "torch.distributed.elastic.rendezvous",
-            "torch.distributed.fsdp",
-            "torch.distributed.launch",
-            "torch.distributed.launcher",
-            "torch.distributed.nn",
-            "torch.distributed.nn.api.remote_module",
-            "torch.distributed.optim",
-            "torch.distributed.optim.optimizer",
-            "torch.distributed.rendezvous",
-            "torch.distributed.rpc.api",
-            "torch.distributed.rpc.backend_registry",
-            "torch.distributed.rpc.constants",
-            "torch.distributed.rpc.internal",
-            "torch.distributed.rpc.options",
-            "torch.distributed.rpc.rref_proxy",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
-            "torch.distributed.elastic.rendezvous.etcd_store",
-            "torch.distributed.rpc.server_process_global_profiler",
-            "torch.distributed.run",
-            "torch.distributed.tensor.parallel",
-            "torch.distributed.utils",
-            "torch.utils.tensorboard",
-            "torch.utils.tensorboard.summary",
-            "torch.utils.tensorboard.writer",
-            "torch.ao.quantization.experimental.fake_quantize",
-            "torch.ao.quantization.experimental.linear",
-            "torch.ao.quantization.experimental.observer",
-            "torch.ao.quantization.experimental.qconfig",
-        }
+        public_allowlist = {}
 
         errors = []
         for mod, exc in failures:
