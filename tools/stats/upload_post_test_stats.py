@@ -42,7 +42,7 @@ class SegmentGenerator:
         cmd_col_name = "cmd"
         time_col_name = "time"
 
-        # generate time series with detected cmds
+        # flatten time series with detected cmds
         df = pd.DataFrame(
             [
                 {time_col_name: record.timestamp, cmd_col_name: process}
@@ -50,15 +50,18 @@ class SegmentGenerator:
                 for process in (record.cmd_names or [])
             ]
         )
-        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s")
 
         # get unique cmd names
         unique_cmds_df = pd.DataFrame(df[cmd_col_name].unique(), columns=[cmd_col_name])
 
-        delta_time_threshold = 60
+        # get all detected python cmd
         cmd_list = unique_cmds_df[
             unique_cmds_df[cmd_col_name].str.startswith("python")
         ][cmd_col_name].tolist()
+
+        # time thread (in seconds) to consider a list of continuous cmd ts as a segment
+        delta_time_threshold = 60
 
         # find segments by screening continuoues time series data
         segments: list[OssCiSegmentV1] = []
@@ -103,13 +106,9 @@ class SegmentGenerator:
         return segments[["start_time", "end_time"]].to_dict(orient="records")  # type: ignore[no-any-return]
 
 
-def get_datetime_string(timestamp: float) -> str:
-    dt = datetime.fromtimestamp(timestamp, timezone.utc)
-    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-    return dt_str
-
-
 class UtilizationDbConverter:
+    """convert utilization log model to db model"""
+
     def __init__(
         self,
         workflow_run_id: int,
@@ -185,118 +184,11 @@ class UtilizationDbConverter:
             json_data=str(asdict(record.data) if record.data else {}),
         )
 
-
-def unzip_file(path: Path, file_name: str) -> str:
-    try:
-        with zipfile.ZipFile(path) as zip_file:
-            # Read the desired file from the zip archive
-            return zip_file.read(name=file_name).decode()
-    except Exception as e:
-        print(f"::warning trying to download test log {object} failed by: {e}")
-        return ""
-
-
-def process_line(line: str) -> tuple[Optional[UtilizationRecord], bool]:
-    try:
-        record = UtilizationRecord.from_json(line)
-        if record.error:
-            return record, False
-        return record, True
-    except Exception as e:
-        print(f"Failed to parse JSON line: {e}")
-        return None, False
-
-
-def process_utilization_records(
-    lines: list[str],
-) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
-    results = [process_line(line) for line in lines[1:]]
-    valid_records = [
-        record for record, valid in results if valid and record is not None
-    ]
-    invalid_records = [
-        record for record, valid in results if not valid and record is not None
-    ]
-    return valid_records, invalid_records
-
-
-def convert_to_log_models(
-    content: str,
-) -> tuple[
-    Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
-]:
-    if not content:
-        return None, [], []
-    lines = content.splitlines()
-    metadata = None
-    if len(lines) < 2:
-        print("Expected at least two records from log file")
-        return None, [], []
-    print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
-    print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
-
-    try:
-        metadata = UtilizationMetadata.from_json(lines[0])
-    except Exception as e:
-        print(f"Failed to parse metadata: {e} for data: {lines[0]}")
-        return None, [], []
-
-    if metadata.data_model_version != getDataModelVersion():
-        print(
-            f"Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}"
-        )
-        return None, [], []
-
-    result_logs, error_logs = process_utilization_records(lines)
-    return metadata, result_logs, error_logs
-
-
-def parse_args() -> argparse.Namespace:
-    """
-    Parse command line arguments.
-
-    Returns:
-        argparse.Namespace: Parsed arguments.
-    """
-    parser = argparse.ArgumentParser(description="Upload test stats to s3")
-    parser.add_argument(
-        "--workflow-run-id",
-        type=int,
-        required=True,
-        help="id of the workflow to get artifacts from",
-    )
-    parser.add_argument(
-        "--workflow-run-attempt",
-        type=int,
-        required=True,
-        help="which retry of the workflow this is",
-    )
-    parser.add_argument(
-        "--workflow-name",
-        type=str,
-        required=True,
-        help="id of the workflow to get artifacts from",
-    )
-    parser.add_argument(
-        "--job-id",
-        type=int,
-        required=True,
-        help="id of the workflow to get artifacts from",
-    )
-    parser.add_argument(
-        "--job-name",
-        type=str,
-        required=True,
-        help="id of the workflow to get artifacts from",
-    )
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-
-    parser.add_argument("--dry-run", action="store_true", help="Enable dry-run mode")
-
-    return parser.parse_args()
-
-
 class UploadUtilizationData:
+    """
+        main class to handle utilization data conversion and s3 upload
+        fetches raw log data from s3, convert to log model, then convert to db model, and upload to s3
+    """
     def __init__(
         self,
         workflow_run_id: int,
@@ -416,6 +308,122 @@ class UploadUtilizationData:
             [asdict(record) for record in db_records],
         )
 
+
+
+def unzip_file(path: Path, file_name: str) -> str:
+    try:
+        with zipfile.ZipFile(path) as zip_file:
+            # Read the desired file from the zip archive
+            return zip_file.read(name=file_name).decode()
+    except Exception as e:
+        print(f"::warning trying to download test log {object} failed by: {e}")
+        return ""
+
+
+def get_datetime_string(timestamp: float) -> str:
+    dt = datetime.fromtimestamp(timestamp, timezone.utc)
+    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+    return dt_str
+
+
+def process_line(line: str) -> tuple[Optional[UtilizationRecord], bool]:
+    try:
+        record = UtilizationRecord.from_json(line)
+        if record.error:
+            return record, False
+        return record, True
+    except Exception as e:
+        print(f"Failed to parse JSON line: {e}")
+        return None, False
+
+
+def process_utilization_records(
+    lines: list[str],
+) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
+    results = [process_line(line) for line in lines[1:]]
+    valid_records = [
+        record for record, valid in results if valid and record is not None
+    ]
+    invalid_records = [
+        record for record, valid in results if not valid and record is not None
+    ]
+    return valid_records, invalid_records
+
+
+def convert_to_log_models(
+    content: str,
+) -> tuple[
+    Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+]:
+    if not content:
+        return None, [], []
+    lines = content.splitlines()
+    metadata = None
+    if len(lines) < 2:
+        print("Expected at least two records from log file")
+        return None, [], []
+    print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
+    print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
+
+    try:
+        metadata = UtilizationMetadata.from_json(lines[0])
+    except Exception as e:
+        print(f"Failed to parse metadata: {e} for data: {lines[0]}")
+        return None, [], []
+
+    if metadata.data_model_version != getDataModelVersion():
+        print(
+            f":: warning Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}"
+        )
+        return None, [], []
+
+    result_logs, error_logs = process_utilization_records(lines)
+    return metadata, result_logs, error_logs
+
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments.
+    """
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
+    parser.add_argument(
+        "--workflow-run-id",
+        type=int,
+        required=True,
+        help="id of the workflow to get artifacts from",
+    )
+    parser.add_argument(
+        "--workflow-run-attempt",
+        type=int,
+        required=True,
+        help="which retry of the workflow this is",
+    )
+    parser.add_argument(
+        "--workflow-name",
+        type=str,
+        required=True,
+        help="id of the workflow to get artifacts from",
+    )
+    parser.add_argument(
+        "--job-id",
+        type=int,
+        required=True,
+        help="id of the workflow to get artifacts from",
+    )
+    parser.add_argument(
+        "--job-name",
+        type=str,
+        required=True,
+        help="id of the workflow to get artifacts from",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+
+    parser.add_argument("--dry-run", action="store_true", help="Enable dry-run mode")
+
+    return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
