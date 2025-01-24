@@ -11,10 +11,14 @@ import time
 from base64 import b64decode, b64encode
 from typing import Optional
 
-import etcd  # type: ignore[import]
-
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 
 # Delay (sleep) for a small random amount to reduce CAS failures.
