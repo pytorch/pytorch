@@ -50,6 +50,7 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._logging.scribe import open_source_signpost
+from torch.testing._internal.error_tensor import ErrorTensor
 
 
 try:
@@ -71,7 +72,7 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_map, tree_map_only, tree_leaves
 
 
 try:
@@ -2934,7 +2935,18 @@ class BenchmarkRunner:
                     self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
+                err_inputs_fp64 = tree_map(
+                    lambda x: ErrorTensor(x, 5e-8)
+                    if isinstance (x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    inputs_fp64
+                )
+                for err_t in tree_leaves(err_inputs_fp64):
+                    if isinstance(err_t, ErrorTensor):
+                        print(f"XXX err_inputs_fp64 {err_t.shape} {err_t.dtype} error: {err_t.error}")
+
                 self.init_optimizer(name, current_device, model_fp64.parameters())
+
                 fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
                 fp64_outputs = tree_map(
                     lambda x: x.to(torch.float64)
@@ -2942,6 +2954,11 @@ class BenchmarkRunner:
                     else x,
                     fp64_outputs,
                 )
+                
+                err_fp64_outputs = self.run_n_iterations(model_fp64, err_inputs_fp64)
+                for err_t in tree_leaves(err_fp64_outputs):
+                    if isinstance(err_t, ErrorTensor):
+                        print(f"XXX err_fp64_outputs {err_t.shape} {err_t.dtype} error: {err_t.error}")
             except Exception:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
@@ -2949,6 +2966,7 @@ class BenchmarkRunner:
                 )
                 self.args.cosine = True
                 fp64_outputs = None
+                raise
             finally:
                 del model_fp64, inputs_fp64
                 empty_gpu_cache(current_device)

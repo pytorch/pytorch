@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
+from torch.testing._internal.error_tensor import ErrorTensor
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
@@ -6410,6 +6411,16 @@ metadata incorrectly.
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
+
+    def test_error_tensor(self):
+        # @torch.compile(backend="eager")
+        def fn(x):
+            return x * torch.full_like(x, 1)
+
+        et = ErrorTensor(torch.randn(2, 2), 0.5)
+        res = fn(et)
+        assert isinstance(res, ErrorTensor)
+        print(f"XXX res.error:{res.error}")
 
 
 # entries in here don't work and need to be fixed.
