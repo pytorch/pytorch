@@ -88,24 +88,9 @@ def aot_dispatch_base_graph(
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
 
-    # This gets mutated by _aot_dispatch_subclass
-    subclass_tracing_info: SubclassTracingInfo | None = None
-
-    # Split the result and save subclass_tracing_info
-    @functools.wraps(aot_dispatch_subclass)
-    def _aot_dispatch_subclass(
-        fn: Callable[..., Any],
-        args: list[Tensor],
-        **kwargs: Any,
-    ) -> tuple[Callable[..., Any], list[Tensor]]:
-        nonlocal subclass_tracing_info
-        subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
-        return subclass_tracing_info[:2]
-
-    state, subclass_traing_info = wrap_and_run(
+    state, subclass_tracing_info = wrap_and_run(
         flat_fn, flat_args, fw_metadata, aot_config, is_autograd=False
     )
-
     fn_to_trace, updated_flat_args_subclasses_desugared, fw_metadata = state
     maybe_subclass_meta = subclass_tracing_info[-1] if subclass_tracing_info else None
 
@@ -250,31 +235,7 @@ def aot_dispatch_autograd_graph(
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
 
-    # This gets mutated by _aot_dispatch_subclass
-    subclass_tracing_info: SubclassTracingInfo | None = None
-
-    # Split the result and save subclass_tracing_info
-    @functools.wraps(aot_dispatch_subclass)
-    def _aot_dispatch_subclass(
-        fn: Callable[..., Any],
-        args: list[Tensor],
-        **kwargs: Any,
-    ) -> tuple[Callable[..., Any], list[Tensor]]:
-        nonlocal subclass_tracing_info
-        subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
-        return subclass_tracing_info[:2]
-
-    # Create joint_inputs parameter
-    @functools.wraps(create_functionalized_fn)
-    def _create_functionalized_fn(
-        fn: Callable[..., Any],
-        args: list[Tensor],
-        **kwargs: Any,
-    ) -> tuple[Callable[..., Any], list[Tensor]]:
-        joint_inputs = flat_args, fw_metadata.traced_tangents
-        return create_functionalized_fn(fn, joint_inputs, **kwargs)
-
-    state, subclass_traing_info = wrap_and_run(
+    state, subclass_tracing_info = wrap_and_run(
         flat_fn, flat_args, fw_metadata, aot_config, is_autograd=True
     )
     joint_fn_to_trace, updated_joint_inputs, _ = state
