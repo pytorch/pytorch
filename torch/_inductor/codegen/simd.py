@@ -1416,7 +1416,7 @@ class SIMDScheduling(BaseScheduling):
             kernel.finalize_indexing(all_indexing.keys())
 
             # Second pass to do codegen
-            for i, node in enumerate(node_schedule):
+            for node in node_schedule:
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
