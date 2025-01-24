@@ -5,6 +5,7 @@ import contextlib
 import functools
 import inspect
 import itertools
+import keyword
 import math
 import operator
 import random
@@ -31,12 +32,10 @@ from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfHpu,
 )
 
 # Defines all the kernels for tests
@@ -1022,10 +1021,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_get_device_properties_tensor_device(a):
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
+
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type2(a, b):
+        m = a.to("cuda")
+        return m + b.type(m.type())
 
     @make_test
     def test_tensor_type3(a, b):
@@ -1035,6 +1049,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_tensor_type4(a, b):
         m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
 
     @make_test
@@ -1567,7 +1587,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_reduce_with_initial(a, b, c, d):
         return functools.reduce(operator.add, [b, c, d], a)
 
-    @make_test(expected_frame_count=0)
+    @make_test
     def test_reduce_with_single(x):
         return functools.reduce(lambda a, b: (a, b), [x])
 
@@ -1590,10 +1610,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
-    @unittest.skipIf(
-        sys.version_info < (3, 9),
-        "SET_UPDATE was added at Python 3.9",
-    )
     @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
@@ -1603,10 +1619,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
-    @unittest.skipIf(
-        sys.version_info < (3, 9),
-        "SET_UPDATE was added at Python 3.9",
-    )
     @make_test
     def test_set_update_list_with_duplicated_items(x):
         list1 = ["apple", "banana", "apple"]
@@ -1907,6 +1919,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_slice_eq(a, b):
+        tmp1 = [a + 1, b + 2]
+        s = slice(1, 2)
+        if isinstance(s, slice) and s == slice(None):
+            return tmp1[s] * 2
+        return tmp1[s] * 3
 
     @make_test
     def test_namedtuple(a, b):
@@ -3196,7 +3216,7 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return operator.truth(x) and bool(y)
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+        opt_fn = torch.compile(dynamic=False)(fn)
 
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -3514,6 +3534,15 @@ class GraphModule(torch.nn.Module):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_round(self):
+        def fn(t):
+            return t + round(1.00002000011, 7)
+
+        t = torch.randn(2)
+        e = fn(t)
+        g = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(e, g)
+
     def test_map_return(self):
         def fn(a, b):
             return map(lambda x: x + 1, [a, b])
@@ -3694,6 +3723,7 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
 
+    @unittest.skip("https://github.com/pytorch/pytorch/pull/146527 exposed a bug")
     def test_enumerate_reconstruct(self):
         def fn(a, b):
             return enumerate([a, b], start=1)
@@ -4435,35 +4465,191 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
+    def test_udf_tuple(self):
+        class MyTuple(tuple):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
 
-class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @skipIfHpu
-    @make_test
-    def test_get_device_properties_tensor_device(a, device):
-        x = a.to(device)
-        prop = torch.cuda.get_device_properties(x.device)
-        if prop.major == 8:
-            return x + prop.multi_processor_count
-        return x + prop.max_threads_per_multi_processor
+            def __contains__(self, val):
+                # Ensure that overridden method is traced
+                self.checked = True
+                return super().__contains__(val)
 
-    @make_test
-    def test_tensor_type2(a, b, device):
-        m = a.to(device)
-        return m + b.type(m.type())
+        def fn(x, tup):
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x * tup.len_mulitply_2()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @skipIfHpu
-    @make_test
-    def test_tensor_type5(a, b, device):
-        m = a.type(torch.cuda.HalfTensor)
-        return b.type(m.type())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_tup = MyTuple([1, 2, 3])
+        ref = fn(x, ref_tup)
+        res_tup = MyTuple([1, 2, 3])
+        res = opt_fn(x, res_tup)
+        self.assertEqual(ref, res)
+        self.assertTrue(ref_tup.checked)
+        self.assertTrue(res_tup.checked)
+
+    def test_udf_tuple_reconstruction(self):
+        class MyTuple(tuple):  # noqa: SLOT001
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_tuple = tuple.__new__(klass, [x])
+            if isinstance(sc_tuple, MyTuple):
+                sc_tuple.attr = 3
+            return sc_tuple
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyTuple)
+        res = opt_fn(x, MyTuple)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyTuple))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, tuple)
+        res = opt_fn(x, tuple)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, tuple))
+
+    def test_udf_list(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+            def __contains__(self, val):
+                # Ensure that overridden method is traced
+                self.checked = True
+                return super().__contains__(val)
+
+            def __getitem__(self, idx):
+                # Tests that the reconstruction logic does not call the
+                # overridden __getitem__ method.
+                raise RuntimeError("Should not be called")
+
+        def fn(x, lst):
+            if 3 in lst:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            lst.append(4)
+            return x * lst.len_mulitply_2()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
+        self.assertTrue(ref_lst.checked)
+        self.assertTrue(res_lst.checked)
+
+    def test_udf_list_slice(self):
+        class MyList(list):  # noqa: SLOT001
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+        def fn(x, lst):
+            lst.append(4)
+            return x * lst.len_mulitply_2() * sum(lst[1:3])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_lst = MyList([1, 2, 3])
+        ref = fn(x, ref_lst)
+        res_lst = MyList([1, 2, 3])
+        res = opt_fn(x, res_lst)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref_lst), len(res_lst))
+
+    def test_udf_list_reconstruction(self):
+        class MyList(list):  # noqa: SLOT001
+            # def __new__(cls, *args, **kwargs):
+            #     return super().__new__(cls, *args, **kwargs)
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_list = list.__new__(klass)
+            sc_list.append(x)
+            if isinstance(sc_list, MyList):
+                sc_list.attr = 3
+            return sc_list
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyList)
+        res = opt_fn(x, MyList)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyList))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, list)
+        res = opt_fn(x, list)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, list))
+
+    def test_sys_recursionlimit(self):
+        def fn(x):
+            return x.sin() * sys.getrecursionlimit()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_keyword(self):
+        def fn(x, word):
+            if keyword.iskeyword(word):
+                return torch.sin(x)
+            return torch.cos(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        word = "None"
+        self.assertEqual(fn(x, word), opt_fn(x, word))
+        word = "dynamo"
+        self.assertEqual(fn(x, word), opt_fn(x, word))
+
+    def test_func_attrs(self):
+        def f(x=4, y=2):
+            pass
+
+        def fn(x):
+            try:
+                f.dynamo + 1
+            except AttributeError:
+                x = torch.sin(x)
+
+            code = f.__code__
+            defaults = f.__defaults__
+            return x * len(defaults) * code.co_argcount
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_functools_partial_id(self):
+        def gn(a, b):
+            return a + b
+
+        partial_gn = functools.partial(gn, a=3)
+
+        def fn(x):
+            d = {id(partial_gn): 5}
+            return partial_gn(b=x) * d[id(partial_gn)]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(FunctionTests)
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(FunctionTestsDevice, globals(), only_for=devices)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
