@@ -98,7 +98,6 @@ class Lock {
   }
 
   Lock(const Lock& that) = delete;
-  Lock& operator=(const Lock&) = delete;
 
   Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
