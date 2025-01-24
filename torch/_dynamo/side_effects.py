@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections.abc import MutableMapping
 from types import CellType
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Optional
 
 import torch.nn
 
@@ -28,14 +28,10 @@ from .variables.base import (
     AttributeMutationNew,
     is_side_effect_safe,
     ValueMutationExisting,
+    ValueMutationNew,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
-
-
-def _manual_update_dict(dict_from, dict_to):
-    for k, v in dict_from.items():
-        dict_to[k] = v
 
 
 def _manual_dict_setitem(dict_from, dict_to, mro_index):
@@ -55,9 +51,9 @@ class SideEffects:
     applied after an FX graph is run.
     """
 
-    id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[VariableTracker, Dict[str, VariableTracker]]
-    keepalive: List[Any]
+    id_to_variable: dict[int, VariableTracker]
+    store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+    keepalive: list[Any]
 
     def __init__(
         self,
@@ -214,7 +210,7 @@ class SideEffects:
     def is_modified(self, item):
         if item.is_immutable():
             return False
-        if isinstance(item.mutation_type, AttributeMutationNew):
+        if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
@@ -293,7 +289,7 @@ class SideEffects:
         user_cls = cls_variable.value
 
         # Find the variable class
-        variable_cls: Type[
+        variable_cls: type[
             variables.UserDefinedObjectVariable
         ] = variables.UserDefinedObjectVariable
         if issubclass(user_cls, torch.nn.Module):
@@ -365,8 +361,8 @@ class SideEffects:
 
     def prune_dead_object_new(self, tx):
         # Avoid VT cycles from e.g., recursive function.
-        visited: Set[VariableTracker] = set()
-        live_new_objects: Set[VariableTracker] = set()
+        visited: set[VariableTracker] = set()
+        live_new_objects: set[VariableTracker] = set()
 
         def visit(var: VariableTracker):
             if var in visited:

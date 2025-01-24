@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -106,7 +106,7 @@ class AbstractTimeoutTest:
         else:
             yield f"file://{f.name}"
             f.close()
-            yield "tcp://127.0.0.1:%d" % common.find_free_port()
+            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -339,7 +339,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
+        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -972,7 +972,7 @@ class CommonDistributedDataParallelTest:
     @dataclass
     class CustomOutput:
         o1: Optional[torch.Tensor]
-        o2: Dict[str, torch.Tensor]
+        o2: dict[str, torch.Tensor]
 
     class DataclassOutputModule(nn.Module):
         def __init__(self, skip_o1):

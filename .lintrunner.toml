@@ -161,6 +161,7 @@ init_command = [
     'rich==10.9.0',
     'pyyaml==6.0.1',
     'optree==0.13.0',
+    'dataclasses_json==0.6.7'
 ]
 
 [[linter]]
@@ -249,6 +250,7 @@ exclude_patterns = [
     'c10/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
     'c10/util/logging*.h',
+    'c10/metal/*.h',
     'c10/util/hash.h',
     'c10/util/strong_type.h',
     'c10/util/SmallVector.h',
@@ -259,13 +261,13 @@ exclude_patterns = [
     'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
 ]
@@ -1473,7 +1475,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.7.4',  # sync with RUFF
+    'ruff==0.8.4',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1558,7 +1560,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.7.4',  # sync with PYFMT
+    'ruff==0.8.4',  # sync with PYFMT
 ]
 is_formatter = true
 

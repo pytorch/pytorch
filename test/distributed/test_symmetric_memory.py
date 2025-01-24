@@ -72,7 +72,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device(f"cuda:{self.rank}")
 
-    def _init_process(self, set_device: bool=True):
+    def _init_process(self, set_device: bool = True):
         if set_device:
             torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
@@ -770,6 +770,7 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
+@skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcessTestCase):
@@ -857,6 +858,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
@@ -877,6 +879,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])

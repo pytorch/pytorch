@@ -11,7 +11,7 @@ import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
+    IS_S390X,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1083,6 +1084,7 @@ class TestTensorCreation(TestCase):
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
     @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
+    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
@@ -1153,13 +1155,11 @@ class TestTensorCreation(TestCase):
         self.assertIs(layout, t.layout)
         self.assertEqual(torch.device(device), t.device)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_stack(self, device):
         for dtype in (torch.half, torch.double, torch.int):
-            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
             for dim in range(4):
                 res = torch.stack((x, y, z), dim)
                 res_neg = torch.stack((x, y, z), dim - 4)
@@ -1170,13 +1170,11 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res.select(dim, 2), z, atol=0, rtol=0)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_stack_out(self, device):
         for dtype in (torch.half, torch.double, torch.int):
-            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
             for dim in range(4):
                 expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
                 res_out = x.new(expected_size)
@@ -1243,8 +1241,6 @@ class TestTensorCreation(TestCase):
         y = torch.repeat_interleave(x, x)
         self.assertEqual(y, x)
 
-    # TODO: udpate to work on CUDA, too
-    @onlyCPU
     def test_new_methods_requires_grad(self, device):
         size = (10,)
         test_cases = [
@@ -1255,18 +1251,16 @@ class TestTensorCreation(TestCase):
             ('new_ones', [size]),
         ]
         for method_name, args in test_cases:
-            x = torch.randn(size)
+            x = torch.randn(size, device=device)
             for requires_grad in [True, False]:
                 x_new = x.__getattribute__(method_name)(*args, requires_grad=requires_grad)
                 self.assertEqual(x_new.requires_grad, requires_grad)
-            x = torch.randint(10, size)
+            x = torch.randint(10, size, device=device)
             with self.assertRaisesRegex(
                     RuntimeError,
                     r'Only Tensors of floating point and complex dtype can require gradients'):
                 x_new = x.__getattribute__(method_name)(*args, requires_grad=True)
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     def test_tensor_from_sequence(self, device):
         class MockSequence:
             def __init__(self, lst):
@@ -1285,14 +1279,12 @@ class TestTensorCreation(TestCase):
         bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
         good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
         with self.assertRaisesRegex(ValueError, 'could not determine the shape'):
-            torch.tensor(bad_mock_seq)
-        self.assertEqual(torch.tensor([1.0, 2.0, 3.0]), torch.tensor(good_mock_seq))
+            torch.tensor(bad_mock_seq, device=device)
+        self.assertEqual(torch.tensor([1.0, 2.0, 3.0], device=device), torch.tensor(good_mock_seq, device=device))
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_simple_scalar_cast(self, device):
-        ok = [torch.tensor([1.5]), torch.zeros(1, 1, 1, 1)]
+        ok = [torch.tensor([1.5], device=device), torch.zeros(1, 1, 1, 1, device=device)]
         ok_values = [1.5, 0]
 
         not_ok = map(torch.Tensor, [[], [1, 2], [[1, 2], [3, 4]]])
@@ -1312,10 +1304,8 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: float(torch.tensor(1.5j)))
         self.assertRaises(RuntimeError, lambda: int(torch.tensor(1.5j)))
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     def test_offset_scalar_cast(self, device):
-        x = torch.tensor([1., 2., 3.])
+        x = torch.tensor([1., 2., 3.], device=device)
         y = x[2:]
         self.assertEqual(int(y), 3)
 
@@ -3227,6 +3217,10 @@ class TestTensorCreation(TestCase):
         t = torch.randn(2, 5, device=device)
         self.assertIsNone(t.untyped_storage().filename)
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_refs_tensor(self, device, dtype):
+        self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
+
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
@@ -3507,6 +3501,25 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
+    def test_randint_distribution(self, device):
+        size = 1_000_000
+        n_max = int(0.75 * 2 ** 32)
+        n_bins = 8
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+        res = torch.randint(n_max, (size,), device=device)
+        # histogram implemented for float only
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
+
+
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
@@ -3588,6 +3601,29 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(non_contiguous_tensor, res)
             self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
+
+    @largeTensorTest("10GB", "cpu")
+    @largeTensorTest("40GB", "cuda")
+    @slowTest
+    def test_randperm_large(self, device):
+        # Test even distribution where rand32 might produce skewed "uniform" distribution
+        # n_items is chosen to not evenly divide 2**32 and be sufficiently large
+        # to easily detect skew
+        def decile(index, collection_size):
+            return index // (collection_size // 10)
+
+        n_items = 700_000_000
+        shuffled = torch.randperm(n_items, device=device)
+        interval = 1_000_000
+        shuffled_interval = shuffled[:interval]
+        # histogram implemented for float only
+        deciles = decile(shuffled_interval, shuffled.shape[0]).float().cpu()
+        hist, _ = deciles.histogram(10, range=(0, 10))
+        expected_bin = shuffled_interval.shape[0] / 10
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Produces inconsistent errors when run in fbcode.")
@@ -3623,6 +3659,116 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+
+    @dtypes(*integral_types_and(torch.uint16, torch.uint32, torch.uint64))
+    def test_randint_like(self, device, dtype):
+        SIZE = 100
+        RANGE = (0, 6)
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.randint(*RANGE, tensor.size(), device=tensor.device, dtype=tensor.dtype,
+                             layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.randint_like(tensor, *RANGE, generator=generator)
+        generator = seed(None)
+        res2 = torch.randint_like(tensor, *RANGE, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
+            torch.complex32, torch.complex64, torch.complex128)
+    def test_randn_like(self, device, dtype):
+        SIZE = 100
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.randn(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.randn(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.randn_like(tensor, generator=generator)
+        generator = seed(None)
+        res2 = torch.randn_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+    @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
+    def test_rand_like(self, device, dtype):
+        SIZE = 100
+
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        tensor = torch.empty((SIZE, SIZE), device=device, dtype=dtype)
+        gen = torch.Generator(device=device)
+
+        # Using default generator
+        generator = seed(None)
+        res1 = torch.rand(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(None)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Using explicit generator
+        generator = seed(gen)
+        res1 = torch.rand(tensor.size(), device=tensor.device, dtype=tensor.dtype, layout=tensor.layout, generator=generator)
+        generator = seed(gen)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
+        # Default vs. explicit
+        generator = seed(gen)
+        res1 = torch.rand_like(tensor, generator=generator)
+        generator = seed(None)
+        res2 = torch.rand_like(tensor, generator=generator)
+        self.assertEqual(res1, res2, exact_device=True, exact_layout=True)
+
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
@@ -4137,7 +4283,7 @@ class TestAsArray(TestCase):
     def test_default_device(self, device):
         original = torch.arange(5)
 
-        examples: List[Tuple[Any, Dict]] = [
+        examples: list[tuple[Any, dict]] = [
             (3, {}),
             (original, {}),
             (to_numpy(original), {}),

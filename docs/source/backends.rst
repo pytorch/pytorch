@@ -69,6 +69,8 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_blas_library
 
+.. autofunction:: torch.backends.cuda.preferred_rocm_fa_library
+
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
 .. autoclass:: torch.backends.cuda.SDPAParams

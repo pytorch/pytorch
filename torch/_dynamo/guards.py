@@ -21,18 +21,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
@@ -47,10 +36,12 @@ from torch._C._dynamo.guards import (
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
+    install_symbolic_shape_guard,
     profile_guard_manager,
     RootGuardManager,
 )
 from torch._dynamo.source import (
+    IndexedSource,
     is_from_flatten_script_object_source,
     is_from_local_source,
     is_from_optimizer_source,
@@ -85,10 +76,14 @@ from .source import (
     AttrProxySource,
     AttrSource,
     CallFunctionNoArgsSource,
+    CallMethodItemSource,
     ChainedSource,
+    ConstantSource,
     ConstDictKeySource,
     DefaultsSource,
+    DictGetItemSource,
     FlattenScriptObjectSource,
+    FloatTensorSource,
     FSDPNNModuleSource,
     GetItemSource,
     GlobalSource,
@@ -98,7 +93,6 @@ from .source import (
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
-    ODictGetItemSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
@@ -120,9 +114,9 @@ from .types import (  # noqa: F401
     GuardFn,
 )
 from .utils import (
+    builtin_dict_keys,
     common_constant_types,
     dict_keys,
-    dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -409,7 +403,7 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-_CLOSURE_VARS: Optional[Dict[str, object]] = None
+_CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
 def _get_closure_vars():
@@ -421,7 +415,7 @@ def _get_closure_vars():
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
-            "___dict_contains": lambda a, b: a in b,
+            "___dict_contains": lambda a, b: dict.__contains__(b, a),
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
@@ -461,15 +455,15 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: Union[str | List[str]], guard: Guard
-) -> List[str]:
+    code_parts: Union[str | list[str]], guard: Guard
+) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
 
 
 def convert_to_concrete_values(size_or_stride):
-    converted: List[Optional[int]] = []
+    converted: list[Optional[int]] = []
     for dim in size_or_stride:
         if not is_symbolic(dim):
             converted.append(dim)
@@ -495,11 +489,15 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
 
 
 def get_key_index(dct, key):
-    return list(dct.keys()).index(key)
+    # Ensure that we call dict.keys and not value.keys (which can call
+    # overridden keys method). In the C++ guards, we relied on PyDict_Next
+    # to traverse the dictionary, which uses the internal data structure and
+    # does not call the overridden keys method.
+    return list(builtin_dict_keys(dct)).index(key)
 
 
 def get_key_index_source(source, index):
-    return f"list({source}.keys())[{index}]"
+    return f"list(dict.keys({source}))[{index}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -528,7 +526,12 @@ def getitem_on_dict_manager(
         index = get_key_index(base_example_value, source.index)
 
     key_source = get_key_index_source(base_source_name, index)
-    key_example_value = list(base_example_value.keys())[index]
+
+    # Ensure that we call dict.keys and not value.keys (which can call
+    # overridden keys method). In the C++ guards, we relied on PyDict_Next
+    # to traverse the dictionary, which uses the internal data structure and
+    # does not call the overridden keys method.
+    key_example_value = list(builtin_dict_keys(base_example_value))[index]
     if isinstance(key_example_value, (int, str)):
         value_source = f"{base_source_name}[{key_example_value!r}]"
     else:
@@ -562,14 +565,13 @@ def match_on_id_for_tensor(guard):
 # the original guard object that created it for provenance
 @dataclasses.dataclass
 class GuardCodeList:
-    code_list: List[str]
+    code_list: list[str]
     guard: Guard
 
 
 class GuardManagerType(enum.Enum):
     GUARD_MANAGER = 1
     DICT_GUARD_MANAGER = 2
-    DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
 @functools.lru_cache(None)
@@ -584,8 +586,8 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
-        local_scope: Dict[str, object],
-        global_scope: Dict[str, object],
+        local_scope: dict[str, object],
+        global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
@@ -593,7 +595,7 @@ class GuardBuilder(GuardBuilderBase):
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -606,19 +608,19 @@ class GuardBuilder(GuardBuilderBase):
             self.scope[name] = package_module
         self.guard_manager = guard_manager
 
-        self.argnames: List[str] = []
+        self.argnames: list[str] = []
         # Code is python expression strings generated for each guard
-        self.code: List[GuardCodeList] = []
+        self.code: list[GuardCodeList] = []
         # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
-        self.shape_env_code: List[GuardCodeList] = []
+        self.shape_env_code: list[GuardCodeList] = []
 
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
-        self.no_tensor_aliasing_names: List[str] = []
-        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
+        self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_guard_managers: list[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -633,13 +635,13 @@ class GuardBuilder(GuardBuilderBase):
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
-        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
+        self.id_matched_objs: dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[
+        self._cached_guard_managers: dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
-        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
+        self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -651,9 +653,14 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for key in example_value.keys():
+
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        for key in builtin_dict_keys(example_value):
             value = example_value[key]
-            value_source = GetItemSource(guard.originating_source, index=key)
+            value_source = DictGetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
@@ -675,7 +682,11 @@ class GuardBuilder(GuardBuilderBase):
             )
         assert isinstance(dict_mgr, DictGuardManager)
 
-        for idx, key in enumerate(value.keys()):
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        for idx, key in enumerate(builtin_dict_keys(value)):
             key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
                 index=idx,
@@ -752,7 +763,7 @@ class GuardBuilder(GuardBuilderBase):
                 index = get_key_index(base_example_value, key)
 
                 # Install the key manager and add equals match guard
-                key_source = f"list({source_name}.keys())[{index!r}]"
+                key_source = f"list(dict.keys({source_name}))[{index!r}]"
                 mgr.get_key_manager(
                     index=index,
                     source=key_source,
@@ -778,7 +789,7 @@ class GuardBuilder(GuardBuilderBase):
         attr_name = source.member
         mod_dict = base_example_value.__dict__
 
-        all_class_attribute_names: Set[str] = set()
+        all_class_attribute_names: set[str] = set()
         for x in inspect.getmro(base_example_value.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -875,23 +886,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
+            # Fix this if condition
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
                 assert isinstance(example_value, dict)
-                # If keys method is not overriden, we can use PyDict_Next to get key
-                # orderings. Read more in guards.cpp
-                if type(example_value).keys is type({}).keys:
-                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-                else:
-                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
-        return (
-            mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
-            or mgr_enum == GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
-        )
+        return mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
 
     def get_global_guard_manager(self):
         return self.guard_manager.root.globals_dict_manager(
@@ -1040,34 +1044,55 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, DictGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            assert isinstance(base_example_value, (dict, collections.OrderedDict))
+            if isinstance(base_guard_manager, DictGuardManager):
+                assert self.manager_guards_on_keys(base_guard_manager_enum)
+                out = getitem_on_dict_manager(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    guard_manager_enum,
+                )
+            else:
+                if isinstance(source.index, ConstDictKeySource):
+                    raise RuntimeError(
+                        "Expecting clean index here. Likely Dynamo forgot to mark"
+                        " a dict as guard_on_key_order"
+                    )
+                out = base_guard_manager.dict_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+        elif istype(source, TensorPropertySource):
+            out = getattr(
+                base_guard_manager,
+                f"tensor_property_{source.prop.name.lower()}_manager",
+            )(
+                idx=source.idx,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, IndexedSource):
+            assert base_guard_manager  # to make mypy happy
+
+            out = base_guard_manager.indexed_manager(
+                idx=source.idx,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GetItemSource):
             assert base_guard_manager  # to make mypy happy
-            if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource (or maybe use ODictGetItemSource for
-                # dicts) so that GetItemSource is only for non dict objects.
-                if isinstance(base_guard_manager, DictGuardManager):
-                    assert self.manager_guards_on_keys(base_guard_manager_enum)
-                    out = getitem_on_dict_manager(
-                        source,
-                        base_guard_manager,
-                        base_example_value,
-                        example_value,
-                        guard_manager_enum,
-                    )
-                else:
-                    if isinstance(source.index, ConstDictKeySource):
-                        raise RuntimeError(
-                            "Expecting clean index here. Likely Dynamo forgot to mark"
-                            " a dict as guard_on_key_order"
-                        )
-                    out = base_guard_manager.dict_getitem_manager(
-                        key=source.index,
-                        source=source_name,
-                        example_value=example_value,
-                        guard_manager_enum=guard_manager_enum,
-                    )
-            elif isinstance(base_example_value, list) and not source.index_is_slice:
+            assert not isinstance(
+                base_example_value, (dict, collections.OrderedDict)
+            ), "Use DictGetItemSource"
+            if isinstance(base_example_value, list) and not source.index_is_slice:
                 out = base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -1087,24 +1112,6 @@ class GuardBuilder(GuardBuilderBase):
                     index = source.unpack_slice()
                 out = base_guard_manager.getitem_manager(
                     key=index,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-        elif istype(source, ODictGetItemSource):
-            if isinstance(base_guard_manager, DictGuardManager):
-                assert self.manager_guards_on_keys(base_guard_manager_enum)
-                out = getitem_on_dict_manager(
-                    source,
-                    base_guard_manager,
-                    base_example_value,
-                    example_value,
-                    guard_manager_enum,
-                )
-            else:
-                assert base_guard_manager  # to make mypy happy
-                out = base_guard_manager.dict_getitem_manager(
-                    key=source.index,
                     source=source_name,
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
@@ -1183,6 +1190,22 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CallMethodItemSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.item(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, FloatTensorSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: torch._as_tensor_fullprec(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.tuple_iterator_getitem_manager(
@@ -1241,8 +1264,9 @@ class GuardBuilder(GuardBuilderBase):
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
         _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
+        guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
@@ -1261,8 +1285,10 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str) -> Any:
-        return eval(name, self.scope, _get_closure_vars())
+    def get(self, name: str, closure_vars: Optional[dict[str, Any]] = None) -> Any:
+        if closure_vars is None:
+            closure_vars = _get_closure_vars()
+        return eval(name, self.scope, closure_vars)
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -1445,6 +1471,16 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
+    def DISPATCH_KEY_SET_MATCH(self, guard: Guard):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch._C.DispatchKeySet)
+        code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
+
+        self.get_guard_manager(guard).add_dispatch_key_set_guard(
+            val, get_verbose_code_parts(code_parts, guard)
+        )
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
@@ -1517,7 +1553,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
-            np_types: Tuple[Type[Any], ...] = (
+            np_types: tuple[type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -1651,7 +1687,7 @@ class GuardBuilder(GuardBuilderBase):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
-        # This guard is used to check lenght of PySequence objects like list,
+        # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -1737,29 +1773,6 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard),
         )
 
-    def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-
-        self.TYPE_MATCH(guard)
-        code = []
-        any_key_is_id = any(key_is_id(k) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            key_to_id(value),
-            local=is_from_local_source(guard.originating_source),
-        )
-        if any_key_is_id:
-            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
-        else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
-
-        self._set_guard_export_info(guard, code)
-        if self.requires_key_order_guarding(guard.originating_source):
-            self.guard_on_dict_keys_and_order(value, guard)
-        else:
-            self.guard_on_dict_keys_and_ignore_order(value, guard)
-
     def WEAKREF_ALIVE(self, guard):
         code = [f"{self.arg_ref(guard)} is not None"]
 
@@ -1768,13 +1781,24 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
-    def DICT_CONST_KEYS(self, guard):
-        """Constant keys match"""
+    def DICT_KEYS_MATCH(self, guard):
+        """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
 
+        if value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+            self.DICT_VERSION(guard)
+            return
+
+        self.SEQUENCE_LENGTH(guard)
+
         code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        code.append(f"list(dict.keys({ref})) == {list(builtin_dict_keys(value))!r}")
         self._set_guard_export_info(guard, code)
 
         if self.requires_key_order_guarding(guard.originating_source):
@@ -1835,13 +1859,13 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
-            names: Dict[str, Tuple[int, int]] = {}
-            source_pairs: List[Tuple[Source, Source]] = []
-            derived_equalities: List[  # type: ignore[type-arg]
-                Tuple[Source, Union[Source, Symbol], Callable]
+            names: dict[str, tuple[int, int]] = {}
+            source_pairs: list[tuple[Source, Source]] = []
+            derived_equalities: list[  # type: ignore[type-arg]
+                tuple[Source, Union[Source, Symbol], Callable]
             ] = []
-            phantom_symbols: Dict[str, Symbol] = {}
-            relaxed_sources: Set[Source] = set()
+            phantom_symbols: dict[str, Symbol] = {}
+            relaxed_sources: set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -1865,34 +1889,139 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             equalities_inputs = None
-        code_parts, verbose_code_parts = output_graph.shape_env.produce_guards_verbose(
-            [a.fake for a in fs],
-            [a.source for a in fs],
-            input_contexts=input_contexts,
-            equalities_inputs=equalities_inputs,
-            source_ref=self.source_ref,
-            # Export keeps static.
-            ignore_static=(not self.check_fn_manager.output_graph.export),
-        )
+
+        def _get_code_parts(langs):
+            return output_graph.shape_env.produce_guards_verbose(
+                [a.fake for a in fs],
+                [a.source for a in fs],
+                input_contexts=input_contexts,
+                equalities_inputs=equalities_inputs,
+                source_ref=self.source_ref,
+                # Export keeps static.
+                ignore_static=(not self.check_fn_manager.output_graph.export),
+                langs=langs,
+            )
+
+        if config.enable_cpp_symbolic_shape_guards:
+            # For exporting we need the python code parts
+            python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
+                ("python", "verbose_python", "cpp")
+            )
+        else:
+            python_code_parts, verbose_code_parts = _get_code_parts(
+                ("python", "verbose_python")
+            )
+
         # When exporting, we may work with the shape constraints some more in
         # postprocessing, so don't freeze yet
         if not self.check_fn_manager.output_graph.export:
             output_graph.shape_env.freeze()
-
-        for code in code_parts:
+        for code in python_code_parts.exprs:
             self._set_guard_export_info(guard, [code])
 
         # Make ShapeEnv guards available for testing.
         if compile_context := CompileContext.try_get():
-            compile_context.shape_env_guards.extend(verbose_code_parts)
+            compile_context.shape_env_guards.extend(verbose_code_parts.exprs)
 
-        # Install all the symbolic guards in one lambda guard. These are run
+        if config.enable_cpp_symbolic_shape_guards:
+            import ctypes
+
+            from torch._inductor.codecache import CppCodeCache
+
+            assert cpp_code_parts  # type: ignore[possibly-undefined]
+            code_parts, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
+
+            if not code_parts:
+                return
+
+            int_source_to_symbol = []
+            float_source_to_symbol = []
+
+            python_fallback = False
+            for source, symbol in source_to_symbol.items():
+                if isinstance(source, ConstantSource):
+                    python_fallback = True
+                else:
+                    example_value = self.get(
+                        source.name(),
+                        closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+                    )
+                    if isinstance(example_value, int):
+                        int_source_to_symbol.append((source, symbol))
+                    elif isinstance(example_value, float):
+                        float_source_to_symbol.append((source, symbol))
+                    else:
+                        # SymInts/SymFloats go through python guard as we only support
+                        # int64_t/double in C++ guards for now.
+                        python_fallback = True
+
+            if not python_fallback:
+                source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
+                try:
+                    guard_managers = [
+                        self.get_guard_manager_from_source(IndexedSource(source, i))
+                        for i, source in enumerate(source_to_symbol)
+                    ]
+
+                    int_symbols_str = ", ".join(
+                        f"{symbol} = int_values[{i}]"
+                        for i, (_, symbol) in enumerate(int_source_to_symbol)
+                    )
+                    float_symbols_str = ", ".join(
+                        f"{symbol} = float_values[{i}]"
+                        for i, (_, symbol) in enumerate(float_source_to_symbol)
+                    )
+
+                    if int_symbols_str:
+                        int_symbols_str = f"int64_t {int_symbols_str};"
+                    if float_symbols_str:
+                        float_symbols_str = f"double {float_symbols_str};"
+
+                    func_str = textwrap.dedent(
+                        f"""
+                    #include <cstdint>
+                    #include <cmath>
+                    #include <c10/util/generic_math.h>
+
+                    extern "C" int8_t guard(int64_t *int_values, double *float_values) {{
+                      {int_symbols_str}
+                      {float_symbols_str}
+                      return ({") && (".join(code_parts)});
+                    }}
+                    """
+                    )
+                    guards_log.debug(
+                        "C++ shape guard function: %s %s",
+                        func_str,
+                        verbose_code_parts.exprs,
+                    )
+                    clib = CppCodeCache.load(func_str)
+                    cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
+                    assert cguard
+                except torch._inductor.exc.InvalidCxxCompiler:
+                    # No valid C++ compiler to compile the shape guard
+                    pass
+                else:
+                    install_symbolic_shape_guard(
+                        guard_managers,
+                        len(int_source_to_symbol),
+                        len(float_source_to_symbol),
+                        cguard,
+                        clib,
+                        verbose_code_parts.exprs,
+                    )
+                    return
+
+        # Install all the symbolic guards in one python lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        if code_parts:
+        if python_code_parts.exprs:
             self.add_python_lambda_leaf_guard_to_root(
-                code_parts,
-                verbose_code_parts,
+                python_code_parts.exprs,
+                verbose_code_parts.exprs,
                 closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
             )
 
@@ -1938,7 +2067,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
-            code: List[str] = []
+            code: list[str] = []
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 terms = [
@@ -2127,8 +2256,8 @@ class PyExprCSEPass:
 
     @dataclasses.dataclass
     class Config:
-        expr_count: Dict[str, int]
-        expr_to_name: Dict[str, str]
+        expr_count: dict[str, int]
+        expr_to_name: dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
         def __init__(self, config: PyExprCSEPass.Config) -> None:
@@ -2148,7 +2277,7 @@ class PyExprCSEPass:
             super().__init__()
             self._config = config
             self._gen_name = gen_name
-            self.preface: List[str] = []
+            self.preface: list[str] = []
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
@@ -2187,7 +2316,7 @@ class PyExprCSEPass:
         self._counter += 1
         return name
 
-    def count(self, exprs: List[str]) -> None:
+    def count(self, exprs: list[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
             try:
@@ -2196,7 +2325,7 @@ class PyExprCSEPass:
                 log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
                 raise
 
-    def replace(self, expr: str) -> Tuple[List[str], str]:
+    def replace(self, expr: str) -> tuple[list[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
         new_node = replacer.visit(ast.parse(expr))
         return replacer.preface, _ast_unparse(new_node)
@@ -2239,7 +2368,7 @@ class CheckFunctionManager:
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
-        self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self._weakrefs: dict[int, ReferenceType[object]] = {}
 
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
@@ -2343,11 +2472,14 @@ class CheckFunctionManager:
                     self.guard_manager, output_graph.local_scope
                 )
 
-            if guards_log.isEnabledFor(logging.DEBUG):
-                latency = profile_guard_manager(
-                    self.guard_manager.root, output_graph.local_scope
-                )
-                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+            # NB for developers: n_iters is chosen to be 50 to achieve
+            # statistical significance.  If you are working on a guard
+            # optimization, it might be a good idea to increase this number for
+            # more stabiilty during development.
+            latency = profile_guard_manager(
+                self.guard_manager.root, output_graph.local_scope, 50
+            )
+            guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2448,7 +2580,7 @@ class CheckFunctionManager:
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
-        aotautograd_guards: List[GuardEnvExpr] = (
+        aotautograd_guards: list[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
             if self.output_graph
             else []
@@ -2577,13 +2709,13 @@ class CheckFunctionManager:
         return None
 
 
-def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
+def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     csepass = PyExprCSEPass()
     csepass.count(code_parts)
 
-    def replace(expr: str) -> Tuple[List[str], str]:
+    def replace(expr: str) -> tuple[list[str], str]:
         return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
@@ -2659,7 +2791,7 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     """
@@ -2669,11 +2801,11 @@ def get_guard_fail_reason_helper(
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
-    verbose_code_parts: List[str] = []
+    verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
@@ -2727,7 +2859,7 @@ def get_guard_fail_reason_helper(
 def get_guard_fail_reason(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     compile_id: CompileId,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -2750,7 +2882,7 @@ def get_guard_fail_reason(
 
 def get_and_maybe_log_recompilation_reason(
     cache_entry, frame: DynamoFrameType
-) -> List[str]:
+) -> list[str]:
     """
     Return the list of guard failure reasons using cache_entry.
     Logs the recompilation reason if `recompiles` logging is enabled.
@@ -2836,7 +2968,7 @@ def update_diff_guard_managers_for_existing_cache_entries(cache_entry):
 def guard_error_hook(
     guard_manager: GuardFn,
     code: types.CodeType,
-    f_locals: Dict[str, object],
+    f_locals: dict[str, object],
     index: int,
     last: bool,
 ):

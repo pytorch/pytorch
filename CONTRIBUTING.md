@@ -78,7 +78,9 @@ git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
-make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+make setup-env
+# Or run `make setup-env-cuda` for pre-built CUDA binaries
+# Or run `make setup-env-rocm` for pre-built ROCm binaries
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
@@ -190,6 +192,13 @@ To install the nightly binaries built with CUDA, you can pass in the flag `--cud
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
+
+To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --rocm
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 

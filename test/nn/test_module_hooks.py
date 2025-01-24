@@ -9,7 +9,7 @@ from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import partial
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -55,11 +55,11 @@ class ToyModel(nn.Module):
 
 def forward_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    inp: Tuple[torch.Tensor],
+    inp: tuple[torch.Tensor],
     out: torch.Tensor,
 ) -> None:
     fired_hooks.append(hook_id)
@@ -69,11 +69,11 @@ def forward_hook(
 
 def forward_pre_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    inp: Tuple[torch.Tensor],
+    inp: tuple[torch.Tensor],
 ) -> None:
     fired_hooks.append(hook_id)
     self.assertEqual(id(module), id(expected_module))
@@ -82,12 +82,12 @@ def forward_pre_hook(
 
 def full_backward_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    grad_input: Tuple[torch.Tensor],
-    grad_output: Tuple[torch.Tensor],
+    grad_input: tuple[torch.Tensor],
+    grad_output: tuple[torch.Tensor],
 ) -> None:
     fired_hooks.append(hook_id)
     self.assertEqual(id(module), id(expected_module))
@@ -97,11 +97,11 @@ def full_backward_hook(
 
 def full_backward_pre_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    grad_input: Tuple[torch.Tensor],
+    grad_input: tuple[torch.Tensor],
 ) -> None:
     fired_hooks.append(hook_id)
     self.assertEqual(id(module), id(expected_module))
@@ -122,8 +122,8 @@ class KwargModel(nn.Module):
     def internal_forward_hook(
         self,
         module: nn.Module,
-        args: Tuple[torch.Tensor],
-        kwargs: Dict[str, Any],
+        args: tuple[torch.Tensor],
+        kwargs: dict[str, Any],
         out: torch.Tensor,
     ):
         return out + kwargs["bias"]
@@ -142,13 +142,13 @@ class FailsInForwardModel(nn.Module):
 
 def kwarg_forward_pre_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    args: Tuple[torch.Tensor],
-    kwargs: Dict[str, Any],
-) -> Tuple[Any, Any]:
+    args: tuple[torch.Tensor],
+    kwargs: dict[str, Any],
+) -> tuple[Any, Any]:
     fired_hooks.append(hook_id)
     self.assertEqual(id(module), id(expected_module))
     self.assertEqual(len(args), 1)
@@ -158,12 +158,12 @@ def kwarg_forward_pre_hook(
 
 def kwarg_forward_hook(
     self: TestCase,
-    fired_hooks: List[int],
+    fired_hooks: list[int],
     expected_module: nn.Module,
     hook_id: int,
     module: nn.Module,
-    args: Tuple[torch.Tensor],
-    kwargs: Dict[str, Any],
+    args: tuple[torch.Tensor],
+    kwargs: dict[str, Any],
     out: torch.Tensor,
 ) -> Any:
     fired_hooks.append(hook_id)
@@ -188,7 +188,7 @@ class DummyContextManager:
 class TestModuleHooks(TestCase):
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(forward_hook, self, fired_hooks, model.net1.seq2)
@@ -210,7 +210,7 @@ class TestModuleHooks(TestCase):
 
     @parametrize_test("named_tuple", (True, False))
     def test_forward_pre_hooks(self, named_tuple):
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(forward_pre_hook, self, fired_hooks, model.net2.seq1)
@@ -232,7 +232,7 @@ class TestModuleHooks(TestCase):
 
     @parametrize_test("named_tuple", (True, False))
     def test_full_backward_hooks(self, named_tuple):
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(full_backward_hook, self, fired_hooks, model.net1)
@@ -254,7 +254,7 @@ class TestModuleHooks(TestCase):
 
     @parametrize_test("named_tuple", (True, False))
     def test_full_backward_pre_hooks(self, named_tuple):
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(full_backward_pre_hook, self, fired_hooks, model.net1)
@@ -294,7 +294,7 @@ class TestModuleHooks(TestCase):
 
     @parametrize_test("named_tuple", (True, False))
     def test_mixed_hooks(self, named_tuple):
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         model.register_forward_pre_hook(
@@ -319,7 +319,7 @@ class TestModuleHooks(TestCase):
 
     def test_kwarg_hooks(self):
         # 1. test forward pre hook
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         x: torch.Tensor = torch.ones(10, 10)
         bias: torch.Tensor = torch.ones(10, 10)
         model = KwargModel()
@@ -336,7 +336,7 @@ class TestModuleHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
         # 2. test forward pre and forward hooks
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         x: torch.Tensor = torch.ones(10, 10)
         bias: torch.Tensor = torch.ones(10, 10)
         model = KwargModel()
@@ -372,7 +372,7 @@ class TestModuleHooks(TestCase):
 
     def test_remove_kwarg_hooks(self):
         # test forward pre and forward hooks
-        fired_hooks: List[int] = []
+        fired_hooks: list[int] = []
         x: torch.Tensor = torch.ones(10, 10)
         bias: torch.Tensor = torch.ones(10, 10)
         model = KwargModel()
@@ -1217,8 +1217,8 @@ class TestModuleGlobalHooks(TestCase):
     def test_module_global_hooks_with_kwargs(self):
         def kwarg_global_forward_hook(
             module: nn.Module,
-            args: Tuple[torch.Tensor],
-            kwargs: Dict[str, Any],
+            args: tuple[torch.Tensor],
+            kwargs: dict[str, Any],
             out: torch.Tensor,
         ) -> Any:
             out = out + kwargs["bias"]
