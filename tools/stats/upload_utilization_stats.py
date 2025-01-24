@@ -227,11 +227,14 @@ class UploadUtilizationData:
             return
 
         version = f"v_{db_metadata.data_model_version}"
+        metadata_collection = "util_metadata"
+        ts_collection = "util_timeseries"
         if self.debug_mode:
-            version= f"debug_util_v{db_metadata.data_model_version}"
+            metadata_collection = f"debug_{metadata_collection}"
+            ts_collection = f"debug_{ts_collection}"
 
         self._upload_utilization_data_to_s3(
-            collection="util_metadata",
+            collection=metadata_collection,
             version=version,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
@@ -241,7 +244,7 @@ class UploadUtilizationData:
         )
 
         self._upload_utilization_data_to_s3(
-            collection="util_timeseries",
+            collection=ts_collection,
             version=version,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
