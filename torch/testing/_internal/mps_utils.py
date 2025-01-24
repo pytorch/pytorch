@@ -889,7 +889,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "ones_like": MPSSkipInfo(NONCONTIGUOUS),
     "ormqr": MPSSkipInfo(NONCONTIGUOUS),
     "pca_lowrank": MPSSkipInfo(UNIMPLEMENTED),
-    "polygamma": [ 
+    "polygamma": [
         MPSSkipInfo(
             TEST_OUT,
             variant="polygamma_n_0",
