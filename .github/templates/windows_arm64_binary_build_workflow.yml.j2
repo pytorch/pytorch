@@ -193,6 +193,10 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Prepare environment - Bootstrap tests
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/bootstrat_tests.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
