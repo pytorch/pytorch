@@ -1047,6 +1047,23 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
+    @serialTest()
+    def test_serialization_4gb_file(self):
+        '''
+        This is a specially engineered testcase that would fail if the data_descriptor size
+        had been incorrectly set as data_descriptor_size32 when it should be data_descriptor_size64
+        '''
+        # Run GC to clear up as much memory as possible before running this test
+        gc.collect()
+        big_model = torch.nn.ModuleList([torch.nn.Linear(1, int(1024 * 1024 * 1024) + 12, bias=False),
+                                         torch.nn.Linear(1, 1, bias=False).to(torch.float8_e4m3fn),
+                                         torch.nn.Linear(1, 2, bias=False).to(torch.float8_e4m3fn)])
+
+        with BytesIOContext() as f:
+            torch.save(big_model.state_dict(), f)
+            f.seek(0)
+            torch.load(f)
+
     @parametrize('weights_only', (True, False))
     def test_pathlike_serialization(self, weights_only):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)

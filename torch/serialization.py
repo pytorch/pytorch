@@ -1899,12 +1899,13 @@ def _load(
 
     def _get_offset(key, name, numel):
         """
-        Get the offset of the storage of size numel whose zipfile header starts
-        at current_offset and record is named name.
+        Return the offset of the storage associated with key with record name `name` and size numel.
+        It is expected that the zipfile header of this storage starts at current_offset.
 
         After reading a storage of size numel that starts at storage_offset
-        if it is the first time that storage was read, update current_offset to the start of the
-        next zipfile header by incrementing it by numel and the data descriptor size.
+        if it is the first time that storage was read, update nonlocal variable
+        current_offset to the start of the next zipfile header by incrementing
+        it by numel and the data descriptor size.
         """
         nonlocal current_offset, offsets
         if name in offsets:
@@ -1920,8 +1921,8 @@ def _load(
                 current_offset, name, numel
             )
 
-        # This is only required for storages that have typed_storage._data_ptr() == 0
-        # after being read. Otherwise persistent_load will never "re-call" load_tensor
+        # This is only actually needed for storages that have typed_storage._data_ptr() == 0
+        # after being read. Otherwise persistent_load would never "re-call" load_tensor
         # for a given key.
         offsets[name] = storage_offset
 
@@ -1944,6 +1945,11 @@ def _load(
         elif overall_storage is not None:
             if has_version and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)
+                if run_debug_asserts:
+                    assert (
+                        storage_offset == zip_file.get_record_offset(name)
+                    ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
+
             else:
                 storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset : storage_offset + numel]
@@ -1952,9 +1958,9 @@ def _load(
                 # This is debug code that we use to test the validity of
                 # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
                 storage_offset = _get_offset(key, name, numel)
-                assert storage_offset == zip_file.get_record_offset(
-                    name
-                ), f"{name}, {storage_offset}, {zip_file.get_record_offset(name)}"
+                assert (
+                    storage_offset == zip_file.get_record_offset(name)
+                ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
                 ._typed_storage()
