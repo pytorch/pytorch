@@ -231,7 +231,7 @@ class UploadUtilizationData:
             version= f"debug_util_v{db_metadata.data_model_version}"
 
         self._upload_utilization_data_to_s3(
-            collection="util_matadata",
+            collection="util_metadata",
             version=version,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
