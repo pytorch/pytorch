@@ -1385,6 +1385,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
+        "torch._dyn_quant_matmul_4bit",
+        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -3275,7 +3277,6 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
-    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
