@@ -52,7 +52,7 @@ from .codegen.triton import (
     TritonKernel,
     TritonScheduling,
 )
-from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
@@ -416,8 +416,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -445,7 +445,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            return f"{', '.join(arg_defs)}"
+            return f"{', '.join(x.full_name() for x in arg_defs)}"
 
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
@@ -515,7 +515,9 @@ class TritonTemplateKernel(TritonKernel):
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
-            code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
+            code.writeline(
+                f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
+            )
             with code.indent():
                 code.splice(self.defines)
                 code.splice(renames.getvalue())
