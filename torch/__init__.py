@@ -325,8 +325,8 @@ def _load_global_deps() -> None:
             if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
                 return
             # If all abovementioned conditions are met, preload nvjitlink and nvrtc
-            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
 
