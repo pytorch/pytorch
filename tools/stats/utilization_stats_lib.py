@@ -65,8 +65,6 @@ class OssCiSegmentV1(DataClassJsonMixin):
 
 # the db schema related to this is:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
-
-
 @dataclass
 class OssCiUtilizationMetadataV1:
     created_at: str
