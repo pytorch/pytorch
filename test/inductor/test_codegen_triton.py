@@ -45,10 +45,10 @@ class TestCodegenTriton(InductorTestCase):
         s1 = sympy.Symbol("s1", positive=True, integer=True)
 
         def _check_divisibility(expected_divisible_indices, config):
-            if (
-                get_triton_attrs_descriptor_version()
-                == TritonAttrsDescriptorVersion.V1_COMPILER
-            ):
+            if get_triton_attrs_descriptor_version() in {
+                TritonAttrsDescriptorVersion.V1_COMPILER,
+                TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            }:
                 self.assertEqual(expected_divisible_indices, config.divisible_by_16)
             elif get_triton_attrs_descriptor_version() in {
                 TritonAttrsDescriptorVersion.V2_BACKENDS,
