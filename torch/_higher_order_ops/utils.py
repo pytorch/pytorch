@@ -457,7 +457,7 @@ def save_tensors_and_symints_for_backward(ctx, args):
     ), args
     partitioned_args: list[Any] = [[], []]
     pos = []
-    for i, arg in enumerate(args):
+    for arg in args:
         idx = 0 if isinstance(arg, torch.Tensor) else 1
         partitioned_args[idx].append(arg)
         pos.append(idx)
