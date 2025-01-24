@@ -91,16 +91,36 @@ def _log_modified_bessel_fn(x, order=0):
 @torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
-    while not done.all():
-        u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
-        u1, u2, u3 = u.unbind()
-        z = torch.cos(math.pi * u1)
-        f = (1 + proposal_r * z) / (proposal_r + z)
-        c = concentration * (proposal_r - f)
-        accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
-        if accept.any():
+    if not torch.compiler.is_compiling():
+        while not done.all():
+            u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
+            u1, u2, u3 = u.unbind()
+            z = torch.cos(math.pi * u1)
+            f = (1 + proposal_r * z) / (proposal_r + z)
+            c = concentration * (proposal_r - f)
+            accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
+            if accept.any():
+                x = torch.where(accept, (u3 - 0.5).sign() * f.acos(), x)
+                done = done | accept
+    else:
+
+        def cond_fn(loc, concentration, proposal_r, x, done):
+            return (~done).any()
+
+        def func(loc, concentration, proposal_r, x, done):
+            u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
+            u1, u2, u3 = u.unbind()
+            z = torch.cos(math.pi * u1)
+            f = (1 + proposal_r * z) / (proposal_r + z)
+            c = concentration * (proposal_r - f)
+            accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
             x = torch.where(accept, (u3 - 0.5).sign() * f.acos(), x)
             done = done | accept
+            return loc, concentration, proposal_r, x, done
+
+        loc, concentration, proposal_r, x, done = torch.while_loop(
+            cond_fn, func, (loc, concentration, proposal_r, x, done)
+        )
     return (x + math.pi + loc) % (2 * math.pi) - math.pi
 
 
@@ -145,11 +165,11 @@ class VonMises(Distribution):
 
     @lazy_property
     def _loc(self) -> Tensor:
-        return self.loc.to(torch.double)
+        return self.loc.double()
 
     @lazy_property
     def _concentration(self) -> Tensor:
-        return self.concentration.to(torch.double)
+        return self.concentration.double()
 
     @lazy_property
     def _proposal_r(self) -> Tensor:

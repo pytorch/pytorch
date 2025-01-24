@@ -105,7 +105,7 @@ class Wishart(ExponentialFamily):
             self.df = df.expand(batch_shape)
         event_shape = param.shape[-2:]
 
-        if self.df.le(event_shape[-1] - 1).any():
+        if self._validate_args and self.df.le(event_shape[-1] - 1).any():
             raise ValueError(
                 f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
             )
@@ -118,7 +118,7 @@ class Wishart(ExponentialFamily):
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
         self.arg_constraints["df"] = constraints.greater_than(event_shape[-1] - 1)
-        if self.df.lt(event_shape[-1]).any():
+        if self._validate_args and self.df.lt(event_shape[-1]).any():
             warnings.warn(
                 "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."
             )
@@ -255,7 +255,7 @@ class Wishart(ExponentialFamily):
         sample = self._bartlett_sampling(sample_shape)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
-        is_singular = self.support.check(sample)
+        is_singular = ~self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
 
@@ -269,22 +269,46 @@ class Wishart(ExponentialFamily):
                 if self._batch_shape:
                     is_singular = is_singular.amax(self._batch_dims)
 
-        else:
+        elif torch.compiler.is_compiling():
             # More optimized version with data-dependent control flow.
-            if is_singular.any():
-                warnings.warn("Singular sample detected.")
+            def _expand_as_right(tensor, dest):
+                while tensor.ndim < dest.ndim:
+                    tensor = tensor.unsqueeze(-1)
+                return tensor.expand_as(dest)
 
-                for _ in range(max_try_correction):
-                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
-                    sample[is_singular] = sample_new
+            def body_fn(sample):
+                is_singular = ~self.support.check(sample)
+                sample_new = self._bartlett_sampling(sample_shape)
+                sample = torch.where(
+                    _expand_as_right(is_singular, sample), sample_new, sample
+                )
 
-                    is_singular_new = ~self.support.check(sample_new)
-                    if self._batch_shape:
-                        is_singular_new = is_singular_new.amax(self._batch_dims)
-                    is_singular[is_singular.clone()] = is_singular_new
+                return sample
 
-                    if not is_singular.any():
-                        break
+            def cond_fn(sample):
+                return ~self.support.check(sample).any()
+
+            sample = torch.while_loop(
+                cond_fn=cond_fn,
+                body_fn=body_fn,
+                carried_inputs=(sample,),
+            )
+        elif is_singular.any():
+            warnings.warn("Singular sample detected.")
+
+            for _ in range(max_try_correction):
+                sample_new = self._bartlett_sampling((is_singular.sum(),))
+                sample[is_singular] = sample_new
+
+                is_singular_new = ~self.support.check(sample_new)
+                if self._batch_shape:
+                    is_singular_new = is_singular_new.amax(self._batch_dims)
+                is_singular = torch.masked_scatter(
+                    is_singular, is_singular, is_singular_new
+                )
+
+                if not is_singular.any():
+                    break
 
         return sample
 

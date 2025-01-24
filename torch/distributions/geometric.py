@@ -121,7 +121,8 @@ class Geometric(Distribution):
             self._validate_sample(value)
         value, probs = broadcast_all(value, self.probs)
         probs = probs.clone(memory_format=torch.contiguous_format)
-        probs[(probs == 1) & (value == 0)] = 0
+        probs_nz_idx = (probs != 1) | (value != 0)
+        probs = torch.where(probs_nz_idx, probs, 0)
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
