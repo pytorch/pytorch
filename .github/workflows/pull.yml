@@ -616,6 +616,7 @@ jobs:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm75
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-xpu-2025_0-py3_9-build:
     name: linux-jammy-xpu-2025.0-py3.9
