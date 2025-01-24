@@ -424,9 +424,6 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
-        permissions:
-          id-token: write
-          contents: read
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
