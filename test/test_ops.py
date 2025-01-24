@@ -2780,8 +2780,10 @@ class TestFakeTensor(TestCase):
                 with torch._subclasses.CrossRefFakeMode(
                     ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
                 ):
-                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(
-                        False
+                    with (
+                        warnings.catch_warnings(),
+                        context(),
+                        torch.autograd.set_multithreading_enabled(False),
                     ):
                         composite_compliance.compute_expected_grads(
                             op.get_op(),
