@@ -213,49 +213,8 @@ class UploadUtilizationData:
         self.debug_mode = debug
         self.dry_run = dry_run
 
-    def _process_test_log(
-        self, workflow_run_id: int, job_id: int, workflow_run_attempt: int
-    ) -> tuple[
-        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
-    ]:
-        artifact_paths = download_s3_artifacts(
-            "logs-test", workflow_run_id, workflow_run_attempt, job_id
-        )
-        if len(artifact_paths) == 0:
-            print(
-                f"Failed to download artifacts for workflow {workflow_run_id} and job {job_id}"
-            )
-            return None, [], []
-        elif len(artifact_paths) > 1:
-            print(
-                f"Found more than one artifact for workflow {workflow_run_id} and job {job_id}, {artifact_paths}"
-            )
-            return None, [], []
-
-        p = artifact_paths[0]
-        test_log_content = unzip_file(p, USAGE_LOG_FILENAME)
-        metadata, records, error_records = convert_to_log_models(test_log_content)
-        if metadata is None:
-            return None, [], []
-
-        print(f"Converted Log Model: UtilizationMetadata:\n {metadata}")
-        return metadata, records, error_records
-
-    def _upload_utilization_data_to_s3(
-        self,
-        collection: str,
-        workflow_run_id: int,
-        workflow_run_attempt: int,
-        job_id: int,
-        name: str,
-        docs: list[dict[str, Any]],
-    ) -> None:
-        bucket_name = UTILIZATION_BUCKET
-        key = f"{collection}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{name}"
-        upload_to_s3(bucket_name, key, docs)
-
     def start(self) -> None:
-        metadata, valid_records, _ = self._process_test_log(
+        metadata, valid_records, _ = self.get_log_data(
             self.workflow_run_id, self.job_id, self.workflow_run_attempt
         )
 
@@ -313,6 +272,104 @@ class UploadUtilizationData:
             [asdict(record) for record in db_records],
         )
 
+    def _upload_utilization_data_to_s3(
+        self,
+        collection: str,
+        workflow_run_id: int,
+        workflow_run_attempt: int,
+        job_id: int,
+        name: str,
+        docs: list[dict[str, Any]],
+    ) -> None:
+        bucket_name = UTILIZATION_BUCKET
+        key = f"{collection}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{name}"
+        upload_to_s3(bucket_name, key, docs)
+
+    def get_log_data(
+        self, workflow_run_id: int, job_id: int, workflow_run_attempt: int
+    ) -> tuple[
+        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+    ]:
+        artifact_paths = download_s3_artifacts(
+            "logs-test", workflow_run_id, workflow_run_attempt, job_id
+        )
+        if len(artifact_paths) == 0:
+            print(
+                f"Failed to download artifacts for workflow {workflow_run_id} and job {job_id}"
+            )
+            return None, [], []
+        elif len(artifact_paths) > 1:
+            print(
+                f"Found more than one artifact for workflow {workflow_run_id} and job {job_id}, {artifact_paths}"
+            )
+            return None, [], []
+
+        p = artifact_paths[0]
+        test_log_content = unzip_file(p, USAGE_LOG_FILENAME)
+
+        metadata, records, error_records = self.convert_to_log_models(test_log_content)
+        if metadata is None:
+            return None, [], []
+
+        print(f"Converted Log Model: UtilizationMetadata:\n {metadata}")
+        return metadata, records, error_records
+
+    def _process_raw_record(
+        self, line: str
+    ) -> tuple[Optional[UtilizationRecord], bool]:
+        try:
+            record = UtilizationRecord.from_json(line)
+            if record.error:
+                return record, False
+            return record, True
+        except Exception as e:
+            print(f"Failed to parse JSON line: {e}")
+            return None, False
+
+    def _process_utilization_records(
+        self,
+        lines: list[str],
+    ) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
+        results = [self._process_raw_record(line) for line in lines[1:]]
+        valid_records = [
+            record for record, valid in results if valid and record is not None
+        ]
+        invalid_records = [
+            record for record, valid in results if not valid and record is not None
+        ]
+        return valid_records, invalid_records
+
+    def convert_to_log_models(
+        self,
+        content: str,
+    ) -> tuple[
+        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+    ]:
+        if not content:
+            return None, [], []
+        lines = content.splitlines()
+        metadata = None
+        if len(lines) < 2:
+            print("Expected at least two records from log file")
+            return None, [], []
+        print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
+        print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
+
+        try:
+            metadata = UtilizationMetadata.from_json(lines[0])
+        except Exception as e:
+            print(f":: warning Failed to parse metadata: {e} for data: {lines[0]}")
+            return None, [], []
+
+        if metadata.data_model_version != getDataModelVersion():
+            print(
+                f":: warning Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}"
+            )
+            return None, [], []
+
+        result_logs, error_logs = self._process_utilization_records(lines)
+        return metadata, result_logs, error_logs
+
 
 def unzip_file(path: Path, file_name: str) -> str:
     try:
@@ -328,61 +385,6 @@ def get_datetime_string(timestamp: float) -> str:
     dt = datetime.fromtimestamp(timestamp, timezone.utc)
     dt_str = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
     return dt_str
-
-
-def process_line(line: str) -> tuple[Optional[UtilizationRecord], bool]:
-    try:
-        record = UtilizationRecord.from_json(line)
-        if record.error:
-            return record, False
-        return record, True
-    except Exception as e:
-        print(f"Failed to parse JSON line: {e}")
-        return None, False
-
-
-def process_utilization_records(
-    lines: list[str],
-) -> tuple[list[UtilizationRecord], list[UtilizationRecord]]:
-    results = [process_line(line) for line in lines[1:]]
-    valid_records = [
-        record for record, valid in results if valid and record is not None
-    ]
-    invalid_records = [
-        record for record, valid in results if not valid and record is not None
-    ]
-    return valid_records, invalid_records
-
-
-def convert_to_log_models(
-    content: str,
-) -> tuple[
-    Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
-]:
-    if not content:
-        return None, [], []
-    lines = content.splitlines()
-    metadata = None
-    if len(lines) < 2:
-        print("Expected at least two records from log file")
-        return None, [], []
-    print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
-    print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
-
-    try:
-        metadata = UtilizationMetadata.from_json(lines[0])
-    except Exception as e:
-        print(f"Failed to parse metadata: {e} for data: {lines[0]}")
-        return None, [], []
-
-    if metadata.data_model_version != getDataModelVersion():
-        print(
-            f":: warning Data model version mismatch: {metadata.data_model_version} != {getDataModelVersion()}"
-        )
-        return None, [], []
-
-    result_logs, error_logs = process_utilization_records(lines)
-    return metadata, result_logs, error_logs
 
 
 def parse_args() -> argparse.Namespace:
