@@ -12,54 +12,6 @@
 
 #if defined(BUILD_ASYNC_MM_KERNEL)
 
-// TODO(yifu): remove this once cutlass 3.5.1 upgrade is completed
-#if CUTLASS_VERSION != 351
-// We are going to override the cuTensorMapEncodeTiled driver api with our lazy
-// loader
-static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
-    CUtensorMap* tensorMap,
-    CUtensorMapDataType tensorDataType,
-    cuuint32_t tensorRank,
-    void* globalAddress,
-    const cuuint64_t* globalDim,
-    const cuuint64_t* globalStrides,
-    const cuuint32_t* boxDim,
-    const cuuint32_t* elementStrides,
-    CUtensorMapInterleave interleave,
-    CUtensorMapSwizzle swizzle,
-    CUtensorMapL2promotion l2Promotion,
-    CUtensorMapFloatOOBfill oobFill) {
-  return at::globalContext().getNVRTC().cuTensorMapEncodeTiled(
-      tensorMap,
-      tensorDataType,
-      tensorRank,
-      globalAddress,
-      globalDim,
-      globalStrides,
-      boxDim,
-      elementStrides,
-      interleave,
-      swizzle,
-      l2Promotion,
-      oobFill);
-}
-
-// clang-format off
-#include <cutlass/core_io.h>
-#include <cutlass/cutlass.h>
-#include <cutlass/gemm/device/gemm.h>
-#include <cutlass/half.h>
-#include <cutlass/numeric_types.h>
-#include <cutlass/trace.h>
-#include <cutlass/util/host_tensor.h>
-
-// Rename the global function symbol
-#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
-#include <cute/tensor.hpp>
-#undef cuTensorMapEncodeTiled
-// Set everything back to normal
-// clang-format on
-#else
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -68,7 +20,6 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
 #include <cute/tensor.hpp>
-#endif
 
 #include <cutlass/version.h>
 #include <cutlass/gemm/collective/collective_builder.hpp>
