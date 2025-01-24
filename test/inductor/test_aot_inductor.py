@@ -3883,12 +3883,8 @@ class AOTInductorTestsTemplate:
 
         # Check the runtime assertion.
         with self.assertRaisesRegex(Exception, ""):
-            unexpected_inputs = (
-                torch.ones(0, device=self.device), b, c
-            )
+            unexpected_inputs = (torch.ones(0, device=self.device), b, c)
             compiled(*unexpected_inputs)
-
-
 
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:
