@@ -1318,6 +1318,7 @@ class CommonTemplate:
         fn(x)
         self.assertEqual(x, y)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_logit(self):
         # fix https://github.com/pytorch/pytorch/issues/145379
         def fn(*args):
