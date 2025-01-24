@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
@@ -896,19 +895,6 @@ bool has_input_metadata<std::optional<InputMetadata>>(
 template <>
 bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
-}
-
-std::vector<std::optional<InputMetadata>> collect_input_metadata(
-    const edge_list& edges) {
-  std::vector<std::optional<InputMetadata>> input_metadata;
-  for (const auto& edge : edges) {
-    if (!edge.is_valid()) {
-      input_metadata.emplace_back(std::nullopt);
-      continue;
-    }
-    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
-  }
-  return input_metadata;
 }
 
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
