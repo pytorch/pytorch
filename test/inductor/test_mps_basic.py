@@ -145,6 +145,10 @@ class MPSBasicTests(TestCase):
         self.common(inc_, (torch.rand(1024),))
 
 
+# Copy tests
+for test_name in ["test_builtins_round", "test_builtins_round_float_ndigits_neg"]:
+    setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
+
 instantiate_parametrized_tests(MPSBasicTests)
 
 if __name__ == "__main__":
