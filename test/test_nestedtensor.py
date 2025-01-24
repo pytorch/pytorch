@@ -6153,18 +6153,17 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
                 for extra_kwargs in extra_kwarg_sets:
                     nt_like = func(nt, **extra_kwargs)
+                    self.assertEqual(nt.shape, nt_like.shape)
                     if change_dtype_device:
                         self.assertNotEqual(nt.device, nt_like.device)
                         self.assertNotEqual(nt.device, nt_like.dtype)
                         # layout should be ignored since only torch.jagged is supported
                         self.assertEqual(torch.jagged, nt_like.layout)
-                        self.assertEqual(nt.shape, nt_like.shape)
                     else:
                         self.assertEqual(nt.device, nt_like.device)
                         self.assertEqual(nt.dtype, nt_like.dtype)
                         self.assertEqual(nt.layout, nt_like.layout)
                         self.assertEqual(nt.layout, torch.jagged)
-                        self.assertEqual(nt.shape, nt_like.shape)
 
                     # don't bother trying to compare random or empty values
                     if func not in [
