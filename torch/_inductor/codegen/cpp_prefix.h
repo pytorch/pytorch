@@ -79,6 +79,7 @@ struct WeightRecp {
   std::vector<scalar_t> weight_recps;
   std::vector<Welford<T>> welford_stk;
   uint64_t depth;
+  WeightRecp() {}
   WeightRecp(uint64_t N) {
     weight_recps.reserve(kChunkSize);
     for (const auto i : c10::irange(kChunkSize)) {
@@ -516,15 +517,13 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 #endif
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc, WeightRecp<at::vec::Vectorized<scalar_t>>* w=nullptr) {
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc, WeightRecp<at::vec::Vectorized<scalar_t>>* w=nullptr, int num_threads=1) {
   if (w != nullptr) {
-    if (acc.index != 0) {
-      acc = welford_combine(acc, w->welford_stk[0]);
-    } else {
-      acc = w->welford_stk[0];
-    }
-    for (const auto i : c10::irange(1, w->depth)) {
-      acc = welford_combine(acc, w->welford_stk[i]);
+    for (const auto n : c10::irange(num_threads)) {
+      for (const auto i : c10::irange(w->depth)) {
+        acc = welford_combine(acc, w->welford_stk[i]);
+      }
+      w++;
     }
   }
   using Vec = at::vec::Vectorized<scalar_t>;
@@ -561,15 +560,13 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 }
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc, WeightRecp<at::vec::VectorizedN<scalar_t, 2>>* w=nullptr) {
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc, WeightRecp<at::vec::VectorizedN<scalar_t, 2>>* w=nullptr, int num_threads=1) {
   if (w != nullptr) {
-    if (acc.index != 0) {
-      acc = welford_combine(acc, w->welford_stk[0]);
-    } else {
-      acc = w->welford_stk[0];
-    }
-    for (const auto i : c10::irange(1, w->depth)) {
-      acc = welford_combine(acc, w->welford_stk[i]);
+    for (const auto n : c10::irange(num_threads)) {
+      for (const auto i : c10::irange(w->depth)) {
+        acc = welford_combine(acc, w->welford_stk[i]);
+      }
+      w++;
     }
   }
   auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
