@@ -2751,6 +2751,8 @@ class View(GenericView):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
                 # TODO: unbacked should not diverge from backed in determining striding
+                # Need to require contiguous here instead of realize, see:
+                # https://github.com/pytorch/pytorch/issues/145561
                 x = ExternKernel.require_contiguous(x)
 
             storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
