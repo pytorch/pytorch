@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <stdexcept>
+
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
