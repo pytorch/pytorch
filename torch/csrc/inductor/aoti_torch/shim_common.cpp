@@ -799,6 +799,21 @@ AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   });
 }
 
+AOTITorchError aoti_torch_as_strided(
+    AtenTensorHandle self,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    int64_t ndim = self_tensor->dim();
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor ret_tensor = self_tensor->as_strided(sizes, strides);
+    *ret = new_tensor_handle(std::move(ret_tensor));
+  });
+}
+
 AOTITorchError aoti_torch_clone_preserve_strides(
     AtenTensorHandle self,
     AtenTensorHandle* ret) {
