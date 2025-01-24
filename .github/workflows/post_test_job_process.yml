@@ -25,8 +25,7 @@ on:
 
 jobs:
   process-utilization-logs:
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     environment: post-test
     permissions:
       id-token: write
