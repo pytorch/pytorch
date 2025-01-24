@@ -404,17 +404,11 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._utils",
         }
 
-        # No new entries should be added to this list.
-        # All public modules should be importable on all platforms.
-        public_allowlist = {}
-
         errors = []
         for mod, exc in failures:
-            if mod in public_allowlist:
-                # TODO: Ensure this is the right error type
-
-                continue
             if mod in private_allowlist:
+                # make sure mod is actually private
+                assert any([t.beginswith("_") for t in mod.split(".")])
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
