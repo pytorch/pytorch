@@ -71,7 +71,6 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(ReduceOp&& other) = default;
   ReduceOp& operator=(ReduceOp&& other) = default;
-  ~ReduceOp() override = default;
 
   operator RedOpType() const {
     return op_;
