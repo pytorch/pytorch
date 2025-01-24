@@ -4531,7 +4531,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with torch.serialization._open_file_like(f, "rb") as opened_file:
                 with torch.serialization._open_zipfile_reader(opened_file) as opened_zipfile:
                     self.assertTrue(opened_zipfile.has_record(".format_version"))
-                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'0x01')
+                    self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
 
 
     def run(self, *args, **kwargs):
