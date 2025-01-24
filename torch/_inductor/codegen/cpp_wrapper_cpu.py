@@ -1055,16 +1055,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
 
-    def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
+    def generate_c_shim_extern_kernel_alloc(
+        self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
+    ) -> None:
         # registered output buffer name
         name = extern_kernel.name
         output_handle_name = f"{name}_handle"
-        self.writeline(f"AtenTensorHandle {output_handle_name};")
-        output_arg = f"&{output_handle_name}"
-        self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args + [output_arg]
-        )
-        self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+        # In-place returns are automatically excised from the torchgen-ed shim.  There
+        # may be a better way to determine whether this op is in-place, but checking for
+        # input aliasing pragmatically seems to work.
+        if not (aliased_inputs := extern_kernel.get_inputs_that_alias_output()):
+            self.writeline(f"AtenTensorHandle {output_handle_name};")
+            args = [*args, f"&{output_handle_name}"]
+        self.generate_c_shim_extern_kernel_call(extern_kernel.get_kernel_name(), args)
+        if not aliased_inputs:
+            self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):
