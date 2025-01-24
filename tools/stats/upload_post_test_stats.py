@@ -22,6 +22,7 @@ import pandas as pd  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
+    WorkflowInfo,
     getDataModelVersion,
     OssCiSegmentV1,
     OssCiUtilizationMetadataV1,
@@ -114,11 +115,7 @@ class UtilizationDbConverter:
 
     def __init__(
         self,
-        workflow_run_id: int,
-        workflow_name: str,
-        job_id: int,
-        run_attempt: int,
-        job_name: str,
+        info: WorkflowInfo,
         metadata: UtilizationMetadata,
         records: list[UtilizationRecord],
         segments: list[OssCiSegmentV1],
@@ -130,11 +127,7 @@ class UtilizationDbConverter:
         self.segments = segments
         dt = datetime.now().timestamp()
         self.created_at = get_datetime_string(dt)
-        self.run_attempt = run_attempt
-        self.workflow_run_id = workflow_run_id
-        self.workflow_name = workflow_name
-        self.job_id = job_id
-        self.job_name = job_name
+        self.info = info
         end_time_stamp = max([record.timestamp for record in records])
         self.end_at = get_datetime_string(end_time_stamp)
 
@@ -148,11 +141,11 @@ class UtilizationDbConverter:
     def _to_oss_ci_metadata(self) -> OssCiUtilizationMetadataV1:
         return OssCiUtilizationMetadataV1(
             repo=self.repo,
-            workflow_id=self.workflow_run_id,
-            run_attempt=self.run_attempt,
-            job_id=self.job_id,
-            workflow_name=self.workflow_name,
-            job_name=self.job_name,
+            workflow_id=self.info.workflow_run_id,
+            run_attempt=self.info.run_attempt,
+            job_id=self.info.job_id,
+            workflow_name=self.info.workflow_name,
+            job_name=self.info.job_name,
             usage_collect_interval=self.metadata.usage_collect_interval,
             data_model_version=str(self.metadata.data_model_version),
             created_at=self.created_at,
@@ -179,11 +172,11 @@ class UtilizationDbConverter:
             tags=tags,
             time_stamp=get_datetime_string(record.timestamp),
             repo=self.repo,
-            workflow_id=self.workflow_run_id,
-            run_attempt=self.run_attempt,
-            job_id=self.job_id,
-            workflow_name=self.workflow_name,
-            job_name=self.job_name,
+            workflow_id=self.info.workflow_run_id,
+            run_attempt=self.info.run_attempt,
+            job_id=self.info.job_id,
+            workflow_name=self.info.workflow_name,
+            job_name=self.info.job_name,
             json_data=str(asdict(record.data) if record.data else {}),
         )
 
@@ -196,26 +189,20 @@ class UploadUtilizationData:
 
     def __init__(
         self,
-        workflow_run_id: int,
-        job_id: int,
-        workflow_run_attempt: int,
-        workflow_name: str,
-        job_name: str,
+        info: WorkflowInfo,
         dry_run: bool = False,
         debug: bool = False,
     ):
-        self.workflow_run_id = workflow_run_id
-        self.job_id = job_id
-        self.workflow_run_attempt = workflow_run_attempt
-        self.workflow_name = workflow_name
-        self.job_name = job_name
+        self.info = info
         self.segment_generator = SegmentGenerator()
         self.debug_mode = debug
         self.dry_run = dry_run
 
     def start(self) -> None:
         metadata, valid_records, _ = self.get_log_data(
-            self.workflow_run_id, self.job_id, self.workflow_run_attempt
+            self.info.workflow_run_id,
+            self.info.job_id,
+            self.info.run_attempt
         )
 
         if not metadata:
@@ -227,16 +214,7 @@ class UploadUtilizationData:
             return None
         segments = self.segment_generator.generate(valid_records)
 
-        db_metadata, db_records = UtilizationDbConverter(
-            self.workflow_run_id,
-            self.workflow_name,
-            self.job_id,
-            self.workflow_run_attempt,
-            self.job_name,
-            metadata,
-            valid_records,
-            segments,
-        ).convert()
+        db_metadata, db_records = UtilizationDbConverter(self.info,metadata,valid_records,segments).convert()
         print(
             f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata),indent=4)}"
         )
@@ -255,21 +233,21 @@ class UploadUtilizationData:
             collection = f"debug_util_v{db_metadata.data_model_version}"
 
         self._upload_utilization_data_to_s3(
-            collection,
-            self.workflow_run_id,
-            self.workflow_run_attempt,
-            self.job_id,
-            "metadata",
-            [asdict(db_metadata)],
+            collection=collection,
+            workflow_run_id=self.info.workflow_run_id,
+            workflow_run_attempt=self.info.run_attempt,
+            job_id=self.info.job_id,
+            name="metadata",
+            docs=[asdict(db_metadata)],
         )
 
         self._upload_utilization_data_to_s3(
-            collection,
-            self.workflow_run_id,
-            self.workflow_run_attempt,
-            self.job_id,
-            "timeseries",
-            [asdict(record) for record in db_records],
+            collection=collection,
+            workflow_run_id=self.info.workflow_run_id,
+            workflow_run_attempt=self.info.run_attempt,
+            job_id=self.info.job_id,
+            name="timeseries",
+            docs=[asdict(record) for record in db_records],
         )
 
     def _upload_utilization_data_to_s3(

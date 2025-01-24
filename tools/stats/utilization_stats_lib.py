@@ -103,3 +103,12 @@ class OssCiUtilizationTimeSeriesV1:
 
 def getDataModelVersion() -> float:
     return _DATA_MODEL_VERSION
+
+@dataclass
+class WorkflowInfo:
+    workflow_run_id: int
+    workflow_name: str
+    job_id: int
+    run_attempt: int
+    job_name: str
+    repo: str = "pytorch/pytorch"
