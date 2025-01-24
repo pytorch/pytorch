@@ -376,11 +376,29 @@ class AutogradCompilerInstance:
 
         outputs = copy_paste_aot_backward_graph()
 
-        # TODO(rzou): follow-up PR: tracing through backward_epilogue_functional
-        # is incorrect if there are any Tensor subclasses.
-        # This is a pre-existing problem and will be fixed in a follow-up.
+        def proxy_subclass_constructor(subclass_meta, is_runtime, unwrapped_args):
+            @torch._dynamo.allow_in_graph
+            def make_subclass(*unwrapped_args):
+                return subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+
+            punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
+
+            poutput = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=make_subclass,
+                args=tuple(punwrapped_args),
+                kwargs={},
+            )
+
+            output = self.allocate_dummy()
+            self.bind_tensors_to_proxies([output], [poutput])
+            return output
+
         results = torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
-            metadata, maybe_subclass_metadata, outputs
+            metadata,
+            maybe_subclass_metadata,
+            outputs,
+            make_subclass_override=proxy_subclass_constructor,
         )
         presults = pytree.tree_map(self.to_proxy, results)
         return presults
