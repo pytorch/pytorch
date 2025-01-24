@@ -206,7 +206,6 @@ manual_torch_name_rule_map = {
     "torch.autograd.grad": SkipFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
-    "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
     "torch._C.set_anomaly_enabled": SkipFunctionVariable,
     "torch._C.set_autocast_cache_enabled": SkipFunctionVariable,

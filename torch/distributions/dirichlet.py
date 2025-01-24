@@ -20,10 +20,14 @@ def _Dirichlet_backward(x, concentration, grad_output):
 
 class _Dirichlet(Function):
     @staticmethod
-    def forward(ctx, concentration):
-        x = torch._sample_dirichlet(concentration)
+    def setup_context(ctx, inputs, output):
+        (concentration,) = inputs
+        x = output
         ctx.save_for_backward(x, concentration)
-        return x
+
+    @staticmethod
+    def forward(concentration):
+        return torch._sample_dirichlet(concentration)
 
     @staticmethod
     @once_differentiable
