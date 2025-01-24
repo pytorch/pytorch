@@ -3,7 +3,7 @@ import logging
 import math
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 from unittest import mock
 
 from torch.export import Dim
@@ -114,7 +114,7 @@ class TestCutlassBackend(TestCase):
             ) as mocked_select_algorithm:
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
                 Y = mm(a, b)
-                passed_choice_callers: List[ChoiceCaller] = mocked_select_algorithm[0][
+                passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
                     1
                 ]
                 assert all(
@@ -573,7 +573,7 @@ class TestCutlassBackend(TestCase):
             return torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
         def compare_results(
-            m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]
+            m: int, k: int, n: int, alpha: float, beta: float, x_shape: list[int]
         ) -> None:
             x = torch.randn(x_shape).cuda().half()
             a = torch.randn(m, k).cuda().half()

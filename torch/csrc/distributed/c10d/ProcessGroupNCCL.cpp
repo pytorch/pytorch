@@ -1661,20 +1661,25 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
+        auto handleError = [&](const std::string& errorMessage) {
+          LOG(WARNING)
+              << logPrefix()
+              << "Failed to check the \"should dump\" flag on TCPStore, "
+              << "(maybe TCPStore server has shut down too early), with error: "
+              << errorMessage;
+          // We give up for now assuming TCPStore has been torn down.
+          return;
+        };
         // Wrap globalStore_->check() in a try-catch block to avoid crashing if
         // the store is not available.
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
               globalStore_->check({std::string(EXCEPTION_DUMP)});
+        } catch (const c10::DistNetworkError& e) {
+          handleError(e.msg());
         } catch (const std::exception& e) {
-          LOG(WARNING)
-              << logPrefix()
-              << "Failed to check the \"should dump\" flag on TCPStore, "
-              << "(maybe TCPStore server has shut down too early), with error: "
-              << e.what();
-          // We give up for now assuming TCPStore has been torn down.
-          return;
+          handleError(e.what());
         }
 
         if (checkExceptionDump) {

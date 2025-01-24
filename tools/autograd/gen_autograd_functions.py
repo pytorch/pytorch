@@ -68,6 +68,7 @@ struct TORCH_API ${op} : public ${superclass} {
   }
   ${will_release_variables}
   void compiled_args(CompiledNodeArgs& args) override;
+  ivalue_list get_packed_args();
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -107,6 +108,13 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+static variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
+{
+  auto packed_args = PackedArgs(args);
+  auto needs_input_grad = packed_args.unpack<std::array<bool, ${num_inputs}>>();
+  ${unpack_ivalues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
@@ -120,11 +128,42 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
-    ${apply_with_saved_after}
-    return result;
+  ${apply_with_saved_before}
+
+  static std::once_flag flag;
+  std::call_once(flag, [&](){
+    ${compute_schema}
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    interface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
+  });
+
+  variable_list result;
+  auto packed_args = get_packed_args();
+  auto output_metadata = torch::dynamo::autograd::IValuePacker<
+    std::vector<std::optional<InputMetadata>>>::pack(
+      torch::dynamo::autograd::get_input_metadata(next_edges()));
+  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+  result = interface->call_function(
+      saved.get_py_compiler(),
+      "apply_functional",
+      name(),
+      grads,
+      packed_args,
+      output_metadata);
+
+  ${apply_with_saved_after}
+  return result;
 }
+ivalue_list ${op}::get_packed_args() {
+  PackedArgs packed_args;
+  ${asserts}
+  ${unpacks}
+  ${compute_needs_input_grad}
+  packed_args.pack(needs_input_grad);
+  ${get_packed_args}
+  return std::move(packed_args).vec();
+}
+
 """
 )
 
@@ -993,14 +1032,38 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         f"{T} {x}"
         for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
     ]
+    get_packed_args = "\n".join(
+        f"packed_args.pack({name});" for name in apply_functional_args
+    )
+    unpack_ivalues = []
+    for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
+
+    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    for typ in apply_functional_args_ref_types:
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        if typ.startswith("const"):
+            typ = typ[5:]
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for schema_arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{schema_arg}>::packed_type(),"
+        )
+    compute_schema.append("};")
 
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
+        compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
         num_inputs=len(input_name_to_idx),
+        unpack_ivalues="\n".join(unpack_ivalues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1015,4 +1078,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_packed_args=get_packed_args,
     )
