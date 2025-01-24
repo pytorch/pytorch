@@ -9,6 +9,7 @@ from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
+from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -22,7 +23,7 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -305,7 +306,6 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    @skipIfRocm
     def test_precompilation_threads(self):
         import threading
         from typing import Any, Dict
@@ -481,7 +481,6 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
-    @skipIfRocm
     def test_autotune_conv1x1(self):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
@@ -512,7 +511,6 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
-    @skipIfRocm
     def test_filled_cache_precompile(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -531,7 +529,6 @@ class TestMaxAutotune(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-    @skipIfRocm
     @fresh_inductor_cache()
     @config.patch(search_autotune_cache=True)
     def test_search_autotune_cache(self):
@@ -547,7 +544,6 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-    @skipIfRocm
     @fresh_inductor_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):
@@ -979,6 +975,49 @@ class TestMaxAutotune(TestCase):
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
             self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties().total_memory < 2e10,
+        "Only if the GPU has at least 20GB memory to be safe",
+    )
+    @config.patch(force_shape_pad=True, max_autotune=True)
+    def test_linear_and_cel(self):
+        """
+        Similate a GPU without enough SMs. Make sure max-autotune still
+        works even when the MultiTritonTemplate encapsulates just extern
+        kernels.
+        """
+
+        def mock_is_big_gpu(*args, **kwargs):
+            return False
+
+        B, T, C, V = 32, 1024, 768, 50257
+
+        linear = nn.Linear(C, V).bfloat16().to(device=GPU_TYPE)
+        ce = torch.nn.CrossEntropyLoss()
+
+        def f(x, y):
+            x.grad = None
+            linear.weight.grad = None
+            linear.bias.grad = None
+
+            loss = ce(linear(x), y)
+            loss.backward()
+            return loss
+
+        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x.retain_grad()
+        y = torch.randint(0, V, (B * T,)).cuda()
+
+        import torch._inductor.utils as inductor_utils
+
+        with unittest.mock.patch.object(inductor_utils, "is_big_gpu", mock_is_big_gpu):
+            opt_f = torch.compile(f)
+
+            expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
+            actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
+            assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
@@ -990,7 +1029,6 @@ class TestMaxAutotuneRemoteCache(TestCase):
         super().tearDown()
         PatchCaches.tearDown()
 
-    @skipIfRocm
     @parametrize("dynamic", (False, True))
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
@@ -1219,7 +1257,10 @@ class TestPrologueFusion(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
-    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+    )
     def test_low_precision(self):
         M = K = N = 128
 

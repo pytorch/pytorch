@@ -2,7 +2,7 @@
 
 import collections
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -142,7 +142,7 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker],
         user_cls=dict,
         **kwargs,
     ) -> None:
@@ -340,8 +340,8 @@ class ConstDictVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # NB - Both key and value are LazyVariableTrackers in the beginning. So,
         # we have to insert guards when a dict method is accessed. For this to
@@ -533,8 +533,8 @@ class DefaultDictVariable(ConstDictVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__":
             assert len(args) == 1
@@ -562,7 +562,7 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         items = dict.fromkeys(items, SetVariable._default_value())
@@ -600,8 +600,8 @@ class SetVariable(ConstDictVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         # We foward the calls to the dictionary model
         if name == "add":
@@ -676,7 +676,7 @@ class SetVariable(ConstDictVariable):
 class FrozensetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -712,8 +712,8 @@ class FrozensetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
@@ -723,7 +723,7 @@ class FrozensetVariable(SetVariable):
 class DictKeySetVariable(SetVariable):
     def __init__(
         self,
-        items: List[VariableTracker],
+        items: list[VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(items, **kwargs)
@@ -752,8 +752,8 @@ class DictKeySetVariable(SetVariable):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
@@ -800,8 +800,8 @@ class DictViewVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
@@ -827,8 +827,8 @@ class DictKeysVariable(DictViewVariable):
         self,
         tx,
         name,
-        args: List["VariableTracker"],
-        kwargs: Dict[str, "VariableTracker"],
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)

@@ -359,7 +359,8 @@ class _StorageBase:
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
@@ -374,7 +375,8 @@ class _StorageBase:
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.
@@ -1158,7 +1160,8 @@ class TypedStorage:
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
@@ -1170,7 +1173,8 @@ class TypedStorage:
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.

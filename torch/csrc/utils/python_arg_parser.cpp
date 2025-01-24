@@ -87,16 +87,37 @@ static const std::unordered_map<std::string, std::vector<std::string>>
 // functions.)
 bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
-      "add",          "add_",          "add_out",
-      "div",          "div_",          "div_out",
-      "divide",       "divide_",       "divide_out", // alias of div
-      "mul",          "mul_",          "mul_out",
-      "multiply",     "multiply_",     "multiply_out", // alias of mul
-      "sub",          "sub_",          "sub_out",
-      "subtract",     "subtract_",     "subtract_out", // alias of sub
-      "true_divide",  "true_divide_",  "true_divide_out",
-      "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out",
+      "add",
+      "add_",
+      "add_out",
+      "div",
+      "div_",
+      "div_out",
+      "divide",
+      "divide_",
+      "divide_out", // alias of div
+      "mul",
+      "mul_",
+      "mul_out",
+      "multiply",
+      "multiply_",
+      "multiply_out", // alias of mul
+      "sub",
+      "sub_",
+      "sub_out",
+      "subtract",
+      "subtract_",
+      "subtract_out", // alias of sub
+      "true_divide",
+      "true_divide_",
+      "true_divide_out",
+      "to",
+      "_to_copy",
+      "copy_",
+      "copy",
+      "floor_divide",
+      "floor_divide_",
+      "floor_divide_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
@@ -921,7 +942,9 @@ auto FunctionParameter::check(
   }
   // NB: This will not detect torch function inside elements of a list.  So
   // you still have to handle that manually
-  if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
+  // NB: torch function on Tensor subclasses NOT eligible here, you handled
+  // that internally
+  if (check_has_torch_function(obj, /*ignore_mode*/ true) && !THPVariable_Check(obj)) {
     // tensor subclasses and unrelated objects with __torch_function__
     append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
     return true;

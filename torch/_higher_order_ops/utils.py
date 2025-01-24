@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -462,7 +462,7 @@ def save_tensors_and_symints_for_backward(ctx, args):
     assert all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
     ), args
-    partitioned_args: List[Any] = [[], []]
+    partitioned_args: list[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
         idx = 0 if isinstance(arg, torch.Tensor) else 1
@@ -514,7 +514,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
     meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
-) -> List[str]:
+) -> list[str]:
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     pair_diffs = []
@@ -541,7 +541,7 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: Union[Tuple[Any, ...], List[Any]]):
+def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args

@@ -49,6 +49,14 @@ class AdamW(Adam):
             decoupled_weight_decay=True,
         )
 
+    # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
+    # guarantees that decoupled_weight_decay will always be True for loading any state into
+    # AdamW
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group["decoupled_weight_decay"] = True
+
 
 AdamW.__doc__ = (
     r"""Implements AdamW algorithm, where weight decay does not accumulate in the momentum nor variance.

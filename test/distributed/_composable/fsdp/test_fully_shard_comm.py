@@ -611,6 +611,8 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
+                # `1.lin1` post-backward hook runs but is a no-op
+                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
             events.clear()
@@ -624,6 +626,8 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
+                # `1.lin2` post-backward hook runs but is a no-op
+                ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
             events.clear()

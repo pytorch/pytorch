@@ -377,6 +377,37 @@ class TestDynamismExpression(TestCase):
         export(Module(torch.sym_fresh_size), inputs, strict=True)
 
 
+class InputModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(3, 3)
+
+    def forward(self, x, y):
+        return self.linear(x) * y
+
+
+class InputModuleWithNestedSubclass(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+        self.p2 = torch.nn.Parameter(
+            CustomTensorPlainOut(
+                CustomTensorPlainOut(
+                    torch.Tensor([[0, 0], [0, 1]]),
+                    torch.Tensor([[0, 0], [1, 0]]),
+                ),
+                CustomTensorPlainOut(
+                    torch.Tensor([[1, 0], [0, 0]]),
+                    torch.Tensor([[0, 1], [0, 0]]),
+                ),
+            )
+        )
+
+    def forward(self, x):
+        a = (x + 2 * self.p1 + self.p2).sum().sum()
+        return x + a
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -2096,8 +2127,6 @@ graph():
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
-    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -2108,8 +2137,6 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -5944,6 +5971,32 @@ def forward(self, x):
                     torch.allclose(torch.tensor(7, dtype=torch.float), buffer)
                 )
 
+    def test_module_input(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, m):
+                return m(x, y) + x + y
+
+        i = InputModule()
+        f = Foo()
+        ep = export(f, (torch.randn(3), torch.randn(3), i), strict=False)
+
+        m = InputModule()
+        inputs = (torch.randn(3), torch.randn(3), m)
+        self.assertEqual(f(*inputs), ep.module()(*inputs))
+
+    def test_module_input_subclasses_parameterization_nested(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) * 2
+
+        mod = InputModuleWithNestedSubclass()
+        f = Module()
+        ref_x = torch.randn(2, 2)
+        ref_out = f(ref_x, mod)
+
+        ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
+        self.assertEqual(ref_out, ep.module()(ref_x, mod))
+
     def test_runtime_assert_for_prim(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -7524,8 +7577,8 @@ graph():
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = export(mod, inp)
+        ep_non_strict = export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
