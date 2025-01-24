@@ -1724,19 +1724,17 @@ def forward(self, arg0_1, arg1_1):
             out = torch.zeros_like(a)
             n_elements = out.numel()
 
-            ptrs = [t.data_ptr() for t in (a, b, out)]
-
             if after_data_ptr:
                 torch._dynamo.graph_break()
 
             descs = [
                 triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                    ptr,
+                    t.data_ptr(),
                     n_elements,
                     BLOCK_SIZE,
                     t.element_size(),
                 )
-                for ptr in ptrs
+                for t in (a, b, out)
             ]
 
             if after_create_desc:
