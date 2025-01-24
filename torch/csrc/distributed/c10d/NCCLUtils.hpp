@@ -240,7 +240,7 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
-#endif
+#endif // NCCL_HAS_COMM_NONBLOCKING
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
@@ -322,7 +322,7 @@ class NCCLComm {
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
-#endif
+#endif // NCCL_HAS_COMM_REGISTER
 
  private:
   ncclComm_t ncclComm_{nullptr};
@@ -347,7 +347,7 @@ struct ncclRedOpRAII {
       ncclRedOpDestroy(op_, comm_);
     }
   }
-#endif
+#endif // ENABLE_NCCL_PREMUL_SUM_SUPPORT
   operator ncclRedOp_t() const {
     return op_;
   }
