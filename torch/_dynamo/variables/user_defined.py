@@ -14,12 +14,12 @@ import types
 import warnings
 import weakref
 from typing import Generic, TYPE_CHECKING
+from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
-from typing_extensions import is_typeddict
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
