@@ -3595,6 +3595,7 @@ def run(runner, args, original_dir=None):
         if args.only is not None and args.only in {
             "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
+            "volo_d1_224",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             # sizes following #145130 (due to enabling split-k?)
