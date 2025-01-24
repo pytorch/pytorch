@@ -80,8 +80,8 @@ class SegmentGenerator:
                 segment = OssCiSegmentV1(
                     level=CMD_PYTHON_LEVEL,
                     name=value,
-                    start_at=get_datetime_string(row["start_time"].timestamp()),
-                    end_at=get_datetime_string(row["end_time"].timestamp()),
+                    start_at=row["start_time"].timestamp(),
+                    end_at=row["end_time"].timestamp(),
                     extra_info={},
                 )
                 segments.append(segment)
@@ -124,11 +124,10 @@ class UtilizationDbConverter:
         self.metadata = metadata
         self.records = records
         self.segments = segments
-        dt = datetime.now().timestamp()
-        self.created_at = get_datetime_string(dt)
+        self.created_at = datetime.now().timestamp()
         self.info = info
         end_time_stamp = max([record.timestamp for record in records])
-        self.end_at = get_datetime_string(end_time_stamp)
+        self.end_at = end_time_stamp
 
     def convert(
         self,
@@ -151,7 +150,7 @@ class UtilizationDbConverter:
             gpu_count=self.metadata.gpu_count if self.metadata.gpu_count else 0,
             cpu_count=self.metadata.cpu_count if self.metadata.cpu_count else 0,
             gpu_type=self.metadata.gpu_type if self.metadata.gpu_type else "",
-            start_at=get_datetime_string(self.metadata.start_at),
+            start_at=self.metadata.start_at,
             end_at=self.end_at,
             segments=self.segments,
         )
@@ -169,7 +168,7 @@ class UtilizationDbConverter:
             created_at=self.created_at,
             type=type,
             tags=tags,
-            time_stamp=get_datetime_string(record.timestamp),
+            time_stamp=record.timestamp,
             repo=self.info.repo,
             workflow_id=self.info.workflow_run_id,
             run_attempt=self.info.run_attempt,
