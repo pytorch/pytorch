@@ -86,20 +86,17 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state);
 //  - extra_state->frame_state: Borrowed.
 FrameState* extract_frame_state(ExtraState* extra_state);
 
+// Returns the Action stored in extra_state.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
 Action extra_state_get_action(ExtraState* extra_state);
+
+// Set the Action to be done to all frames with code object corresponding
+// to this extra_state.
+// Ownership contract
+// - extra_state: Borrowed
 void extra_state_set_action(ExtraState* extra_state, Action action);
-
-// Returns if this extra_state is marked as cache limit hit.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// bool extra_state_cache_limit_hit(ExtraState* extra_state);
-
-// Mark that extra_state has hit its cache limit hit.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value);
 
 // Ownership contract
 // args
