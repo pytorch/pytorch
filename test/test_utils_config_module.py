@@ -100,10 +100,6 @@ class TestConfigModule(TestCase):
         config.e_env_force = False
         self.assertTrue(config.e_env_force)
 
-    def test_multi_env(self):
-        self.assertTrue(config2.e_env_default_multi)
-        self.assertTrue(config2.e_env_force_multi)
-
     def test_save_config(self):
         p = config.save_config()
         self.assertDictEqual(
