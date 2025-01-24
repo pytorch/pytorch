@@ -874,9 +874,11 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   }
 
   if (prior_compiler == nullptr) {
+    Py_INCREF(Py_None);
     prior_compiler = Py_None;
   }
   PyObject* prior = PyTuple_New(2);
+  Py_INCREF(prior_dynamic);
   PyTuple_SET_ITEM(prior, 0, prior_compiler);
   PyTuple_SET_ITEM(prior, 1, prior_dynamic);
   return prior;
