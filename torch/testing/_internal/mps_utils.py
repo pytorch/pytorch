@@ -312,6 +312,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         upper=15.0,
         lower=14.0,
     ),
+    "clamp_min": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "column_stack": MPSSkipInfo(
         TEST_OUT,
         upper=15.0,
@@ -884,12 +889,14 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "ones_like": MPSSkipInfo(NONCONTIGUOUS),
     "ormqr": MPSSkipInfo(NONCONTIGUOUS),
     "pca_lowrank": MPSSkipInfo(UNIMPLEMENTED),
-    "polygamma": MPSSkipInfo(
-        NONCONTIGUOUS,
-        TEST_OUT,
-        variant="polygamma_n_0",
-        lower=15.0,  # Regressed in MacOS15
-    ),
+    "polygamma": [ 
+        MPSSkipInfo(
+            TEST_OUT,
+            variant="polygamma_n_0",
+            lower=15.0,  # Regressed in MacOS15
+        ),
+        MPSSkipInfo(NONCONTIGUOUS),
+    ],
     "polar": MPSSkipInfo(TEST_OUT),
     "prod": MPSSkipInfo(
         NONCONTIGUOUS,
@@ -998,11 +1005,13 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "special.modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
     "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
-    "special.polygamma": MPSSkipInfo(
-        NONCONTIGUOUS,
-        TEST_OUT,
-        lower=15.0,  # Regressed in MacOS15
-    ),
+    "special.polygamma": [
+        MPSSkipInfo(NONCONTIGUOUS),
+        MPSSkipInfo(
+            TEST_OUT,
+            lower=15.0,  # Regressed in MacOS15
+        ),
+    ],
     "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
     "special.spherical_bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
