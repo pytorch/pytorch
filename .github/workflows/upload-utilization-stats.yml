@@ -28,8 +28,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-utilization-stats
-    permissions:
-      id-token: write
     name: process and upload utilziation logs for ${{ github.event.inputs.workflow_name }}:${{ github.event.inputs.job_name }}, with attempt ${{ github.event.inputs.workflow_attempt}}
     steps:
       - name: Checkout PyTorch
