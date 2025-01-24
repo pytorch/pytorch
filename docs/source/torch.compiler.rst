@@ -92,6 +92,7 @@ Read More
    torch.compiler_faq
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
+   torch.compiler.config
 
 ..
   _If you want to contribute a developer-level topic
