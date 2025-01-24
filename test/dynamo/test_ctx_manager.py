@@ -1722,6 +1722,22 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    def test_torch_profiler_use_after_with_block(self):
+        counters.clear()
+
+        def fn(x):
+            with torch.profiler.profile() as p:
+                pass
+            p.profiler.kineto_results.experimental_event_tree()
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
