@@ -2275,11 +2275,13 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, options, dynamic):
+    def __init__(self, mode, options, dynamic, fullgraph, name):
         from torch._inductor.compiler_bisector import CompilerBisector
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
+        self.fullgraph = fullgraph
+        self.name = name
         self.apply_mode(mode)
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
@@ -2335,7 +2337,7 @@ class _TorchCompileInductorWrapper:
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        return compile_fx(model_, inputs_, config_patches=self.config, fullgraph=self.fullgraph, name=self.name)
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2401,6 +2403,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    name: _Optional[str] = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2414,6 +2417,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    name: _Optional[str] = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2426,6 +2430,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
+    name: _Optional[str] = None,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
     _Callable[_InputT, _RetT],
@@ -2508,6 +2513,8 @@ def compile(
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
+        -  `name`: A globally unique name for the exported model.
+
     Example::
 
         @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
@@ -2539,6 +2546,7 @@ def compile(
                 mode=mode,
                 options=options,
                 disable=disable,
+                name=name,
             )
 
         return fn
@@ -2556,7 +2564,7 @@ def compile(
         backend = bisect_backend
 
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic, fullgraph, name)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 

@@ -583,9 +583,12 @@ class CompiledAOTI(OutputCode):
     """
 
     filename: Union[str, list[str]]
+    current_callable: Optional[Callable[..., Any]]
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        raise NotImplementedError("NYI")
+    def __call__(self, *inputs: Any) -> Any:
+        if self.current_callable is None:
+            raise RuntimeError("AOTInductor compiled so is not loaded")
+        return self.current_callable(inputs)
 
     def post_compile(
         self,
