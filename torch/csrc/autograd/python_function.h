@@ -43,8 +43,6 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
-  bool is_aot_backward() const override;
-
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
