@@ -8,6 +8,37 @@ import torch
 from torch import Tensor
 
 
+__all__ = [
+    "calculate_gain",
+    "uniform_",
+    "normal_",
+    "trunc_normal_",
+    "constant_",
+    "ones_",
+    "zeros_",
+    "eye_",
+    "dirac_",
+    "xavier_uniform_",
+    "xavier_normal_",
+    "kaiming_uniform_",
+    "kaiming_normal_",
+    "orthogonal_",
+    "sparse_",
+    # below are technically deprecated (see _make_deprecate)
+    "uniform",
+    "normal",
+    "constant",
+    "eye",
+    "dirac",
+    "xavier_uniform",
+    "xavier_normal",
+    "kaiming_uniform",
+    "kaiming_normal",
+    "orthogonal",
+    "sparse",
+]
+
+
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers

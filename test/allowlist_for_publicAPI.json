@@ -619,9 +619,6 @@
     "softshrink",
     "threshold_"
   ],
-  "torch.nn.init": [
-    "Tensor"
-  ],
   "torch.nn.intrinsic.modules": [
     "_FusedModule"
   ],
