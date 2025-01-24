@@ -20,6 +20,8 @@ from ..pattern_matcher import (
 )
 
 
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
 
@@ -78,6 +80,14 @@ class _AllGatherMatch:
         for node in reversed(self.match.nodes):
             if len(node.users) == 0:
                 node.graph.erase_node(node)
+
+    def __str__(self) -> str:
+        return (
+            "_AllGatherMatch("
+            f"shard_node={self.shard_node}, "
+            f"res_node={self.res_node}, "
+            f"gather_dim={self.gather_dim})"
+        )
 
 
 def find_all_gather_patterns(graph: torch.fx.Graph):
@@ -340,7 +350,7 @@ class _Matmul:
 
     def erase(self) -> None:
         for node in reversed(self.nodes):
-            if len(node.users) == 0:
+            if len(node.users) == 0 and not node._erased:
                 node.graph.erase_node(node)
 
     @classmethod
@@ -356,6 +366,10 @@ class _Matmul:
             A_node=cast(torch.fx.Node, match[0].args[0]),
             B_node=cast(torch.fx.Node, mm_node.args[1]),
         )
+
+    def __str__(self) -> str:
+        nodes_str = ", ".join(str(node) for node in self.nodes)
+        return f"_Matmul(nodes=[{nodes_str}])"
 
 
 @dataclass
@@ -504,7 +518,7 @@ def _insert_fused_all_gather_matmul(
         raise AssertionError(f"Unexpected matmul match type: {mm_type}")
 
 
-def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
+def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> bool:
     """
     Fused the pattern
 
@@ -520,11 +534,18 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
+
+    def log_skip(reason: str) -> None:
+        fusion_log.info(
+            "skipping fuse_all_gather_matmul for %s: %s", all_gather, reason
+        )
+
     if (
         not torch.distributed.is_available()
         or not torch.distributed.is_nccl_available()
     ):
-        return
+        log_skip("torch.distributed is unavailable or uninitialized")
+        return False
 
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
@@ -540,11 +561,12 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
-        return
+        log_skip(f"symm_mem is not enabled for group {group_name}")
+        return False
 
     if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+        log_skip("decomposing the matmul on the K dimension is not supported")
+        return False
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -557,8 +579,13 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
 
-    if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
-        return
+    if len(matmuls) == 0:
+        log_skip("no eligible downstream matmuls found")
+        return False
+
+    if len(OrderedSet(map(type, matmuls))) != 1:
+        log_skip("downstream matmuls contain both aten.mm and aten._scaled_mm")
+        return False
 
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
@@ -613,6 +640,11 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
+
+    fusion_log.info("fused %s with %d downstream matmuls:", all_gather, len(matmuls))
+    for matmul in matmuls:
+        fusion_log.info("  %s", matmul.nodes)
+    return True
 
 
 def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
@@ -846,6 +878,11 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
     all_gathers = find_all_gather_patterns(graph)
     reduce_scatters = find_reduce_scatter_patterns(graph)
 
+    fusion_log.info("===== fusing all-gathers with downstream matmuls =====")
+    fusion_log.info("all-gather candidates for all-gather-matmul fusion:")
+    for all_gather in all_gathers:
+        fusion_log.info("  %s", all_gather)
+
     # When a collective can be hidden through either simple overlapping or
     # micro-pipeline TP, we prefer simple overlapping to avoid the overhead
     # associated with decomposition. If reorder_for_compute_comm_overlap is
@@ -858,8 +895,15 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             x for x in reduce_scatters if x.rs_node not in unexposed_collectives
         ]
 
+    num_fused = 0
     for all_gather in all_gathers:
-        fuse_all_gather_matmul(all_gather)
+        if fuse_all_gather_matmul(all_gather):
+            num_fused += 1
+    fusion_log.info(
+        "===== fused %d/%d all-gathers with downstream matmuls =====",
+        num_fused,
+        len(all_gathers),
+    )
 
     for reduce_scatter in reduce_scatters:
         fuse_matmul_reduce_scatter(reduce_scatter)
