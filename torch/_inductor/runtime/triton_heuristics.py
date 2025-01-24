@@ -19,6 +19,7 @@ from collections import namedtuple
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -290,9 +291,7 @@ class CachingAutotuner(KernelInterface):
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
         if (
-            self.inductor_meta.get("dynamic_scale_rblock", True)
-            and not self.inductor_meta.get("persistent_reduction")
-            and self.heuristic_type == HeuristicType.REDUCTION
+            self.heuristic_type == HeuristicType.REDUCTION
             and self.size_hints is not None
             # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
             and device_prop.type in ["cuda", "hip"]
@@ -301,27 +300,16 @@ class CachingAutotuner(KernelInterface):
             and device_prop.regs_per_multiprocessor is not None
         ):
             assert device_prop.regs_per_multiprocessor
-            assert device_prop.max_threads_per_multi_processor
             assert device_prop.multi_processor_count
+            assert len(self.size_hints) >= 2
             seen_config_hashes: Optional[OrderedSet[Hashable]] = None
             warp_size = device_prop.warp_size or 32
-            for result in self.compile_results:
-                triton_config = result.config
+            for result_id, result in enumerate(self.compile_results):
                 compiled_binary = result.kernel
-                assert len(self.size_hints) >= 2
-                xblock = triton_config.kwargs.get("XBLOCK", 1)
-                reduction_kwargs = [
-                    kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
-                ]
-                rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
-                total_block = (self.size_hints["x"] + xblock - 1) // xblock
                 nreg = getattr(compiled_binary, "n_regs", None)
                 if nreg is None:
                     continue
-
-                # make sure rblocks are not too small
-                if conditional_product(*rblocks) <= 64:
-                    continue
+                triton_config = result.config
 
                 # each SM of A100 has 65536 32-bit registers. To maximize
                 # the theoretical occupancy, we need run 2048 threads on each
@@ -332,17 +320,6 @@ class CachingAutotuner(KernelInterface):
                 # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
                 # from PLBartForCausalLM, latency improve from
                 # 7.795ms to 4.883ms.
-                #
-                if (
-                    nreg
-                    <= device_prop.regs_per_multiprocessor
-                    // device_prop.max_threads_per_multi_processor
-                ):
-                    continue
-
-                nreg_per_warp = nreg * warp_size
-                nreg_per_block = nreg_per_warp * triton_config.num_warps
-
                 # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                 # The formula below is a tighter upper bound since we have the assumption that
                 #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
@@ -351,50 +328,107 @@ class CachingAutotuner(KernelInterface):
                 #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
                 #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                 #   = max_threads_per_multi_processor / (32 * num_warps)
-                # Using a tigher upper bound can reveal more optimization opportunities.
+                # Using a tighter upper bound can reveal more optimization opportunities.
+                nreg_per_warp = nreg * warp_size
+                nreg_per_block = nreg_per_warp * triton_config.num_warps
                 max_blocks_per_sm = max(
                     device_prop.regs_per_multiprocessor // nreg_per_block, 1
                 )
-
-                if total_block <= max_blocks_per_sm * device_prop.multi_processor_count:
-                    # no need to improve occupancy
-                    continue
-                new_config = copy.deepcopy(triton_config)
-
-                # Reduce the largest Rn_BLOCK by a factor of 2.
-                largest_rkwarg: str = max(
-                    reduction_kwargs, key=triton_config.kwargs.__getitem__
+                max_concurrent_blocks = (
+                    max_blocks_per_sm * device_prop.multi_processor_count
                 )
-                new_config.kwargs[largest_rkwarg] //= 2
 
-                if seen_config_hashes is None:
-                    seen_config_hashes = OrderedSet(
-                        [
-                            triton_config_to_hashable(x.config)
-                            for x in self.compile_results
-                        ]
+                rsplit = triton_config.kwargs.get("RSPLIT", 1)
+                if max_concurrent_blocks < rsplit:
+                    # would deadlock, since we can't launch rsplit kernels at the same time
+                    while max_concurrent_blocks < rsplit:
+                        rsplit //= 2
+                    new_config = copy.deepcopy(triton_config)
+                    new_config.kwargs["RSPLIT"] = rsplit
+                    # replace deadlocking config
+                    self.compile_results[result_id] = self._precompile_config(
+                        new_config, reload_in_parent
                     )
-                new_config_hash = triton_config_to_hashable(new_config)
-                if new_config_hash in seen_config_hashes:
-                    continue
-                seen_config_hashes.add(new_config_hash)
-                log.debug(
-                    "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
-                    largest_rkwarg,
-                    triton_config,
-                    new_config,
-                )
-                if self.fn.fn is None:
-                    """
-                    We are in the parent process, while this program was compiled in a worker
-                    and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
-                    containing the real fn yet.
-                    """
-                    assert reload_in_parent
-                    self.fn = reload_in_parent().fn
-                self.compile_results.append(self._precompile_config(new_config))
+                    if seen_config_hashes is not None:
+                        seen_config_hashes.add(triton_config_to_hashable(new_config))
+                    self.launchers.clear()  # force launcher reload
+                    triton_config = new_config  # rblock shrink uses new config
+
+                if self._want_shrink_rblock(
+                    triton_config, max_concurrent_blocks, nreg, device_prop
+                ):
+                    new_config = self._shrink_rblock(triton_config)
+                    if seen_config_hashes is None:
+                        seen_config_hashes = OrderedSet(
+                            [
+                                triton_config_to_hashable(x.config)
+                                for x in self.compile_results
+                            ]
+                        )
+                    new_config_hash = triton_config_to_hashable(new_config)
+                    if new_config_hash in seen_config_hashes:
+                        continue
+                    seen_config_hashes.add(new_config_hash)
+                    self.compile_results.append(
+                        self._precompile_config(new_config, reload_in_parent)
+                    )
 
             self._make_launchers()
+
+    def _want_shrink_rblock(
+        self,
+        triton_config: Config,
+        max_concurrent_blocks: int,
+        nreg: int,
+        device_prop: DeviceProperties,
+    ) -> Config:
+        if self.inductor_meta.get("persistent_reduction"):
+            return False
+        if not self.inductor_meta.get("dynamic_scale_rblock", True):
+            return False
+        if (
+            conditional_product(
+                *[v for k, v in triton_config.kwargs.items() if k.startswith("R")]
+            )
+            <= 64
+        ):
+            return False
+
+        assert device_prop.regs_per_multiprocessor
+        assert device_prop.max_threads_per_multi_processor
+        if (
+            nreg
+            <= device_prop.regs_per_multiprocessor
+            // device_prop.max_threads_per_multi_processor
+        ):
+            return False
+
+        xblock = triton_config.kwargs.get("XBLOCK", 1)
+        rsplit = triton_config.kwargs.get("RSPLIT", 1)
+        total_block = (self.size_hints["x"] + xblock - 1) // xblock * rsplit
+        if total_block <= max_concurrent_blocks:
+            return False  # no need to improve occupancy
+
+        return True
+
+    @staticmethod
+    def _shrink_rblock(triton_config: Config) -> Config:
+        new_config = copy.deepcopy(triton_config)
+        reduction_kwargs = [
+            kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
+        ]
+        # Reduce the largest Rn_BLOCK by a factor of 2.
+        largest_rkwarg: str = max(
+            reduction_kwargs, key=triton_config.kwargs.__getitem__
+        )
+        new_config.kwargs[largest_rkwarg] //= 2
+        log.debug(
+            "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
+            largest_rkwarg,
+            triton_config,
+            new_config,
+        )
+        return new_config
 
     def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
@@ -448,8 +482,20 @@ class CachingAutotuner(KernelInterface):
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
 
-    def _precompile_config(self, cfg: Config) -> TritonCompileResult:
+    def _precompile_config(
+        self,
+        cfg: Config,
+        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+    ) -> TritonCompileResult:
         """Ahead of time compile a given autotuner config."""
+        if reload_in_parent and self.fn.fn is None:
+            """
+            We are in the parent process, while this program was compiled in a worker
+            and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+            containing the real fn yet.
+            """
+            self.fn = reload_in_parent().fn
+
         compile_meta = copy.deepcopy(self.triton_meta)
         cfg_kwargs = cfg.kwargs
         if self.device_props.type == "hip":
@@ -574,7 +620,7 @@ class CachingAutotuner(KernelInterface):
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contanminating them. We try to pass cloned args to the kernel.
         If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteratrion. Figure out the args
+        copy to cpu and restore them after each iteration. Figure out the args
         to be copied and do the copying.
         """
         if not self.optimize_mem:
@@ -587,16 +633,24 @@ class CachingAutotuner(KernelInterface):
             if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                size = arg.numel() * arg.element_size()
+                required_storage_length = compute_required_storage_length(
+                    arg.size(),
+                    arg.stride(),
+                    0,
+                )
+                size = required_storage_length * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(
-                        arg.size(),
-                        arg.stride(),
+                        (required_storage_length,),
+                        (1,),
                         dtype=arg.dtype,
                         device="cpu",
                         pin_memory=True,
                     )
-                    cpu_arg.copy_(arg, non_blocking=True)
+                    cpu_arg.copy_(
+                        arg.as_strided((required_storage_length,), (1,)),
+                        non_blocking=True,
+                    )
                     copies[name] = (arg, cpu_arg)
                 else:
                     budget -= size
@@ -612,7 +666,14 @@ class CachingAutotuner(KernelInterface):
     def restore_args_from_cpu(self, cpu_copies):
         for pair in cpu_copies.values():
             arg, cpu_arg = pair
-            arg.copy_(cpu_arg, non_blocking=True)
+            required_storage_length = compute_required_storage_length(
+                arg.size(),
+                arg.stride(),
+                0,
+            )
+            arg.as_strided((required_storage_length,), (1,)).copy_(
+                cpu_arg, non_blocking=True
+            )
 
     def reset_to_zero_args(self, *args, **kwargs):
         if not self.reset_to_zero_arg_names:
