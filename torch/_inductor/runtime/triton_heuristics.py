@@ -19,6 +19,7 @@ from collections import namedtuple
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -575,7 +576,7 @@ class CachingAutotuner(KernelInterface):
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contanminating them. We try to pass cloned args to the kernel.
         If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteratrion. Figure out the args
+        copy to cpu and restore them after each iteration. Figure out the args
         to be copied and do the copying.
         """
         if not self.optimize_mem:
@@ -588,16 +589,24 @@ class CachingAutotuner(KernelInterface):
             if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                size = arg.numel() * arg.element_size()
+                required_storage_length = compute_required_storage_length(
+                    arg.size(),
+                    arg.stride(),
+                    0,
+                )
+                size = required_storage_length * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(
-                        arg.size(),
-                        arg.stride(),
+                        (required_storage_length,),
+                        (1,),
                         dtype=arg.dtype,
                         device="cpu",
                         pin_memory=True,
                     )
-                    cpu_arg.copy_(arg, non_blocking=True)
+                    cpu_arg.copy_(
+                        arg.as_strided((required_storage_length,), (1,)),
+                        non_blocking=True,
+                    )
                     copies[name] = (arg, cpu_arg)
                 else:
                     budget -= size
@@ -613,7 +622,14 @@ class CachingAutotuner(KernelInterface):
     def restore_args_from_cpu(self, cpu_copies):
         for pair in cpu_copies.values():
             arg, cpu_arg = pair
-            arg.copy_(cpu_arg, non_blocking=True)
+            required_storage_length = compute_required_storage_length(
+                arg.size(),
+                arg.stride(),
+                0,
+            )
+            arg.as_strided((required_storage_length,), (1,)).copy_(
+                cpu_arg, non_blocking=True
+            )
 
     def reset_to_zero_args(self, *args, **kwargs):
         if not self.reset_to_zero_arg_names:
