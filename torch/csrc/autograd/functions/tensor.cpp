@@ -74,8 +74,8 @@ variable_list CopyBackwards::apply_with_saved(
     std::vector<at::TypePtr> schema = {
         IValuePacker<std::array<bool, 2>>::packed_type(),
         IValuePacker<c10::TensorOptions>::packed_type()};
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-    interface->bind_function(
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+    pyinterface->bind_function(
         saved.get_py_compiler(),
         name(),
         CopyBackwards_apply_functional_ivalue,
@@ -91,8 +91,8 @@ variable_list CopyBackwards::apply_with_saved(
       IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
           torch::dynamo::autograd::get_input_metadata(next_edges()));
 
-  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-  auto result = interface->call_function(
+  const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+  auto result = pyinterface->call_function(
       saved.get_py_compiler(),
       "apply_functional",
       name(),
