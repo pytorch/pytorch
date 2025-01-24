@@ -33,7 +33,10 @@ class TestCodegenTriton(InductorTestCase):
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
 
         two = sympy.Integer(2)
         eight = sympy.Integer(8)
@@ -42,7 +45,21 @@ class TestCodegenTriton(InductorTestCase):
         s1 = sympy.Symbol("s1", positive=True, integer=True)
 
         def _check_divisibility(expected_divisible_indices, config):
-            if triton_version_uses_attrs_dict():
+            if (
+                get_triton_attrs_descriptor_version()
+                == TritonAttrsDescriptorVersion.V1_COMPILER
+            ):
+                self.assertEqual(expected_divisible_indices, config.divisible_by_16)
+            elif get_triton_attrs_descriptor_version() in {
+                TritonAttrsDescriptorVersion.V2_BACKENDS,
+                TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+            }:
+                self.assertEqual(expected_divisible_indices, config.divisibility_16)
+            else:
+                assert (
+                    get_triton_attrs_descriptor_version()
+                    == TritonAttrsDescriptorVersion.V4_DICT
+                )
                 self.assertIsInstance(config, dict)
 
                 for idx in expected_divisible_indices:
@@ -51,10 +68,6 @@ class TestCodegenTriton(InductorTestCase):
                     # where (idx,) is a tuple in order to support tuple inputs to triton kernels.
                     self.assertTrue((idx,) in config)
                     self.assertTrue(["tt.divisibility", 16] in config[(idx,)])
-
-            else:
-                # config is an AttrsDescriptor
-                self.assertEqual(expected_divisible_indices, config.divisible_by_16)
 
         _check_divisibility(
             (2,),
