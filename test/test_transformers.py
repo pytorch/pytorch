@@ -18,7 +18,7 @@ import math
 import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
-from typing import List, Tuple, Optional, Dict
+from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -55,11 +55,6 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
     tf32_enabled,
 )
-
-if not IS_FBCODE:
-    from test_cpp_extensions_open_device_registration import (
-        generate_faked_module
-    )
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -149,12 +144,12 @@ def _check_equal(
 
 
 def check_out_and_grad(
-    out_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_query_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_key_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_value_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_attn_mask_tuple: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
-    fudge_factors: Optional[Dict[str, float]] = None
+    out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_value_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_attn_mask_tuple: Optional[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    fudge_factors: Optional[dict[str, float]] = None
 ) -> None:
     """
     Check output and gradients of attention mechanism tensors.
@@ -2574,7 +2569,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
-        def test_attention(backend: SDPBackend, permute_order: List[List[int]]):
+        def test_attention(backend: SDPBackend, permute_order: list[list[int]]):
             BHSqD = [4, 16, 256, 64]
             BHSkvD = [4, 16, 512, 64]
 
@@ -2602,7 +2597,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
-    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
+    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64
@@ -3307,7 +3302,7 @@ class TestSDPACudaOnly(NNTestCase):
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: List[int]):
+                                               scale: str, enable_gqa: bool, n_heads: list[int]):
         if isSM8XDevice and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3317,6 +3312,10 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
+        if TEST_WITH_ROCM and dropout_p != 0:
+            self.skipTest("CK does not support tensor format dropout masks")
+        if TEST_WITH_ROCM and head_dim > 128:
+            self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
@@ -3901,7 +3900,7 @@ class TestAttnBias(NNTestCase):
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
@@ -3938,7 +3937,7 @@ class TestAttnBias(NNTestCase):
     )
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
-    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
             self.skipTest("No support for LOWER_RIGHT variant for now")
             return
@@ -3971,7 +3970,7 @@ class TestAttnBias(NNTestCase):
         self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
-    def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
+    def test_is_causal_equals_upper_left(self, device, shape: list[tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
@@ -4012,6 +4011,8 @@ class TestAttnBias(NNTestCase):
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
+        import pytorch_openreg  # noqa: F401
+
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -4022,10 +4023,6 @@ class TestSDPAPrivateUse1Only(NNTestCase):
             extra_cflags=["-g"],
             verbose=True,
         )
-        # register torch.foo module and foo device to torch
-        torch.utils.rename_privateuse1_backend("foo")
-        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        torch._register_device_module("foo", generate_faked_module())
 
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_privateuseone(self):
@@ -4033,9 +4030,9 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
         assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1) == SDPBackend.OVERRIDEABLE.value
 
     def test_scaled_dot_product_fused_attention_overrideable(self):
@@ -4043,9 +4040,9 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
         torch.nn.functional.scaled_dot_product_attention(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
 
@@ -4055,16 +4052,16 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         shape = (batch_size, num_heads, seq_len, head_dim)
         q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
         attn_mask = make_tensor((batch_size, num_heads, seq_len, seq_len))
-        q_privateuse1 = q_cpu.to("foo")
-        k_privateuse1 = k_cpu.to("foo")
-        v_privateuse1 = v_cpu.to("foo")
-        attn_mask_privateuse1 = attn_mask.to("foo")
+        q_privateuse1 = q_cpu.to("openreg")
+        k_privateuse1 = k_cpu.to("openreg")
+        v_privateuse1 = v_cpu.to("openreg")
+        attn_mask_privateuse1 = attn_mask.to("openreg")
         output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = \
             torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
                 q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
 
         rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
-        rand_upward_privateuse1 = rand_upward.to("foo")
+        rand_upward_privateuse1 = rand_upward.to("openreg")
         grad_input_mask = [True, True, True, True]
         grad_q, grad_k, grad_v, grad_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
             rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1,

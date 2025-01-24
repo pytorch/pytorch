@@ -74,6 +74,12 @@ TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
+  const auto self_dtype = self.dtype();
+  TORCH_CHECK_VALUE(
+    self_dtype != ScalarType::ComplexFloat &&
+    self_dtype != ScalarType::ComplexDouble,
+    "Sort currently does not support complex dtypes on CPU.");
+
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
   // We either use 'self' strides, or infer dense strides from them.

@@ -12,8 +12,12 @@ from enum import Enum
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
-from typing import Any, Iterator, Sequence
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 FSTRING_START = getattr(token, "FSTRING_START", None)  # py3.12+
