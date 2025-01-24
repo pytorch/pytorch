@@ -1253,7 +1253,7 @@ class cuda:
     # Set this to "pingpong" to avoid numerical issues
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
-    cutlass_op_denylist_regex: Optional[str] = None
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 class rocm:
