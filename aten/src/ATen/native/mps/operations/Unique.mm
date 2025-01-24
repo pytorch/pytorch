@@ -235,50 +235,50 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
                                                            const bool return_counts,
                                                            const bool consecutive,
                                                            std::optional<int64_t> dimOpt) {
+  const Tensor& input = self.contiguous();
+
+  // get flat output size
+  int64_t totalElems = c10::multiply_integers(input.sizes());
+
+  IntArrayRef outputShape = IntArrayRef(totalElems);
+  IntArrayRef inverseIndicesShape = input.sizes();
+  IntArrayRef countsShape = IntArrayRef(totalElems);
+  int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
+
+  if (dimOpt.has_value()) {
+    outputShape = input.sizes();
+    inverseIndicesShape = IntArrayRef(input.sizes()[dim]);
+    countsShape = IntArrayRef(input.sizes()[dim]);
+  }
+  if (!return_inverse)
+    inverseIndicesShape = {};
+  if (!return_counts)
+    countsShape = {};
+
+  Tensor output = at::empty(outputShape, input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor inverse_indices =
+      at::empty(inverseIndicesShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor counts = at::empty(countsShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  Tensor length = at::empty({1}, ScalarType::Int, std::nullopt, kMPS, std::nullopt, std::nullopt);
+
+  if (input.numel() == 0) {
+    return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
+  }
+
   @autoreleasepool {
-    const Tensor& input = self.contiguous();
-
-    // get flat output size
-    int64_t totalElems = c10::multiply_integers(input.sizes());
-
-    IntArrayRef outputShape = IntArrayRef(totalElems);
-    IntArrayRef inverseIndicesShape = input.sizes();
-    IntArrayRef countsShape = IntArrayRef(totalElems);
-    int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
-
-    if (dimOpt.has_value()) {
-      outputShape = input.sizes();
-      inverseIndicesShape = IntArrayRef(input.sizes()[dim]);
-      countsShape = IntArrayRef(input.sizes()[dim]);
-    }
-    if (!return_inverse)
-      inverseIndicesShape = {};
-    if (!return_counts)
-      countsShape = {};
-
-    Tensor output = at::empty(outputShape, input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-    Tensor inverse_indices =
-        at::empty(inverseIndicesShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
-    Tensor counts = at::empty(countsShape, ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
-    Tensor length = at::empty({1}, ScalarType::Int, std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-    if (input.numel() == 0) {
-      return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
-    }
-
     mps::UniqueCachedGraph* uniqueGraph =
         mps::getUniqueGraph(input, return_inverse, return_counts, consecutive, dimOpt);
     mps::runUniqueGraph(uniqueGraph, input, output, inverse_indices, counts, length, return_inverse, return_counts);
-
-    int64_t lengthScalar = length.item<int64_t>() + 1; // length actually holds max index, add 1
-    if (output.sizes().size() != 0) {
-      output = at::slice(output, dim, 0, lengthScalar);
-    }
-    if (return_counts)
-      counts = at::slice(counts, 0, 0, lengthScalar);
-
-    return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
   }
+
+  int64_t lengthScalar = length.item<int64_t>() + 1; // length actually holds max index, add 1
+  if (output.sizes().size() != 0) {
+    output = at::slice(output, dim, 0, lengthScalar);
+  }
+  if (return_counts)
+    counts = at::slice(counts, 0, 0, lengthScalar);
+
+  return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 static std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, Tensor> out) {
