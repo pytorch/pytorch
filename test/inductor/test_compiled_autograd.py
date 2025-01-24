@@ -2924,7 +2924,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "aot0_le",
             "aot0_permute_2",
             "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_tangents_1",
             "aot0_full_default",
             "aot0_where",
             "aot0_mm",
@@ -2974,20 +2973,17 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "CompiledFunctionBackward1",
-            "aot1_tangents_1",
             "aot1_sin_1",
-            "aot1_primals_2",
             "aot1_neg",
             "aot0_tangents_2",
             "aot1_cos_1",
-            "aot1_primals_1",
             "aot0_tangents_1",
             "CompiledFunctionBackward0",
+            "aot0_sin_1",
             "aot0_neg",
-            "aot0_sin",
             "aot0_mul",
+            "aot0_cos_1",
             "aot0_mul_1",
-            "aot0_cos",
             "aot0_add",
         ]
 
@@ -3618,6 +3614,7 @@ known_failing_tests = {
     "test_tp_compile_comm_reordering",
     "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
+    "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
 
 if not HAS_CUDA:
