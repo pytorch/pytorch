@@ -14,12 +14,12 @@ import types
 import warnings
 import weakref
 from typing import Generic, TYPE_CHECKING
-from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
+from typing_extensions import is_typeddict
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -672,8 +672,6 @@ class NO_SUCH_SUBOBJ:
 
 
 def call_random_fn(tx, fn, args, kwargs):
-    # example_fn: function called at compile time to generate example_value
-    # runtime_fn: function called to generate random number at runtime
     from .builder import VariableBuilder
 
     args = [x.as_python_constant() for x in args]
