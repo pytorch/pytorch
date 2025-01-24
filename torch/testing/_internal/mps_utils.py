@@ -94,6 +94,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ),
     "_refs._conversions.cdouble": MPSSkipInfo(UNIMPLEMENTED),
     "_refs._conversions.double": MPSSkipInfo(UNIMPLEMENTED),
+    "_refs.diag_embed": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "_refs.erfc": MPSSkipInfo(UNIMPLEMENTED),
     "_refs.float_power": MPSSkipInfo(UNIMPLEMENTED),
     "_refs.frexp": MPSSkipInfo(UNIMPLEMENTED),
@@ -153,6 +158,16 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(TEST_OUT),
     ],
+    "addcmul": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "addcdiv": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "addmm": [
         MPSSkipInfo(
             NONCONTIGUOUS,
@@ -164,7 +179,17 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
             variant=" ",
             dtypes=[torch.complex64],
         ),
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
     ],
+    "addmv": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "addr": [
         MPSSkipInfo(
             NONCONTIGUOUS,
@@ -172,6 +197,21 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(TEST_OUT),
     ],
+    "all": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "amax": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "amin": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "angle": [
         MPSSkipInfo(
             NONCONTIGUOUS,
@@ -184,23 +224,49 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         upper=15.0,
         lower=14.0,
     ),
+    "argmax": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "argmin": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "atan2": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.int64],
     ),
-    "baddbmm": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
+    "baddbmm": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+    ],
+    "bitwise_and": MPSSkipInfo(
+        TEST_OUT,
+        lower=15.0,  # Regressed in MacOS15 
     ),
-    "bitwise_and": MPSSkipInfo(TEST_OUT),
     "bitwise_left": MPSSkipInfo(TEST_OUT),
-    "bitwise_left_shift": MPSSkipInfo(TEST_OUT),
+    "bitwise_left_shift": MPSSkipInfo(
+        TEST_OUT,
+        lower=15.0,  # Regressed in MacOS15
+    ),
     "bitwise_not": [
         MPSSkipInfo(
             NONCONTIGUOUS,
             dtypes=[torch.int64],
         ),
-        MPSSkipInfo(TEST_OUT),
+        MPSSkipInfo(
+            TEST_OUT,
+            lower=15.0  # Regressed in MacOS15
+        ),
     ],
     "bitwise_or": MPSSkipInfo(
         TEST_OUT,
@@ -210,7 +276,10 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
     ),
-    "bitwise_right_shift": MPSSkipInfo(TEST_OUT),
+    "bitwise_right_shift": MPSSkipInfo(
+        TEST_OUT,
+        lower=15.0,  # Regressed in MacOS15
+    ),
     "bitwise_xor": MPSSkipInfo(
         TEST_OUT,
         lower=15.0,  # Regressed in MacOS15
@@ -225,12 +294,27 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
     ],
     "bucketize": MPSSkipInfo(TEST_OUT),
+    "cat": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "cauchy": MPSSkipInfo(UNIMPLEMENTED),
     "cdist": MPSSkipInfo(NONCONTIGUOUS),
     "cdouble": MPSSkipInfo(UNIMPLEMENTED),
     "cholesky_inverse": MPSSkipInfo(NONCONTIGUOUS),
     "cholesky": MPSSkipInfo(UNIMPLEMENTED),
     "cholesky_solve": MPSSkipInfo(UNIMPLEMENTED),
+    "clamp": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "clamp_max": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "column_stack": MPSSkipInfo(
         TEST_OUT,
         upper=15.0,
@@ -255,7 +339,13 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
     ),
-    "digamma": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "digamma": [
+        MPSSkipInfo(NONCONTIGUOUS),
+        MPSSkipInfo(
+            TEST_OUT,
+            lower=15.0  # Regressed in MacOS15
+        ),
+    ],
     "dist": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
@@ -265,6 +355,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         dtypes=[torch.complex64],
     ),
     "double": MPSSkipInfo(UNIMPLEMENTED),
+    "dstack": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "einsum": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
@@ -275,6 +370,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "exponential": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.float32],
+        upper=15.0,
+        lower=14.0,
+    ),
+    "eye": MPSSkipInfo(
+        TEST_OUT,
         upper=15.0,
         lower=14.0,
     ),
@@ -296,18 +396,37 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "floor_divide": MPSSkipInfo(TEST_OUT),
     "frexp": MPSSkipInfo(UNIMPLEMENTED),
     "full_like": MPSSkipInfo(NONCONTIGUOUS),
-    "gather": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
-    ),
+    "gather": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+    ],
     "gcd": MPSSkipInfo(UNIMPLEMENTED),
     "geometric": MPSSkipInfo(UNIMPLEMENTED),
     "geqrf": MPSSkipInfo(NONCONTIGUOUS),
     "grid_sampler_2d": MPSSkipInfo(NONCONTIGUOUS),
     "heaviside": MPSSkipInfo(UNIMPLEMENTED),
-    "histc": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.int64],
+    "histc": [
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.int64],
+        ),
+    ],
+    "hstack": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
     ),
     "igamma": MPSSkipInfo(UNIMPLEMENTED),
     "igammac": MPSSkipInfo(UNIMPLEMENTED),
@@ -339,14 +458,37 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         upper=15.0,
         lower=14.0,
     ),
+    "isneginf": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "isposinf": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "istft": MPSSkipInfo(NONCONTIGUOUS),
     "kthvalue": MPSSkipInfo(UNIMPLEMENTED),
     "lcm": MPSSkipInfo(UNIMPLEMENTED),
-    "lerp": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
-    ),
-    "lgamma": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "lerp": [
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+    ],
+    "lgamma": [
+        MPSSkipInfo(NONCONTIGUOUS),
+        MPSSkipInfo(
+            TEST_OUT,
+            lower=15.0,  # Regressed in MacOS15
+        ),
+    ],
     "linalg.cholesky_ex": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.cholesky": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.cond": MPSSkipInfo(UNIMPLEMENTED),
@@ -488,6 +630,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "logical_xor": MPSSkipInfo(TEST_OUT),
     "logit": MPSSkipInfo(TEST_OUT),
     "logspace": MPSSkipInfo(UNIMPLEMENTED),
+    "logsumexp": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "lu": MPSSkipInfo(NONCONTIGUOUS),
     "lu_solve": MPSSkipInfo(NONCONTIGUOUS),
     "lu_unpack": MPSSkipInfo(UNIMPLEMENTED),
@@ -547,6 +694,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ],
     "mode": MPSSkipInfo(UNIMPLEMENTED),
     "msort": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "mv": MPSSkipInfo(
         TEST_OUT,
         upper=15.0,
         lower=14.0,
@@ -709,6 +861,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         upper=15.0,
         lower=14.0,
     ),
+    "nn.functional.softshrink": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "nn.functional.triplet_margin_loss": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
@@ -737,6 +894,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         NONCONTIGUOUS,
         TEST_OUT,
         variant="polygamma_n_0",
+        lower=15.0  # Regressed in MacOS15
     ),
     "polar": MPSSkipInfo(TEST_OUT),
     "prod": MPSSkipInfo(
@@ -784,10 +942,17 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
             lower=14.0,
         ),
     ],
-    "scatter": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
-    ),
+    "scatter": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+    ],
     "scatter_reduce": [
         MPSSkipInfo(
             NONCONTIGUOUS,
@@ -801,25 +966,6 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             TEST_OUT,
-            variant="amin",
-            upper=15.0,
-            lower=14.0,
-        ),
-        MPSSkipInfo(
-            TEST_OUT,
-            variant="mean",
-            upper=15.0,
-            lower=14.0,
-        ),
-        MPSSkipInfo(
-            TEST_OUT,
-            variant="prod",
-            upper=15.0,
-            lower=14.0,
-        ),
-        MPSSkipInfo(
-            TEST_OUT,
-            variant="sum",
             upper=15.0,
             lower=14.0,
         ),
@@ -833,7 +979,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         UNIMPLEMENTED,
         variant="with_dtype",
     ),
-    "sort": MPSSkipInfo(TEST_OUT),
+    "sort": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "special.airy_ai": MPSSkipInfo(UNIMPLEMENTED),
     "special.bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
     "special.bessel_j1": MPSSkipInfo(UNIMPLEMENTED),
@@ -854,12 +1004,20 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "special.modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
     "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
-    "special.polygamma": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "special.polygamma": MPSSkipInfo(
+        NONCONTIGUOUS, TEST_OUT,
+        lower=15.0,  # Regressed in MacOS15
+    ),
     "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
     "special.scaled_modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
     "special.spherical_bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
     "special.xlog1py": MPSSkipInfo(UNIMPLEMENTED),
     "special.zeta": MPSSkipInfo(UNIMPLEMENTED),
+    "stack": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "std": [
         MPSSkipInfo(
             NONCONTIGUOUS,
@@ -876,10 +1034,17 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         dtypes=[torch.complex64],
     ),
     "svd_lowrank": MPSSkipInfo(UNIMPLEMENTED),
-    "take_along_dim": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
-    ),
+    "take_along_dim": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            upper=15.0,
+            lower=14.0,
+        ),
+    ],
     "take": MPSSkipInfo(UNIMPLEMENTED),
     "tensordot": MPSSkipInfo(
         NONCONTIGUOUS,
@@ -891,6 +1056,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ),
     "to": MPSSkipInfo(UNIMPLEMENTED),
     "to_sparse": MPSSkipInfo(TEST_OUT),
+    "topk": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "torch.ops.aten._efficient_attention_forward": MPSSkipInfo(UNIMPLEMENTED),
     "torch.ops.aten._flash_attention_forward": MPSSkipInfo(UNIMPLEMENTED),
     "trace": MPSSkipInfo(
@@ -901,6 +1071,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
     ),
     "triangular_solve": MPSSkipInfo(NONCONTIGUOUS),
+    "tril": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "triu": MPSSkipInfo(
         TEST_OUT,
         upper=15.0,
@@ -933,6 +1108,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ],
     "vdot": MPSSkipInfo(UNIMPLEMENTED),
     "vstack": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
+    "where": MPSSkipInfo(
         TEST_OUT,
         upper=15.0,
         lower=14.0,
