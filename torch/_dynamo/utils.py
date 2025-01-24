@@ -1186,7 +1186,6 @@ class CompilationMetrics:
     tensorify_float_attempt: Optional[bool] = None
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
-    guard_latency_us: Optional[float] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
