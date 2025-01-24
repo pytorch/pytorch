@@ -701,7 +701,6 @@ def mps_ops_modifier(ops):
         'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
-        'linalg.detsingular': None,
         'linalg.det': None,
         'linalg.eigh': None,
         'linalg.eigvalsh': None,
