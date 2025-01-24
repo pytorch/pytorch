@@ -2643,6 +2643,18 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unique_consecutive(self):
+        x = torch.tensor([1, 1, 2, 2, 1, 3])
+
+        def fn(x):
+            return torch.unique_consecutive(x)
+
+        expected = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        result = opt_fn(x)
+        self.assertEqual(result, expected)
+
     def test_numpy_unique_f16(self):
         def fn():
             x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
