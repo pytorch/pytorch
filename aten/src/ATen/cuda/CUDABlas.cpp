@@ -1520,8 +1520,8 @@ void scaled_gemm(
 
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
-  auto cuda_mat1_dtype = mat1_dtype == c10::ScalarType::Char ? dtype_to_cuda(a_dtype) : ScalarTypeToCudaDataType(mat1_dtype);
-  auto cuda_mat2_dtype = mat2_dtype == c10::ScalarType::Char ? dtype_to_cuda(b_dtype) : ScalarTypeToCudaDataType(mat2_dtype);
+  auto cuda_mat1_dtype = mat1_dtype == c10::ScalarType::Byte ? dtype_to_cuda(a_dtype) : ScalarTypeToCudaDataType(mat1_dtype);
+  auto cuda_mat2_dtype = mat2_dtype == c10::ScalarType::Byte ? dtype_to_cuda(b_dtype) : ScalarTypeToCudaDataType(mat2_dtype);
 
   CuBlasLtMatrixLayout Adesc(cuda_mat1_dtype, m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(cuda_mat2_dtype, k, n, mat2_ld, transb == 't');

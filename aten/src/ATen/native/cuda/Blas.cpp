@@ -922,7 +922,7 @@ ScalingType get_scaling_type(
     int64_t dim_m,
     int64_t dim_n) {
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-  if(scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kChar) {
+  if(scale_a.scalar_type() == scale_b.scalar_type() && scale_a.scalar_type() == at::kByte) {
     return ScalingType::BlockWise;
   }
   TORCH_CHECK(
