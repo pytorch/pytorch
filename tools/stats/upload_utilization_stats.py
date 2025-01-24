@@ -249,7 +249,7 @@ class UploadUtilizationData:
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
-            file_name="timeseries",
+            file_name="time_series",
             docs=[asdict(record) for record in db_records],
         )
 
