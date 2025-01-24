@@ -368,7 +368,7 @@ def wrap_and_run(
     steps = WrapSteps()
     if is_autograd:
         steps.add(fn_prepped_for_autograd)
-        steps.add(create_joint)
+        steps.add(create_joint, aot_config=aot_config)
     else:
         steps.add(
             fn_input_mutations_to_outputs,
