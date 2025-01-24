@@ -560,9 +560,11 @@ class _Symmetric(_Square):
 
     def check(self, value):
         square_check = super().check(value)
-        if not square_check.all():
-            return square_check
-        return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
+        if not torch.compiler.is_compiling():
+            if not square_check.all():
+                return square_check
+            return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
+        return square_check | torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
 class _PositiveSemidefinite(_Symmetric):
@@ -584,9 +586,11 @@ class _PositiveDefinite(_Symmetric):
 
     def check(self, value):
         sym_check = super().check(value)
-        if not sym_check.all():
-            return sym_check
-        return torch.linalg.cholesky_ex(value).info.eq(0)
+        if not torch.compiler.is_compiling():
+            if not sym_check.all():
+                return sym_check
+            return torch.linalg.cholesky_ex(value).info.eq(0)
+        return sym_check | torch.linalg.cholesky_ex(value).info.eq(0)
 
 
 class _Cat(Constraint):

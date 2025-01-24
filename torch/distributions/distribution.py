@@ -50,6 +50,10 @@ class Distribution:
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
+            if torch.compiler.is_compiling():
+                # Warn users that this will graph break
+                _validate_warn()
+
             try:
                 arg_constraints = self.arg_constraints
             except NotImplementedError:
@@ -270,7 +274,10 @@ class Distribution:
         """
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
-        return torch.Size(sample_shape + self._batch_shape + self._event_shape)
+        size = sample_shape + self._batch_shape + self._event_shape
+        if not isinstance(size, torch.Size):
+            return torch.Size(size)
+        return size
 
     def _validate_sample(self, value: Tensor) -> None:
         """
@@ -339,3 +346,12 @@ class Distribution:
             ]
         )
         return self.__class__.__name__ + "(" + args_string + ")"
+
+
+def _validate_warn():
+    warnings.warn(
+        "You are attempting to compile a distribution constructors with validate_args=True (default). "
+        "To compile this without graph breaks, make sure to turn validate_args to False through the "
+        "constructor or distributions.Distribution.set_default_validate_args.",
+        category=UserWarning,
+    )
