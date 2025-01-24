@@ -862,7 +862,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
     def reconstruct(self, cg):
-        raise NotImplementedError(
+        unimplemented(
             """
 Dynamo doesn't support compiling a region that leaks torch profiler context
 objects which will be used outside the region
