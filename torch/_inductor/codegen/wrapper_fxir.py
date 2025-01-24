@@ -9,6 +9,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dynamo._higher_order_ops.triton_kernel_wrap import triton_wrapper_mutation
 
 from .. import config, ir
+from torch._inductor.runtime.triton_heuristics import grid
 from .wrapper import (
     PythonWrapperCodegen,
     Line,
@@ -21,6 +22,27 @@ from .wrapper import (
     CommBufferFreeLine,
 )
 
+"""
+Extra wrapper IR nodes for FX codegen.
+"""
+@dataclasses.dataclass
+class WrapperIRLine(MemoryPlanningLine):
+    """
+    Base class for Wrapper IR nodes that do not participate in memory planning.
+    Records the call args of the underlying codegen function.
+    """
+    args: Tuple
+    kwargs: Dict
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
+        pass
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError("Python codegen not supported")
+
+class KernelCallLine(WrapperIRLine):
+    pass
+class KernelDefinitionLine(WrapperIRLine):
+    pass
 
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
@@ -30,6 +52,14 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         super().__init__()
         self.graph = torch.fx.Graph() # Wrapper FX IR.
         self.buffer_to_node: Dict[MemoryPlanningLine, torch.fx.Node] = {} # Symbol table for codegen.
+
+    def define_kernel(
+        self, *args, **kwargs,
+    ):
+        """
+        Generates Wrapper IR for a kernel definition.
+        """
+        self.writeline(KernelDefinitionLine(self, args, kwargs))
 
     def _fake_tensor(self, size, stride, dtype) -> torch.Tensor:
         with V.fake_mode:
@@ -80,6 +110,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 CommBufferLine: self._generate_comm_buffer,
                 CommBufferAllocateLine: self._generate_comm_buffer_allocate,
                 CommBufferFreeLine: self._generate_comm_buffer_free,
+                KernelDefinitionLine: self._generate_kernel_definition,
+                KernelCallLine: self._generate_kernel_call,
             }.get(line_type)
 
             # FX conversion only supports Wrapper IR, not Python/C++ lines.
@@ -182,7 +214,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self.graph.free(line.node)
 
     def _generate_triton_call(self, line: Line) -> None:
-        assert isinstance(line, TritonKernelLine) #TODO create this in Wrapper IR
+        assert isinstance(line, KernelCallLine) #TODO create this in Wrapper IR
+
         grid = [] #TODO get a valid config from Line. Might have to import the Triton source.
         kwargs = {} #TODO
         triton_kernel = () #TODO figure out how Dynamo initializes this
@@ -190,3 +223,25 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         node = self.graph.call_function(triton_wrapper_mutation, args=(triton_kernel, grid, kwargs))
         # TODO add autotuning metadata?
 
+    def generate_kernel_call(
+        self, *args, **kwargs,
+    ):
+        """
+        Generates Wrapper IR for a kernel call.
+        """
+        self.writeline(KernelCallLine(self, args, kwargs))
+
+    def _generate_kernel_call_line(self, line: Line):
+        assert isinstance(line, KernelCallLine)
+        if not line.kwargs["triton"]:
+            raise NotImplementedError("FX conversion only supports Triton kernels.")
+
+        if line.kwargs["grid_fn"] not in ("grid", None):
+            raise NotImplementedError(f"Unsupported grid_fn: '{grid_fn}'")
+
+        #TODO call self._generate_triton_kernel
+
+    def _generate_kernel_definition(self, line: Line):
+        assert isinstance(line, KernelDefinitionLine)
+
+        #TODO generate triton kernel representing the kernel define. Put it in a symbol table.
