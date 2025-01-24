@@ -574,6 +574,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             return
 
         if value.is_python_constant():
+            # ConstDictVariable is optimized to be very lazy about insertion of
+            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
+            # here.
+            if isinstance(value, ConstDictVariable) and value.source:
+                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)

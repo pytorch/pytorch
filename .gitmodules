@@ -133,4 +133,4 @@
 	branch = develop
 [submodule "third_party/kleidiai"]
 	path = third_party/kleidiai
-	url = https://git.gitlab.arm.com/kleidi/kleidiai.git
+	url = https://github.com/ARM-software/kleidiai.git
