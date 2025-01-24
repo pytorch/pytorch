@@ -18,7 +18,9 @@ def xfailUnimplemented(test_func: Callable) -> Callable:
         try:
             test_func(*args, **kwargs)
         except NotImplementedError as e:
-            raise unittest.SkipTest("Requires op not currently implemented on MPS") from e
+            raise unittest.SkipTest(
+                "Requires op not currently implemented on MPS"
+            ) from e
         except TypeError as e:
             raise unittest.SkipTest("Uses dtype not supported on MPS") from e
         except unittest.SkipTest as e:
@@ -26,7 +28,8 @@ def xfailUnimplemented(test_func: Callable) -> Callable:
             raise e
         except Exception as e:
             raise RuntimeError(
-                f"Test is marked as unimplemented on MPS, but instead of NotImplementedError or TypeError we received {type(e).__name__}:{e} "
+                f"Test is marked as unimplemented on MPS, but instead of NotImplementedError\
+                    or TypeError we received {type(e).__name__}:{e} "
             ) from e
         else:
             raise RuntimeError(
@@ -73,6 +76,7 @@ class MPSSkipInfo:
         if UNIMPLEMENTED in self.tests:
             self.tests = [NONCONTIGUOUS, TEST_OUT]
             self.skip = xfailUnimplemented
+
 
 """Each op can have multiple skipInfos to account for OS differences & other variations"""
 MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
@@ -161,7 +165,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
             NONCONTIGUOUS,
             dtypes=[torch.complex64, torch.int64],
         ),
-        MPSSkipInfo(TEST_OUT)
+        MPSSkipInfo(TEST_OUT),
     ],
     "angle": [
         MPSSkipInfo(
@@ -177,12 +181,6 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "baddbmm": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.complex64],
-    ),
-    "bmm": MPSSkipInfo(
-        NONCONTIGUOUS,
-        dtypes=[torch.complex64],
-        upper=15.0,
-        lower=14.0,
     ),
     "bitwise_and": MPSSkipInfo(TEST_OUT),
     "bitwise_left": MPSSkipInfo(TEST_OUT),
@@ -201,7 +199,15 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ),
     "bitwise_right_shift": MPSSkipInfo(TEST_OUT),
     "bitwise_xor": MPSSkipInfo(TEST_OUT),
-    "bmm": MPSSkipInfo(TEST_OUT),
+    "bmm": [
+        MPSSkipInfo(TEST_OUT),
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+            upper=15.0,
+            lower=14.0,
+        ),
+    ],
     "bucketize": MPSSkipInfo(TEST_OUT),
     "cauchy": MPSSkipInfo(UNIMPLEMENTED),
     "cdist": MPSSkipInfo(NONCONTIGUOUS),
@@ -368,7 +374,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
             ),
             dtypes=[torch.float32],
         ),
-        MPSSkipInfo(TEST_OUT),       
+        MPSSkipInfo(TEST_OUT),
     ],
     "linalg.lu": MPSSkipInfo(UNIMPLEMENTED),
     "linalg.lu_solve": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
@@ -502,7 +508,9 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             TEST_OUT,
-            skip=unittest.skip("Crashes on MPS with error 'Function isNaN_i64_i8 was not found in the library'"),
+            skip=unittest.skip(
+                "Crashes on MPS with error 'Function isNaN_i64_i8 was not found in the library'"
+            ),
         ),
     ],
     "nanquantile": MPSSkipInfo(
@@ -661,7 +669,8 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "ormqr": MPSSkipInfo(NONCONTIGUOUS),
     "pca_lowrank": MPSSkipInfo(UNIMPLEMENTED),
     "polygamma": MPSSkipInfo(
-        NONCONTIGUOUS, TEST_OUT,
+        NONCONTIGUOUS,
+        TEST_OUT,
         variant="polygamma_n_0",
     ),
     "polar": MPSSkipInfo(TEST_OUT),
