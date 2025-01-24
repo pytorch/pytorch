@@ -596,7 +596,9 @@ class MemoryStats:
     @classmethod
     def compute(cls, estimator: MemoryEstimator) -> typing.Self:
         persistent = StatsForKernelType.compute([estimator.persistent], estimator)
-        if len(estimator.loops) == 1 and not estimator.outside_loop:
+        if len(estimator.loops) == 1 and not (
+            estimator.outside_loop and estimator.loops[0]
+        ):
             looped = persistent  # loops/persistent is the same in this common case
         else:
             looped = StatsForKernelType.compute(
