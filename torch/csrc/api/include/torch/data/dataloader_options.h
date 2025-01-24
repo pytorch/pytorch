@@ -6,8 +6,7 @@
 #include <chrono>
 #include <cstddef>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// Options to configure a `DataLoader`.
 struct DataLoaderOptions {
@@ -61,5 +60,4 @@ struct FullDataLoaderOptions {
   bool enforce_ordering;
   bool drop_last;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

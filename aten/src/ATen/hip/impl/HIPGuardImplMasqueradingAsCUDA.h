@@ -82,7 +82,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return getCurrentHIPStreamMasqueradingAsCUDA(d.index()).unwrap();
   }
   Stream getDefaultStream(Device d) const override {
@@ -94,7 +94,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
     return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     HIPStreamMasqueradingAsCUDA cs(s);
     auto old_stream = getCurrentHIPStreamMasqueradingAsCUDA(s.device().index());
     setCurrentHIPStreamMasqueradingAsCUDA(cs);
@@ -216,6 +216,15 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     C10_HIP_CHECK(hipEventSynchronize(hip_event));
   }
 
+  // Note: synchronizeDevice can be safely called from any device
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
+    int orig_device{-1};
+    C10_HIP_CHECK(hipGetDevice(&orig_device));
+    C10_HIP_CHECK(hipSetDevice(device_index));
+    C10_HIP_CHECK(hipDeviceSynchronize());
+    C10_HIP_CHECK(hipSetDevice(orig_device));
+  }
+
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {
@@ -328,7 +337,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   std::optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
     } else {
       return std::nullopt;
     }
@@ -337,7 +346,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   std::optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
     } else {
       return std::nullopt;
     }

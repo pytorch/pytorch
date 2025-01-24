@@ -33,10 +33,10 @@ class TestLazyReuseIr(TestCase):
         y_lazy = y.detach().clone().to(device=device)
         z_lazy = z.detach().clone().to(device=device)
 
-        for i in range(10):
+        for _ in range(10):
             z += x + y
 
-        for i in range(10):
+        for _ in range(10):
             z_lazy += x_lazy + y_lazy
             torch._lazy.mark_step()
 
@@ -111,7 +111,7 @@ class TestLazyReuseIr(TestCase):
         weight = torch.randn(3, device=device)
         bias = torch.randn(3, device=device)
 
-        for i in range(10):
+        for _ in range(10):
             # BatchNorm2d does extra checks on dimensions which SymInts don't support yet
             # so we call `torch.ops.aten.native_batch_norm` to bypass the checks.
             z, _, _ = torch.ops.aten.native_batch_norm(
@@ -125,7 +125,7 @@ class TestLazyReuseIr(TestCase):
         x_lazy = x.detach().clone().to(device=device)
         weight_lazy = weight.detach().clone().to(device=device)
         bias_lazy = bias.detach().clone().to(device=device)
-        for i in range(10):
+        for _ in range(10):
             z_lazy, _, _ = torch.ops.aten.native_batch_norm(
                 x_lazy, weight_lazy, bias_lazy, None, None, True, 0.1, 1e-5
             )

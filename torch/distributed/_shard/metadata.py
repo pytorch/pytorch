@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import reduce
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from torch.distributed.remote_device import _remote_device
 
@@ -25,14 +25,14 @@ class ShardMetadata:
 
     __slots__ = ["shard_offsets", "shard_sizes", "placement"]
 
-    shard_offsets: List[int]
-    shard_sizes: List[int]
+    shard_offsets: list[int]
+    shard_sizes: list[int]
     placement: Optional[_remote_device]
 
     def __init__(
         self,
-        shard_offsets: List[int],
-        shard_sizes: List[int],
+        shard_offsets: list[int],
+        shard_sizes: list[int],
         placement: Optional[Union[str, _remote_device]] = None,
     ):
         self.shard_offsets = shard_offsets

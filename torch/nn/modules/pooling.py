@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 import torch.nn.functional as F
 from torch import Tensor
@@ -384,7 +384,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool1d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
@@ -479,7 +479,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool2d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
@@ -557,7 +557,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool3d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size

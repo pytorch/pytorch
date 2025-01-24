@@ -15,6 +15,8 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
+#include <c10/util/overflows.h>
+
 namespace at::native {
 
 // Returns true if resize is necessary
@@ -238,8 +240,7 @@ const Tensor& _resize_(
     std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  _resize_impl_<T>(self_, size, /*strides=*/std::nullopt, true);
+  _resize_impl_<T>(self_, size, /*stride=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();

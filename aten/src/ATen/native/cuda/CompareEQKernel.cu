@@ -44,7 +44,7 @@ void ne_kernel_cuda(TensorIteratorBase& iter) {
   compare_eq_ne_kernel(iter, EqOpType::NE);
 }
 
-REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
-REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
+REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda)
+REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda)
 
 } // namespace at::native

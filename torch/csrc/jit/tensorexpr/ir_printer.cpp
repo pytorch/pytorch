@@ -44,6 +44,15 @@ std::string IRPrinter::to_string(CompareSelectOperation op) {
   }
 }
 
+void IRPrinter::PrinterStream::initialize_imbue() {
+  // Similar to https://github.com/pytorch/pytorch/issues/79583:
+  // global locale can be set to something other than "C", which can add
+  // extra commas in the printed numbers.
+  static std::locale c_locale("C");
+  // note: IRPrinter is a subclass of ostream, so imbue is a member function.
+  imbue(c_locale);
+}
+
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
 template <
@@ -182,25 +191,27 @@ void IRPrinter::visit(const CompareSelectPtr& v) {
   withParens(v->ret_val2());
 }
 
-static void formatFPSuffix(std::ostream& os, double v) {
-  os << (v == std::ceil(v) ? ".0" : "");
+static void formatFPSuffix(std::ostream& os, double v, bool flag) {
+  os << (flag && v == std::ceil(v) ? ".0" : "");
 }
 
 template <typename T>
-static void formatFPSuffix(std::ostream& os, T v) {
-  os << (v == std::ceil(v) ? ".f" : "f");
+static void formatFPSuffix(std::ostream& os, T v, bool flag) {
+  os << (flag && v == std::ceil(v) ? ".f" : "f");
 }
 
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   const int precision = 16;
+  const T lower_bound = static_cast<T>(-std::pow(10, precision));
+  const T upper_bound = -lower_bound;
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
     os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
   } else {
     os << std::setprecision(precision) << v;
-    formatFPSuffix(os, v);
+    formatFPSuffix(os, v, v > lower_bound && v < upper_bound);
   }
 }
 
@@ -217,12 +228,11 @@ static void formatImm(std::ostream& os, T v) {
   formatIntSuffix(os, v);
 }
 
-// NOLINTNEXTLINE
 #define IMM_PRINT_VISIT(Type, Name)              \
   void IRPrinter::visit(const Name##ImmPtr& v) { \
     formatImm(os(), v->value());                 \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
 void IRPrinter::visit(const CastPtr& v) {

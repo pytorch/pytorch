@@ -3,7 +3,6 @@
 import os
 import sys
 import unittest
-from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
@@ -148,10 +147,10 @@ FAULTY_AGENT_TESTS = [
 
 def generate_tests(
     prefix: str,
-    mixin: Type[RpcAgentTestFixture],
-    tests: List[Type[RpcAgentTestFixture]],
+    mixin: type[RpcAgentTestFixture],
+    tests: list[type[RpcAgentTestFixture]],
     module_name: str,
-) -> Dict[str, Type[RpcAgentTestFixture]]:
+) -> dict[str, type[RpcAgentTestFixture]]:
     """Mix in the classes needed to autogenerate the tests based on the params.
 
     Takes a series of test suites, each written against a "generic" agent (i.e.,
@@ -166,7 +165,7 @@ def generate_tests(
     that the classes can be fixed to make it look like they belong to it, which
     is necessary for pickling to work on them.
     """
-    ret: Dict[str, Type[RpcAgentTestFixture]] = {}
+    ret: dict[str, type[RpcAgentTestFixture]] = {}
     for test_class in tests:
         if IS_SANDCASTLE and TEST_WITH_DEV_DBG_ASAN:
             print(

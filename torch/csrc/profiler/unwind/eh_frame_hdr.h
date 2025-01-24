@@ -1,5 +1,5 @@
 #pragma once
-#include <stdint.h>
+#include <cstdint>
 #include <ostream>
 
 #include <torch/csrc/profiler/unwind/lexer.h>
@@ -40,6 +40,7 @@ struct EHFrameHdr {
           throw UnwindError("unknown table encoding");
       }
     }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     eh_frame_ = (void*)L.readEncodedOr(eh_frame_ptr_enc_, 0);
     fde_count_ = L.readEncodedOr(fde_count_enc_, 0);
     table_start_ = L.loc();
@@ -54,6 +55,7 @@ struct EHFrameHdr {
         .readEncoded(table_enc_);
   }
   void* fde(size_t i) const {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return (void*)Lexer(table_start_, base_)
         .skip((2 * i + 1) * table_size_)
         .readEncoded(table_enc_);

@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -29,6 +29,8 @@ from torch.onnx._internal import jit_utils, registration
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -2955,7 +2957,6 @@ def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accum
 
 @_onnx_symbolic("aten::index_fill")
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -2968,8 +2969,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
-    expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
+    _expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
     return scatter(g, self, dim, expanded_index, source)
@@ -3674,14 +3674,14 @@ def new_full(
 def eye(g: jit_utils.GraphContext, *args):
     if len(args) == 5:
         # aten::eye(n, dtype, layout, device, pin_memory)
-        n, dtype, layout, device, pin_memory = args
+        n, dtype, layout, device, _pin_memory = args
         dim_size = symbolic_helper._unsqueeze_helper(g, n, [0])
         shape = g.op("Concat", dim_size, dim_size, axis_i=0)
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
     if len(args) == 6:
         # aten::eye(n, m, dtype, layout, device, pin_memory)
-        n, m, dtype, layout, device, pin_memory = args
+        n, m, dtype, layout, device, _pin_memory = args
         shape = g.op(
             "Concat",
             symbolic_helper._unsqueeze_helper(g, n, [0]),
@@ -5567,14 +5567,14 @@ def linalg_matrix_norm(
             g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim
         )
         if ord_value > 0:
-            result, indices = max(
+            result, _indices = max(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),
                 keepdim=keepdim,
             )
         else:
-            result, indices = min(
+            result, _indices = min(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),
@@ -6192,8 +6192,17 @@ def cdist(
     # In order to respect numpy style broadcasting as demonstrated in
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
     # we unsqueeze both input tensors
-    # Currently we ignore the 'compute_mode' variable as we use default to
-    # using matrix multiplication to calculate the euclidean distance
+    row_size_x1 = symbolic_helper._get_tensor_dim_size(x1, -2)
+    row_size_x2 = symbolic_helper._get_tensor_dim_size(x2, -2)
+    assert row_size_x1 is not None
+    assert row_size_x2 is not None
+    p_float = symbolic_helper._parse_arg(p, "f")
+    compute_mode = symbolic_helper._parse_arg(compute_mode, "i")
+    if p_float == 2.0 and (
+        compute_mode == 1
+        or (compute_mode is None and row_size_x1 >= 25 and row_size_x2 >= 25)
+    ):
+        return _euclidean_dist(g, x1, x2)
     rank = symbolic_helper._get_tensor_rank(x1)
     assert rank is not None
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
@@ -6201,6 +6210,48 @@ def cdist(
     return pairwise_distance(
         g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False
     )
+
+
+def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
+    # X1.shape = (B * P * D), X2.shape = (B * R * D)
+    # using matrix multiplication to accelerate the calculation of
+    # the euclidean distance
+    rank = symbolic_helper._get_tensor_rank(x1)
+    assert rank is not None
+    x1_norm = symbolic_helper._reducesum_helper(
+        g,
+        pow(g, x1, symbolic_helper._generate_wrapped_number(g, 2.0)),
+        axes_i=[-1],
+        keepdims_i=True,
+    )
+    x1_pad = ones_like(g, x1_norm)
+    x2_norm = symbolic_helper._reducesum_helper(
+        g,
+        pow(g, x2, symbolic_helper._generate_wrapped_number(g, 2.0)),
+        axes_i=[-1],
+        keepdims_i=True,
+    )
+    x2_pad = ones_like(g, x2_norm)
+    x1_ = g.op(
+        "Concat",
+        *[
+            mul(g, symbolic_helper._generate_wrapped_number(g, -2.0), x1),
+            x1_norm,
+            x1_pad,
+        ],
+        axis_i=-1,
+    )
+    x2_ = g.op("Concat", *[x2, x2_pad, x2_norm], axis_i=-1)
+    result = matmul(g, x1_, transpose(g, x2_, -2, -1))
+    dtype = _type_utils.JitScalarType.from_value(result)
+    min = g.op(
+        "Cast", symbolic_helper._generate_wrapped_number(g, 0.0), to_i=dtype.onnx_type()
+    )
+    result = symbolic_helper._op_with_optional_float_cast(
+        g, "Max", result, min, opset_before=12
+    )
+    result = sqrt(g, result)
+    return result
 
 
 @_onnx_symbolic("aten::lerp")
@@ -6391,7 +6442,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
     opset_version = GLOBALS.export_onnx_opset_version
 
     old_blocks = tuple(node.blocks())
-    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+    _new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
         g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
     )
 
@@ -6500,7 +6551,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
         return final_b_list
     else:
         old_blocks = tuple(n.blocks())
-        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+        _new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
             g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
         )
 

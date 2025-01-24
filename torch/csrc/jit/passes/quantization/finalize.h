@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
@@ -59,5 +58,4 @@ TORCH_API Module FinalizeOnDevicePTQ(
     Module& module,
     QuantType quant_type,
     const std::string& method_name);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

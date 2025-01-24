@@ -1,13 +1,15 @@
-# mypy: allow-untyped-defs
 # pyre-strict
-from typing import Union
-
+from typing import Union, Generic
+from collections.abc import Iterator, Iterable
 import torch
 
+from typing import TypeVar
 
-class ProxyValue:
+_T = TypeVar("_T")
+
+class ProxyValue(Generic[_T]):
     # pyre-ignore
-    def __init__(self, data, proxy: Union[torch.fx.Proxy, torch.fx.Node]):
+    def __init__(self, data: Iterable[_T], proxy: Union[torch.fx.Proxy, torch.fx.Node]):
         # pyre-ignore
         self.data = data
         self.proxy_or_node = proxy
@@ -35,7 +37,7 @@ class ProxyValue:
         return isinstance(self.data, torch.Tensor)
 
     # pyre-ignore
-    def __iter__(self):
+    def __iter__(self) -> Iterator[_T]:
         yield from self.data
 
     def __bool__(self) -> bool:

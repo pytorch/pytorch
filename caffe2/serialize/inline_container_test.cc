@@ -6,13 +6,11 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Logging.h>
-#include <c10/util/irange.h>
+#include "c10/util/irange.h"
 #include "caffe2/serialize/inline_container.h"
-#include "caffe2/serialize/istream_adapter.h"
 
-
-// NOLINTBEGIN(*-narrowing-conversions)
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 namespace {
 
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
@@ -21,7 +19,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
-    oss.write(static_cast<const char*>(b), static_cast<std::streamsize>(n));
+    oss.write(static_cast<const char*>(b), n);
     return oss ? n : 0;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
@@ -30,14 +28,14 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
-    data1[i] = static_cast<char>(data1.size() - i);
+    data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
   for (auto i : c10::irange(data2.size())) {
-    data2[i] = static_cast<char>(data2.size() - i);
+    data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
@@ -79,9 +77,12 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key1", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
-        memcpy(dst, src, n);
-      });
+      "key1",
+      dst.data(),
+      size,
+      3,
+      buf.data(),
+      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
 
@@ -99,9 +100,12 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key2", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
-        memcpy(dst, src, n);
-      });
+      "key2",
+      dst.data(),
+      size,
+      3,
+      buf.data(),
+      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
   // clean up
@@ -109,7 +113,6 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 }
 
 TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
-
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
@@ -151,14 +154,14 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   PyTorchStreamReader reader(&iss);
   reader.setAdditionalReaderSizeThreshold(0);
   // before testing, sanity check
-  int64_t size1 = 0, size2 = 0, ret = 0;
+  int64_t size1, size2, ret;
   at::DataPtr data_ptr;
   std::tie(data_ptr, size1) = reader.getRecord("key1");
   std::tie(data_ptr, size2) = reader.getRecord("key2");
 
   // Test getRecord(name, additional_readers)
   std::vector<std::shared_ptr<ReadAdapterInterface>> additionalReader;
-  for(int i=0; i<10; ++i){
+  for (int i = 0; i < 10; ++i) {
     // Test various sized additional readers.
     std::tie(data_ptr, ret) = reader.getRecord("key1", additionalReader);
     ASSERT_EQ(ret, size1);
@@ -172,7 +175,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
   std::vector<uint8_t> dst1(size1), dst2(size2);
-  for(int i=0; i<10; ++i){
+  for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
     additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
 
@@ -298,7 +301,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   reader.setShouldLoadDebugSymbol(false);
   EXPECT_FALSE(reader.hasRecord("key1.debug_pkl"));
   at::DataPtr ptr;
-  size_t size = 0;
+  size_t size;
   std::tie(ptr, size) = reader.getRecord("key1.debug_pkl");
   EXPECT_EQ(size, 0);
   std::vector<uint8_t> dst(data1.size());
@@ -326,7 +329,7 @@ TEST(PytorchStreamWriterAndReader, ValidSerializationId) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (auto i: c10::irange(data1.size())) {
+  for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1.debug_pkl", data1.data(), data1.size());
@@ -363,7 +366,10 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   });
 
   std::string dup_serialization_id = "dup-serialization-id";
-  writer.writeRecord(kSerializationIdRecordName, dup_serialization_id.c_str(), dup_serialization_id.size());
+  writer.writeRecord(
+      kSerializationIdRecordName,
+      dup_serialization_id.c_str(),
+      dup_serialization_id.size());
 
   const std::unordered_set<std::string>& written_records =
       writer.getAllWrittenRecords();
@@ -412,13 +418,12 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   std::map<std::string, std::map<std::string, std::string>> expected_logs = {
       {"pytorch.stream.writer.metadata",
        {{"serialization_id", writer.serializationId()},
-       {"file_name", "archive"},
-       {"file_size", str(oss.str().length())}}},
+        {"file_name", "archive"},
+        {"file_size", str(oss.str().length())}}},
       {"pytorch.stream.reader.metadata",
        {{"serialization_id", writer.serializationId()},
-       {"file_name", "archive"},
-       {"file_size", str(iss.str().length())}}}
-  };
+        {"file_name", "archive"},
+        {"file_size", str(iss.str().length())}}}};
   ASSERT_EQ(expected_logs, logs);
 
   // reset logger
@@ -435,7 +440,8 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   auto chunkSize = GetParam();
-  std::string zipFileName = "output_chunk_" + std::to_string(chunkSize) + ".zip";
+  std::string zipFileName =
+      "output_chunk_" + std::to_string(chunkSize) + ".zip";
   const char* fileName = zipFileName.c_str();
   const std::string recordName = "key1";
   const size_t tensorDataSizeInBytes = 1000;
@@ -481,5 +487,5 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
 }
 
 } // namespace
-} // namespace caffe2::serialize
-// NOLINTEND(*-narrowing-conversions)
+} // namespace serialize
+} // namespace caffe2

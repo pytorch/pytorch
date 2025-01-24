@@ -35,7 +35,7 @@ inline int64_t maybe_wrap_dim(
     // if necessary
     return dim;
   }
-  return maybe_wrap_dim(dim, tensor_sizes[0].size());
+  return maybe_wrap_dim(dim, static_cast<int64_t>(tensor_sizes[0].size()));
 }
 
 // Given an array of dimensions `dims` of length `ndims`, this function "Wraps"

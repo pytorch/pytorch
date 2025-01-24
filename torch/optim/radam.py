@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
@@ -16,6 +15,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -225,20 +225,20 @@ RAdam.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        decoupled_weight_decay (bool, optional): whether to use decoupled weight
-            decay as in AdamW to obtain RAdamW (default: False)
+        decoupled_weight_decay (bool, optional): whether to decouple the weight
+            decay as in AdamW to obtain RAdamW. If True, the algorithm does not
+            accumulate weight decay in the momentum nor variance. (default: False)
         {_foreach_doc}
         {_maximize_doc}
-        {_differentiable_doc}
         {_capturable_doc}
+        {_differentiable_doc}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
@@ -276,7 +276,7 @@ def _single_tensor_radam(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -374,7 +374,7 @@ def _multi_tensor_radam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -404,7 +404,7 @@ def _multi_tensor_radam(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -511,7 +511,7 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                (
+                (  # type: ignore[misc]
                     (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf

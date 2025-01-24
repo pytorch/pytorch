@@ -293,7 +293,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_consecutive_mps(const Tensor& self
                                                               int64_t dim,
                                                               const bool return_inverse,
                                                               const bool return_counts) {
-  return _unique_impl_mps(self, return_inverse, return_counts, true, std::make_optional((int64_t)dim));
+  return _unique_impl_mps(self, return_inverse, return_counts, true, dim);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,

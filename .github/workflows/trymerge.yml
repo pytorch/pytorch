@@ -24,11 +24,11 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           check-latest: false
           cache: pip
           architecture: x64
-      - run: pip install pyyaml==6.0 rockset==1.0.3
+      - run: pip install pyyaml==6.0
 
       - name: Setup committer id
         run: |
@@ -43,7 +43,6 @@ jobs:
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           REBASE: ${{ github.event.client_payload.rebase }}
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |

@@ -9,15 +9,16 @@ except ImportError as e:
 import numbers
 import os
 import sys
+from collections.abc import Iterator
 from datetime import timedelta
-from typing import Callable, Dict, Iterator, Optional, Tuple
+from typing import Callable, Optional
 
-from torch.distributed import FileStore, PrefixStore, Store, TCPStore
+from torch.distributed import FileStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
+_rendezvous_handlers: dict[str, Callable[..., Iterator[tuple[Store, int, int]]]] = {}
 
 __all__ = ["register_rendezvous_handler", "rendezvous"]
 
@@ -54,14 +55,14 @@ def register_rendezvous_handler(scheme, handler):
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
-def _query_to_dict(query: str) -> Dict[str, str]:
+def _query_to_dict(query: str) -> dict[str, str]:
     return {
         pair[0]: pair[1]
         for pair in (pair.split("=") for pair in filter(None, query.split("&")))
     }
 
 
-def _get_use_libuv_from_query_dict(query_dict: Dict[str, str]) -> bool:
+def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
     # libuv is the default backend for TCPStore. To enable the non-libuv backend,
     # user can explicitly specify ``use_libuv=0`` in the URL parameter.
     return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
@@ -181,17 +182,22 @@ def _create_c10d_store(
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
     if _torchelastic_use_agent_store():
-        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
-        tcp_store = TCPStore(hostname, port, world_size, False, timeout)
-        return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
+        # We create a new TCPStore for every retry so no need to add prefix for each attempt.
+        return TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=False,
+            timeout=timeout,
+        )
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname,
-            port,
-            world_size,
-            start_daemon,
-            timeout,
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=start_daemon,
+            timeout=timeout,
             multi_tenant=True,
             use_libuv=use_libuv,
         )

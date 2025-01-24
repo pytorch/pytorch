@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import functools
 import itertools
@@ -440,8 +441,6 @@ class TestEinsum(TestCase):
 
         # Suppress the complex warnings for the 'as f8' tests
         with suppress_warnings() as sup:
-            #         sup.filter(np.ComplexWarning)
-
             # matvec(a,b) / a.dot(b) where a is matrix, b is vector
             for n in range(1, 17):
                 a = np.arange(4 * n, dtype=dtype).reshape(4, n)

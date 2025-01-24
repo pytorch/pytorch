@@ -3,11 +3,11 @@ import copy
 import functools
 import os
 import unittest
-from typing import Tuple
 
 import torch
 from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
@@ -17,10 +17,9 @@ from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     serialTest,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -91,19 +90,19 @@ def forward_and_backward_pass(m, inputs):
         "triton.cudagraphs": USE_CUDA_GRAPHS,
     }
 )
-@requires_cuda
+@requires_gpu()
 class TestCaseBase(TestCase):
     @classmethod
     def setUpClass(cls):
-        if HAS_CUDA:
+        if HAS_GPU:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
             torch.set_float32_matmul_precision("high")
-            torch.set_default_device("cuda")
+            torch.set_default_device(GPU_TYPE)
 
     @classmethod
     def tearDownClass(cls):
-        if HAS_CUDA:
+        if HAS_GPU:
             torch.set_float32_matmul_precision(cls.prior_float32_matmul_precision)
             torch.set_default_device(cls.prior_default_device)
 
@@ -141,7 +140,8 @@ class TestCaseBase(TestCase):
     ):
         if kwargs is None:
             kwargs = {}
-        torch.cuda.synchronize()
+        device_interface = get_interface_for_device(GPU_TYPE)
+        device_interface.synchronize()
         with torch.profiler.profile(with_stack=WITH_STACK) as p:
             niter = 3
             for _ in range(niter):
@@ -150,7 +150,7 @@ class TestCaseBase(TestCase):
 
                 with torch.profiler.record_function(tag_rhs):
                     f_rhs(*args, **kwargs)
-            torch.cuda.synchronize()
+            device_interface.synchronize()
 
         profile_path = "/tmp/chrome.json"
         p.export_chrome_trace(profile_path)
@@ -207,7 +207,7 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
 
             def f(**inputs):
                 optim.zero_grad(True)
-                with torch.cuda.amp.autocast():
+                with torch.autocast(GPU_TYPE):
                     pred = model(**inputs)
                     loss = pred[0]
                 loss.backward()
@@ -279,7 +279,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
             def get_f(m, optim):
                 def f(*args, **kwargs):
                     optim.zero_grad(True)
-                    with torch.cuda.amp.autocast():
+                    with torch.autocast(GPU_TYPE):
                         pred = m(*args, **kwargs)
                         loss = reduce_to_scalar_loss(pred)
                     loss.backward()
@@ -443,7 +443,7 @@ class PaddingTest(TestCaseBase):
 
         # Using stride (30522, 1) does not make a difference here.
         x_bad_shape = rand_strided(
-            (8192, 30522), (30528, 1), device="cuda", dtype=torch.float16
+            (8192, 30522), (30528, 1), device=GPU_TYPE, dtype=torch.float16
         )
         weight_bad_shape = torch.randn(30522, 768, dtype=torch.float16)
         out_bad_shape = torch.randn(8192, 768, dtype=torch.float16)
@@ -486,7 +486,7 @@ class PaddingTest(TestCaseBase):
 
         # make sure the load for softmax is aligned
         self.assertTrue(
-            "tl.load(in_ptr0 + (r1 + (30528*x0))" in forward_wrapper,
+            "tl.load(in_ptr0 + (r0_1 + 30528*x0)" in forward_wrapper,
             f"forward_wrapper: {forward_wrapper}",
         )
 
@@ -592,7 +592,7 @@ class PaddingTest(TestCaseBase):
         x1 = torch.randn(*x_shape)
 
         padded_stride = ir.Layout._pad_strides(x1.stride(), x1.shape, torch.float32)
-        x2 = rand_strided(x_shape, padded_stride, device="cuda")
+        x2 = rand_strided(x_shape, padded_stride, device=GPU_TYPE)
         x2.copy_(x1)
 
         weight = torch.randn(64, 128, 3, 3)
@@ -665,7 +665,7 @@ class PaddingTest(TestCaseBase):
     @parametrize("shape", [(21, 19), (3, 5, 71)])
     @parametrize("dtype", (torch.float16, torch.float32))
     def test_pad_outputs(
-        self, dtype: torch.dtype, shape: Tuple[int], alignment_bytes: int
+        self, dtype: torch.dtype, shape: tuple[int], alignment_bytes: int
     ):
         """
         Tests padding output tensors to a specific alignment.
@@ -710,5 +710,5 @@ class PaddingTest(TestCaseBase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

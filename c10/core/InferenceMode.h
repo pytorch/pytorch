@@ -73,6 +73,11 @@ struct C10_API InferenceMode {
     c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
   }
 
+  InferenceMode(const InferenceMode&) = delete;
+  InferenceMode(InferenceMode&&) = delete;
+  InferenceMode& operator=(const InferenceMode&) = delete;
+  InferenceMode& operator=(InferenceMode&&) = delete;
+
   ~InferenceMode() {
     AutogradState::set_tls_state(prev_mode);
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);

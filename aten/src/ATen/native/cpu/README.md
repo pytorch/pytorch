@@ -20,7 +20,7 @@ it using DECLARE/REGISTER DISPATCH.**  Writing a kernel requires
 three steps:
 
 1. Declare your dispatch in a header file using
-  `DECLARE_DISPATCH(fn_type, fnNameImpl);`
+  `DECLARE_DISPATCH(fn_type, fnNameImpl)`
    where `fn_type` is the function pointer type of the kernel (e.g.,
    defined as `using fn_type = void(*)(Tensor&, const Tensor&)`
    and `fnNameImpl` is the name of your dispatch registry.

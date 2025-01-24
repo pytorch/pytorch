@@ -4,18 +4,22 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 import dataclasses
 import datetime
+import logging
 import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch._export import converter as _torchscript_converter
 from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
     import os
+
+
+logger = logging.getLogger(__name__)
 
 
 def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
@@ -32,6 +36,22 @@ def _take_first_line(text: str) -> str:
     if len(lines) > 1:
         first_line += "[...]"
     return first_line
+
+
+@contextlib.contextmanager
+def _patch_dynamo_unsupported_functions():
+    """Patch PyTorch to bypass some functions torch.export.export does not support."""
+    # TODO: Remove the patches once dynamo supports these functions.
+    import torch.jit
+
+    # Replace torch.jit.isinstance with isinstance
+    jit_isinstance = torch.jit.isinstance
+    torch.jit.isinstance = isinstance
+    logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
+    try:
+        yield
+    finally:
+        torch.jit.isinstance = jit_isinstance
 
 
 @dataclasses.dataclass
@@ -120,22 +140,27 @@ class TorchExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        try:
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
-            )
-        except torch._dynamo.exc.UserError as exc:
-            # Refine the dynamic shapes based on the suggested fixes.
+        with _patch_dynamo_unsupported_functions():
             try:
-                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
-                    exc.msg, dynamic_shapes
+                return torch.export.export(
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
                 )
-            except Exception:
-                # If the dynamic shapes cannot be refined, re-raise the exception.
-                raise exc from None
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=new_shapes
-            )
+            except torch._dynamo.exc.UserError as exc:
+                # Refine the dynamic shapes based on the suggested fixes.
+                try:
+                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                        exc.msg, dynamic_shapes
+                    )
+                except Exception:
+                    # If the dynamic shapes cannot be refined, re-raise the exception.
+                    raise exc from None
+                return torch.export.export(
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
+                )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -202,6 +227,9 @@ class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
+        # Avoid circular import
+        from torch._export import converter as _torchscript_converter
+
         del dynamic_shapes  # Unused
 
         flattened_args, spec = _pytree.tree_flatten((args, kwargs))
@@ -289,73 +317,8 @@ class JitTraceConvertStrategy(CaptureStrategy):
         )
 
 
-class LegacyDynamoStrategy(CaptureStrategy):
-    """Strategy implemented by the ONNX team using internal dynamo APIs and custom fx passes."""
-
-    def _capture(
-        self, model, args, kwargs, dynamic_shapes
-    ) -> torch.export.ExportedProgram:
-        # NOTE: Import here to prevent circular dependency
-        from torch.onnx._internal.fx import diagnostics, passes
-
-        graph_module, _ = torch._dynamo.export(
-            model,
-            tracing_mode="symbolic",
-            dynamic_shapes=dynamic_shapes,
-        )(
-            *args,
-            **kwargs,
-        )
-        torch._dynamo.reset()
-
-        diagnostic_context = diagnostics.DiagnosticContext(
-            "torch.onnx.export",
-            torch.__version__,
-        )
-
-        flattened_args, _ = _pytree.tree_flatten((args, kwargs))
-        flattened_args = tuple(flattened_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        graph_module = passes.Functionalize(
-            diagnostic_context,
-            graph_module,
-            enable_dynamic_axes=bool(dynamic_shapes),
-        ).run(*flattened_args)
-
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        graph_module = passes.RemoveInputMutation(diagnostic_context, graph_module).run(
-            *flattened_args
-        )
-
-        # Use torch.export to recapture the GraphModule into an ExportedProgram.
-        return torch.export.export(graph_module, flattened_args)
-
-    def _enter(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis..."
-        )
-
-    def _success(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ✅"
-        )
-
-    def _failure(self, model, e) -> None:
-        del e  # Unused
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ❌"
-        )
-
-
 CAPTURE_STRATEGIES = (
+    TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrategy,
-    TorchExportNonStrictStrategy,
     JitTraceConvertStrategy,
-    LegacyDynamoStrategy,
 )

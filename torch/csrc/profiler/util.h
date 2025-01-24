@@ -76,6 +76,30 @@ struct TORCH_API FileLineFunc {
   std::string funcname;
 };
 
+struct TORCH_API SaveNcclMetaConfig {
+  bool truncate;
+  bool introspectMetadata;
+  bool introspectInputs;
+  bool introspectOutputs;
+
+  // Default constructor with default values
+  SaveNcclMetaConfig()
+      : truncate(true),
+        introspectMetadata(true),
+        introspectInputs(false),
+        introspectOutputs(false) {}
+
+  SaveNcclMetaConfig(
+      bool truncate,
+      bool introspectMetadata,
+      bool introspectInputs,
+      bool introspectOutputs)
+      : truncate(truncate),
+        introspectMetadata(introspectMetadata),
+        introspectInputs(introspectInputs),
+        introspectOutputs(introspectOutputs) {}
+};
+
 TORCH_API std::vector<FileLineFunc> prepareCallstack(
     const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(
@@ -98,9 +122,14 @@ TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
-std::unordered_map<std::string, std::string> TORCH_API
-saveNcclMeta(const at::RecordFunction& fn, bool truncate = true);
-
+std::unordered_map<std::string, std::string> TORCH_API saveNcclMeta(
+    const at::RecordFunction& fn,
+    const SaveNcclMetaConfig& config = SaveNcclMetaConfig());
+int getTensorStartHint(const at::Tensor& t);
+bool checkFunctionOutputsForLogging(const at::RecordFunction& fn);
+bool checkFunctionInputsForLogging(const at::RecordFunction& fn);
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
+    const c10::IValue& val);
 uint64_t TORCH_API computeFlops(
     const std::string& op_name,
     const std::unordered_map<std::string, c10::IValue>& extra_args);
@@ -111,7 +140,7 @@ template <typename T>
 class TORCH_API GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
-    static GlobalStateManager singleton_;
+    /* library-local */ static GlobalStateManager singleton_;
     return singleton_;
   }
 
@@ -172,6 +201,8 @@ constexpr auto kGroupRanks = "Process Group Ranks";
 constexpr auto kRank = "Rank";
 constexpr auto kP2pSrc = "Src Rank";
 constexpr auto kP2pDst = "Dst Rank";
+constexpr auto kInTensorsStart = "Input Tensors start";
+constexpr auto kOutTensorsStart = "Output Tensors start";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl

@@ -9,9 +9,10 @@ Type=simple
 Restart=always
 ExecStartPre=-/usr/bin/docker rm --force actions-runner.%i
 ExecStartPre=-/usr/local/bin/gh_token_generator.sh /etc/actions-runner/%i/appid.env /etc/actions-runner/%i/installid.env /etc/actions-runner/%i/key_private.pem /etc/actions-runner/%i/ghtoken.env
+ExecStartPre=-/usr/local/bin/gh_cat_token.sh /etc/actions-runner/%i/ghtoken.env /etc/actions-runner/%i/ghtoken.socket
 ExecStart=/usr/bin/docker run \
               --env-file=/etc/actions-runner/%i/env \
-              --env-file=/etc/actions-runner/%i/ghtoken.env \
+              --volume /etc/actions-runner/%i/ghtoken.socket:/run/runner_secret \
               --init \
               --interactive \
               --name=actions-runner.%i \
@@ -21,6 +22,7 @@ ExecStart=/usr/bin/docker run \
 ExecStop=/bin/sh -c "docker exec actions-runner.%i kill -INT -- -1"
 ExecStop=/bin/sh -c "docker wait actions-runner.%i"
 ExecStop=/bin/sh -c "docker rm actions-runner.%i"
+ExecStop=/usr/bin/env rm -f /etc/actions-runner/%i/ghtoken.env /etc/actions-runner/%i/ghtoken.socket
 
 [Install]
 WantedBy=multi-user.target

@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,7 +28,7 @@ def replace_params_with_constants(
     gm: torch.fx.GraphModule,
     flat_params: list[Any],
     fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
-) -> List[int]:
+) -> list[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -66,8 +66,8 @@ def replace_params_with_constants(
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
-    example_inputs: List[torch._subclasses.FakeTensor],
-) -> Tuple[torch.fx.GraphModule, List[int]]:
+    example_inputs: list[torch._subclasses.FakeTensor],
+) -> tuple[torch.fx.GraphModule, list[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
     and other techniques. If enabled, the function also discards the original parameters of the module for memory efficiency.
@@ -90,7 +90,8 @@ def freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        params_flat = tracing_context.params_flat
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat = tracing_context.params_flat_unwrap_subclasses
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -165,7 +166,7 @@ def invalidate_eager_modules():
                     e_t = ErasedTensor(tensor, attr_name, mod)
                 if isinstance(tensor, torch.nn.Parameter):
                     e_t.requires_grad_(True)
-                    e_t._is_param = True  # type: ignore[attr-defined]
+                    e_t._is_param = True
                 setattr(mod, attr_name, e_t)
 
 
@@ -180,7 +181,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True  # type: ignore[attr-defined]
+                e_t._is_param = True
             setattr(mod, attr_name, e_t)
 
 

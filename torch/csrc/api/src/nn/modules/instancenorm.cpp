@@ -1,8 +1,7 @@
 #include <torch/nn/functional/instancenorm.h>
 #include <torch/nn/modules/instancenorm.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
   if (input.dim() != 3 && input.dim() != 2) {
@@ -30,5 +29,4 @@ template class InstanceNormImpl<1, InstanceNorm1dImpl>;
 template class InstanceNormImpl<2, InstanceNorm2dImpl>;
 template class InstanceNormImpl<3, InstanceNorm3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

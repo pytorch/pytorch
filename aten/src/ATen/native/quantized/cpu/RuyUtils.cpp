@@ -3,9 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/RuyUtils.h>
 
-namespace at {
-namespace native {
-namespace ruy_utils {
+namespace at::native::ruy_utils {
 
 static thread_local ruy::Context context;
 
@@ -30,8 +28,6 @@ void quantize_multiplier(double scale,
   *multiplier_fixedpoint = static_cast<std::int32_t>(q_fixed);
 }
 
-} // namespace ruy_utils
-} // namespace native
-} // namespace
+} // namespace at::native::ruy_utils
 
 #endif // USE_RUY_QMATMUL

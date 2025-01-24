@@ -5,8 +5,7 @@
 
 #include <torch/csrc/lazy/core/ir.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API Util {
  public:
@@ -43,5 +42,4 @@ class TORCH_API Util {
   static size_t GetGraphSize(c10::ArrayRef<const Node*> nodes);
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

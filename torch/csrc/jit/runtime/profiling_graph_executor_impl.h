@@ -3,9 +3,9 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
-C10_DECLARE_bool(torch_jit_static_then_dynamic);
+TORCH_DECLARE_bool(torch_jit_static_then_dynamic);
 
-C10_DECLARE_bool(torch_jit_always_dynamic);
+TORCH_DECLARE_bool(torch_jit_always_dynamic);
 
 namespace torch::jit {
 

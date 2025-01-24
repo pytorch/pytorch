@@ -6,20 +6,11 @@ import inspect
 import io
 import linecache
 import os
+import sys
 import types
+from collections.abc import Iterable
 from contextlib import contextmanager
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -63,7 +54,7 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
 # The primary motivation is to enable Numpy upgrade that many modules
 # depend on. The latest release of Numpy removed `numpy.str` and
 # `numpy.bool` breaking unpickling for many modules.
-EXTERN_IMPORT_COMPAT_NAME_MAPPING: Dict[str, Dict[str, Any]] = {
+EXTERN_IMPORT_COMPAT_NAME_MAPPING: dict[str, dict[str, Any]] = {
     "numpy": {
         "str": str,
         "bool": bool,
@@ -89,7 +80,7 @@ class PackageImporter(Importer):
     local to this importer.
     """
 
-    modules: Dict[str, types.ModuleType]
+    modules: dict[str, types.ModuleType]
 
     def __init__(
         self,
@@ -259,7 +250,10 @@ class PackageImporter(Importer):
 
             if typename == "storage":
                 storage_type, key, location, size = data
-                dtype = storage_type.dtype
+                if storage_type is torch.UntypedStorage:
+                    dtype = torch.uint8
+                else:
+                    dtype = storage_type.dtype
 
                 if key not in loaded_storages:
                     load_tensor(
@@ -463,7 +457,6 @@ class PackageImporter(Importer):
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
     def _do_find_and_load(self, name):
-        path = None
         parent = name.rpartition(".")[0]
         module_name_no_parent = name.rpartition(".")[-1]
         if parent:
@@ -475,7 +468,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                path = parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__  # type: ignore[attr-defined]
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,
@@ -527,8 +520,9 @@ class PackageImporter(Importer):
         if name == "os":
             self.modules["os.path"] = cast(Any, module).path
         elif name == "typing":
-            self.modules["typing.io"] = cast(Any, module).io
-            self.modules["typing.re"] = cast(Any, module).re
+            if sys.version_info < (3, 13):
+                self.modules["typing.io"] = cast(Any, module).io
+                self.modules["typing.re"] = cast(Any, module).re
 
         return module
 
@@ -642,7 +636,7 @@ class PackageImporter(Importer):
             return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(
-        self, atoms: List[str]
+        self, atoms: list[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
         for i, atom in enumerate(atoms):
@@ -701,7 +695,7 @@ class _PathNode:
 class _PackageNode(_PathNode):
     def __init__(self, source_file: Optional[str]):
         self.source_file = source_file
-        self.children: Dict[str, _PathNode] = {}
+        self.children: dict[str, _PathNode] = {}
 
 
 class _ModuleNode(_PathNode):

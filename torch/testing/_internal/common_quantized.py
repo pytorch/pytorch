@@ -6,14 +6,13 @@ tensors and modules.
 import numpy as np
 import torch
 from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS
 
 supported_qengines = torch.backends.quantized.supported_engines
 supported_qengines.remove('none')
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
-# QNNPACK throws ASAN heap-buffer-overflow error.
-if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_MACOS, IS_WINDOWS]):
+if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_TSAN, IS_MACOS, IS_WINDOWS]):
     supported_qengines.remove('qnnpack')
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
@@ -128,9 +127,7 @@ def _snr(x, x_hat):
     """
     if isinstance(x, (list, tuple)):
         assert len(x) == len(x_hat)
-        res = []
-        for idx in range(len(x)):
-            res.append(_snr(x[idx], x_hat[idx]))
+        res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
         return res
     if x_hat.is_quantized:
         x_hat = x_hat.dequantize()
@@ -223,5 +220,5 @@ def to_tensor(X, device):
     if not isinstance(X, torch.Tensor):
         X = torch.tensor(X)
     else:
-        X = X.clone().detach()
+        X = X.detach().clone()
     return X.to(device=torch.device(device), dtype=torch.float32)

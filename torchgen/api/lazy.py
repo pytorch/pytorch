@@ -80,7 +80,7 @@ def process_ir_type(
      (3) making cpp-reference types into cpp-value types (e.g. vector instead of IntArrayRef)
 
     (1) converts at::Tensors to lazy::Values (which wrap lazy::Nodes, with which Lazy IR represents tensors.)
-    There is special handling for Optional[Tensor] or List[Tensor], etc- hence 'tensor-like'
+    There is special handling for Optional[Tensor] or list[Tensor], etc- hence 'tensor-like'
 
     This is incomplete- there are assertions in places that it's expected to need to add
     more types as the codegen is used with more operators.
@@ -378,7 +378,8 @@ class LazyIrSchema:
                             self.generator_arg is None
                         ), "We expect there is only one generator arg"
                         self.generator_arg = NamedCType(
-                            arg.name, arg.type  # type:ignore[arg-type]
+                            arg.name,
+                            arg.type,  # type:ignore[arg-type]
                         )
                 keyword_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)

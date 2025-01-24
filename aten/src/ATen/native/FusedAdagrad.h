@@ -15,6 +15,6 @@ using fused_adagrad_fn = void (*)(
     const bool maximize,
     const float* grad_scale_ptr);
 
-DECLARE_DISPATCH(fused_adagrad_fn, fused_adagrad_stub);
+DECLARE_DISPATCH(fused_adagrad_fn, fused_adagrad_stub)
 
 } // namespace at::native

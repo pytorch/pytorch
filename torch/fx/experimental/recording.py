@@ -4,7 +4,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -83,11 +83,11 @@ class ShapeEnvEvent:
     f: Callable
 
     # Arguments and keyword arguments called with.
-    args: Optional[List[Any]] = None
-    kwargs: Optional[Dict[str, Any]] = None
+    args: Optional[list[Any]] = None
+    kwargs: Optional[dict[str, Any]] = None
 
     # List of tracked_fakes at the time the method was called.
-    tracked_fakes: Optional[List[Any]] = None
+    tracked_fakes: Optional[list[Any]] = None
 
     # Name of the captured event.
     # Used for special handling of particular methods.
@@ -253,7 +253,8 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 return r
 
             try:
-                if args[0].is_recording:  # type: ignore[has-type]
+                shape_env = args[0]
+                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
@@ -331,7 +332,7 @@ def replay_shape_env_events(events):
             # We need to call create_mapping_fn every time, since the node list might
             # change after each event is replayed.
             event.run(shape_env)
-        except Exception as e:
+        except Exception:
             log.error("failed when running event: %s", event)
             raise
 
@@ -343,15 +344,15 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: Tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: Tuple[Union[int, torch.SymInt], ...]
+    tensor_size: tuple[Union[int, torch.SymInt], ...]
+    tensor_stride: tuple[Union[int, torch.SymInt], ...]
     tensor_storage_offset: Union[int, torch.SymInt]
     is_nested: bool
 
-    def size(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_size
 
-    def stride(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_stride
 
     def storage_offset(self) -> Union[int, torch.SymInt]:
@@ -444,7 +445,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # compare the two values.
     def compare_vars(
         map_value: Callable[[str, Any], Any]
-    ) -> List[Tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 
         # First, compare the set of keys in each vars dictionary.
@@ -488,7 +489,7 @@ class NotEqualError(Exception):
     def __init__(
         self,
         msg: str,
-        mismatched: List[Tuple[str, str, str]],
+        mismatched: list[tuple[str, str, str]],
     ) -> None:
         details = "\n".join(
             [

@@ -13,6 +13,8 @@
 
 #include <torch/csrc/profiler/perf.h>
 
+#include <limits>
+
 namespace torch::profiler::impl::linux_perf {
 
 /*

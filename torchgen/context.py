@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torchgen.local as local
 from torchgen.model import (
@@ -13,6 +13,10 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
 )
 from torchgen.utils import context, S, T
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 # Helper functions for defining generators on things in the model
@@ -35,7 +39,7 @@ F2 = TypeVar(
     str,
 )
 
-F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
+F3 = TypeVar("F3", tuple[NativeFunction, Any], list[NativeFunction])
 
 
 @contextlib.contextmanager
@@ -95,7 +99,7 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
 
 
 def method_with_nested_native_function(
-    func: Callable[[S, F3], T]
+    func: Callable[[S, F3], T],
 ) -> Callable[[S, F3], T]:
     @functools.wraps(func)
     def wrapper(slf: S, f: F3) -> T:
@@ -108,7 +112,7 @@ def method_with_nested_native_function(
 # Convenience decorator for functions that explicitly take in a BackendIndex,
 # instead of indirectly taking one in as a closure
 def with_native_function_and_index(
-    func: Callable[[F, BackendIndex], T]
+    func: Callable[[F, BackendIndex], T],
 ) -> Callable[[F, BackendIndex], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_index: BackendIndex) -> T:
@@ -120,7 +124,7 @@ def with_native_function_and_index(
 
 # Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
-    func: Callable[[F, dict[DispatchKey, BackendIndex]], T]
+    func: Callable[[F, dict[DispatchKey, BackendIndex]], T],
 ) -> Callable[[F, dict[DispatchKey, BackendIndex]], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_indices: dict[DispatchKey, BackendIndex]) -> T:

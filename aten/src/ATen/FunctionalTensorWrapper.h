@@ -62,18 +62,18 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // functionalization.
   const Tensor& value() const {
     return value_;
-  };
+  }
   // The concept of "level" is only ever important to functorch; it's exposed
   // here as more of a hook for functorch to use.
   int64_t level() const {
     return level_;
-  };
+  }
   void set_level(int64_t level) {
     level_ = level;
   }
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
-  };
+  }
 
   void mark_mutation() {
     functional_storage_impl()->mark_mutation();

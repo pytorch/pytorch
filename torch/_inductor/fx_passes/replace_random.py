@@ -27,9 +27,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
         return 0
 
     count = patterns.apply(gm)
-    with GraphTransformObserver(
-        gm, "fuse_seed_creation_pass", config.trace.log_url_for_graph_xform
-    ):
+    with GraphTransformObserver(gm, "fuse_seed_creation_pass"):
         count += fuse_seed_creation_pass(gm.graph)
 
     return count

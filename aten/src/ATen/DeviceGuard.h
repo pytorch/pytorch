@@ -17,7 +17,7 @@ namespace at {
 /// Return the Device of a Tensor, if the Tensor is defined.
 inline std::optional<Device> device_of(const Tensor& t) {
   if (t.defined()) {
-    return std::make_optional(t.device());
+    return t.device();
   } else {
     return std::nullopt;
   }

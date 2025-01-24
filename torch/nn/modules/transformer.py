@@ -34,10 +34,6 @@ def _generate_square_subsequent_mask(
 
     The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
-    if device is None:
-        device = torch.device("cpu")
-    if dtype is None:
-        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float("-inf"), dtype=dtype, device=device),
         diagonal=1,
@@ -60,6 +56,11 @@ def _get_seq_len(src: Tensor, batch_first: bool) -> Optional[int]:
 
 class Transformer(Module):
     r"""A transformer model.
+
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
 
     User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
@@ -309,6 +310,11 @@ class Transformer(Module):
 class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers.
 
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
+
     Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
@@ -527,6 +533,11 @@ class TransformerEncoder(Module):
 class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers.
 
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
+
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
@@ -618,6 +629,11 @@ class TransformerDecoder(Module):
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
+
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
 
     This standard encoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
@@ -934,6 +950,11 @@ class TransformerEncoderLayer(Module):
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
+
+    .. note::
+        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+        for an in depth discussion of the performant building blocks PyTorch offers for building your own
+        transformer layers.
 
     This standard decoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,

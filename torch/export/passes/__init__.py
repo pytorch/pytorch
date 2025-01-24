@@ -9,7 +9,7 @@ __all__ = ["move_to_device_pass"]
 
 
 def move_to_device_pass(
-    ep: ExportedProgram, location: Union[torch.device, str, Dict[str, str]]
+    ep: ExportedProgram, location: Union[torch.device, str, dict[str, str]]
 ) -> ExportedProgram:
     """
     Move the exported program to the given device.
@@ -27,7 +27,7 @@ def move_to_device_pass(
 
     def _get_new_device(
         curr_device: torch.device,
-        location: Union[torch.device, str, Dict[str, str]],
+        location: Union[torch.device, str, dict[str, str]],
     ) -> str:
         if isinstance(location, dict):
             if str(curr_device) in location.keys():
@@ -41,7 +41,8 @@ def move_to_device_pass(
     for k, v in ep.state_dict.items():
         if isinstance(v, torch.nn.Parameter):
             ep._state_dict[k] = torch.nn.Parameter(
-                v.to(_get_new_device(v.device, location))
+                v.to(_get_new_device(v.device, location)),
+                v.requires_grad,
             )
         else:
             ep._state_dict[k] = v.to(_get_new_device(v.device, location))

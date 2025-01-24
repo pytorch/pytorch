@@ -8,7 +8,6 @@ import re
 import typing
 import warnings
 from textwrap import dedent
-from typing import Type
 
 import torch
 from torch._C import (
@@ -350,7 +349,7 @@ def try_real_annotations(fn, loc):
 
 # Finds common type for enum values belonging to an Enum class. If not all
 # values have the same type, AnyType is returned.
-def get_enum_value_type(e: Type[enum.Enum], loc):
+def get_enum_value_type(e: type[enum.Enum], loc):
     enum_values: List[enum.Enum] = list(e)
     if not enum_values:
         raise ValueError(f"No enum values defined for: '{e.__class__}'")

@@ -7,7 +7,7 @@ source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
-set -ex
+set -ex -o pipefail
 
 # for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
 # the order of operations goes:
@@ -63,7 +63,7 @@ build_docs () {
     echo "(tried to echo the WARNINGS above the ==== line)"
     echo =========================
   fi
-  set -ex
+  set -ex -o pipefail
   return $code
 }
 

@@ -68,6 +68,8 @@ RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
+ADD ./common/install_miopen.sh install_miopen.sh
+RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
@@ -105,12 +107,11 @@ COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
-# Install AOTriton
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt/rocm && rm -rf install_aotriton.sh aotriton_version.txt common_utils.sh"]
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
+# This is needed by sccache
+COPY ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+ENV OPENSSL_DIR /opt/openssl
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
@@ -120,6 +121,9 @@ RUN bash ./install_cache.sh && rm install_cache.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

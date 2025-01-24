@@ -14,7 +14,7 @@ It does so by:
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Union
 from unittest.mock import patch
 
 import torch
@@ -190,7 +190,7 @@ def fn_prepped_for_autograd(
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
-    def inner_fn(primals: List[Any], tangents: List[Any]):
+    def inner_fn(primals: list[Any], tangents: list[Any]):
         outs, tangent_mask = fn(*primals)
 
         assert len(tangent_mask) == len(outs)
@@ -232,7 +232,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = ()
+        backward_out: tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
@@ -621,7 +621,7 @@ def create_functionalized_fn(
                 flat_outs = [from_fun(o) for o in flat_outs]
                 num_outs = len(meta.output_info)
 
-                for i, outp in enumerate(flat_outs[:num_outs]):
+                for i in range(num_outs):
                     info = meta.output_info[i]
                     if info.output_type != OutputType.is_input:
                         continue
@@ -733,7 +733,7 @@ def handle_effect_tokens_fn(
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
 def aot_dispatch_subclass(
     flat_fn_maybe_joint,
-    args: List[Any],
+    args: list[Any],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
@@ -775,10 +775,19 @@ def aot_dispatch_subclass(
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
+            # Add extra symints as outputs to the forward/backward graphs
+            # ignore nested ints here
+            forward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[0], append_symints=True
+            )
+            # ignore nested ints here
+            backward_outs = unwrap_tensor_subclasses(
+                wrapped_outs[1], append_symints=True
+            )
+            return (forward_outs, backward_outs)
+
         # Step 3: Unwrap any subclass outputs back into dense tensors
-        unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs, is_joint_structure=use_trace_joint
-        )
+        unwrapped_outs = unwrap_tensor_subclasses(wrapped_outs, append_symints=True)
         return unwrapped_outs
 
     def joint_fn(primals, tangents):
@@ -794,9 +803,16 @@ def aot_dispatch_subclass(
     def metadata_fn(*primals):
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
-    args_unwrapped = unwrap_tensor_subclasses(
-        args, is_joint_structure=is_joint_structure
-    )
+    if is_joint_structure:
+        args_unwrapped = (
+            # Add extra symints (size/strides) as input to the forward graph
+            unwrap_tensor_subclasses(args[0], append_symints=True),
+            # We pass append_symints=False here because the partitioner will
+            # capture and add any extra argument
+            unwrap_tensor_subclasses(args[1], append_symints=False),
+        )
+    else:
+        args_unwrapped = unwrap_tensor_subclasses(args, append_symints=True)
     remapped_static_indices = remap_unwrapped_subclass_arg_indices(
         args, meta.static_input_indices
     )
@@ -822,7 +838,7 @@ def aot_dispatch_subclass(
     # However, the original ViewAndMutationMeta that we computed was created
     # on the subclass -> subclass graph,
     # which can have a different number of outputs than the dense -> dense graph.
-    # That's why we createa a fresh metadata object on the dense -> dense function here,
+    # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(

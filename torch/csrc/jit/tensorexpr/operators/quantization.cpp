@@ -543,7 +543,6 @@ Tensor computeQuantizedMulScalar(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
@@ -598,12 +597,9 @@ Tensor computeQuantizedCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
-    // NOLINTNEXTLINE
     at::Device device) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto inputList = std::get<BufList>(inputs[0]);
+  auto const& inputList = std::get<BufList>(inputs[0]);
   auto argDim = std::get<int64_t>(inputs[1]);
   auto n = inputList.size();
   // TODO: handle optional out_qscale, out_qzero
@@ -643,7 +639,7 @@ Tensor computeDequantize(
   if (outputType) {
     dtype = Dtype(*outputType);
   }
-  auto qx = std::get<BufHandle>(inputs[0]);
+  auto const& qx = std::get<BufHandle>(inputs[0]);
   TORCH_INTERNAL_ASSERT(
       qx.node()->qscale(),
       buildErrorMessage("Missing quantized scale for dequantize"));
@@ -671,7 +667,7 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
     at::Device) {
-  auto A = std::get<BufHandle>(inputs[0]);
+  const auto& A = std::get<BufHandle>(inputs[0]);
   const auto& output_height = outputShape[2];
   const auto& output_width = outputShape[3];
   auto input_height = ExprHandle(A.dim(2));

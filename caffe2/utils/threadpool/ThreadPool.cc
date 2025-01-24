@@ -10,16 +10,16 @@
 C10_DEFINE_bool(
     caffe2_threadpool_force_inline,
     false,
-    "Force to always run jobs on the calling thread");
+    "Force to always run jobs on the calling thread")
 
 // Whether or not threadpool caps apply to Android
-C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_android_cap, true, "")
 
 // Whether or not threadpool caps apply to iOS and MacOS
-C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
-C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "")
+C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "")
 
-C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
+C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.")
 
 namespace caffe2 {
 
@@ -184,14 +184,10 @@ void ThreadPoolImpl::run(const std::function<void(int, size_t)>& fn, size_t rang
   }
 
   struct FnTask : public Task {
-    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
-    FnTask(){};
-    // NOLINTNEXTLINE(modernize-use-equals-default)
-    ~FnTask() override{};
-    const std::function<void(int, size_t)>* fn_;
-    int idx_;
-    size_t start_;
-    size_t end_;
+    const std::function<void(int, size_t)>* fn_{};
+    int idx_{};
+    size_t start_{};
+    size_t end_{};
     void Run() override {
       for (auto i = start_; i < end_; ++i) {
         (*fn_)(idx_, i);

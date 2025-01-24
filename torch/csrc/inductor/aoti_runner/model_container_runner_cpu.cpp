@@ -12,11 +12,6 @@ AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
 
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
 
-std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
-    std::vector<at::Tensor>& inputs) {
-  return AOTIModelContainerRunner::run(inputs);
-}
-
 namespace {
 std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
     const std::string& model_so_path,

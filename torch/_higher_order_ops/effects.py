@@ -1,7 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 from weakref import WeakKeyDictionary
 
 import torch
@@ -72,9 +71,9 @@ class WithEffects(HigherOrderOperator):
         self,
         token,
         op: OpType,
-        *args: Tuple[Any, ...],
-        **kwargs: Dict[str, Any],
-    ) -> Tuple[Any, ...]:
+        *args: tuple[Any, ...],
+        **kwargs: dict[str, Any],
+    ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
@@ -127,17 +126,16 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
 
 
 def new_token_tensor() -> torch.Tensor:
-    # Use dtype bool to not affect Inductor dtype promotions
-    return torch.tensor([], dtype=torch.bool)
+    return torch.tensor([])
 
 
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
     new_token = new_token_tensor()
     if isinstance(out, tuple):
@@ -150,9 +148,9 @@ def with_effects_fake(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
         return result
@@ -163,9 +161,9 @@ def with_effects_proxy(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
 
@@ -204,10 +202,10 @@ def _get_schema(op, args) -> torch.FunctionSchema:
 
 def handle_effects(
     allow_token_discovery: bool,
-    tokens: Dict[_EffectType, torch.Tensor],
+    tokens: dict[_EffectType, torch.Tensor],
     op: OpType,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     """
     Args:
@@ -262,12 +260,12 @@ def handle_effects(
 
     ctx = PythonFunctionalizeAPI()
 
-    unwrapped_token = ctx.unwrap_tensors([token])[0]  # type: ignore[arg-type]
-    unwrapped_args = ctx.unwrap_tensors(args)  # type: ignore[arg-type]
+    unwrapped_token = ctx.unwrap_tensors([token])[0]
+    unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         (new_token, *unwrapped_outs) = with_effects(
-            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs  # type: ignore[arg-type]
+            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
     schema = _get_schema(op, unwrapped_args)
@@ -286,4 +284,4 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_outs)

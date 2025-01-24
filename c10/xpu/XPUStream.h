@@ -27,7 +27,7 @@ namespace c10::xpu {
  * threads as the SYCL specification described.
  */
 
-static constexpr int max_compile_time_stream_priorities = 2;
+static constexpr int max_compile_time_stream_priorities = 3;
 
 /*
  * This serves as a wrapper around c10::Stream and acts as a representation for
@@ -132,7 +132,8 @@ class C10_XPU_API XPUStream {
 
   /// Return the range of priority **supported by PyTorch**.
   static std::tuple<int, int> priority_range() {
-    return std::make_tuple(0, -max_compile_time_stream_priorities + 1);
+    // See Note [XPU Stream priorities]
+    return std::make_tuple(1, -max_compile_time_stream_priorities + 2);
   }
 
  private:
@@ -156,6 +157,23 @@ getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
  */
 C10_XPU_API XPUStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
+
+/**
+ * Get an XPUStream from an external SYCL queue.
+ *
+ * This function allows interoperability with other libraries by enabling
+ * the use of an external SYCL queue that was not created by PyTorch. This
+ * can be useful for data exchange or other operations where integration
+ * with non-PyTorch queues is required.
+ *
+ * NOTE: It is the user's responsibility to ensure that the referenced SYCL
+ * queue remains alive while the corresponding XPUStream, or any c10::Stream
+ * derived from it, is in use. The different SYCL queue pointers will result in
+ * distinct XPUStream instances, even if the SYCL queues they dereference are
+ * equivalent.
+ */
+C10_XPU_API XPUStream
+getStreamFromExternal(sycl::queue* ext_queue, DeviceIndex device_index);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current

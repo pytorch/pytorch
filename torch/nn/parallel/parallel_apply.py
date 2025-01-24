@@ -1,5 +1,6 @@
 import threading
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any, cast, Optional, Union
 
 import torch
 from torch._utils import ExceptionWrapper
@@ -11,7 +12,7 @@ __all__ = ["get_a_var", "parallel_apply"]
 
 
 def get_a_var(
-    obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]],
+    obj: Union[torch.Tensor, list[Any], tuple[Any, ...], dict[Any, Any]],
 ) -> Optional[torch.Tensor]:
     if isinstance(obj, torch.Tensor):
         return obj
@@ -30,9 +31,9 @@ def get_a_var(
 def parallel_apply(
     modules: Sequence[Module],
     inputs: Sequence[Any],
-    kwargs_tup: Optional[Sequence[Dict[str, Any]]] = None,
+    kwargs_tup: Optional[Sequence[dict[str, Any]]] = None,
     devices: Optional[Sequence[Optional[Union[int, torch.device]]]] = None,
-) -> List[Any]:
+) -> list[Any]:
     r"""Apply each `module` in :attr:`modules` in parallel on each of :attr:`devices`.
 
     Args:
@@ -51,7 +52,7 @@ def parallel_apply(
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:
-        kwargs_tup = (cast(Dict[str, Any], {}),) * len(modules)
+        kwargs_tup = (cast(dict[str, Any], {}),) * len(modules)
     if devices is not None:
         assert len(modules) == len(devices)
     else:
@@ -69,7 +70,7 @@ def parallel_apply(
         i: int,
         module: Module,
         input: Any,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         device: Optional[Union[int, torch.device]] = None,
         stream: Optional[torch.cuda.Stream] = None,
     ) -> None:

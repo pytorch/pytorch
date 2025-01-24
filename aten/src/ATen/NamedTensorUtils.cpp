@@ -40,7 +40,7 @@ std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dim
   return result;
 }
 
-static void report_positional_error(
+[[noreturn]] static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
     DimnameList names,
@@ -391,10 +391,8 @@ void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
     return;
   }
   std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
-  std::copy(
-      self.opt_names()->begin(),
-      self.opt_names()->end(),
-      outnames.begin() + result_dim - self.dim());
+  auto const names = self.names();
+  std::copy( names.begin(), names.end(), outnames.begin() + result_dim - self.dim());
   propagate_names(result, outnames);
 }
 

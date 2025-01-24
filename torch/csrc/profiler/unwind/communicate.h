@@ -1,15 +1,16 @@
 #pragma once
 #include <ext/stdio_filebuf.h>
-#include <sys/wait.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
 #include <unistd.h>
+#include <array>
 #include <memory>
 
 namespace torch::unwind {
 // helper to open a process with stdin/stdout/stderr streams.
 struct Communicate {
   Communicate(const char* command, const char** args) {
-    if (pipe(inpipe_) < 0 || pipe(outpipe_) < 0 || pipe(errpipe_) < 0) {
+    if (pipe(inpipe_.data()) < 0 || pipe(outpipe_.data()) < 0 ||
+        pipe(errpipe_.data()) < 0) {
       throw UnwindError("pipe() failed");
     }
     pid_t pid = fork();
@@ -29,17 +30,21 @@ struct Communicate {
       close(inpipe_[0]);
       close(outpipe_[1]);
       close(errpipe_[1]);
-      outbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(inpipe_[1], std::ios::out));
-      inbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(outpipe_[0], std::ios::in));
-      errbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(errpipe_[0], std::ios::in));
-      in_.reset(new std::istream(inbuf_.get()));
-      out_.reset(new std::ostream(outbuf_.get()));
-      err_.reset(new std::ostream(errbuf_.get()));
+      outbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          inpipe_[1], std::ios::out);
+      inbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          outpipe_[0], std::ios::in);
+      errbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          errpipe_[0], std::ios::in);
+      in_ = std::make_unique<std::istream>(inbuf_.get());
+      out_ = std::make_unique<std::ostream>(outbuf_.get());
+      err_ = std::make_unique<std::ostream>(errbuf_.get());
     }
   }
+  Communicate(const Communicate&) = delete;
+  Communicate(Communicate&&) = delete;
+  Communicate& operator=(const Communicate&) = delete;
+  Communicate& operator=(Communicate&&) = delete;
   ~Communicate() {
     close(inpipe_[1]);
     close(outpipe_[0]);
@@ -56,9 +61,9 @@ struct Communicate {
   }
 
  private:
-  int inpipe_[2];
-  int outpipe_[2];
-  int errpipe_[2];
+  std::array<int, 2> inpipe_{-1, -1};
+  std::array<int, 2> outpipe_{-1, -1};
+  std::array<int, 2> errpipe_{-1, -1};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> outbuf_, inbuf_, errbuf_;
   std::unique_ptr<std::istream> in_;
   std::unique_ptr<std::ostream> out_;

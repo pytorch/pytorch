@@ -107,7 +107,7 @@ def run_and_compare_activation(self, fn, inps):
             torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
             for shape in inps
         ]
-        res_args = [i.clone().detach().requires_grad_(True) for i in ref_args]
+        res_args = [i.detach().clone().requires_grad_(True) for i in ref_args]
 
         ref = fn(*ref_args)
         ref.sum().backward()

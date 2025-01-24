@@ -73,6 +73,7 @@ void initCudartBindings(PyObject* module) {
       [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
         py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
             cudaHostRegister((void*)ptr, size, flags));
       });
   cudart.def(
@@ -80,6 +81,7 @@ void initCudartBindings(PyObject* module) {
       "HostUnregister",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
       });
   cudart.def(
@@ -87,6 +89,7 @@ void initCudartBindings(PyObject* module) {
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
       });
   cudart.def(
@@ -94,6 +97,7 @@ void initCudartBindings(PyObject* module) {
       "StreamDestroy",
       [](uintptr_t ptr) -> cudaError_t {
         py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaStreamDestroy((cudaStream_t)ptr));
       });
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000

@@ -1,8 +1,11 @@
 // NOTE: Like interface.cpp, this file will be copied into AOTInductor
 // generated output. This file is intended to keep implementation
 // details separate from the implementation of the AOTI public
-// interface. Note also that #includes should go into interface.cpp
-// for simplicity of maintenance.
+// interface.
+#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 namespace torch {
 namespace aot_inductor {

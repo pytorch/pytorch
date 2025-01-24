@@ -2,7 +2,7 @@
 from numbers import Number
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
@@ -55,19 +55,19 @@ class FisherSnedecor(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 2] = nan
         return df2 / (df2 - 2)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         mode = (self.df1 - 2) / self.df1 * self.df2 / (self.df2 + 2)
         mode[self.df1 <= 2] = nan
         return mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 4] = nan
         return (
@@ -77,7 +77,7 @@ class FisherSnedecor(Distribution):
             / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
         )
 
-    def rsample(self, sample_shape: _size = torch.Size(())) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size(())) -> Tensor:
         shape = self._extended_shape(sample_shape)
         #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
         #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)

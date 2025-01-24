@@ -21,8 +21,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qclamp_stub);
 DEFINE_DISPATCH(qclamp_min_stub);
@@ -170,5 +169,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

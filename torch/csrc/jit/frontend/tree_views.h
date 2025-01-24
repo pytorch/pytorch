@@ -1062,7 +1062,7 @@ struct Subscript : public Expr {
 struct Var : public Expr {
   explicit Var(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_VAR);
-  };
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
@@ -1119,7 +1119,7 @@ struct With : public Stmt {
 struct TernaryIf : public Expr {
   explicit TernaryIf(const TreeRef& tree) : Expr(tree) {
     tree_->matchNumSubtrees(TK_IF_EXPR, 3);
-  };
+  }
   Expr cond() const {
     return Expr(subtree(0));
   }
@@ -1136,7 +1136,7 @@ struct TernaryIf : public Expr {
       const Expr& false_expr) {
     return TernaryIf(
         Compound::create(TK_IF_EXPR, range, {cond, true_expr, false_expr}));
-  };
+  }
 };
 
 struct ListLiteral : public Expr {
@@ -1262,7 +1262,11 @@ inline Expr pep604union_to_union(const Expr& expr) {
       expr.range(),
       Var::create(expr.range(), Ident::create(expr.range(), "Union")),
       List<Expr>::create(expr.range(), members));
+#if defined(__clang__)
   return std::move(synthesised_union);
+#else
+  return synthesised_union;
+#endif
 }
 
 } // namespace torch::jit

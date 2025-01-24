@@ -335,7 +335,7 @@ class TestJit(JitCommonTestCase):
                     try:
                         inp = clone_input_helper(sample.input)
                         scripted(inp)
-                    except Exception as e:
+                    except Exception:
                         continue
                     self.fail(
                         "Inplace operation on integer tensor that should be promoted to float didn't fail!"

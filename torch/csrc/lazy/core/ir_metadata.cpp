@@ -3,8 +3,7 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <functional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 void EmitShortFrameInfo(
     std::ostream& stream,
@@ -103,5 +102,4 @@ MetaData GetMetaDataIfDebugging() {
   return meta;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

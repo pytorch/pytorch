@@ -7,6 +7,7 @@
 
 namespace c10d {
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonCommHook::~PythonCommHook() {
   py::gil_scoped_acquire ag;
   state_.dec_ref();

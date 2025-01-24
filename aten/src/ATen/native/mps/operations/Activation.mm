@@ -662,7 +662,7 @@ static MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   return erfTensor;
 }
 
-TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, const Tensor& output) {
+TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, std::string_view approximate, const Tensor& output) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
@@ -711,7 +711,7 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_mps)
-(const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input) {
+(const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input) {
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
@@ -1428,6 +1428,12 @@ TORCH_IMPL_FUNC(softshrink_out_mps)
                                                                                         name:nil]
                                     falsePredicateTensor:outputTensor
                                                     name:nil];
+      MPSGraphTensor* isNanTensor = [mpsGraph isNaNWithTensor:inputTensor name:nil];
+
+      outputTensor = [mpsGraph selectWithPredicateTensor:isNanTensor
+                                     truePredicateTensor:inputTensor
+                                    falsePredicateTensor:outputTensor
+                                                    name:nil];
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -1653,6 +1659,11 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
 
   MPSStream* stream = getCurrentMPSStream();
 
+  bool executeGatherOp =
+      !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
+        self.is_contiguous(MemoryFormat::ChannelsLast3d));
+  Tensor result_ = at::empty_like(self, executeGatherOp ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
+
   @autoreleasepool {
     string key = "silu_out_mps:" + getTensorsStringKey({self});
 
@@ -1673,11 +1684,15 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, executeGatherOp ? result_ : result, nil, false);
 
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+  if (executeGatherOp) {
+    result.copy_(result_);
   }
 }
 

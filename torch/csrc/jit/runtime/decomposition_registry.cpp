@@ -10,9 +10,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
 #include <unordered_map>
@@ -79,8 +77,7 @@ static void DecomposeOp(Node* n) {
     return;
   }
   WithInsertPoint guard(n);
-  auto outputs =
-      insertGraph(*n->owningGraph(), *decomposition->get(), n->inputs());
+  auto outputs = insertGraph(*n->owningGraph(), **decomposition, n->inputs());
   TORCH_INTERNAL_ASSERT(outputs.size() == n->outputs().size());
   for (size_t i : c10::irange(outputs.size())) {
     n->outputs().at(i)->replaceAllUsesWith(outputs[i]);
@@ -101,7 +98,7 @@ static void RunDecompositions(Block* block) {
 
 void RunDecompositions(std::shared_ptr<Graph> g) {
   RunDecompositions(g->block());
-  for (C10_UNUSED const auto _ : c10::irange(2)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(2)) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }
@@ -189,7 +186,7 @@ void run_jit_decomposition(
   auto* trace_exec = torch::jit::GetDecompositionExecutor(schema);
   trace_exec->run((*stack));
   if (stack->back().isTuple()) {
-    at::IValue tup = stack->back();
+    at::IValue tup = std::move(stack->back());
     stack->pop_back();
     for (const auto& elem : tup.toTuple()->elements()) {
       stack->push_back(elem);

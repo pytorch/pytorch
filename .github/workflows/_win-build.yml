@@ -16,6 +16,10 @@ on:
         type: boolean
         default: false
         description: If set, build with XPU support.
+      xpu-version:
+        required: false
+        type: string
+        description: The version of XPU support package.
       vc-year:
         required: false
         type: string
@@ -68,9 +72,10 @@ jobs:
         shell: bash
     steps:
       # Duplicated in win-test because this MUST go before a checkout
-      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
+          git config --global core.longpaths true
           git config --global core.symlinks true
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
@@ -145,7 +150,7 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
-          PYTHON_VERSION: "3.8"
+          PYTHON_VERSION: "3.9"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1
@@ -160,6 +165,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           USE_XPU: ${{ inputs.use-xpu == true && '1' || '0' }}
+          XPU_VERSION: "${{ inputs.xpu-version }}"
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           .ci/pytorch/win-build.sh
@@ -176,13 +182,9 @@ jobs:
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
+        uses: ./.github/actions/upload-sccache-stats
         with:
-          s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-          retention-days: 14
-          if-no-files-found: warn
-          path: sccache-stats-*.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

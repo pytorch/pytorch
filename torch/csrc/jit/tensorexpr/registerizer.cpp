@@ -272,7 +272,7 @@ void RegisterizerAnalysis::visit(const ForPtr& v) {
 
   // having hoisted, now we can merge normally.
   mergeCurrentScopeIntoParent();
-};
+}
 
 void RegisterizerAnalysis::visit(const CondPtr& v) {
   ExprPtr condition = v->condition();

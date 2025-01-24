@@ -342,10 +342,10 @@ class TestSubgraphRewriter(JitTestCase):
     ):
         class M(torch.nn.Module):
             def forward(self, x, w1, w2, b1, b2):
-                m0 = torch.cat([w1, w2])
+                m0 = torch.cat([w1, w2])  # noqa: F841
                 m1 = torch.cat([w1, w2])
                 m2 = torch.cat([x, b2])
-                t0 = torch.addmm(b1, m1, m2.t())
+                t0 = torch.addmm(b1, m1, m2.t())  # noqa: F841
                 t1 = torch.sum(w1, 1)
                 t2 = torch.addmm(b1, m1, m2.t())
                 return torch.sum(t1), torch.sum(t2)
@@ -676,6 +676,51 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_outs = comparison_fn(x1, x2, x3)
         test_outs = traced.forward(x1, x2, x3)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_with_unused_results(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, cache):
+                m = torch.mul(x, y)
+                n = cache.index_copy(0, torch.tensor([0]), m)
+                p = torch.ops.aten.copy.default(cache, n)
+                q = torch.ops.aten.copy_.default(cache, p)  # noqa: F841
+                u = torch.relu(cache)
+                # check the result to ensure cache is updated before relu op
+                return u
+
+        def pattern(self_tensor, src_tensor):
+            p = torch.ops.aten.copy.default(self_tensor, src_tensor)
+            q = torch.ops.aten.copy_.default(self_tensor, p)
+            return q
+
+        def replacement(self_tensor, src_tensor):
+            q = torch.ops.aten.copy_.default(self_tensor, src_tensor)
+            return q
+
+        def comparison(x, y, cache):
+            m = torch.mul(x, y)
+            n = cache.index_copy(0, torch.tensor([0]), m)
+            q = torch.ops.aten.copy_.default(cache, n)  # noqa: F841
+            u = torch.relu(cache)
+            return u
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        x = torch.randn(1, 8)
+        y = torch.randn(1, 8)
+        cache = torch.randn(2, 8)
+        x_clone = x.clone()
+        y_clone = y.clone()
+        cache_clone = cache.clone()
+
+        ref_outs = comparison_fn(x, y, cache)
+        test_outs = traced.forward(x_clone, y_clone, cache_clone)
         self.assertEqual(ref_outs, test_outs)
 
     def test_subgraph_rewriter_call_method(self):

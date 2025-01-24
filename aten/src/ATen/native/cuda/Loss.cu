@@ -63,13 +63,9 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 namespace at::native {
 
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cuda(
-        input, target, weight, reduction, loss);
+        input, target, weight_opt, reduction, loss);
 }
 
 Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
@@ -122,13 +118,9 @@ Tensor& binary_cross_entropy_out_cuda(const Tensor& input, const Tensor& target,
 }
 
 Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   Tensor grad_input = at::empty_like(input);
   return at::native::binary_cross_entropy_backward_out_cuda(
-      grad, input, target, weight, reduction, grad_input);
+      grad, input, target, weight_opt, reduction, grad_input);
 }
 
 Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
@@ -161,11 +153,11 @@ constexpr int NLL_LOSS_THREADS = 32;
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
-#define CHECK_INDEX_IN_CLASS(INDEX, N_CLASSES)                                \
-  if constexpr(std::is_unsigned<decltype(INDEX)>::value) {                    \
-    CUDA_KERNEL_ASSERT(INDEX < N_CLASSES);                                    \
-  } else {                                                                    \
-    CUDA_KERNEL_ASSERT(INDEX >= 0 && INDEX < N_CLASSES);                      \
+#define CHECK_INDEX_IN_CLASS(INDEX, N_CLASSES)                           \
+  if constexpr(std::is_unsigned_v<decltype(INDEX)>) {                    \
+    CUDA_KERNEL_ASSERT(INDEX < N_CLASSES);                               \
+  } else {                                                               \
+    CUDA_KERNEL_ASSERT(INDEX >= 0 && INDEX < N_CLASSES);                 \
   }
 
 template <typename scalar_t, typename index_t>
@@ -470,7 +462,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
       CHECK_INDEX_IN_CLASS(t, n_classes);
       // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
       const bwd_index_t index = static_cast<bwd_index_t>(i) * ndim + t;
-      if constexpr(!std::is_unsigned<decltype(index)>::value) {
+      if constexpr(!std::is_unsigned_v<decltype(index)>) {
         CUDA_KERNEL_ASSERT(index >= 0);
       }
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;

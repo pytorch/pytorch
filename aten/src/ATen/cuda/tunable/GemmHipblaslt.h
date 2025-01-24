@@ -9,6 +9,7 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -178,6 +179,26 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
+bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
+  return false;
+}
+
+template <typename T>
+bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
+  return params->use_rowwise;
+}
+
+template <typename T>
 const void* GetAScalePointerFromParams(const GemmParams<T>* params) {
   return nullptr;
 }
@@ -309,7 +330,7 @@ static hipblasOperation_t _hipblasOpFromChar(char op) {
     case 'C':
       return HIPBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_hipblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -322,7 +343,7 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
     case HIPBLAS_OP_C:
       return 'C';
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
@@ -338,7 +359,9 @@ static size_t GetHipblasltWorkspaceSize() {
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  size_t workspace_size = 32*1024;  // going with 32MB
+  // TunableOp hipBLASLt workspace size is aligned with
+  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
+  size_t workspace_size = 76*1024;
   if (env) {
     try {
       workspace_size = std::stoi(env);
@@ -457,8 +480,18 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+#ifdef HIPBLASLT_VEC_EXT
+        if (GetUseRowwiseFromParams<CT>(params)) {
+          // swapped
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+        }
+        else
+#endif
+        {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+        }
       }
       if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
@@ -578,8 +611,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = c10::str(
-        "Gemm_Hipblaslt_", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), "_", algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 

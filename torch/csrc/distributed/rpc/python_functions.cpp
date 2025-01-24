@@ -87,8 +87,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     } catch (const std::runtime_error& e) {
       opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
     }
-    matchedOperator = std::get<0>(opWithStack);
-    stack = std::get<1>(opWithStack);
+    matchedOperator = std::move(std::get<0>(opWithStack));
+    stack = std::move(std::get<1>(opWithStack));
   }
 
   // We should never hit this path, since if !matchedOperator, then the last
@@ -266,7 +266,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
       dstWorkerName,
       qualifiedName,
       functionSchema,
-      stack,
+      std::move(stack),
       rpcTimeoutSeconds,
       isAsyncExecution);
   return fut;

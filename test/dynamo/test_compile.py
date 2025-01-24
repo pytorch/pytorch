@@ -46,7 +46,10 @@ class InPlaceCompilationTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_state_dict_save(self):
@@ -58,7 +61,8 @@ class InPlaceCompilationTests(TestCase):
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(
-                torch.load(os.path.join(tmpdirname, "model.pt"))
+                # weights_only=False as this is a legacy use case that loads a module
+                torch.load(os.path.join(tmpdirname, "model.pt"), weights_only=False)
             )
             loaded_model(torch.randn(1, 10))
 
@@ -138,6 +142,51 @@ class InPlaceCompilationTests(TestCase):
         self.assertEqual(
             printed_output, "Counter = 1\nCounter = 2\nCounter = 3\nCounter = 4"
         )
+
+    def test_compilation_constant_hasattr_fail(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(None)
+
+    def test_compilation_evnum_hasattr_fail(self):
+        from enum import Enum
+
+        class TestEnum(Enum):
+            VALID = 1
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x.max()
+
+        # We should fallback to normal mode, and throw a AttributeError, not a internal dynamo exception
+        with self.assertRaises(AttributeError):
+            fn(TestEnum.VALID)
+
+    def test_compilation_name_error(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            does_not_exist()  # noqa: F821
+            return x
+
+        x = torch.randn(10, 10)
+        with self.assertRaises(NameError):
+            fn(x)
+
+    def test_compilation_tensor_invalid_method(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = torch.tensor(x)
+            return y.doesnotexist()
+
+        x = torch.randn(10, 10)
+
+        with self.assertRaises(AttributeError):
+            fn(x)
 
 
 # The private variants of the below functions are extensively tested

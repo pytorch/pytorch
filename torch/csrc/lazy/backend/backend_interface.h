@@ -7,10 +7,8 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
-#include <atomic>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct IrBuilder;
 
@@ -154,5 +152,4 @@ TORCH_API const BackendImplInterface* getBackend();
 
 TORCH_API const IrBuilder* getIrBuilder();
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

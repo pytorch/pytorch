@@ -6,7 +6,7 @@
 namespace c10 {
 struct StorageImpl;
 class DataPtr;
-}; // namespace c10
+} // namespace c10
 
 namespace c10::impl::cow {
 

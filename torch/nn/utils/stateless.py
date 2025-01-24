@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional, Set, Tuple, Union
+import contextlib
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -12,8 +13,8 @@ __all__ = ["functional_call"]
 
 def _untie_named_tensors_map(
     module: "torch.nn.Module",
-    parameters_and_buffers: Dict[str, Tensor],
-) -> Dict[str, Tensor]:
+    parameters_and_buffers: dict[str, Tensor],
+) -> dict[str, Tensor]:
     """
     Unties all tied tensors in the module to parameters_and_buffers.
 
@@ -40,12 +41,12 @@ def _untie_named_tensors_map(
         ValueError: if there are more than one user-given values for the same tied tensor.
     """
     # A map of {name: tensor} for all tensors (including tied ones) in the module.
-    all_named_tensors: Dict[str, Tensor] = {}
+    all_named_tensors: dict[str, Tensor] = {}
     all_named_tensors.update(module.named_parameters(remove_duplicate=False))
     all_named_tensors.update(module.named_buffers(remove_duplicate=False))
 
     # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
-    tensor_to_tied_names_map: Dict[Tensor, Set[str]] = {}
+    tensor_to_tied_names_map: dict[Tensor, set[str]] = {}
     for name, tensor in all_named_tensors.items():
         if tensor not in tensor_to_tied_names_map:
             tensor_to_tied_names_map[tensor] = set()
@@ -53,7 +54,7 @@ def _untie_named_tensors_map(
 
     # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
     # If a name is not tied, it will not be in this map.
-    tied_names_map: Dict[str, Set[str]] = {}
+    tied_names_map: dict[str, set[str]] = {}
     for tied_names in tensor_to_tied_names_map.values():
         if len(tied_names) > 1:
             for tied_name in tied_names:
@@ -94,87 +95,68 @@ def _untie_named_tensors_map(
     return untied_parameters_and_buffers
 
 
-class _ReparametrizeModule:
-    def __init__(
-        self,
-        module: "torch.nn.Module",
-        parameters_and_buffers: Dict[str, Tensor],
-        tie_weights: bool = False,
-        strict: bool = False,
-        stack_weights: bool = False,
-    ):
-        self.parameters_and_buffers = parameters_and_buffers
-        self.stack_weights = stack_weights
+@contextlib.contextmanager
+def _reparametrize_module(
+    module: "torch.nn.Module",
+    parameters_and_buffers: dict[str, Tensor],
+    tie_weights: bool = False,
+    strict: bool = False,
+    stack_weights: bool = False,
+):
+    parameters_and_buffers = parameters_and_buffers
+    stack_weights = stack_weights
 
-        if tie_weights:
-            self.untied_parameters_and_buffers = _untie_named_tensors_map(
-                module, parameters_and_buffers
-            )
-        else:
-            self.untied_parameters_and_buffers = parameters_and_buffers
-
-        self.accessor = NamedMemberAccessor(module)
-        if strict:
-            missing_keys, unexpected_keys = self.accessor.check_keys(
-                self.untied_parameters_and_buffers
-            )
-            error_msgs = []
-            if len(unexpected_keys) > 0:
-                error_msgs.append(
-                    f"Unexpected key(s): {', '.join(map(repr, unexpected_keys))}."
-                )
-            if len(missing_keys) > 0:
-                error_msgs.append(
-                    f"Missing key(s): {', '.join(map(repr, missing_keys))}."
-                )
-            if len(error_msgs) > 0:
-                raise RuntimeError(
-                    "Error(s) in reparametrizing for {}:\n\t{}".format(
-                        module._get_name(), "\n\t".join(error_msgs)
-                    )
-                )
-
-    def __enter__(self):
-        self.orig_parameters_and_buffers, _ = self.accessor.swap_tensors_dict(
-            self.untied_parameters_and_buffers, allow_missing=True
+    if tie_weights:
+        untied_parameters_and_buffers = _untie_named_tensors_map(
+            module, parameters_and_buffers
         )
+    else:
+        untied_parameters_and_buffers = parameters_and_buffers
 
-    def __exit__(self, exception_type, exception_value, traceback):
-        if self.stack_weights:
-            # When stacking is enabled, we will restore the weights in LIFO order.
-            self.orig_parameters_and_buffers = dict(
-                reversed(self.orig_parameters_and_buffers.items())
+    accessor = NamedMemberAccessor(module)
+    if strict:
+        missing_keys, unexpected_keys = accessor.check_keys(
+            untied_parameters_and_buffers
+        )
+        error_msgs = []
+        if len(unexpected_keys) > 0:
+            error_msgs.append(
+                f"Unexpected key(s): {', '.join(map(repr, unexpected_keys))}."
             )
-        new_parameters_and_buffers, _ = self.accessor.swap_tensors_dict(
-            self.orig_parameters_and_buffers, allow_missing=True
+        if len(missing_keys) > 0:
+            error_msgs.append(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
+        if len(error_msgs) > 0:
+            raise RuntimeError(
+                "Error(s) in reparametrizing for {}:\n\t{}".format(
+                    module._get_name(), "\n\t".join(error_msgs)
+                )
+            )
+
+    orig_parameters_and_buffers: dict[str, Tensor] = {}
+    try:
+        orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+            untied_parameters_and_buffers, allow_missing=True
+        )
+        yield
+    finally:
+        if stack_weights:
+            # When stacking is enabled, we will restore the weights in LIFO order.
+            orig_parameters_and_buffers = dict(
+                reversed(orig_parameters_and_buffers.items())
+            )
+        new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+            orig_parameters_and_buffers, allow_missing=True
         )
         # Sometimes the module is not completely stateless and has some in-place modifications on
         # the _parameters and _buffers dictionaries.
         # Write the changed parameters and buffers back to the original dict.
-        self.parameters_and_buffers.update(
+        parameters_and_buffers.update(
             {
                 k: new_parameters_and_buffers[k]
-                for k in self.parameters_and_buffers
+                for k in parameters_and_buffers
                 if k in new_parameters_and_buffers
             }
         )
-
-
-def _reparametrize_module(
-    module: "torch.nn.Module",
-    parameters_and_buffers: Dict[str, Tensor],
-    *,
-    tie_weights: bool = False,
-    strict: bool = False,
-    stack_weights: bool = False,
-) -> _ReparametrizeModule:
-    return _ReparametrizeModule(
-        module,
-        parameters_and_buffers,
-        tie_weights=tie_weights,
-        strict=strict,
-        stack_weights=stack_weights,
-    )
 
 
 @deprecated(
@@ -185,9 +167,9 @@ def _reparametrize_module(
 )
 def functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: Dict[str, Tensor],
-    args: Optional[Union[Any, Tuple]] = None,
-    kwargs: Optional[Dict[str, Any]] = None,
+    parameters_and_buffers: dict[str, Tensor],
+    args: Optional[Union[Any, tuple]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -263,9 +245,9 @@ def functional_call(
 
 def _functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: Dict[str, Tensor],
-    args: Optional[Union[Any, Tuple]] = None,
-    kwargs: Optional[Dict[str, Any]] = None,
+    parameters_and_buffers: dict[str, Tensor],
+    args: Optional[Union[Any, tuple]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,

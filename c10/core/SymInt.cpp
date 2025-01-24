@@ -61,7 +61,6 @@ bool SymInt::has_hint() const {
     }                                                                \
   }
 
-// clang-format off
 DEFINE_BINARY(operator+, std::plus<>(), add, SymInt)
 DEFINE_BINARY(operator-, std::minus<>(), sub, SymInt)
 DEFINE_BINARY(operator*, std::multiplies<>(), mul, SymInt)
@@ -75,7 +74,6 @@ DEFINE_BINARY(sym_gt, std::greater<>(), gt, SymBool)
 DEFINE_BINARY(sym_ge, std::greater_equal<>(), ge, SymBool)
 DEFINE_BINARY(min, std::min, sym_min, SymInt)
 DEFINE_BINARY(max, std::max, sym_max, SymInt)
-// clang-format on
 
 SymInt::operator SymFloat() const {
   if (auto ma = maybe_as_int()) {

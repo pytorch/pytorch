@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import atexit
 import functools
 import logging
 import multiprocessing
@@ -10,10 +11,11 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
+from torch._dynamo.utils import dynamo_timed, set_feature_use
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -26,17 +28,14 @@ from torch._inductor.codecache import (
     TritonCodeCache,
     TritonFuture,
 )
-from torch._inductor.compile_worker.subproc_pool import (
-    _warm_process_pool,
-    AnyPool,
-    SubprocPool,
-)
+from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -48,6 +47,8 @@ _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+log = logging.getLogger(__name__)
 
 
 def pre_fork_setup():
@@ -94,9 +95,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
-
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[AnyPool] = set()
+_pool_set = OrderedSet[AnyPool]()
 
 
 def shutdown_compile_workers() -> None:
@@ -118,14 +118,14 @@ except AttributeError:
     pass  # register_at_fork does not exists on windows
 
 
-def get_worker_start_method() -> str:
+def get_compile_threads() -> int:
     """
-    Temporary for internal subprocess pool rollout. Assign config.worker_start_method
-    lazily and return it. TODO: remove after rollout.
+    Temporary for internal rollout. Assign config.compile_threads lazily and return it.
+    TODO: remove after rollout.
     """
-    if config.worker_start_method is None:
-        config.worker_start_method = config.decide_worker_start_method()
-    return config.worker_start_method
+    if config.compile_threads is None:
+        config.compile_threads = config.decide_compile_threads()
+    return config.compile_threads
 
 
 class AsyncCompile:
@@ -135,8 +135,8 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert config.compile_threads > 1
-        return ThreadPoolExecutor(config.compile_threads)
+        assert get_compile_threads() > 1
+        return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
     def _get_ready():
@@ -146,16 +146,25 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert config.compile_threads > 1
+        assert get_compile_threads() > 1
+        log.info(
+            "Creating '%s' pool with %d workers",
+            config.worker_start_method,
+            get_compile_threads(),
+        )
+
         pool: AnyPool
-        if get_worker_start_method() == "subprocess":
+        if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(config.compile_threads)
+            pool = SubprocPool(get_compile_threads())
         else:
+            if config.worker_start_method == "spawn":
+                # Avoid creating pools in the spawned subprocs themselves:
+                os.environ["TORCH_WARM_POOL"] = "0"
             pre_fork_setup()
-            ctx = multiprocessing.get_context(get_worker_start_method())
+            ctx = multiprocessing.get_context(config.worker_start_method)
             pool = ProcessPoolExecutor(
-                config.compile_threads,
+                get_compile_threads(),
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
@@ -172,21 +181,22 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
+        if get_compile_threads() <= 1:
             return
         _compile_start()
-        _warm_process_pool(cls.process_pool(), config.compile_threads)
+        # Pool is initialized on first access
+        cls.process_pool()
         _compile_end()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
-        if config.compile_threads <= 1:
+        if get_compile_threads() <= 1:
             return task()
         return cls.pool().submit(task)
 
-    def _use_process_pool(self):
+    def use_process_pool(self):
         return (
-            config.compile_threads > 1
+            get_compile_threads() > 1
             and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
@@ -195,8 +205,14 @@ class AsyncCompile:
         _compile_start()
         _set_triton_ptxas_path()
 
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return getattr(
+                torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
+            )
+
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self._use_process_pool():
+        if self.use_process_pool():
+            set_feature_use("parallel_compile_post_warmup", True)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -210,7 +226,14 @@ class AsyncCompile:
                 ),
             )
         else:
-            kernel.precompile()
+            set_feature_use("parallel_compile_post_warmup", False)
+            with dynamo_timed(
+                "async_compile.precompile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
+                log_waitcounter=True,
+            ):
+                kernel.precompile()
             return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -221,15 +244,15 @@ class AsyncCompile:
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
+        if get_compile_threads() <= 1:
             return CppCodeCache.load(source_code).kernel
         else:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
+        if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
             get_result = CppPythonBindingsCodeCache.load_pybinding_async(
@@ -237,25 +260,38 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext):
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
 
         def task():
+            if aot_compile:
+                # We rely on JITInductor to compile the CUDA code,
+                # so that we can load it into AOTInductor.
+                CUDACodeCache.compile(source_code, "o")
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
-    def rocm(self, source_code, dst_file_ext):
+    def rocm(
+        self,
+        source_code,
+        dst_file_ext,
+        aot_compile=False,
+    ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
         def task():
+            if aot_compile:
+                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+            if config.rocm.generate_test_runner:
+                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
-        if config.compile_threads <= 1:
+        if get_compile_threads() <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:
             get_result = HalideCodeCache.generate_halide_async(
@@ -263,37 +299,43 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=0,
-        )
-        if config.compile_threads > 1:
-            for key, result in scope.items():
-                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                    pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
-                    try:
-                        scope[key] = result.result()
-                    except BrokenProcessPool as e:
-                        raise RuntimeError(
-                            "A compilation subprocess exited unexpectedly. This "
-                            "is likely due to a crash. To facilitate debugging, "
-                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
-                            "to cause compilation to occur in the main process."
-                        ) from e
-                    pbar.update(1)
+    def wait(self, scope: dict[str, Any]) -> None:
+        with dynamo_timed(
+            "async_compile.wait",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="triton_compile_time_us",
+            log_waitcounter=True,
+        ):
+            num_kernels = len(
+                [
+                    value
+                    for key, value in scope.items()
+                    if isinstance(value, (Future, CodeCacheFuture))
+                ]
+            )
+            pbar = tqdm(
+                total=num_kernels,
+                desc="Inductor Compilation",
+                disable=config.disable_progress,
+                delay=0,
+            )
+            if get_compile_threads() > 1:
+                for key, result in scope.items():
+                    if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                        pbar.set_postfix_str(key)
+                    if isinstance(result, (Future, CodeCacheFuture)):
+                        try:
+                            scope[key] = result.result()
+                        except BrokenProcessPool as e:
+                            raise RuntimeError(
+                                "A compilation subprocess exited unexpectedly. This "
+                                "is likely due to a crash. To facilitate debugging, "
+                                "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                                "to cause compilation to occur in the main process."
+                            ) from e
+                        pbar.update(1)
 
-        _compile_end()
+            _compile_end()
 
 
 if (
@@ -301,10 +343,17 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
     # The subprocess pool is only used for the Triton backend
     or not has_triton_package()
-    # Skip for fbcode so we can query the worker_start_method lazily.
-    # TODO: remove once "subprocess" has rolled out internally.
+    # Skip for fbcode. We have internal reports of usages inside multiprocessing
+    # pools that lead a multiplicative number of compile subprocesses.
     or config.is_fbcode()
 ):
     pass
 else:
     AsyncCompile.warm_pool()
+
+# On exit give the workers a chance to clean themselves up. Without this the
+# resource_tracker can complain about leaked semaphores coming from the
+# ProcessPoolExecutor:
+#   UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects
+#   to clean up at shutdown
+atexit.register(shutdown_compile_workers)

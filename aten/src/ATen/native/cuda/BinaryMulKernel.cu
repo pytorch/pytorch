@@ -18,7 +18,7 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char mul_name[] = "mul_kernel";
+constexpr char mul_name[] = "mul_kernel";
 void mul_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (common_dtype == kComplexHalf) {
@@ -43,6 +43,6 @@ void mul_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda)
 
 } // namespace at::native

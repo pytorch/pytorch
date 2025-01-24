@@ -1,7 +1,8 @@
 #pragma once
 #include <cstdint>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
@@ -128,4 +129,5 @@ constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x4L;
 constexpr uint64_t kMaxSupportedBytecodeVersion = 0x9L;
 
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2

@@ -92,7 +92,7 @@ class ScriptList final {
   at::IValue getItem(diff_type idx) {
     idx = wrap_index(idx);
     return list_.get(idx);
-  };
+  }
 
   // Set the value corresponding to the given index.
   void setItem(diff_type idx, const at::IValue& value) {

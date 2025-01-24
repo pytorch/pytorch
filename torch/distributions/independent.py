@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Dict
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
@@ -40,7 +40,7 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(
         self, base_distribution, reinterpreted_batch_ndims, validate_args=None
@@ -72,11 +72,11 @@ class Independent(Distribution):
         return new
 
     @property
-    def has_rsample(self):
+    def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
     @property
-    def has_enumerate_support(self):
+    def has_enumerate_support(self) -> bool:  # type: ignore[override]
         if self.reinterpreted_batch_ndims > 0:
             return False
         return self.base_dist.has_enumerate_support
@@ -89,21 +89,21 @@ class Independent(Distribution):
         return result
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.base_dist.mean
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.base_dist.mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()) -> Tensor:
         return self.base_dist.sample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):

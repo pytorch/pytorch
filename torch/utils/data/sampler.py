@@ -1,15 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import (
-    Generic,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Sized,
-    TypeVar,
-    Union,
-)
+import itertools
+from collections.abc import Iterable, Iterator, Sequence, Sized
+from typing import Generic, Optional, TypeVar, Union
 
 import torch
 
@@ -290,7 +282,7 @@ class WeightedRandomSampler(Sampler[int]):
         return self.num_samples
 
 
-class BatchSampler(Sampler[List[int]]):
+class BatchSampler(Sampler[list[int]]):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
@@ -331,28 +323,19 @@ class BatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
+        sampler_iter = iter(self.sampler)
         if self.drop_last:
-            sampler_iter = iter(self.sampler)
-            while True:
-                try:
-                    batch = [next(sampler_iter) for _ in range(self.batch_size)]
-                    yield batch
-                except StopIteration:
-                    break
+            # Create multiple references to the same iterator
+            args = [sampler_iter] * self.batch_size
+            for batch_droplast in zip(*args):
+                yield [*batch_droplast]
         else:
-            batch = [0] * self.batch_size
-            idx_in_batch = 0
-            for idx in self.sampler:
-                batch[idx_in_batch] = idx
-                idx_in_batch += 1
-                if idx_in_batch == self.batch_size:
-                    yield batch
-                    idx_in_batch = 0
-                    batch = [0] * self.batch_size
-            if idx_in_batch > 0:
-                yield batch[:idx_in_batch]
+            batch = [*itertools.islice(sampler_iter, self.batch_size)]
+            while batch:
+                yield batch
+                batch = [*itertools.islice(sampler_iter, self.batch_size)]
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented

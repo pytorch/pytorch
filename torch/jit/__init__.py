@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 import torch._C
 

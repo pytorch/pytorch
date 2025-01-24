@@ -59,6 +59,6 @@ void max_pool1d_impl(
 
 } // namespace
 
-REGISTER_DISPATCH(max_pool1d_stub, &max_pool1d_impl);
+REGISTER_DISPATCH(max_pool1d_stub, &max_pool1d_impl)
 
 } // namespace at::native

@@ -2,19 +2,25 @@
 # Owner(s): ["oncall: distributed"]
 # This file is a Schedule zoo for testing torch.distributed.pipelining.
 # It includes schedules designed purely for testing purposes
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Optional
 
 from torch.distributed.pipelining.schedules import (
     _Action,
     _ComputationType,
+    _PipelineScheduleRuntime,
     PipelineScheduleMulti,
+    RECV_B,
+    RECV_F,
+    SEND_B,
+    SEND_F,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 
 
 F = _ComputationType.FORWARD
-B = _ComputationType.BACKWARD
-W = _ComputationType.WEIGHT
+B = _ComputationType.FULL_BACKWARD
+W = _ComputationType.BACKWARD_WEIGHT
+I = _ComputationType.BACKWARD_INPUT
 
 
 class ScheduleVShaped(PipelineScheduleMulti):
@@ -26,16 +32,18 @@ class ScheduleVShaped(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: Dict[int, int],
+        stage_index_to_group_rank: dict[int, int],
         loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
         )
 
         # Go through one microbatch
@@ -74,16 +82,18 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
-        stage_index_to_group_rank: Dict[int, int],
+        stage_index_to_group_rank: dict[int, int],
         loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=stage_index_to_group_rank,
+            scale_grads=scale_grads,
         )
 
         self.pipeline_order = {
@@ -124,15 +134,17 @@ class ScheduleWithW(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[_PipelineStageBase],
+        stages: list[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         enable_zero_bubble: bool = True,
+        scale_grads: bool = True,
     ):
         super().__init__(
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            scale_grads=scale_grads,
         )
 
         # Needs to be updated as part of all schedules using "W"
@@ -146,12 +158,12 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(2, F, 0),
                 _Action(2, F, 1),
                 None,
-                _Action(2, B, 0),
+                _Action(2, I, 0),
                 _Action(2, W, 0),
-                _Action(0, B, 0),
-                _Action(2, B, 1),
+                _Action(0, I, 0),
+                _Action(2, I, 1),
                 _Action(0, W, 0),
-                _Action(0, B, 1),
+                _Action(0, I, 1),
                 _Action(2, W, 1),
                 _Action(0, W, 1),
             ],
@@ -160,14 +172,60 @@ class ScheduleWithW(PipelineScheduleMulti):
                 _Action(1, F, 0),
                 _Action(1, F, 1),
                 _Action(3, F, 0),
-                _Action(3, B, 0),
+                _Action(3, I, 0),
                 _Action(3, F, 1),
-                _Action(1, B, 0),
-                _Action(3, B, 1),
+                _Action(1, I, 0),
+                _Action(3, I, 1),
                 _Action(3, W, 0),
-                _Action(1, B, 1),
+                _Action(1, I, 1),
                 _Action(1, W, 0),
                 _Action(3, W, 1),
                 _Action(1, W, 1),
+            ],
+        }
+
+
+class ScheduleWithReorderedB(_PipelineScheduleRuntime):
+    n_stages = 2
+    num_microbatches = 2
+    rank_stages = {
+        0: [0],
+        1: [1],
+    }
+
+    def __init__(
+        self,
+        stages: list[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        scale_grads: bool = True,
+    ):
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=scale_grads,
+        )
+        # Go through two microbatches
+        self.pipeline_order_with_comms = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, RECV_B, 0),
+                _Action(0, RECV_B, 1),
+                _Action(0, B, 0),
+                _Action(0, B, 1),
+            ],
+            1: [
+                _Action(1, RECV_F, 0),
+                _Action(1, RECV_F, 1),
+                _Action(1, F, 0),
+                _Action(1, F, 1),
+                _Action(1, B, 0),
+                _Action(1, B, 1),
+                _Action(1, SEND_B, 0),
+                _Action(1, SEND_B, 1),
             ],
         }

@@ -15,14 +15,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <cstddef>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace {
 
@@ -62,8 +60,9 @@ namespace {
 struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
       : destination_device_(destination_device){};
-  ~ReduceAdd() override {}
+  ~ReduceAdd() override = default;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   autograd::variable_list apply(autograd::variable_list&& inputs) override {
     TORCH_CHECK(
         !torch::autograd::compute_requires_grad(inputs),
@@ -276,7 +275,7 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
-  autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
+  autograd::Scatter scatter(*devices, /*chunk_sizes=*/std::nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
   // Input tensor might not be big enough to scale across all available devices
   if (scattered_inputs.size() < devices->size()) {
@@ -293,5 +292,4 @@ Tensor data_parallel(
 }
 
 } // namespace parallel
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

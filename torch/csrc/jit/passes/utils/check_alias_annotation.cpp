@@ -6,8 +6,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 
 IValue deepCopy(const IValue& self) {
@@ -305,5 +304,4 @@ void checkAliasAnnotation(
   checkWrites(inputsToCheck, inputsDeepCopy);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

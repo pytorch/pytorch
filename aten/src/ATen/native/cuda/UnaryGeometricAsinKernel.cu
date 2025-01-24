@@ -13,7 +13,7 @@
 namespace at::native {
 
 #if 0 && AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char asin_name[] = "asin_impl";
+constexpr char asin_name[] = "asin_impl";
 #endif
 
 void asin_kernel_cuda(TensorIteratorBase& iter) {
@@ -50,6 +50,6 @@ void asin_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
+REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda)
 
 } // namespace at::native

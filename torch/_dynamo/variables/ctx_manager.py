@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -111,8 +111,8 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -124,6 +124,12 @@ class ContextWrappingVariable(VariableTracker):
 
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
+
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
@@ -182,6 +188,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
         tx.generic_context_manager_depth -= 1
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -433,12 +445,21 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        if isinstance(batch_size, variables.SymNodeVariable):
+            batch_size_value = batch_size.sym_num
+            batch_size_node = batch_size.as_proxy().node
+        else:
+            batch_size_value = batch_size.as_python_constant()
+            batch_size_node = batch_size.as_python_constant()
+        randomness = randomness.as_python_constant()
+        vmap_level = torch._C._functorch._vmap_increment_nesting(
+            batch_size_value, randomness
+        )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
+            (batch_size_node, randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -486,8 +507,8 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -637,6 +658,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
@@ -949,8 +972,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -971,7 +994,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             self.param_group_var.value._training_state = value
 
     def module_name(self):
-        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+        return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
     def fn_name(self):
         return "use_training_state"
@@ -993,7 +1016,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values: List[torch.nn.attention.SDPBackend],
+        target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
         **kwargs,
     ) -> None:
@@ -1003,17 +1026,16 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
-        nodes = []
-        for backend in backends:
-            # convert to/from string in order to bake the backend into FX graph
-            nodes.append(
-                tx.output.create_node(
-                    "call_function",
-                    torch.nn.attention._backend_from_string,
-                    (backend.name,),
-                    {},
-                )
+        # convert to/from string in order to bake the backend into FX graph
+        nodes = [
+            tx.output.create_node(
+                "call_function",
+                torch.nn.attention._backend_from_string,
+                (backend.name,),
+                {},
             )
+            for backend in backends
+        ]
         return nodes
 
     def enter(self, tx):
@@ -1067,8 +1089,8 @@ class StreamVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
         assert name in [
@@ -1136,8 +1158,8 @@ class EventVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
@@ -1193,8 +1215,8 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert not kwargs
         return self.ctx.exit(tx, *args)

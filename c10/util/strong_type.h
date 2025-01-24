@@ -46,7 +46,7 @@ namespace strong
 namespace impl
 {
   template <typename T, typename ... V>
-  using WhenConstructible = std::enable_if_t<std::is_constructible<T, V...>::value>;
+  using WhenConstructible = std::enable_if_t<std::is_constructible_v<T, V...>>;
 }
 
 template <typename M, typename T>
@@ -101,18 +101,18 @@ public:
   {
   }
   template <typename ... U,
-            typename = std::enable_if_t<std::is_constructible<T, U&&...>::value && (sizeof...(U) > 0)>>
+            typename = std::enable_if_t<std::is_constructible_v<T, U&&...> && (sizeof...(U) > 0)>>
   constexpr
   explicit
   type(
     U&& ... u)
-  noexcept(std::is_nothrow_constructible<T, U...>::value)
+  noexcept(std::is_nothrow_constructible_v<T, U...>)
   : val(std::forward<U>(u)...)
   {}
 
   friend constexpr void swap(type& a, type& b) noexcept(
-                                                        std::is_nothrow_move_constructible<T>::value &&
-                                                        std::is_nothrow_move_assignable<T>::value
+                                                        std::is_nothrow_move_constructible_v<T> &&
+                                                        std::is_nothrow_move_assignable_v<T>
                                                       )
   {
     using std::swap;
@@ -820,7 +820,7 @@ class affine_point<D>::modifier<::strong::type<T, Tag, M...>>
   using base_diff_type = decltype(std::declval<const T&>() - std::declval<const T&>());
 public:
   using difference = std::conditional_t<std::is_same<D, void>{}, strong::type<base_diff_type, Tag, strong::difference>, D>;
-  static_assert(std::is_constructible<difference, base_diff_type>::value, "");
+  static_assert(std::is_constructible_v<difference, base_diff_type>, "");
   [[nodiscard]]
   friend
   constexpr

@@ -5,7 +5,7 @@ import collections
 import importlib
 import sys
 from pprint import pformat
-from typing import Sequence
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 from warnings import warn
 
@@ -23,6 +23,10 @@ from torchgen.api.python import (
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 """
@@ -177,14 +181,18 @@ blocklist = [
     "copy_",
 ]
 
-binary_ops = (
+shift_ops = (
+    "lshift",
+    "rshift",
+    "ilshift",
+    "irshift",  # inplace ops
+)
+arithmetic_ops = (
     "add",
     "sub",
     "mul",
     "div",
     "pow",
-    "lshift",
-    "rshift",
     "mod",
     "truediv",
     "matmul",
@@ -195,24 +203,26 @@ binary_ops = (
     "rtruediv",
     "rfloordiv",
     "rpow",  # reverse arithmetic
+    "iadd",
+    "idiv",
+    "imul",
+    "isub",
+    "ifloordiv",
+    "imod",  # inplace ops
+)
+logic_ops = (
     "and",
     "or",
     "xor",
     "rand",
     "ror",
-    "rxor",  # logic
-    "iadd",
+    "rxor",  # reverse logic
     "iand",
-    "idiv",
-    "ilshift",
-    "imul",
     "ior",
-    "irshift",
-    "isub",
-    "ixor",
-    "ifloordiv",
-    "imod",  # inplace ops
+    "ixor",  # inplace ops
 )
+binary_ops = shift_ops + arithmetic_ops + logic_ops
+
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
 comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
@@ -223,7 +233,7 @@ all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
 def sig_for_ops(opname: str) -> list[str]:
-    """sig_for_ops(opname : str) -> List[str]
+    """sig_for_ops(opname : str) -> list[str]
 
     Returns signatures for operator special functions (__add__ etc.)"""
 
@@ -232,14 +242,28 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in binary_ops:
-        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    elif name in comparison_ops:
-        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
-        if name in symmetric_comparison_ops:
+    if name == "rpow":
+        return [  # somehow required to make mypy ci happy?
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ... # type: ignore[has-type]"
+        ]
+    elif name in arithmetic_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
+    elif name in logic_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
+    elif name in shift_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
+    elif name in symmetric_comparison_ops:
+        return [
             # unsafe override https://github.com/python/mypy/issues/5704
-            sig += "  # type: ignore[override]"
-        return [sig]
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
+            f"def {opname}(self, other: Any) -> _bool: ...",
+        ]
+    elif name in asymmetric_comparison_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
@@ -310,11 +334,11 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
             ),
             tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
+                return_type="tuple[Tensor, Tensor]",
             ),
             tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
+                return_type="tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -360,13 +384,13 @@ def gen_nn_functional(fm: FileManager) -> None:
                                 "_random_samples: Tensor",
                             ]
                         ),
-                        "Tuple[Tensor, Tensor]",
+                        "tuple[Tensor, Tensor]",
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
                     f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
                         ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
-                        "Tuple[Tensor, Tensor]",
+                        "tuple[Tensor, Tensor]",
                     )
                 ],
             }
@@ -670,9 +694,9 @@ def gen_pyi(
                     f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
                         ", ".join(
                             [
-                                f"{n1}_indices: Union[Tensor, List]",
-                                f"{n2}_indices: Union[Tensor, List]",
-                                "values: Union[Tensor, List]",
+                                f"{n1}_indices: Union[Tensor, list]",
+                                f"{n2}_indices: Union[Tensor, list]",
+                                "values: Union[Tensor, list]",
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
@@ -747,7 +771,7 @@ def gen_pyi(
                     ", ".join(
                         [
                             "indices: Tensor",
-                            "values: Union[Tensor, List]",
+                            "values: Union[Tensor, list]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -763,9 +787,9 @@ def gen_pyi(
                 "def sparse_compressed_tensor({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            "compressed_indices: Union[Tensor, List]",
-                            "plain_indices: Union[Tensor, List]",
-                            "values: Union[Tensor, List]",
+                            "compressed_indices: Union[Tensor, list]",
+                            "plain_indices: Union[Tensor, list]",
+                            "values: Union[Tensor, list]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -953,7 +977,7 @@ def gen_pyi(
                             "size: _size",
                             "fill_value: Union[Number, _complex]",
                             "*",
-                            "names: List[Union[str, None]]",
+                            "names: list[Union[str, None]]",
                             "layout: _layout = strided",
                             FACTORY_PARAMS,
                         ]
@@ -966,7 +990,7 @@ def gen_pyi(
             ],
             "nonzero": [
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
-                "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
+                "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> tuple[Tensor, ...]: ...",
             ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
@@ -1043,13 +1067,6 @@ def gen_pyi(
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
         hint = hint.replace("at::Reduction::Mean", "1")
         hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
-        # Match both:
-        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
-        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
-        hint = hint.replace(
-            "Tuple[Tensor, ...], List[Tensor]] = None",
-            "Tuple[Tensor, ...], List[Tensor], None] = None",
-        )
         return hint
 
     docstrs = gather_docstrs()
@@ -1074,7 +1091,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: None = None) -> tuple[_int, ...]: ...",
                 "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
@@ -1118,7 +1135,7 @@ def gen_pyi(
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
-            "tolist": ["def tolist(self) -> List: ..."],
+            "tolist": ["def tolist(self) -> list: ..."],
             "requires_grad_": [
                 "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
             ],
@@ -1127,7 +1144,7 @@ def gen_pyi(
             "dim": ["def dim(self) -> _int: ..."],
             "nonzero": [
                 "def nonzero(self, *, as_tuple: Literal[False] = False) -> Tensor: ...",
-                "def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
+                "def nonzero(self, *, as_tuple: Literal[True]) -> tuple[Tensor, ...]: ...",
             ],
             "numel": ["def numel(self) -> _int: ..."],
             "ndimension": ["def ndimension(self) -> _int: ..."],
@@ -1184,6 +1201,7 @@ def gen_pyi(
             "_is_view": ["def _is_view(self) -> _bool: ..."],
             "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
+            "is_xpu": ["is_xpu: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
             "is_sparse": ["is_sparse: _bool"],
@@ -1219,7 +1237,7 @@ def gen_pyi(
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
-                "def split(self, split_size: Tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."

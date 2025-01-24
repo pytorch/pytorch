@@ -2,9 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 TORCH_API Tensor computeSign(
     const std::vector<ArgValue>& inputs,
@@ -81,6 +79,4 @@ Tensor computeScalar(
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PACKAGE_TYPE=${PACKAGE_TYPE:-conda}
+PACKAGE_TYPE=${PACKAGE_TYPE:-wheel}
 
 PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
 
@@ -18,10 +18,8 @@ BUILD_NAME=${BUILD_NAME:-}
 
 DRY_RUN=${DRY_RUN:-enabled}
 # Don't actually do work unless explicit
-ANACONDA="true anaconda"
 AWS_S3_CP="aws s3 cp --dryrun"
 if [[ "${DRY_RUN}" = "disabled" ]]; then
-  ANACONDA="anaconda"
   AWS_S3_CP="aws s3 cp"
 fi
 
@@ -34,10 +32,6 @@ if [[ ${BUILD_NAME} == *-full* ]]; then
   UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
 fi
 
-# Sleep 2 minutes between retries for conda upload
-retry () {
-  "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")
-}
 
 do_backup() {
   local backup_dir
@@ -46,20 +40,6 @@ do_backup() {
     pushd /tmp/workspace
     set -x
     ${AWS_S3_CP} --recursive . "${BACKUP_BUCKET}/${CIRCLE_TAG}/${backup_dir}/"
-  )
-}
-
-conda_upload() {
-  (
-    set -x
-    retry \
-    ${ANACONDA} \
-    upload  \
-    ${PKG_DIR}/*.tar.bz2 \
-    -u "pytorch-${UPLOAD_CHANNEL}" \
-    --label main \
-    --no-progress \
-    --force
   )
 }
 
@@ -85,24 +65,9 @@ s3_upload() {
 }
 
 # Install dependencies (should be a no-op if previously installed)
-conda install -yq anaconda-client
-pip install -q awscli
+pip install -q awscli uv
 
 case "${PACKAGE_TYPE}" in
-  conda)
-    conda_upload
-    for conda_archive in ${PKG_DIR}/*.tar.bz2; do
-      # Fetch  platform (eg. win-64, linux-64, etc.) from index file because
-      # there's no actual conda command to read this
-      subdir=$(\
-        tar -xOf "${conda_archive}" info/index.json \
-          | grep subdir  \
-          | cut -d ':' -f2 \
-          | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//' \
-      )
-      BACKUP_DIR="conda/${subdir}"
-    done
-    ;;
   libtorch)
     s3_upload "zip" "libtorch"
     BACKUP_DIR="libtorch/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"

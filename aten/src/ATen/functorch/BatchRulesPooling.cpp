@@ -28,8 +28,10 @@ max_pool_with_indices_batch_rule_helper(
     return std::make_tuple(std::move(std::get<0>(result)), 0, std::move(std::get<1>(result)), 0);
   }
   // Tensor[B, N, logical_rank...] -> Tensor[B * N, logical_rank...]
-  auto bdim_size = self.size(*self_bdim);
-  auto self_ = reshape_dim_into(*self_bdim, 0, self);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto bdim_size = self.size(self_bdim.value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto self_ = reshape_dim_into(self_bdim.value(), 0, self);
   auto result = pooling_fn(
       self_, kernel_size, stride, padding, dilation, ceil_mode);
   return std::make_tuple(

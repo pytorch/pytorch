@@ -18,6 +18,6 @@ void isin_default_kernel_gpu(
 
 } // anonymous namespace
 
-REGISTER_CUDA_DISPATCH(isin_default_stub, &isin_default_kernel_gpu);
+REGISTER_CUDA_DISPATCH(isin_default_stub, &isin_default_kernel_gpu)
 
 } // namespace at::native

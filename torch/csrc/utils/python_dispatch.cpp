@@ -97,6 +97,10 @@ struct EnableHermeticPyObject {
     c10::impl::tls_set_dispatch_key_included(
         at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
   }
+  EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
+  EnableHermeticPyObject& operator=(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject& operator=(EnableHermeticPyObject&&) = delete;
   bool old_;
   bool old_excluded_python_;
   bool old_python_;
@@ -638,7 +642,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.emplace_back(ss.str());
+      names.emplace_back(std::move(ss).str());
     }
 
     return names;

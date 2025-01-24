@@ -6,10 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-namespace analysis {
+namespace torch::jit::tensorexpr::analysis {
 
 // A simple class containing the start and end of a range in a single dimension.
 struct TORCH_API Bound {
@@ -121,7 +118,4 @@ std::vector<IndexBounds> TORCH_API subtractIndicesBounds(
 std::vector<IndexBounds> TORCH_API
 subtractIndicesBounds(const IndexBounds& A, const IndexBounds& B);
 
-} // namespace analysis
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr::analysis

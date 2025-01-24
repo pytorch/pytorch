@@ -671,14 +671,13 @@ struct AttentionKernel {
 
     curandStatePhilox4_32_10_t curand_state_init;
     if (kSupportsDropout && p.use_dropout) {
-      const auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
+      const auto [seed, offset] = at::cuda::philox::unpack(p.rng_engine_inputs);
       if (p.rng_engine_inputs.captured_) {
         // See Note [Seed and Offset Device]
         // When we are in cuda graph capture mode the seed and offset are stored
         // on device We pass in int64_t* seed, and int64_t* offset to act as
         // scratch space for storing the rng state during the forward pass and
         // saving for backwards.
-        auto [seed, offset] = seeds;
         *p.seed = seed;
         *p.extragraph_offset = offset;
       }
@@ -691,9 +690,9 @@ struct AttentionKernel {
       // rather than once per iteration. each iteration takes a copy of the
       // initialized RNG state and offsets it as needed.
       curand_init(
-          std::get<0>(seeds),
+          seed,
           0,
-          std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
+          offset + p.dropout_batch_head_rng_offset,
           &curand_state_init);
     }
 

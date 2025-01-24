@@ -555,11 +555,11 @@ void spmm_reduce_backward_other_arg_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel);
-REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
+REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel)
+REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel)
 
 } // at::native

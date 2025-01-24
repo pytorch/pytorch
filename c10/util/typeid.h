@@ -71,7 +71,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Get() noexcept {
+  static constexpr TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -135,7 +135,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      c10::string_view name) noexcept
+      std::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -152,7 +152,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  c10::string_view name_;
+  std::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -328,6 +328,7 @@ class C10_API TypeMeta final {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept;
+  ~TypeMeta() = default;
 
   /**
    * Copy constructor.
@@ -339,6 +340,7 @@ class C10_API TypeMeta final {
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
+  TypeMeta& operator=(TypeMeta&& src) noexcept = default;
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
   inline TypeMeta& operator=(ScalarType scalar_type) noexcept {
@@ -409,7 +411,7 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  c10::string_view name() const noexcept {
+  std::string_view name() const noexcept {
     return data().name_;
   }
 
@@ -423,12 +425,12 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Id() noexcept {
+  static constexpr TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
+  static std::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
@@ -703,7 +705,7 @@ using _guard_long_unique = std::conditional_t<
 
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<long>,
-    detail_guard_long_unique_long);
+    detail_guard_long_unique_long)
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<std::vector<long>>,
     detail_guard_long_unique_std_vector_long)

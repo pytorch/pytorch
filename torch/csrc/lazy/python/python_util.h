@@ -4,12 +4,10 @@
 #include <optional>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::optional<SourceLocation> TORCH_PYTHON_API GetPythonFrameTop();
 
 std::vector<SourceLocation> TORCH_PYTHON_API GetPythonFrames();
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

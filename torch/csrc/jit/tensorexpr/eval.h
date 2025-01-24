@@ -30,7 +30,7 @@ class InterpValue {
     Name##values.push_back(v); \
     return;                    \
   }
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     throw unsupported_dtype();
   }
@@ -39,7 +39,7 @@ class InterpValue {
   InterpValue(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);            \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR)
 #undef VALUE_CTOR
 
   explicit InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
@@ -53,7 +53,7 @@ class InterpValue {
 #define VALUE_VEC_CTOR(Type, Name)        \
   InterpValue(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR)
   VALUE_VEC_CTOR(c10::quint8, QUInt8)
   VALUE_VEC_CTOR(c10::qint8, QInt8)
 #undef VALUE_VEC_CTOR
@@ -74,9 +74,9 @@ class InterpValue {
   Dtype dtype_;
 
 #define VALUE_STORAGE(Type, Name) std::vector<Type> Name##values;
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_STORAGE);
-  VALUE_STORAGE(c10::qint8, QInt8);
-  VALUE_STORAGE(c10::quint8, QUInt8);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_STORAGE)
+  VALUE_STORAGE(c10::qint8, QInt8)
+  VALUE_STORAGE(c10::quint8, QUInt8)
 #undef VALUE_STORAGE
   void* ptr{nullptr};
 };
@@ -89,9 +89,9 @@ class InterpValue {
     }                                         \
     return Name##values[0];                   \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH);
-VALUE_AS_DISPATCH(c10::quint8, QUInt8);
-VALUE_AS_DISPATCH(c10::qint8, QInt8);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_DISPATCH)
+VALUE_AS_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_DISPATCH
 
 #define VALUE_AS_VEC_DISPATCH(Type, Name)                             \
@@ -102,9 +102,9 @@ VALUE_AS_DISPATCH(c10::qint8, QInt8);
     }                                                                 \
     return Name##values;                                              \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH);
-VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8);
-VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_AS_VEC_DISPATCH)
+VALUE_AS_VEC_DISPATCH(c10::quint8, QUInt8)
+VALUE_AS_VEC_DISPATCH(c10::qint8, QInt8)
 #undef VALUE_AS_VEC_DISPATCH
 
 template <typename Type>
@@ -179,6 +179,7 @@ class ExprEval {
     BufHandle ret_buf("ret_val", {1}, dtype_);
     std::vector<ExprHandle> indices;
     ExprHandle zero = IntImm::make(0);
+    indices.reserve(ret_buf.ndim());
     for (size_t i = 0; i < ret_buf.ndim(); i++) {
       indices.push_back(zero);
     }

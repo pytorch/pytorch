@@ -9,7 +9,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -64,7 +64,8 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
-    ..note:
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
@@ -78,13 +79,13 @@ class LaunchConfig:
     role: str = "default_role"
     rdzv_endpoint: str = ""
     rdzv_backend: str = "etcd"
-    rdzv_configs: Dict[str, Any] = field(default_factory=dict)
+    rdzv_configs: dict[str, Any] = field(default_factory=dict)
     rdzv_timeout: int = -1
     max_restarts: int = 3
     monitor_interval: float = 0.1
     start_method: str = "spawn"
     log_line_prefix_template: Optional[str] = None
-    metrics_cfg: Dict[str, str] = field(default_factory=dict)
+    metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
 
     def __post_init__(self):
@@ -139,7 +140,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: List[Any]
+    entrypoint: Union[Callable, str, None], args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -162,7 +163,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint
@@ -182,8 +183,8 @@ def _get_addr_and_port(
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
-    args: List[Any],
-) -> Dict[int, Any]:
+    args: list[Any],
+) -> dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
         logger.warning("config has no run_id, generated a random run_id: %s", run_id)

@@ -58,20 +58,22 @@ if(USE_CUDA)
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_tensorexpr PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_tensorexpr PRIVATE USE_ROCM)
 
   target_link_libraries(tutorial_tensorexpr PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_tensorexpr PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_tensorexpr DESTINATION bin)
+  set_target_properties(tutorial_tensorexpr PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS tutorial_tensorexpr DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -65,12 +69,19 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
+# inductor_random() doesn't accept a dtype.
+# instead, its lowering always burns in float32, and conversions to a different type
+# are explicit in the graph. We therefore need this impl (used during tracing) to hardcoded
+# the dtype, so it always faithfully produces a float32 tensor during tracing,
+# even if the default dtype is set to something else.
 random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
+    lambda size, seed, mode: getattr(torch, mode)(
+        size, device=seed.device, dtype=torch.float32
+    ),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
 )
 randint = make_prim(

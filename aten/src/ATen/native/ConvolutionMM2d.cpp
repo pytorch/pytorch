@@ -183,7 +183,8 @@ static inline void slow_conv2d_shape_check(
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);
     if (weight.dim() == 2) {
-      n_input_plane /= (kernel_height * kernel_width);
+      n_input_plane /= kernel_height;
+      n_input_plane /= kernel_width;
     }
     if (input.size(1) != 0) {
       check_dim_size(input, ndim, dim_planes, n_input_plane);

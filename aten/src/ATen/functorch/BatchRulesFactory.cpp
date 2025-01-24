@@ -19,6 +19,7 @@ struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
       std::optional<int64_t> batch_dim,
       SymIntArrayRef shape,
       T... extra_args) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto bdim_size = tensor.sym_size(batch_dim.value());
     c10::SmallVector<c10::SymInt> new_shape;
     new_shape.reserve(shape.size() + 1);
@@ -187,7 +188,7 @@ static std::tuple<Tensor, std::optional<int64_t>> logspace_Tensor_Tensor_batch_r
     std::optional<at::Layout> layout,
     std::optional<at::Device> device,
     std::optional<bool> pin_memory){
-  return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, std::make_optional(base), dtype, layout, device, pin_memory);
+  return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, base, dtype, layout, device, pin_memory);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
@@ -201,7 +202,7 @@ static std::tuple<Tensor, std::optional<int64_t>> logspace_Tensor_Scalar_batch_r
     std::optional<bool> pin_memory){
 
   auto end_t = at::native::wrapped_scalar_tensor(end, start.device());
-  return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, std::nullopt, steps, std::make_optional(base), dtype, layout, device, pin_memory);
+  return linspace_logspace_batch_rule_helper(start, start_bdim, end_t, std::nullopt, steps, base, dtype, layout, device, pin_memory);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> logspace_Scalar_Tensor_batch_rule(
@@ -215,7 +216,7 @@ static std::tuple<Tensor, std::optional<int64_t>> logspace_Scalar_Tensor_batch_r
     std::optional<bool> pin_memory){
 
   auto start_t = at::native::wrapped_scalar_tensor(start, end.device());
-  return linspace_logspace_batch_rule_helper(start_t, std::nullopt, end, end_bdim, steps, std::make_optional(base), dtype, layout, device, pin_memory);
+  return linspace_logspace_batch_rule_helper(start_t, std::nullopt, end, end_bdim, steps, base, dtype, layout, device, pin_memory);
 }
 
 static bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {

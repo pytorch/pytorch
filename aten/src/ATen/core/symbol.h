@@ -51,7 +51,7 @@ const std::string& domain_prefix();
 // structure; it is namespaced via SymbolNamespace and the resulting
 // intern pointers support efficient namespace testing.
 struct TORCH_API Symbol {
-  explicit constexpr Symbol() : value(0) {};
+  explicit constexpr Symbol() : value(0) {}
   explicit constexpr Symbol(unique_t uniq)
   : value(uniq) {}
 

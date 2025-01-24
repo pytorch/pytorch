@@ -180,7 +180,7 @@ struct TORCH_API CompilationUnit {
         "' already defined.");
     classes_.push_back(std::move(namedType));
     classDict_[*classes_.back()->name()] = classes_.size() - 1;
-  };
+  }
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
     auto type = get_type(name);

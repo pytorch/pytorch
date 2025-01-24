@@ -16,7 +16,6 @@ weighted_op_quint8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float,
 )
-from typing import List
 
 
 def get_linear_configs():
@@ -110,7 +109,7 @@ def get_pooling_configs():
     dtype_configs = [weighted_op_quint8_dtype_config]
 
     def root_node_getter(node_pattern):
-        getitem, maxpool, index = node_pattern
+        _getitem, maxpool, _index = node_pattern
         return maxpool
 
     backend_pattern_configs.append(
@@ -139,7 +138,7 @@ def get_relu_configs():
 
 
 def get_binary_op_configs():
-    binary_op_configs: List[BackendPatternConfig] = []
+    binary_op_configs: list[BackendPatternConfig] = []
     dtype_configs = [weighted_op_quint8_dtype_config]
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
@@ -159,14 +158,14 @@ def get_binary_op_configs():
             # TODO: remove when functionalization is supported in pt2_mode
             (op_with_quantized_bop_scalar_variant, torch.ops.aten.relu_.default),
         ]
-        for bop_pattern in bop_patterns:
-            binary_op_configs.append(
-                BackendPatternConfig(bop_pattern)
-                .set_dtype_configs(dtype_configs)  # noqa: E131
-                ._set_num_tensor_args_to_observation_type(
-                    num_tensor_args_to_observation_type_mapping
-                )
+        binary_op_configs.extend(
+            BackendPatternConfig(bop_pattern)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            ._set_num_tensor_args_to_observation_type(
+                num_tensor_args_to_observation_type_mapping
             )
+            for bop_pattern in bop_patterns
+        )
 
     return binary_op_configs
 

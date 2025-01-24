@@ -33,7 +33,7 @@ struct DummyDataset : datasets::Dataset<DummyDataset, int> {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return size_;
   }
 
@@ -151,8 +151,8 @@ struct InfiniteStreamDataset
     return batch;
   }
 
-  torch::optional<size_t> size() const override {
-    return torch::nullopt;
+  std::optional<size_t> size() const override {
+    return std::nullopt;
   }
 
   size_t counter = 0;
@@ -459,7 +459,7 @@ TEST(DataTest, StackTransformWorksForExample) {
       return {tensor[index], 1 + tensor[index]};
     }
 
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return tensor.size(0);
     }
 
@@ -503,7 +503,7 @@ struct TensorStringDataset
     return {torch::tensor(static_cast<double>(index)), std::to_string(index)};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
@@ -542,7 +542,7 @@ struct DummyTensorDataset
     return {tensor, static_cast<int>(channels)};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
@@ -624,7 +624,7 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
         torch::tensor({static_cast<int64_t>(index)})};
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
@@ -753,7 +753,7 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return 100;
   }
 };
@@ -806,7 +806,7 @@ struct TestIndexDataset
     }
     return batch;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return data.size();
   }
   std::vector<int> data;
@@ -814,10 +814,10 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset(torch::optional<size_t> new_size = torch::nullopt) override {}
-  torch::optional<TestIndex> next(size_t batch_size) override {
+  void reset(std::optional<size_t> new_size = std::nullopt) override {}
+  std::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
-      return torch::nullopt;
+      return std::nullopt;
     }
     std::vector<size_t> indices(batch_size);
     std::iota(indices.begin(), indices.end(), size_t(0));
@@ -847,7 +847,7 @@ TEST(DataTest, DistributedRandomSamplerSingleReplicaProduceCorrectSamples) {
   samplers::DistributedRandomSampler drs(sample_count);
 
   std::vector<size_t> res;
-  torch::optional<std::vector<size_t>> idx;
+  std::optional<std::vector<size_t>> idx;
   while ((idx = drs.next(3)).has_value()) {
     res.insert(std::end(res), std::begin(*idx), std::end(*idx));
   }
@@ -879,7 +879,7 @@ TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
     std::vector<size_t> res;
     for (const auto i : c10::irange(num_replicas)) {
       (*samplers[i]).reset();
-      torch::optional<std::vector<size_t>> idx;
+      std::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
         res.insert(std::end(res), std::begin(*idx), std::end(*idx));
       }
@@ -943,7 +943,7 @@ TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
   samplers::DistributedSequentialSampler dss(sample_count);
 
   std::vector<size_t> res;
-  torch::optional<std::vector<size_t>> idx;
+  std::optional<std::vector<size_t>> idx;
   while ((idx = dss.next(batch_size)).has_value()) {
     res.insert(std::end(res), std::begin(*idx), std::end(*idx));
   }
@@ -976,7 +976,7 @@ TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
     std::vector<size_t> res;
     for (const auto i : c10::irange(num_replicas)) {
       (*samplers[i]).reset();
-      torch::optional<std::vector<size_t>> idx;
+      std::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
         res.insert(std::end(res), std::begin(*idx), std::end(*idx));
       }
@@ -1052,8 +1052,8 @@ struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
   torch::data::Example<> get(size_t i) override {
     return {torch::ones(i), torch::ones(i)};
   }
-  torch::optional<size_t> size() const noexcept override {
-    return torch::nullopt;
+  std::optional<size_t> size() const noexcept override {
+    return std::nullopt;
   }
 };
 
@@ -1150,7 +1150,7 @@ TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return 1 + indices.front();
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 10;
     }
   };
@@ -1270,7 +1270,7 @@ TEST(DataLoaderTest, RespectsTimeout) {
       baton->cv.wait_for(lock, 1000 * kMillisecond);
       return 0;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     std::shared_ptr<Baton> baton;
@@ -1388,7 +1388,7 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
     return indices.front();
   }
 
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return kNumberOfWorkers;
   }
 
@@ -1441,7 +1441,7 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
     int get(size_t index) override {
       throw std::invalid_argument("badness");
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
   };
@@ -1467,13 +1467,13 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
@@ -1504,14 +1504,14 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
   const int kNumberOfWorkers = 4;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       std::lock_guard<std::mutex> lock(mutex);
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
@@ -1544,13 +1544,13 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D, int, size_t> {
-    torch::optional<int> get_batch(size_t) override {
+    std::optional<int> get_batch(size_t) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         return counter++;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
@@ -1587,7 +1587,7 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
 
   struct D : datasets::StatefulDataset<D> {
-    torch::optional<std::vector<Example<>>> get_batch(
+    std::optional<std::vector<Example<>>> get_batch(
         size_t batch_size) override {
       if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
         counter += batch_size;
@@ -1597,9 +1597,9 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
                 torch::ones(batch_size + 1), torch::zeros(batch_size - 1)});
         return batch;
       }
-      return torch::nullopt;
+      return std::nullopt;
     }
-    torch::optional<size_t> size() const override {
+    std::optional<size_t> size() const override {
       return 100;
     }
     void reset() override {
@@ -1616,7 +1616,7 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
 
   // Notice that the `get_batch()` of the dataset returns a vector<Example>, but
   // the `Stack` collation stacks the tensors into one.
-  torch::optional<Example<>> batch = d.get_batch(kBatchSize);
+  std::optional<Example<>> batch = d.get_batch(kBatchSize);
   ASSERT_TRUE(batch.has_value());
   ASSERT_EQ(batch->data.size(0), kBatchSize);
   ASSERT_EQ(batch->data.size(1), kBatchSize + 1);
@@ -2117,7 +2117,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
    public:
     explicit S(size_t size) : size_(size), index_(0){};
 
-    void reset(torch::optional<size_t> new_size = torch::nullopt) override {
+    void reset(std::optional<size_t> new_size = std::nullopt) override {
       if (new_size.has_value()) {
         size_ = *new_size;
       }
@@ -2134,10 +2134,10 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
     }
 
     // Returns the next batch of indices.
-    torch::optional<std::vector<size_t>> next(size_t batch_size) override {
+    std::optional<std::vector<size_t>> next(size_t batch_size) override {
       const auto remaining_indices = size_ - index_;
       if (remaining_indices == 0) {
-        return torch::nullopt;
+        return std::nullopt;
       }
       auto return_size = std::min(batch_size, remaining_indices);
       std::vector<size_t> index_batch(
@@ -2220,8 +2220,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
         for (const auto i : c10::irange(
                  (chunk_count + cross_chunk_shuffle_count - 1) /
                  cross_chunk_shuffle_count)) {
-          for (const auto j : c10::irange(chunk_size)) {
-            (void)j; // Suppress unused variable warning
+          for ([[maybe_unused]] const auto j : c10::irange(chunk_size)) {
             for (const auto k : c10::irange(cross_chunk_shuffle_count)) {
               if (i * cross_chunk_shuffle_count + k < chunk_count) {
                 expected_result.push_back(i * cross_chunk_shuffle_count + k);

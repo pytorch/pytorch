@@ -56,6 +56,6 @@ void max_all_launch_kernel(TensorIterator &iter) {
   });
 }
 
-REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda)
 
 } // namespace at::native

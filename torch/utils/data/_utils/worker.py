@@ -94,9 +94,7 @@ class WorkerInfo:
         return super().__setattr__(key, val)
 
     def __repr__(self):
-        items = []
-        for k in self.__keys:
-            items.append(f"{k}={getattr(self, k)}")
+        items = [f"{k}={getattr(self, k)}" for k in self.__keys]
         return f"{self.__class__.__name__}({', '.join(items)})"
 
 

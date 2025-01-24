@@ -433,42 +433,42 @@ Tensor& zero_sparse_csr_(Tensor& self) {
   }
 
 #define CREATE_UNARY_UFUNC(op_name)       \
-  CREATE_UNARY_UFUNC_OUT(op_name);        \
-  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name); \
-  CREATE_UNARY_UFUNC_INPLACE(op_name);
+  CREATE_UNARY_UFUNC_OUT(op_name)         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)  \
+  CREATE_UNARY_UFUNC_INPLACE(op_name)
 
 #define CREATE_UNARY_UFUNC_NO_INPLACE(op_name) \
-  CREATE_UNARY_UFUNC_OUT(op_name);             \
-  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
+  CREATE_UNARY_UFUNC_OUT(op_name)              \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)
 
 // Exhaustive list of the unary ufuncs supported by sparse compressed
-CREATE_UNARY_UFUNC(abs);
-CREATE_UNARY_UFUNC(asin);
-CREATE_UNARY_UFUNC(asinh);
-CREATE_UNARY_UFUNC(atan);
-CREATE_UNARY_UFUNC(atanh);
-CREATE_UNARY_UFUNC(ceil);
-CREATE_UNARY_UFUNC(deg2rad);
-CREATE_UNARY_UFUNC(erf);
-CREATE_UNARY_UFUNC(erfinv);
-CREATE_UNARY_UFUNC(expm1);
-CREATE_UNARY_UFUNC(floor);
-CREATE_UNARY_UFUNC(frac);
-CREATE_UNARY_UFUNC(log1p);
-CREATE_UNARY_UFUNC(neg);
-CREATE_UNARY_UFUNC(rad2deg);
-CREATE_UNARY_UFUNC(sign);
-CREATE_UNARY_UFUNC(sin);
-CREATE_UNARY_UFUNC(sinh);
-CREATE_UNARY_UFUNC(sgn);
-CREATE_UNARY_UFUNC(sqrt);
-CREATE_UNARY_UFUNC(tan);
-CREATE_UNARY_UFUNC(tanh);
-CREATE_UNARY_UFUNC(trunc);
-CREATE_UNARY_UFUNC(conj_physical);
+CREATE_UNARY_UFUNC(abs)
+CREATE_UNARY_UFUNC(asin)
+CREATE_UNARY_UFUNC(asinh)
+CREATE_UNARY_UFUNC(atan)
+CREATE_UNARY_UFUNC(atanh)
+CREATE_UNARY_UFUNC(ceil)
+CREATE_UNARY_UFUNC(deg2rad)
+CREATE_UNARY_UFUNC(erf)
+CREATE_UNARY_UFUNC(erfinv)
+CREATE_UNARY_UFUNC(expm1)
+CREATE_UNARY_UFUNC(floor)
+CREATE_UNARY_UFUNC(frac)
+CREATE_UNARY_UFUNC(log1p)
+CREATE_UNARY_UFUNC(neg)
+CREATE_UNARY_UFUNC(rad2deg)
+CREATE_UNARY_UFUNC(sign)
+CREATE_UNARY_UFUNC(sin)
+CREATE_UNARY_UFUNC(sinh)
+CREATE_UNARY_UFUNC(sgn)
+CREATE_UNARY_UFUNC(sqrt)
+CREATE_UNARY_UFUNC(tan)
+CREATE_UNARY_UFUNC(tanh)
+CREATE_UNARY_UFUNC(trunc)
+CREATE_UNARY_UFUNC(conj_physical)
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
-static CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu)
 C10_DIAGNOSTIC_POP()
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
@@ -512,14 +512,14 @@ Tensor& threshold_backward_sparse_compressed_out(
 }
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
-CREATE_UNARY_UFUNC_NO_INPLACE(angle);
-CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
-CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
-CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+CREATE_UNARY_UFUNC_NO_INPLACE(angle)
+CREATE_UNARY_UFUNC_NO_INPLACE(isneginf)
+CREATE_UNARY_UFUNC_NO_INPLACE(isposinf)
+CREATE_UNARY_UFUNC_NO_INPLACE(signbit)
 
 // isnan and isinf don't have an out variant
-CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
-CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
+CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(
@@ -1359,7 +1359,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
 
   auto layout = self.layout();
   TORCH_CHECK(layout == kSparseCsr,
@@ -1411,7 +1411,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     const Tensor& arg_out,
     std::array<bool, 2> output_mask) {
 

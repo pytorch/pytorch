@@ -4,7 +4,7 @@
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch.ao.quantization.observer import (
@@ -392,7 +392,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         )
 
     @torch.jit.export
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         return self.activation_post_process.calculate_qparams()
 
     @torch.jit.export

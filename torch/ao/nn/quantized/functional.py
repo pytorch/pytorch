@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r""" Functional interface (quantized)."""
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -493,7 +493,7 @@ def max_pool1d(
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.nn.functional.max_pool1d(
         input,
         kernel_size,
@@ -524,7 +524,7 @@ def max_pool2d(
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(list[int], [])
     return torch.nn.functional.max_pool2d(
         input,
         kernel_size,

@@ -10,8 +10,7 @@
 #include <utility>
 #endif // USE_PYTORCH_QNNPACK
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -147,5 +146,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

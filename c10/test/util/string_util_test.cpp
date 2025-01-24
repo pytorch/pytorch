@@ -49,8 +49,8 @@ TEST(StringUtilTest, testStrWideSingleMultibyte) {
 
 namespace test_str_wide_empty {
 TEST(StringUtilTest, testStrWideEmpty) {
-  std::wstring s = L"";
-  std::string narrow = "";
+  std::wstring s;
+  std::string narrow;
   EXPECT_EQ(narrow, c10::str(s));
 
   const wchar_t* c_str = s.c_str();

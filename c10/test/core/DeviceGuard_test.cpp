@@ -36,7 +36,6 @@ TEST(OptionalDeviceGuard, ResetDeviceDifferentDeviceType) {
   g.reset_device(Device(DeviceType::HIP, 2), &hip_impl);
   ASSERT_EQ(FakeGuardImpl<DeviceType::CUDA>::getDeviceIndex(), 0);
   ASSERT_EQ(FakeGuardImpl<DeviceType::HIP>::getDeviceIndex(), 2);
-  ASSERT_EQ(g.current_device(), std::make_optional(Device(DeviceType::HIP, 2)));
-  ASSERT_EQ(
-      g.original_device(), std::make_optional(Device(DeviceType::HIP, 0)));
+  ASSERT_EQ(g.current_device(), Device(DeviceType::HIP, 2));
+  ASSERT_EQ(g.original_device(), Device(DeviceType::HIP, 0));
 }

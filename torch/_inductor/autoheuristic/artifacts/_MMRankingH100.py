@@ -242,7 +242,7 @@ class MMRankingH100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
         if context.get_value('arith_intensity') <= 29.89772129058838:
             if context.get_value('n') <= 34.0:
                 if context.get_value('n') <= 18.0:

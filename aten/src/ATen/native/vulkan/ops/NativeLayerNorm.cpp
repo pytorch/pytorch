@@ -48,7 +48,7 @@ void _check_layer_norm_inputs(
       ss << ", " << size;
     }
     ss << "], but got input of size" << input_shape;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 

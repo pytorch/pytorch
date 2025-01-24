@@ -9,6 +9,8 @@ import torch._logging._registrations
 from ._internal import (
     _init_logs,
     DEFAULT_LOGGING,
+    dtrace_structured,
+    get_structured_logging_overhead,
     getArtifactLogger,
     LazyString,
     set_logs,

@@ -3,18 +3,8 @@ import bisect
 import itertools
 import math
 import warnings
-from typing import (
-    cast,
-    Dict,
-    Generic,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Sequence
+from typing import cast, Generic, Iterable, Optional, TypeVar, Union
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
@@ -35,8 +25,8 @@ __all__ = [
 
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
-_T_dict = Dict[str, _T_co]
-_T_tuple = Tuple[_T_co, ...]
+_T_dict = dict[str, _T_co]
+_T_tuple = tuple[_T_co, ...]
 _T_stack = TypeVar("_T_stack", _T_tuple, _T_dict)
 
 
@@ -190,7 +180,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
-class TensorDataset(Dataset[Tuple[Tensor, ...]]):
+class TensorDataset(Dataset[tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
 
     Each sample will be retrieved by indexing tensors along the first dimension.
@@ -199,7 +189,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
 
-    tensors: Tuple[Tensor, ...]
+    tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
         assert all(
@@ -263,7 +253,7 @@ class StackDataset(Dataset[_T_stack]):
     def __getitems__(self, indices: list):
         # add batched sampling support when parent datasets supports it.
         if isinstance(self.datasets, dict):
-            dict_batch: List[_T_dict] = [{} for _ in indices]
+            dict_batch: list[_T_dict] = [{} for _ in indices]
             for k, dataset in self.datasets.items():
                 if callable(getattr(dataset, "__getitems__", None)):
                     items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
@@ -280,7 +270,7 @@ class StackDataset(Dataset[_T_stack]):
             return dict_batch
 
         # tuple data
-        list_batch: List[list] = [[] for _ in indices]
+        list_batch: list[list] = [[] for _ in indices]
         for dataset in self.datasets:
             if callable(getattr(dataset, "__getitems__", None)):
                 items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
@@ -294,7 +284,7 @@ class StackDataset(Dataset[_T_stack]):
             else:
                 for idx, t_sample in zip(indices, list_batch):
                     t_sample.append(dataset[idx])
-        tuple_batch: List[_T_tuple] = [tuple(sample) for sample in list_batch]
+        tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
     def __len__(self):
@@ -310,8 +300,8 @@ class ConcatDataset(Dataset[_T_co]):
         datasets (sequence): List of datasets to be concatenated
     """
 
-    datasets: List[Dataset[_T_co]]
-    cumulative_sizes: List[int]
+    datasets: list[Dataset[_T_co]]
+    cumulative_sizes: list[int]
 
     @staticmethod
     def cumsum(sequence):
@@ -411,7 +401,7 @@ class Subset(Dataset[_T_co]):
             return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
-    def __getitems__(self, indices: List[int]) -> List[_T_co]:
+    def __getitems__(self, indices: list[int]) -> list[_T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
@@ -427,7 +417,7 @@ def random_split(
     dataset: Dataset[_T],
     lengths: Sequence[Union[int, float]],
     generator: Optional[Generator] = default_generator,
-) -> List[Subset[_T]]:
+) -> list[Subset[_T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
 
@@ -454,7 +444,7 @@ def random_split(
         generator (Generator): Generator used for the random permutation.
     """
     if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
-        subset_lengths: List[int] = []
+        subset_lengths: list[int] = []
         for i, frac in enumerate(lengths):
             if frac < 0 or frac > 1:
                 raise ValueError(f"Fraction at index {i} is not between 0 and 1")

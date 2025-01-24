@@ -167,7 +167,7 @@ static std::optional<std::vector<Value*>> build_script_grad(
   auto grad_inputs = insertGraph(*graph, *bw_graph, grad);
   grad_inputs = unpackOutputs(grad_inputs);
   return grad_inputs;
-};
+}
 
 namespace {
 class GradientHelper {

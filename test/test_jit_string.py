@@ -3,26 +3,25 @@
 from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
-from typing import List, Tuple
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
-        def test_str_is(s: str) -> Tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+        def test_str_is(s: str) -> tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
             return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
                 s.isalnum(), s.isalpha(), s.isdecimal(), s.isnumeric(), \
                 s.isidentifier(), s.istitle(), s.isprintable()
 
-        def test_str_to(s: str) -> Tuple[str, str, str, str, str]:
+        def test_str_to(s: str) -> tuple[str, str, str, str, str]:
             return s.upper(), s.lower(), s.capitalize(), s.title(), s.swapcase()
 
-        def test_str_strip(s: str) -> Tuple[str, str, str]:
+        def test_str_strip(s: str) -> tuple[str, str, str]:
             return (
                 s.lstrip(),
                 s.rstrip(),
                 s.strip(),
             )
 
-        def test_str_strip_char_set(s: str, char_set: str) -> Tuple[str, str, str]:
+        def test_str_strip_char_set(s: str, char_set: str) -> tuple[str, str, str]:
             return (
                 s.lstrip(char_set),
                 s.rstrip(char_set),
@@ -83,7 +82,7 @@ class TestScript(JitTestCase):
             test_str_center_error("error")
             test_ljust("error")
 
-        def test_count() -> Tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
+        def test_count() -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
             return (
                 "hello".count("h"),
                 "hello".count("h", 0, 1),
@@ -100,7 +99,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_count, ())
 
-        def test_endswith() -> Tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+        def test_endswith() -> tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
             return (
                 "hello".endswith("lo"),
                 "hello".endswith("lo", 0),
@@ -119,7 +118,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_endswith, ())
 
-        def test_startswith() -> Tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+        def test_startswith() -> tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
             return (
                 "hello".startswith("lo"),
                 "hello".startswith("lo", 0),
@@ -138,7 +137,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_startswith, ())
 
-        def test_expandtabs() -> Tuple[str, str, str, str, str, str]:
+        def test_expandtabs() -> tuple[str, str, str, str, str, str]:
             return (
                 'xyz\t82345\tabc'.expandtabs(),
                 'xyz\t32345\tabc'.expandtabs(3),
@@ -149,7 +148,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_expandtabs, ())
 
-        def test_rfind() -> Tuple[int, int, int, int, int, int, int, int, int]:
+        def test_rfind() -> tuple[int, int, int, int, int, int, int, int, int]:
             return (
                 "hello123abc".rfind("llo"),
                 "hello123abc".rfind("12"),
@@ -163,7 +162,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_rfind, ())
 
-        def test_find() -> Tuple[int, int, int, int, int, int, int, int, int]:
+        def test_find() -> tuple[int, int, int, int, int, int, int, int, int]:
             return (
                 "hello123abc".find("llo"),
                 "hello123abc".find("12"),
@@ -177,7 +176,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_find, ())
 
-        def test_index() -> Tuple[int, int, int, int, int, int]:
+        def test_index() -> tuple[int, int, int, int, int, int]:
             return (
                 "hello123abc".index("llo"),
                 "hello123abc".index("12"),
@@ -188,7 +187,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_index, ())
 
-        def test_rindex() -> Tuple[int, int, int, int, int, int]:
+        def test_rindex() -> tuple[int, int, int, int, int, int]:
             return (
                 "hello123abc".rindex("llo"),
                 "hello123abc".rindex("12"),
@@ -199,7 +198,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_rindex, ())
 
-        def test_replace() -> Tuple[str, str, str, str, str, str, str]:
+        def test_replace() -> tuple[str, str, str, str, str, str, str]:
             return (
                 "hello123abc".replace("llo", "sdf"),
                 "ff".replace("f", "ff"),
@@ -211,9 +210,9 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_replace, ())
 
-        def test_partition() -> Tuple[Tuple[str, str, str], Tuple[str, str, str], Tuple[str, str, str],
-                                      Tuple[str, str, str], Tuple[str, str, str], Tuple[str, str, str],
-                                      Tuple[str, str, str]]:
+        def test_partition() -> tuple[tuple[str, str, str], tuple[str, str, str], tuple[str, str, str],
+                                      tuple[str, str, str], tuple[str, str, str], tuple[str, str, str],
+                                      tuple[str, str, str]]:
             return (
                 "hello123abc".partition("llo"),
                 "ff".partition("f"),
@@ -225,9 +224,9 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_partition, ())
 
-        def test_rpartition() -> Tuple[Tuple[str, str, str], Tuple[str, str, str], Tuple[str, str, str],
-                                       Tuple[str, str, str], Tuple[str, str, str], Tuple[str, str, str],
-                                       Tuple[str, str, str]]:
+        def test_rpartition() -> tuple[tuple[str, str, str], tuple[str, str, str], tuple[str, str, str],
+                                       tuple[str, str, str], tuple[str, str, str], tuple[str, str, str],
+                                       tuple[str, str, str]]:
             return (
                 "hello123abc".rpartition("llo"),
                 "ff".rpartition("f"),
@@ -239,8 +238,8 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_rpartition, ())
 
-        def test_split() -> Tuple[List[str], List[str], List[str], List[str], List[str],
-                                  List[str], List[str], List[str], List[str], List[str], List[str]]:
+        def test_split() -> tuple[list[str], list[str], list[str], list[str], list[str],
+                                  list[str], list[str], list[str], list[str], list[str], list[str]]:
             return (
                 "a a a a a".split(),
                 "a  a a   a a".split(),
@@ -264,8 +263,8 @@ class TestScript(JitTestCase):
         self.checkScriptRaisesRegex(test_split_empty_separator, (), Exception,
                                     "empty separator")
 
-        def test_rsplit() -> Tuple[List[str], List[str], List[str], List[str], List[str],
-                                   List[str], List[str], List[str], List[str]]:
+        def test_rsplit() -> tuple[list[str], list[str], list[str], list[str], list[str],
+                                   list[str], list[str], list[str], list[str]]:
             return (
                 "a a a a a".rsplit(),
                 " a a a a a ".rsplit(" "),
@@ -279,8 +278,8 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_rsplit, ())
 
-        def test_splitlines() -> Tuple[List[str], List[str], List[str], List[str],
-                                       List[str], List[str]]:
+        def test_splitlines() -> tuple[list[str], list[str], list[str], list[str],
+                                       list[str], list[str]]:
             return (
                 "hello\ntest".splitlines(),
                 "hello\n\ntest\n".splitlines(),
@@ -291,7 +290,7 @@ class TestScript(JitTestCase):
             )
         self.checkScript(test_splitlines, ())
 
-        def test_str_cmp(a: str, b: str) -> Tuple[bool, bool, bool, bool, bool, bool]:
+        def test_str_cmp(a: str, b: str) -> tuple[bool, bool, bool, bool, bool, bool]:
             return a != b, a == b, a < b, a > b, a <= b, a >= b
 
         for i in range(len(inputs) - 1):
@@ -318,7 +317,7 @@ class TestScript(JitTestCase):
         self.checkScript(test_bool_conversion, ("",))
 
     def test_string_slice(self):
-        def test_slice(a: str) -> Tuple[str, str, str, str, str]:
+        def test_slice(a: str) -> tuple[str, str, str, str, str]:
             return (
                 a[0:1:2],
                 a[0:6:1],

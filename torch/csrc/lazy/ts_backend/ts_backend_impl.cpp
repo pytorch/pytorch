@@ -20,8 +20,7 @@ extern TORCH_API void RegisterTorchScriptLazyNativeFunctions();
 extern TORCH_API void RegisterTorchScriptAutogradLazyNativeFunctions();
 } // namespace at
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct TSBackendDeviceType : public BackendDeviceType {
   TSBackendDeviceType() = delete;
@@ -215,8 +214,9 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
   std::vector<torch::jit::IValue> stack;
   for (const auto& argument : arguments) {
     const auto ts_data = std::static_pointer_cast<TSData>(argument);
-    if (ts_data->scalar.has_value()) {
-      stack.emplace_back(ts_data->scalar.value());
+    const auto& scalar = ts_data->scalar;
+    if (scalar.has_value()) {
+      stack.emplace_back(scalar.value());
     } else {
       // TODO(whc) should this check be made more general? it's written somewhat
       // oddly
@@ -280,5 +280,4 @@ void InitTorchScriptBackend() {
   LazyGraphExecutor::Register(executor);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

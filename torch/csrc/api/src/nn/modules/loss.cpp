@@ -2,10 +2,9 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
-L1LossImpl::L1LossImpl(L1LossOptions options_) : options(std::move(options_)) {}
+L1LossImpl::L1LossImpl(L1LossOptions options_) : options(options_) {}
 
 void L1LossImpl::reset() {}
 
@@ -19,8 +18,7 @@ Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-KLDivLossImpl::KLDivLossImpl(KLDivLossOptions options_)
-    : options(std::move(options_)) {}
+KLDivLossImpl::KLDivLossImpl(KLDivLossOptions options_) : options(options_) {}
 
 void KLDivLossImpl::reset() {}
 
@@ -35,8 +33,7 @@ Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-MSELossImpl::MSELossImpl(MSELossOptions options_)
-    : options(std::move(options_)) {}
+MSELossImpl::MSELossImpl(MSELossOptions options_) : options(options_) {}
 
 void MSELossImpl::reset() {}
 
@@ -73,7 +70,7 @@ Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
 
 HingeEmbeddingLossImpl::HingeEmbeddingLossImpl(
     HingeEmbeddingLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void HingeEmbeddingLossImpl::reset() {}
 
@@ -126,7 +123,7 @@ Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
     CosineEmbeddingLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void CosineEmbeddingLossImpl::reset() {}
 
@@ -168,7 +165,7 @@ Tensor MultiLabelSoftMarginLossImpl::forward(
 // ============================================================================
 
 TripletMarginLossImpl::TripletMarginLossImpl(TripletMarginLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void TripletMarginLossImpl::reset() {}
 
@@ -226,7 +223,7 @@ Tensor TripletMarginWithDistanceLossImpl::forward(
 
 MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
     torch::nn::MultiLabelMarginLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void MultiLabelMarginLossImpl::reset() {}
 
@@ -244,7 +241,7 @@ Tensor MultiLabelMarginLossImpl::forward(
 
 SoftMarginLossImpl::SoftMarginLossImpl(
     torch::nn::SoftMarginLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void SoftMarginLossImpl::reset() {}
 
@@ -259,7 +256,7 @@ Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 // ============================================================================
 
 SmoothL1LossImpl::SmoothL1LossImpl(torch::nn::SmoothL1LossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void SmoothL1LossImpl::reset() {}
 
@@ -275,7 +272,7 @@ Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
 // ============================================================================
 
 HuberLossImpl::HuberLossImpl(torch::nn::HuberLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void HuberLossImpl::reset() {}
 
@@ -290,8 +287,7 @@ Tensor HuberLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-CTCLossImpl::CTCLossImpl(CTCLossOptions options_)
-    : options(std::move(options_)) {}
+CTCLossImpl::CTCLossImpl(CTCLossOptions options_) : options(options_) {}
 
 void CTCLossImpl::reset() {}
 
@@ -317,7 +313,7 @@ Tensor CTCLossImpl::forward(
 // ============================================================================
 
 PoissonNLLLossImpl::PoissonNLLLossImpl(PoissonNLLLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void PoissonNLLLossImpl::reset() {}
 
@@ -340,7 +336,7 @@ Tensor PoissonNLLLossImpl::forward(
 // ============================================================================
 
 MarginRankingLossImpl::MarginRankingLossImpl(MarginRankingLossOptions options_)
-    : options(std::move(options_)) {}
+    : options(options_) {}
 
 void MarginRankingLossImpl::reset() {}
 
@@ -433,5 +429,4 @@ Tensor BCEWithLogitsLossImpl::forward(
       options.pos_weight());
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

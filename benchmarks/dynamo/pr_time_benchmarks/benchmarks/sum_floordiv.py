@@ -8,8 +8,11 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 100
 
+    def __init__(self):
+        super().__init__(category="sum_floordiv", backend="export", device="cpu")
+
     def name(self):
-        return "sum_floordiv_regression"
+        return f"{self.category()}_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/issues/134133"
@@ -27,12 +30,17 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        torch.export.export(self.m, (self.input,))
+        # enable_cpp_symbolic_shape_guards has impact on this benchmark
+        # Keep using False value for consistency.
+        with torch._dynamo.config.patch("enable_cpp_symbolic_shape_guards", False):
+            torch.export.export(self.m, (self.input,), strict=True)
 
 
 def main():
     result_path = sys.argv[1]
-    Benchmark().enable_instruction_count().collect_all().append_results(result_path)
+    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(
+        result_path
+    )
 
 
 if __name__ == "__main__":
