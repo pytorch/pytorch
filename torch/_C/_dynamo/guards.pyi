@@ -158,6 +158,7 @@ def install_symbolic_shape_guard(
 def profile_guard_manager(
     guard_manager: GuardManager,
     f_locals: dict[str, Any],
+    n_iters: int,
 ) -> float: ...
 
 class TensorGuards:
