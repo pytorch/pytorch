@@ -120,7 +120,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = False
 
         try:
@@ -289,7 +291,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.LazyVariableTracker.create(subobj, source)
         return VariableTracker.build(tx, subobj)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -691,14 +695,6 @@ class SkipFunctionVariable(VariableTracker):
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutation_type=ValueMutationNew()
             )
-        elif self.value is functools.wraps and not kwargs and len(args) == 1:
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -880,6 +876,25 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
+class FunctoolsWrapsVariable(UserFunctionVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if not kwargs and len(args) == 1:
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    return fn.clone(wrapped_fn=args[0])
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps)
+
+        return super().call_function(tx, args, kwargs)
+
+
 class FunctoolsPartialVariable(VariableTracker):
     def __init__(self, func: VariableTracker, args, keywords, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -917,7 +932,9 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
