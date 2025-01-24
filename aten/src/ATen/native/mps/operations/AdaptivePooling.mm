@@ -31,9 +31,9 @@ static void set_kernel_params(int64_t isizeH,
                               int64_t& kernel_sizeH,
                               int64_t& kernel_sizeW,
                               bool check_avg_pooling = false) {
-  TORCH_CHECK_NOT_IMPLEMENTED((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW),
-                              "Adaptive pool MPS: Input height and width must both be greater than, "
-                              "or equal to, or lesser than output height and width")
+  TORCH_CHECK((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW),
+              "Adaptive pool MPS: Input height and width must both be greater than, "
+              "or equal to, or lesser than output height and width")
 
   if (isizeH >= osizeH) {
     if (check_avg_pooling) {
