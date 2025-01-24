@@ -33,49 +33,54 @@ class TestCodegenTriton(InductorTestCase):
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
         two = sympy.Integer(2)
         eight = sympy.Integer(8)
         sixteen = sympy.Integer(16)
         s0 = sympy.Symbol("s0", positive=True, integer=True)
         s1 = sympy.Symbol("s1", positive=True, integer=True)
 
-        def _check_divisibility(config):
-            try:
-                from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+        def _check_divisibility(expected_divisible_indices, config):
+            if triton_version_uses_attrs_dict():
+                self.assertIsInstance(config, dict)
 
-                return config.divisibility_16
-            except ImportError:
-                return config.divisible_by_16
+                for idx in expected_divisible_indices:
+                    # config is in the form
+                    # {(idx,): [["tt.divisibility", 16]]}
+                    # where (idx,) is a tuple in order to support tuple inputs to triton kernels.
+                    self.assertTrue((idx,) in config)
+                    self.assertTrue(["tt.divisibility", 16] in config[(idx,)])
 
-        self.assertEqual(
+            else:
+                # config is an AttrsDescriptor
+                self.assertEqual(expected_divisible_indices, config.divisible_by_16)
+
+        _check_divisibility(
             (2,),
-            _check_divisibility(
-                triton_utils.config_of(
-                    [
-                        SizeArg("A", two),  # no
-                        SizeArg("B", eight),  # no
-                        SizeArg("C", sixteen),  # yes
-                        SizeArg("D", s0),  # no
-                        SizeArg("E", s1),  # no
-                    ]
-                )
+            triton_utils.config_of(
+                [
+                    SizeArg("A", two),  # no
+                    SizeArg("B", eight),  # no
+                    SizeArg("C", sixteen),  # yes
+                    SizeArg("D", s0),  # no
+                    SizeArg("E", s1),  # no
+                ]
             ),
         )
 
-        self.assertEqual(
+        _check_divisibility(
             (0, 2, 4, 5, 6),
-            _check_divisibility(
-                triton_utils.config_of(
-                    [
-                        SizeArg("A", two * eight),  # 0: yes
-                        SizeArg("B", eight * s0),  # 1: no
-                        SizeArg("C", two * eight * s0),  # 2: yes
-                        SizeArg("D", s0 * s1),  # 3: no
-                        SizeArg("E", sixteen * s0),  # 4: yes
-                        SizeArg("F", sixteen * eight * s0 * s1),  # 5: yes
-                        SizeArg("G", two * eight * s0 * s1),  # 6: yes
-                    ]
-                )
+            triton_utils.config_of(
+                [
+                    SizeArg("A", two * eight),  # 0: yes
+                    SizeArg("B", eight * s0),  # 1: no
+                    SizeArg("C", two * eight * s0),  # 2: yes
+                    SizeArg("D", s0 * s1),  # 3: no
+                    SizeArg("E", sixteen * s0),  # 4: yes
+                    SizeArg("F", sixteen * eight * s0 * s1),  # 5: yes
+                    SizeArg("G", two * eight * s0 * s1),  # 6: yes
+                ]
             ),
         )
 
