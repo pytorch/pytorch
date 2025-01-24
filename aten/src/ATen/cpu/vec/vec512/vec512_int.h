@@ -1167,7 +1167,7 @@ inline convert_to_int32(const int8_t* ptr, int count=Vectorized<int32_t>::size()
   } else {
     auto a = Vectorized<int8_t>::loadu(ptr, count);
     return _mm512_cvtepi8_epi32(_mm512_castsi512_si128(a));
-  } 
+  }
 }
 
 template<typename T>
