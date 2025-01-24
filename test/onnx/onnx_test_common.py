@@ -10,19 +10,8 @@ import logging
 import os
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import onnxruntime
@@ -109,7 +98,7 @@ def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: 
     ), "Dynamic shape check failed for graph inputs"
 
 
-def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
     This function is passed to `parameterized.parameterized_class` as the
@@ -208,10 +197,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         atol: Optional[float] = 1e-7,
         has_mutation: bool = False,
         additional_test_inputs: Optional[
-            List[
+            list[
                 Union[
-                    Tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]],
-                    Tuple[Sequence[_InputArgsType]],
+                    tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]],
+                    tuple[Sequence[_InputArgsType]],
                 ]
             ]
         ] = None,
@@ -268,7 +257,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
             with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
-                ref_model = torch.export.export(ref_model, args=ref_input_args)
+                ref_model = torch.export.export(
+                    ref_model, args=ref_input_args, strict=True
+                )
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram

@@ -10,8 +10,8 @@
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -505,4 +505,4 @@ Vectorized<double> inline fmadd(const Vectorized<double>& a, const Vectorized<do
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

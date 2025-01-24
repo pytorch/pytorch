@@ -6,6 +6,7 @@
 // Doesn't work on ROCm or Windows yet
 // TODO: Add compiler warning? Add PyTorch config flag?
 #else
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/tensor_ref.h>

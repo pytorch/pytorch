@@ -24,6 +24,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -454,11 +455,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CUDAEventCache {
+  class CUDAEventCache
+      : public std::enable_shared_from_this<ProcessGroupNCCL::CUDAEventCache> {
    public:
     CUDAEventCache();
     std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
-    static CUDAEventCache& get(at::DeviceIndex device);
+    static std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> get(
+        at::DeviceIndex device);
 
    private:
     std::mutex cacheMutex_;
@@ -985,8 +988,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      bool throwException = false,
-      bool log = false);
+      ::c10d::C10dLoggingData& debugLog,
+      bool throwException = false);
 
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 

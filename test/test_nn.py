@@ -1468,17 +1468,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                    lambda: getattr(net, fn)(None, l))
 
     def test_set_submodule(self):
+        # test the docstring example
+        A = nn.Module()
+        A.set_submodule("net_b", nn.Module())
+        A.set_submodule("net_b.net_c", nn.Module())
+        A.set_submodule("net_b.net_c.conv", nn.Conv2d(3, 3, 3))
+        A.set_submodule("net_b.linear", nn.Linear(3, 3))
+        new_linear = nn.Linear(1, 1)
+        A.set_submodule("net_b.net_c.conv", new_linear)
+        self.assertEqual(A.get_submodule("net_b.net_c.conv"), new_linear)
+        new_linear = nn.Linear(1, 2)
+        A.set_submodule("net_b.net_c.conv", new_linear, True)
+        self.assertEqual(A.get_submodule("net_b.net_c.conv"), new_linear)
+        new_conv = nn.Conv2d(1, 1, 1)
+        self.assertRaises(AttributeError, A.set_submodule, "net_b.conv", new_conv, True)
+        A.set_submodule("net_b.conv", new_conv)
+        self.assertEqual(A.get_submodule("net_b.conv"), new_conv)
+
+        # more tests
         net = nn.Module()
         net.t = nn.Module()
         l = nn.Linear(1, 2)
         target = "t.l"
-        net.set_submodule(target, l)
+        net.t.l = l
         self.assertEqual(net.get_submodule(target), l)
         l2 = nn.Linear(2, 1)
         net.set_submodule(target, l2)
         self.assertEqual(net.get_submodule(target), l2)
         self.assertRaises(ValueError, net.set_submodule, "", l)
         self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+        self.assertRaises(AttributeError, net.set_submodule, "0", l, True)
+        net.set_submodule("0", l, False)
+        self.assertEqual(net.get_submodule("0"), l)
+        l3 = nn.Linear(1, 1)
+        net.set_submodule("0", l3, True)
+        self.assertEqual(net.get_submodule("0"), l3)
+        net.foo = "bar"
+        self.assertRaises(AttributeError, net.set_submodule, "foo", l)
+        self.assertRaises(ValueError, net.set_submodule, "t.l", "bazz")
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -3520,6 +3547,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @tf32_on_and_off
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -4219,6 +4247,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self._test_RNN_cpu_vs_cudnn(1)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @tf32_on_and_off
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
         hidden_size = 6
@@ -7139,6 +7168,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
+    @largeTensorTest("40GB", device="cuda")
+    def test_layer_norm_large_tensor(self):
+        # test for https://github.com/pytorch/pytorch/issues/136291
+        device = torch.device("cuda")
+        b, n, dp = 16, 3000, 16
+        pairwise_repr = torch.randn(b, n, n, dp)
+
+        attn_bias_norm = nn.LayerNorm(dp).to(device=device)
+        pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
+        # we want a smaller copy to compare the results
+        pairwise_small = pairwise_repr[-1, -1, -1].detach().clone()
+        norm = attn_bias_norm(pairwise_repr)
+        norm_small = attn_bias_norm(pairwise_small)
+
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # Check output to make sure it is correct.
+        torch.testing.assert_close(norm_small, norm[-1, -1, -1])
+
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
         x = torch.randn(4, 8, 32, 32)
@@ -9961,7 +10008,8 @@ class TestNNDeviceType(NNTestCase):
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
-    @dtypes(torch.half)
+    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
@@ -9969,6 +10017,10 @@ class TestNNDeviceType(NNTestCase):
         out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         del x
         self.assertTrue(torch.allclose(out, out_ref))
+
+        x = torch.ones((17, 256, 512, 512), dtype=dtype).cuda().to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10325,6 +10377,13 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.double)
+    def test_softmax_double(self, device, dtype):
+        logits = torch.randn(5, 513, dtype=dtype, device=device)
+        expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
+        self.assertEqual(expected_ones, torch.ones_like(expected_ones))
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -11046,6 +11105,20 @@ class TestNNDeviceType(NNTestCase):
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    def test_hardswish_grad_corner(self, device, dtype):
+        m = nn.Hardswish()
+        shape = (1, 9, 9, 1)
+        cpu_input = torch.ones(shape, device=device, dtype=dtype)
+        cpu_input = cpu_input * 3
+        cpu_input.requires_grad = True
+        fwd_result = m(cpu_input)
+        grad = torch.ones_like(fwd_result)
+        fwd_result.backward(grad)
+        ref = torch.ones(shape, device=device, dtype=dtype)
+        ref.fill_(1.5)
+        self.assertEqual(cpu_input.grad, ref)
 
     def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype

@@ -7,23 +7,12 @@ import pickletools
 import platform
 import types
 from collections import defaultdict, OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    DefaultDict,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, Optional, Union
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -133,7 +122,7 @@ class PackagingError(Exception):
 
     def __init__(self, dependency_graph: DiGraph, debug=False):
         # Group errors by reason.
-        broken: Dict[PackagingErrorReason, List[str]] = defaultdict(list)
+        broken: dict[PackagingErrorReason, list[str]] = defaultdict(list)
         for module_name, attrs in dependency_graph.nodes.items():
             error = attrs.get("error")
             if error is None:
@@ -236,9 +225,9 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
-        self._written_files: Set[str] = set()
+        self._written_files: set[str] = set()
 
-        self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_reduces: dict[int, Any] = {}
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -266,7 +255,7 @@ class PackageExporter:
                 )
             self.importer = OrderedImporter(*importer)
 
-        self.patterns: Dict[GlobGroup, _PatternInfo] = {}
+        self.patterns: dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
 
     def save_source_file(
@@ -331,7 +320,7 @@ class PackageExporter:
 
     def _get_dependencies(
         self, src: str, module_name: str, is_package: bool
-    ) -> List[str]:
+    ) -> list[str]:
         """Return all modules that this source code depends on.
 
         Dependencies are found by scanning the source code for import-like statements.
@@ -659,7 +648,7 @@ class PackageExporter:
             all_dependencies = []
             module = None
             field = None
-            memo: DefaultDict[int, str] = defaultdict(None)
+            memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
             for opcode, arg, _pos in pickletools.genops(data_value):
@@ -1011,7 +1000,7 @@ class PackageExporter:
 
     def _write_mock_file(self):
         if "_mock.py" not in self._written_files:
-            mock_file = str(Path(__file__).absolute().parent / "_mock.py")
+            mock_file = str(Path(__file__).parent / "_mock.py")
             self._write_source_string("_mock", _read_file(mock_file), is_package=False)
 
     def _execute_dependency_graph(self):
@@ -1115,7 +1104,7 @@ class PackageExporter:
 
     def _nodes_with_action_type(
         self, action: Optional[_ModuleProviderAction]
-    ) -> List[str]:
+    ) -> list[str]:
         result = []
         for name, node_dict in self.dependency_graph.nodes.items():
             node_action = node_dict.get("action", None)
@@ -1124,7 +1113,7 @@ class PackageExporter:
         result.sort()
         return result
 
-    def externed_modules(self) -> List[str]:
+    def externed_modules(self) -> list[str]:
         """Return all modules that are currently externed.
 
         Returns:
@@ -1133,7 +1122,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
 
-    def interned_modules(self) -> List[str]:
+    def interned_modules(self) -> list[str]:
         """Return all modules that are currently interned.
 
         Returns:
@@ -1142,7 +1131,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
 
-    def mocked_modules(self) -> List[str]:
+    def mocked_modules(self) -> list[str]:
         """Return all modules that are currently mocked.
 
         Returns:
@@ -1151,7 +1140,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
 
-    def denied_modules(self) -> List[str]:
+    def denied_modules(self) -> list[str]:
         """Return all modules that are currently denied.
 
         Returns:
@@ -1160,7 +1149,7 @@ class PackageExporter:
         """
         return self._nodes_with_action_type(_ModuleProviderAction.DENY)
 
-    def get_rdeps(self, module_name: str) -> List[str]:
+    def get_rdeps(self, module_name: str) -> list[str]:
         """Return a list of all modules which depend on the module ``module_name``.
 
         Returns:
