@@ -212,8 +212,6 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
-        # guard_latency_us is not deterministic
-        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -294,7 +292,6 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
-        del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
