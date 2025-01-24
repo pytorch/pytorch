@@ -2315,7 +2315,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         (
             ((3, 4, 64, 64), slice_maker[2, :3]),  # Contiguous slice of weights
             ((3, 4, 64, 64), slice_maker[2, 1:]),  # Contiguous slice of weights
+            ((3, 4, 65, 64), slice_maker[2, 1:, :64]),  # Contiguous slice of weights
             ((3, 4, 64, 64), slice_maker[:, 2]),  # Non-contigous slice of weights
+            ((3, 4, 65, 64), slice_maker[:, 2, :64]),  # Non-contigous slice of weights
         ),
     )
     @dtypes(torch.float)

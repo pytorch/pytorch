@@ -869,6 +869,7 @@ class CppGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
+            nonlocal view_offset
             new_inputs = list(inputs)
             if (
                 not is_mkldnn_wgt
@@ -880,6 +881,7 @@ class CppGemmTemplate(CppTemplate):
                     assert not has_free_symbols(view_size[-2:])
                     view_size[:] = V.graph.sizevars.size_hints(view_size)
                     view_stride[:] = V.graph.sizevars.size_hints(view_stride)
+                    view_offset = V.graph.sizevars.size_hints((view_offset,))[0]
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
