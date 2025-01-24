@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride)
+    (instantiate_device_type_tests, ops, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -271,7 +271,7 @@ class TestMasked(TestCase):
             expected = torch.where(mask, expected, expected.new_zeros([]))
         self.assertEqual(strided, expected, exact_device=False)
 
-    @onlyNativeDeviceTypes
+
     @suppress_warnings
     @ops(masked_ops_with_references)
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-4})
@@ -293,7 +293,7 @@ class TestMasked(TestCase):
             self.assertEqualMasked(actual, expected, outmask)
 
     @mask_layouts()
-    @onlyNativeDeviceTypes
+
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
     @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})

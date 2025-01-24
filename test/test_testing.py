@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
@@ -130,7 +130,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_isclose_float(self, device, dtype):
         tests = (
@@ -400,7 +400,7 @@ if __name__ == '__main__':
         self.assertIn('errors=2', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
-    @onlyNativeDeviceTypes
+
     def test_get_supported_dtypes(self, device):
         # Test the `get_supported_dtypes` helper function.
         # We acquire the dtypes for few Ops dynamically and verify them against
