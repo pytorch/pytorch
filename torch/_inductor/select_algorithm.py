@@ -2168,7 +2168,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
+                node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
             V.graph.sizevars.size_hints(
@@ -2178,29 +2178,35 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             node.layout.offset,
-        ).as_strided(
             V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
+                V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
             ),
         )
 
     @staticmethod
-    def generate_example_value(size, stride, device, dtype, extra_size):
+    def generate_example_value(
+        size, stride, device, dtype, extra_size, allocation_size=None
+    ):
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
-            return rand_strided(
-                size,
-                stride,
-                device=device,
-                dtype=dtype,
-                extra_size=extra_size,
-            )
+            if allocation_size is None or allocation_size == size:
+                return rand_strided(
+                    size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                )
+            else:
+                return rand_strided(
+                    allocation_size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                ).as_strided(size, stride)
 
     @staticmethod
     def key_of(node):
