@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: package/deploy"]
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from torch.package import GlobGroup
 from torch.testing._internal.common_utils import run_tests

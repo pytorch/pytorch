@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -3545,7 +3545,7 @@ def get_tolerances(
     true_value: torch.Tensor,
     computed_value: torch.Tensor,
     fudge_factor: Optional[float] = None,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Returns the absolute and relative tolerances for comparing two tensors."""
     fudge_factor = fudge_factor if fudge_factor is not None else 1.0
     atol = get_atol(true_value, computed_value)
@@ -4188,17 +4188,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
-        ):
-            # doesn't support backward for chunk (dim=0) yet
-            loss = (
-                chunks[0].values().sum()
-                + chunks[1].values().sum()
-                + chunks[2].values().sum()
-            )
-            loss.backward()
+        # doesn't support backward for chunk (dim=0) yet
+        loss = (
+            chunks[0].values().sum()
+            + chunks[1].values().sum()
+            + chunks[2].values().sum()
+        )
+        loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
@@ -5262,7 +5258,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for nt in [nt_contiguous, nt_noncontiguous]:
             self.assertFalse(nt.is_pinned())
-            pinned = nt.pin_memory(device)
+            pinned = nt.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(nt, pinned)
             self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
@@ -6232,18 +6228,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         c = torch.nested.nested_tensor_from_jagged(
             torch.ones(4, 3, device=device), offsets_2
         )
-        # fail when tensors have the same size but not the exact same offset tensor.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
-        ):
-            a.copy_(c)
+        # should work even though the nested ints are different due to unbound-based copy
+        a.copy_(c)
 
         # fail when tensors have different sizes
         a = a.transpose(1, 2)
         with self.assertRaisesRegex(
             RuntimeError,
-            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+            "expected compatible input and src shapes, but got",
         ):
             a.copy_(b)
 
@@ -7909,6 +7901,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             # unary
             # needs log_sigmoid_forward, which returns a tuple
             "nn.functional.logsigmoid",
+            "nn.functional.prelu",
             # needs rrelu_with_noise
             "nn.functional.rrelu",
             # binary
@@ -7971,13 +7964,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             "masked.var",
         },
         name="no_masked_jagged_support",
-    ),
-    # Need to adjust sample input func to pass the right thing
-    XFailRule(
-        error_type=TypeError,
-        error_msg="missing 1 required positional arguments",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.prelu"),
-        name="invalid_prelu_sample_input_func",
     ),
     # Op doesn't support lengths being present
     XFailRule(
@@ -8164,21 +8150,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
     ),
-    # Bug: this op returns a tuple of Tensors so it doesn't work with NJT's unary
-    # pointwise logic
-    XFailRule(
-        error_type=AttributeError,
-        error_msg="'tuple' object has no attribute 'device'",
-        op_match_fn=lambda device, op: op.full_name == "frexp",
-        name="frexp_tuple_return",
-    ),
-    # Bug: fill doesn't work with NJTs at all for some reason
-    XFailRule(
-        error_type=TypeError,
-        error_msg="received an invalid combination of arguments",
-        op_match_fn=lambda device, op: op.full_name == "fill",
-        name="fill_bug",
-    ),
 ]
 
 BACKWARD_SKIPS_AND_XFAILS = [
@@ -8323,22 +8294,16 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         name="broken_narrow_backward",
     ),
-    # min / max: need to examine backwards formula for non-full reduction
+    # min / max: need factory function support for ragged dim reductions
+    # where the output is dense but sizes still contain a nested int
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
-        name="broken_min_max_reduction_with_dim_backward",
-    ),
-    # matmul(): unimplemented backward
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="aten.matmul_backward.default",
-        op_match_fn=lambda device, op: (op.full_name == "matmul"),
-        name="broken_matmul_backward",
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
+        name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
@@ -8347,14 +8312,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_backward",
-    ),
-    # chunk(): backward doesn't work for the batch dim yet
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Nested Tensor doesn't support chunk backward on dim=0 yet",
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_backward",
     ),
     # amin() / amax(): broken in a host of ways I don't think it's a good use of time
     # to try to sift through
@@ -8418,6 +8375,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
+    # e.g. Expected 5 == 4
+    XFailRule(
+        error_type=AssertionError,
+        op_match_fn=lambda device, op: (op.full_name == "fill"),
+        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
+        name="fill_aot_autograd_bug_with_transposed_input",
+    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8502,7 +8467,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
-        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
     ),
     # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;

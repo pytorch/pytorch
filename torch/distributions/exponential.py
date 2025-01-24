@@ -2,6 +2,7 @@
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -31,19 +32,19 @@ class Exponential(ExponentialFamily):
     _mean_carrier_measure = 0
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.rate.reciprocal()
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.rate)
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return self.rate.reciprocal()
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.rate.pow(-2)
 
     def __init__(self, rate, validate_args=None):
@@ -59,7 +60,7 @@ class Exponential(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         return self.rate.new(shape).exponential_() / self.rate
 
@@ -80,7 +81,7 @@ class Exponential(ExponentialFamily):
         return 1.0 - torch.log(self.rate)
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (-self.rate,)
 
     def _log_normalizer(self, x):

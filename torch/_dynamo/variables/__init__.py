@@ -26,6 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    NNModuleHooksDictVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -33,6 +34,7 @@ from .functions import (
     CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -58,6 +60,7 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
