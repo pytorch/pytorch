@@ -406,7 +406,8 @@ class CompiledFxGraph(OutputCode):
                     has_mutation_str = (
                         check_for_mutation_ignore_cuda_graph_managed_tensor(
                             gm,
-                            self,
+                            self.mutated_inputs,
+                            self.mutated_input_idxs,
                             static_input_idxs,
                         )
                     )
