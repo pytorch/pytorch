@@ -165,21 +165,16 @@ void DebugInfoWriter::write(const std::string& trace) {
   }
 
   if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
-    if (file.bad()) {
-      LOG(ERROR) << "Serious error writing Flight Recorder debug info to file: "
-                 << filename_;
-    } else {
-      LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
-                 << filename_;
-    }
+    const auto bad = file.bad();
+    LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
+               << filename_ << " bad bit: " << bad;
     return;
   }
 
   // Flush the buffer to ensure data is written to the file
   file.flush();
   if (file.bad()) {
-    LOG(ERROR) << "Serious error flushing Flight Recorder file buffer: "
-               << filename_;
+    LOG(ERROR) << "Error flushing Flight Recorder debug info: " << filename_;
     return;
   }
 
