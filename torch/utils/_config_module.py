@@ -15,13 +15,9 @@ from types import FunctionType, ModuleType
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     NoReturn,
     Optional,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -214,7 +210,7 @@ def install_config_module(module: ModuleType) -> None:
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, _ConfigEntry] = {}
+    config: dict[str, _ConfigEntry] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
@@ -230,7 +226,7 @@ COMPILE_IGNORED_MARKER = "@compile_ignored"
 
 
 # Gets all the keys (i.e. assignments) with a @compile_ignored comment
-def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str]:
+def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str]:
     source_code = inspect.getsource(module)
     assignments = set()
 
@@ -317,9 +313,9 @@ class ConfigModule(ModuleType):
     # The actual configuration settings.  E.g., torch._dynamo.config.debug
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
     # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
-    _config: Dict[str, _ConfigEntry]
-    _bypass_keys: Set[str]
-    _compile_ignored_keys: Set[str]
+    _config: dict[str, _ConfigEntry]
+    _bypass_keys: set[str]
+    _compile_ignored_keys: set[str]
     _is_dirty: bool
     _hash_digest: Optional[bytes]
 
@@ -385,7 +381,7 @@ class ConfigModule(ModuleType):
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
-    ) -> Optional[Tuple[ModuleType, str]]:
+    ) -> Optional[tuple[ModuleType, str]]:
         alias = entry.alias
         if alias is None:
             return None
@@ -435,10 +431,10 @@ class ConfigModule(ModuleType):
 
     def _get_dict(
         self,
-        ignored_keys: Optional[List[str]] = None,
-        ignored_prefixes: Optional[List[str]] = None,
+        ignored_keys: Optional[list[str]] = None,
+        ignored_prefixes: Optional[list[str]] = None,
         skip_default: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
         This function is design to provide a single point which handles
@@ -456,7 +452,7 @@ class ConfigModule(ModuleType):
                 it skips it. The other is it modified the logging behaviour
                 to match what codegen already did for modified skipped keys
         """
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
         for key in self._config:
             if ignored_keys and key in ignored_keys:
                 if skip_default and not self._is_default(key):
@@ -486,7 +482,7 @@ class ConfigModule(ModuleType):
             protocol=2,
         )
 
-    def save_config_portable(self) -> Dict[str, Any]:
+    def save_config_portable(self) -> dict[str, Any]:
         """Convert config to portable format"""
         prefixes = ["_"]
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
@@ -513,7 +509,7 @@ class ConfigModule(ModuleType):
             if module_name:
                 imports.add(module_name)
 
-        def list_of_callables_to_string(v: Union[List, Set]) -> List[str]:
+        def list_of_callables_to_string(v: Union[list, set]) -> list[str]:
             return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
 
         def importable_callable(v: Any) -> bool:
@@ -572,7 +568,7 @@ class ConfigModule(ModuleType):
         "config.load_config if you need mutable access",
         category=FutureWarning,
     )
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.get_config_copy()
 
     @deprecated(
@@ -581,10 +577,10 @@ class ConfigModule(ModuleType):
         "config.load_config if you need mutable access",
         category=FutureWarning,
     )
-    def shallow_copy_dict(self) -> Dict[str, Any]:
+    def shallow_copy_dict(self) -> dict[str, Any]:
         return self.get_config_copy()
 
-    def load_config(self, maybe_pickled_config: Union[bytes, Dict[str, Any]]) -> None:
+    def load_config(self, maybe_pickled_config: Union[bytes, dict[str, Any]]) -> None:
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
         if not isinstance(maybe_pickled_config, dict):
             config = pickle.loads(maybe_pickled_config)
@@ -598,14 +594,14 @@ class ConfigModule(ModuleType):
                     f"key {k} with value {v} is not understood by this config"
                 )
 
-    def get_config_copy(self) -> Dict[str, Any]:
+    def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 
     def patch(
         self,
-        arg1: Optional[Union[str, Dict[str, Any]]] = None,
+        arg1: Optional[Union[str, dict[str, Any]]] = None,
         arg2: Any = None,
-        **kwargs: Dict[str, Any],
+        **kwargs: dict[str, Any],
     ) -> "ContextDecorator":
         """
         Decorator and/or context manager to make temporary changes to a config.
@@ -623,7 +619,7 @@ class ConfigModule(ModuleType):
             with config.patch("name", val):
                 ...
         """
-        changes: Dict[str, Any]
+        changes: dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
                 assert isinstance(arg1, str)
@@ -639,7 +635,7 @@ class ConfigModule(ModuleType):
             changes = kwargs
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
-        prior: Dict[str, Any] = {}
+        prior: dict[str, Any] = {}
         config = self
 
         class ConfigPatch(ContextDecorator):
@@ -658,7 +654,7 @@ class ConfigModule(ModuleType):
 
         return ConfigPatch()
 
-    def _make_closure_patcher(self, **changes: Dict[str, Any]) -> Any:
+    def _make_closure_patcher(self, **changes: dict[str, Any]) -> Any:
         """
         A lower-overhead version of patch() for things on the critical path.
 

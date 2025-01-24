@@ -2,7 +2,7 @@ import itertools
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from typing import Callable, List
+from typing import Callable
 
 from tabulate import tabulate
 from tqdm import tqdm
@@ -119,7 +119,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     )
 
 
-def generate_experiment_configs() -> List[ExperimentConfig]:
+def generate_experiment_configs() -> list[ExperimentConfig]:
     batch_sizes = [
         1,
         8,
@@ -160,7 +160,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     return all_configs
 
 
-def print_results(experiments: List[Experiment]):
+def print_results(experiments: list[Experiment]):
     table_data = defaultdict(list)
     for experiment in experiments:
         for key, value in experiment.asdict().items():

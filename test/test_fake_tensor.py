@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.custom_op_db import custom_op_db
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -159,11 +160,16 @@ class FakeTensorTest(TestCase):
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_index_cuda_with_cpu(self):
+    @parametrize(
+        "dtype",
+        all_types_complex_float8_and(),
+    )
+    def test_index_cuda_with_cpu(self, dtype):
         with FakeTensorMode():
-            x = torch.rand([2048], device="cuda")
+            x = torch.ones([2048], device="cuda", dtype=dtype)
             out = x[torch.zeros([36], dtype=torch.int64)]
             self.checkType(out, "cuda", [36])
+            self.assertEqual(out.dtype, dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
@@ -1972,7 +1978,6 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res4),
             )
 
-
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_wrapper_tensor_subclass_different_device(self):
         class DifferentDeviceTensor(torch.Tensor):
@@ -2025,6 +2030,29 @@ class FakeTensorDispatchCache(TestCase):
         assert isinstance(fake_wrapped_a, DifferentDeviceTensor)
         self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
+    def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):
+        def f(x):
+            return torch.nn.functional.interpolate(
+                x,
+                size=[256, 256],
+                mode='bilinear',
+                align_corners=False,
+                antialias=True,
+            )
+
+        shape_env = ShapeEnv()
+        fake_m = FakeTensorMode(shape_env=shape_env)
+        x = fake_m.from_tensor(
+            torch.randn(1, 3, 2005, 1920, requires_grad=True),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.STATIC, DimDynamic.STATIC, DimDynamic.DYNAMIC, DimDynamic.DYNAMIC],
+                constraint_sizes=[None, None, None, None]
+            ),
+        )
+        with fake_m, enable_python_dispatcher():
+            out = f(x)
+            out.sum().backward()
+            self.assertEqual(x.shape, x.grad.shape)
 
     def test_cache_tuple_outputs(self):
         """
