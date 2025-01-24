@@ -32,7 +32,7 @@ GEMM_THREADED_MM_STUB = r"""
     aliases=aliases,
     function_name=kernel_name+"_threaded_mm",
     extra_sizevars=BY_sizevars + [b_index],
-    placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
+    placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
 BMM_TEMPLATE = r"""
 {{ template.codegen_microkernel_def() }}
