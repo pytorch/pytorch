@@ -152,6 +152,51 @@ WelfordDataLN cuWelfordCombine(
   return {mean, sigma2, count};
 }
 
+template<typename U> __device__
+WelfordDataLN cuWelfordOnlineSum4(const U val0, const U val1, const U val2, const U val3)
+{
+  U delta = val0;
+  U new_mean = delta;
+  U new_sigma2 = delta * (val0 - new_mean);
+
+  delta = val1 - new_mean;
+  new_mean = new_mean + delta * 0.5;
+  new_sigma2 = new_sigma2 + delta * (val1 - new_mean);
+
+  delta = val2 - new_mean;
+  new_mean = new_mean + delta * 0.333333333333333333333333333;
+  new_sigma2 = new_sigma2 + delta * (val2 - new_mean);
+
+  delta = val3 - new_mean;
+  new_mean = new_mean + delta * 0.25;
+  new_sigma2 = new_sigma2 + delta * (val3 - new_mean);
+
+  return {new_mean, new_sigma2, 4.f};
+}
+
+__device__
+WelfordDataLN cuWelfordCombineShfl(
+  const WelfordDataLN dataB,
+  const WelfordDataLN dataA,
+  int shuffle
+) {
+  using U = decltype(dataB.count);
+  U delta = dataB.mean - dataA.mean;
+  U count = dataA.count + dataB.count;
+  U mean, sigma2;
+  if (count > decltype(dataB.count){0}) {
+    auto coef = 1 >> shuffle;
+    auto nA = dataA.count * coef;
+    auto nB = dataB.count * coef;
+    mean = nA*dataA.mean + nB*dataB.mean;
+    sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
+  } else {
+    mean = U(0);
+    sigma2 = U(0);
+  }
+  return {mean, sigma2, count};
+}
+
 template<typename T>
 __device__ WelfordDataLN compute_stats(
   const T*  __restrict__ X,
@@ -169,16 +214,34 @@ __device__ WelfordDataLN compute_stats(
     //no tail, we check that N is multiple of vec_size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
-      #pragma unroll
-      for (int ii=0; ii < vec_size; ii++){
-        wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
+      if constexpr (vec_size == 4) {
+        wd = cuWelfordOnlineSum4(static_cast<acc_t>(data.val[0]),
+                                 static_cast<acc_t>(data.val[1]),
+                                 static_cast<acc_t>(data.val[2]),
+                                 static_cast<acc_t>(data.val[3]));
+      } else {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
+        }
       }
     }
     // intra-warp reduction
-    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+    int shuffle;
+    if constexpr (vec_size == 4) {
+      shuffle = 2;
+      for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
-        WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+            WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+        wd = cuWelfordCombineShfl(wd, wdB, shuffle);
+        shuffle += 1;
+      }
+    } else {
+      for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
+            WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
         wd = cuWelfordCombine(wd, wdB);
+      }
     }
     // threadIdx.x == 0 has correct values for each warp
     // inter-warp reductions
@@ -199,7 +262,12 @@ __device__ WelfordDataLN compute_stats(
           WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
                           meansigmabuf[2*threadIdx.y+1],
                           countbuf[threadIdx.y]};
-          wd = cuWelfordCombine(wd, wdB);
+          if constexpr (vec_size == 4) {
+            wd = cuWelfordCombineShfl(wd, wdB, shuffle);
+            shuffle += 1;
+          } else {
+            wd = cuWelfordCombine(wd, wdB);
+          }
         }
         __syncthreads();
       }
