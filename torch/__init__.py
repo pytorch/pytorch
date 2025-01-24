@@ -312,12 +312,11 @@ def _load_global_deps() -> None:
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-        # Workaround slim-wheel CUDA-12.4+ dependency bug in libcusparse by preloading nvjitlink
-        # In those versions of cuda cusparse depends on nvjitlink, but does not have rpath when
+        # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
+        # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
-        # if `LD_LIBRARY_PATH` is defined
-        # See https://github.com/pytorch/pytorch/issues/138460
-        # Similar issue as above exist for cuda_nvrtc for reference
+        # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
+        # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
         # See https://github.com/pytorch/pytorch/issues/145580
         try:
             with open("/proc/self/maps") as f:
