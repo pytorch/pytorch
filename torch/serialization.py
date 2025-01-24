@@ -1181,9 +1181,9 @@ def _save(
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
     # .format_version is used to track
-    #     1. version 0x01 represents the order of storages being changed from
+    #     1. version 1 represents the order of storages being changed from
     #        lexicographical based on keys to numerically ordered based on keys
-    zip_file.write_record(".format_version", b"0x01", len(b"0x01"))
+    zip_file.write_record(".format_version", "1", len("1"))
 
     # Write byte order marker
     if not _disable_byteorder_record:
