@@ -14006,6 +14006,22 @@ are freshly created instead of aliasing the input.
 """,
 )
 
+add_docstr(
+    torch._foreach_copy_,
+    r"""
+_foreach_copy_(self: Sequence[Tensor], src: Sequence[Tensor], non_blocking:bool=False) -> None
+
+Apply :func:`torch.Tensor.copy_` to each pair of Tensors.
+
+Example:
+    >>> dest_tensors = (torch.zeros(3), torch.zeros(3))
+    >>> src_tensors = (torch.ones(3), torch.ones(3))
+    >>> torch._foreach_copy_(dest_tensors, src_tensors)
+    >>> print(dest_tensors)
+    (tensor([1., 1., 1.]), tensor([1., 1., 1.]))
+""",
+)
+
 for unary_base_func_name in (
     "exp",
     "sqrt",

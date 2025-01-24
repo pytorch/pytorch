@@ -694,6 +694,7 @@ Foreach Operations
     _foreach_trunc
     _foreach_trunc_
     _foreach_zero_
+    _foreach_copy_
 
 Utilities
 ----------------------------------
