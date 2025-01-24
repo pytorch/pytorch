@@ -35,7 +35,7 @@ from tools.stats.utilization_stats_lib import (
 USAGE_LOG_FILENAME = "usage_log.txt"
 CMD_PYTHON_LEVEL = "CMD_PYTHON"
 UTILIZATION_BUCKET = "ossci-utilization"
-
+PYTORCH_REPO = "pytorch/pytorch"
 
 class SegmentGenerator:
     """
@@ -119,9 +119,7 @@ class UtilizationDbConverter:
         metadata: UtilizationMetadata,
         records: list[UtilizationRecord],
         segments: list[OssCiSegmentV1],
-        repo: str = "pytorch/pytorch",
     ):
-        self.repo = repo
         self.metadata = metadata
         self.records = records
         self.segments = segments
@@ -140,7 +138,7 @@ class UtilizationDbConverter:
 
     def _to_oss_ci_metadata(self) -> OssCiUtilizationMetadataV1:
         return OssCiUtilizationMetadataV1(
-            repo=self.repo,
+            repo=self.info.repo,
             workflow_id=self.info.workflow_run_id,
             run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -171,7 +169,7 @@ class UtilizationDbConverter:
             type=type,
             tags=tags,
             time_stamp=get_datetime_string(record.timestamp),
-            repo=self.repo,
+            repo=self.info.repo,
             workflow_id=self.info.workflow_run_id,
             run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -418,7 +416,8 @@ if __name__ == "__main__":
             run_attempt=args.workflow_run_attempt,
             job_id=args.job_id,
             workflow_name=args.workflow_name,
-            job_name=args.job_name),
+            job_name=args.job_name,
+            repo=PYTORCH_REPO),
         dry_run=args.dry_run,
         debug=args.debug,
     )
