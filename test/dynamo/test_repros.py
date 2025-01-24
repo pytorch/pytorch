@@ -4097,7 +4097,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def fn(num: int):
             return format(num, "b")
 
-        opt_fn = torch.compile(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
         self.assertEqual(fn(10), opt_fn(10))
 
     # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
