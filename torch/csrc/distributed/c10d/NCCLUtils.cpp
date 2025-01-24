@@ -390,11 +390,9 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 #endif
 
 std::string getNcclVersion() {
-  static c10::once_flag ncclGetVersionFlag;
-  static std::string versionString;
-
-  c10::call_once(ncclGetVersionFlag, []() {
+  static std::string versionString = []() {
     int version = 0;
+    std::string versionString;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -417,7 +415,8 @@ std::string getNcclVersion() {
       }
 #endif
     }
-  });
+    return versionString;
+  }();
 
   return versionString;
 }
