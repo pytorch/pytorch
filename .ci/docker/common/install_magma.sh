@@ -5,6 +5,12 @@ set -eou pipefail
 
 function do_install() {
     cuda_version=$1
+
+    # Temporary WAR to be updated for CUDA 12.8
+    if [ "$cuda_version" == "12.8" ]; then
+        # Set it to 12.6 if it matches
+        cuda_version="12.6"
+    fi
     cuda_version_nodot=${1/./}
 
     MAGMA_VERSION="2.6.1"
