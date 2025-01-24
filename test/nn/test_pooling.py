@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
     skipCUDAIfRocm,
     TEST_WITH_ROCM,
 )
@@ -504,7 +503,6 @@ class TestPoolingNN(NNTestCase):
 
 
 class TestPoolingNNDeviceType(NNTestCase):
-    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
@@ -523,7 +521,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     # when output_size = 0, in adaptive_{avg, max}_pool and its variants.
     # These tests are explicitly written because ErrorInputs does not support backward calls
     # Issue: https://github.com/pytorch/pytorch/issues/78868
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_adaptive_pooling_empty_output_size(self, dtype, device):
@@ -556,7 +554,6 @@ class TestPoolingNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
-    @onlyNativeDeviceTypes
     def test_adaptive_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
@@ -570,7 +567,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expected dimensions"):
             torch.ops.aten.adaptive_max_pool3d_backward(grad_output, input, indices)
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
@@ -580,7 +576,6 @@ class TestPoolingNNDeviceType(NNTestCase):
             inp = torch.randn(1, 0, 50, 32, device=device)
             mod(inp)
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_batch(self, device):
         mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
         inp = torch.ones(0, 16, 50, 32, 32, device=device)
@@ -590,21 +585,18 @@ class TestPoolingNNDeviceType(NNTestCase):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_out_size(self, device):
         mod = nn.FractionalMaxPool2d([2, 2], output_size=[0, 1])
         inp = torch.rand([16, 50, 32, 32], device=device)
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 50, 0, 1), device=device))
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_out_size(self, device):
         mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[0, 1, 1])
         inp = torch.rand([16, 50, 32, 32], device=device)
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_samples(self, device):
         samples = torch.rand([0, 16, 2], device=device)
         mod = nn.FractionalMaxPool2d(
@@ -618,7 +610,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
             mod(inp1)
 
-    @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_samples(self, device):
         samples = torch.rand([0, 16, 3], device=device)
         mod = nn.FractionalMaxPool3d(
@@ -632,7 +623,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
             mod(inp1)
 
-    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
@@ -657,7 +647,6 @@ class TestPoolingNNDeviceType(NNTestCase):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
-    @onlyNativeDeviceTypes
     def test_MaxUnpool_zero_batch_dim(self, device):
         pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
         unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
@@ -692,7 +681,6 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
     @slowTest
-    @onlyNativeDeviceTypes
     @skipCUDAIfRocm
     @parametrize_test(
         "module_name,module_size,output_size,test_index,should_error",
@@ -801,7 +789,6 @@ torch.cuda.synchronize()
             else:
                 unpool(output, indices)
 
-    @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
@@ -827,7 +814,6 @@ torch.cuda.synchronize()
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
-    @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
@@ -890,7 +876,7 @@ torch.cuda.synchronize()
         )
         self.assertEqual(y.size(), (1, 1, 3, 4))
 
-    @onlyNativeDeviceTypes  # TODO: fix on XLA
+    # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
             x = torch.randint(
@@ -920,7 +906,6 @@ torch.cuda.synchronize()
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
 
-    @onlyNativeDeviceTypes
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
             (2, 3, 6, 6, 6), dtype=torch.float, device=device, requires_grad=True
@@ -938,7 +923,6 @@ torch.cuda.synchronize()
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
     @expectedFailureMeta  # Runtime Error not raised for meta
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
@@ -951,7 +935,6 @@ torch.cuda.synchronize()
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     module(input)
 
-    @onlyNativeDeviceTypes
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -1098,7 +1081,6 @@ torch.cuda.synchronize()
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -1173,7 +1155,6 @@ torch.cuda.synchronize()
             torch.channels_last,
         )
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
@@ -1325,7 +1306,6 @@ torch.cuda.synchronize()
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
 
-    @onlyNativeDeviceTypes
     def test_max_pool2d_with_indices_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
@@ -1698,7 +1678,7 @@ torch.cuda.synchronize()
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # TODO: Fails on XLA
+    # TODO: Fails on XLA
     @gcIfJetson
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ["", "adaptive_"]:
@@ -1735,7 +1715,6 @@ torch.cuda.synchronize()
                 self.assertTrue(math.isinf(res2.item()))
 
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
-    @onlyNativeDeviceTypes
     def test_fractional_max_pool2d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
@@ -1783,7 +1762,6 @@ torch.cuda.synchronize()
                         x, (2, 2), output_size=output_size, _random_samples=samples
                     )
 
-    @onlyNativeDeviceTypes
     def test_fractional_max_pool2d_backward_fails(self, device):
         grad_output = torch.randn(1, 1, 2, 3, 3, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
@@ -1797,7 +1775,6 @@ torch.cuda.synchronize()
             )
 
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
-    @onlyNativeDeviceTypes
     def test_fractional_max_pool3d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
@@ -1845,7 +1822,7 @@ torch.cuda.synchronize()
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # TODO: Fails on XLA
+    # TODO: Fails on XLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
             fn_name = f"FractionalMaxPool{num_dim}d"
@@ -1872,7 +1849,7 @@ torch.cuda.synchronize()
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
-    @onlyNativeDeviceTypes  # TODO: RuntimeError message different on XLA
+    # TODO: RuntimeError message different on XLA
     def test_pooling_zero_stride(self, device):
         for op in ("max", "avg"):
             for num_dim in [1, 2, 3]:

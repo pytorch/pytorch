@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
+    (instantiate_device_type_tests, ops, dtypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
@@ -129,7 +129,7 @@ def skip_helper_for_fft(device, dtype):
 class TestFFT(TestCase):
     exact_dtype = True
 
-    @onlyNativeDeviceTypes
+
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
          allowed_dtypes=(torch.float, torch.cfloat))
     def test_reference_1d(self, device, dtype, op):
@@ -171,7 +171,7 @@ class TestFFT(TestCase):
             self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
@@ -232,7 +232,7 @@ class TestFFT(TestCase):
                     forward != torch.fft.fft or x.is_complex()))
 
     # Note: NumPy will throw a ValueError for an empty input
-    @onlyNativeDeviceTypes
+
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.float, torch.complex32, torch.cfloat))
     def test_empty_fft(self, device, dtype, op):
         t = torch.empty(1, 0, device=device, dtype=dtype)
@@ -241,7 +241,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, match):
             op(t)
 
-    @onlyNativeDeviceTypes
+
     def test_empty_ifft(self, device):
         t = torch.empty(2, 1, device=device, dtype=torch.complex64)
         match = r"Invalid number of data points \([-\d]*\) specified"
@@ -251,7 +251,7 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(RuntimeError, match):
                 f(t)
 
-    @onlyNativeDeviceTypes
+
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
@@ -265,7 +265,7 @@ class TestFFT(TestCase):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
@@ -317,7 +317,7 @@ class TestFFT(TestCase):
             C = torch.fft.rfft(t)
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
-    @onlyNativeDeviceTypes
+
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
@@ -334,7 +334,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
-    @onlyNativeDeviceTypes
+
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
         t = make_tensor(13, 13, device=device, dtype=dtype)
@@ -351,7 +351,7 @@ class TestFFT(TestCase):
             op(t, **kwargs)
 
     # nd-fft tests
-    @onlyNativeDeviceTypes
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=(torch.cfloat, torch.cdouble))
@@ -384,7 +384,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
@@ -439,7 +439,7 @@ class TestFFT(TestCase):
                     self.assertEqual(x, y, exact_dtype=(
                         forward != torch.fft.fftn or x.is_complex()))
 
-    @onlyNativeDeviceTypes
+
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
@@ -462,7 +462,7 @@ class TestFFT(TestCase):
             op(a, s=(10, 10, 10, 10))
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_fftn_noop_transform(self, device, dtype):
         skip_helper_for_fft(device, dtype)
@@ -487,7 +487,7 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
     })
@@ -526,7 +526,7 @@ class TestFFT(TestCase):
             self.assertEqual(expect, actual)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
     })
@@ -571,7 +571,7 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double, torch.complex128)
     def test_fft2_numpy(self, device, dtype):
         norm_modes = REFERENCE_NORM_MODES
@@ -617,7 +617,7 @@ class TestFFT(TestCase):
                     self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float, torch.complex64)
     def test_fft2_fftn_equivalence(self, device, dtype):
         norm_modes = (None, "forward", "backward", "ortho")
@@ -654,7 +654,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expect)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     def test_fft2_invalid(self, device):
         a = torch.rand(10, 10, 10, device=device)
         fft_funcs = (torch.fft.fft2, torch.fft.ifft2,
@@ -680,7 +680,7 @@ class TestFFT(TestCase):
     # Helper functions
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftfreq_numpy(self, device, dtype):
@@ -706,7 +706,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float, torch.double)
     def test_fftfreq_out(self, device, dtype):
         for func in (torch.fft.fftfreq, torch.fft.rfftfreq):
@@ -718,7 +718,7 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fftshift_numpy(self, device, dtype):
@@ -744,7 +744,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftshift_frequencies(self, device, dtype):
@@ -819,7 +819,7 @@ class TestFFT(TestCase):
         _test_complex((30, 55, 50, 22), 3, lambda x: x[:, 3:53, 15:40, 1:21])
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double)
     def test_fft_ifft_rfft_irfft(self, device, dtype):
         self._test_fft_ifft_rfft_irfft(device, dtype)
@@ -917,7 +917,7 @@ class TestFFT(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -991,7 +991,7 @@ class TestFFT(TestCase):
 
     @skipIfTorchDynamo("double")
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double)
     def test_istft_against_librosa(self, device, dtype):
         if not TEST_LIBROSA:
@@ -1036,7 +1036,7 @@ class TestFFT(TestCase):
             _test(4000, 1024, 512, win_sizes=(1024,), center=center)
             _test(4000, 1024, 512, win_sizes=(1024,), center=center, length=4000)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double, torch.cdouble)
     def test_complex_stft_roundtrip(self, device, dtype):
@@ -1078,7 +1078,7 @@ class TestFFT(TestCase):
                                       length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double, torch.cdouble)
     def test_stft_roundtrip_complex_window(self, device, dtype):
@@ -1138,7 +1138,7 @@ class TestFFT(TestCase):
             actual = torch.stft(*args, window=window, center=False)
             self.assertEqual(actual, expected)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.cdouble)
     def test_complex_stft_real_equiv(self, device, dtype):
@@ -1219,14 +1219,13 @@ class TestFFT(TestCase):
             x.stft(10, pad_mode='constant', onesided=True)
 
     # stft is currently warning that it requires return-complex while an upgrader is written
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
         with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
             y = x.stft(10, pad_mode='constant')
 
-    @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     def test_stft_align_to_window_only_requires_non_center(self, device):
         x = torch.rand(100)
@@ -1235,14 +1234,14 @@ class TestFFT(TestCase):
                 y = x.stft(10, center=True, return_complex=True, align_to_window=align_to_window)
 
     # stft and istft are currently warning if a window is not provided
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     def test_stft_requires_window(self, device):
         x = torch.rand(100)
         with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
             y = x.stft(10, pad_mode='constant', return_complex=True)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     def test_istft_requires_window(self, device):
         stft = torch.rand((51, 5), dtype=torch.cdouble)
@@ -1270,7 +1269,7 @@ class TestFFT(TestCase):
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     def test_fft_plan_repeatable(self, device):
         # Regression test for gh-58724 and gh-63152
@@ -1285,7 +1284,7 @@ class TestFFT(TestCase):
             res2 = torch.fft.rfft(a.clone())
             self.assertEqual(res1, res2)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_round_trip_simple_cases(self, device, dtype):
@@ -1298,7 +1297,7 @@ class TestFFT(TestCase):
         _test(torch.ones(4, dtype=dtype, device=device), 4, 4)
         _test(torch.zeros(4, dtype=dtype, device=device), 4, 4)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_round_trip_various_params(self, device, dtype):
@@ -1369,7 +1368,7 @@ class TestFFT(TestCase):
         for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_round_trip_with_padding(self, device, dtype):
@@ -1436,7 +1435,7 @@ class TestFFT(TestCase):
         for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
-    @onlyNativeDeviceTypes
+
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
         stft = torch.zeros((3, 5, 2), device=device)
@@ -1453,7 +1452,7 @@ class TestFFT(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
@@ -1489,7 +1488,7 @@ class TestFFT(TestCase):
         _test(amplitude=80, L=9, n=6)
         _test(amplitude=99, L=10, n=7)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
@@ -1556,7 +1555,7 @@ class TestFFT(TestCase):
         for data_size, kwargs in patterns:
             _test(data_size, kwargs)
 
-    @onlyNativeDeviceTypes
+
     @skipCPUIfNoFFT
     def test_batch_istft(self, device):
         original = torch.tensor([

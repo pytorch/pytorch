@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
     OpDTypes,
     ops,
     precisionOverride,
@@ -1161,7 +1160,7 @@ class TestBinaryUfuncs(TestCase):
             a += b
 
     # TODO: refactor this test into a more generic one, it's parked here currently
-    @onlyNativeDeviceTypes
+
     def test_out_resize_warning(self, device):
         a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
         b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
@@ -1199,7 +1198,6 @@ class TestBinaryUfuncs(TestCase):
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
-    @onlyNativeDeviceTypes
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)
         expected = t.data_ptr()
@@ -1696,7 +1694,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(cpu_out, cuda_out)
 
     @skipIfTorchDynamo()
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1.0 + 1.0j, -1.5j, 2.2 - 1.6j, 1 + 0j]
@@ -1727,7 +1724,6 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(base, first_exp)
                 self._test_pow(base, second_exp)
 
-    @onlyNativeDeviceTypes
     @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
@@ -1897,7 +1893,6 @@ class TestBinaryUfuncs(TestCase):
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
         _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
-    @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
@@ -1970,7 +1965,6 @@ class TestBinaryUfuncs(TestCase):
                     # See issue gh-52387
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
 
-    @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
         def _wrapped_idiv_tensor(a, b):
@@ -2729,7 +2723,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, 0.0).isnan()))
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
-    @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
+    # Check Issue https://github.com/pytorch/pytorch/issues/48130
     @dtypes(*integral_types())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
@@ -2882,7 +2876,6 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -2907,7 +2900,6 @@ class TestBinaryUfuncs(TestCase):
             expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(actual, expected)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int16, torch.int32, torch.int64)
     def test_lcm(self, device, dtype):
         # Tests lcm(0, 0), lcm(0, a) cases
@@ -2924,7 +2916,6 @@ class TestBinaryUfuncs(TestCase):
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
     def test_nextafter(self, device, dtype):
@@ -2949,7 +2940,6 @@ class TestBinaryUfuncs(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16)
     def test_nextafter_bfloat16(self, device, dtype):
         nan = float("nan")
@@ -3169,7 +3159,6 @@ class TestBinaryUfuncs(TestCase):
                     )  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
         "Ensure that signed integer bit shifting works as expected."
@@ -3185,7 +3174,6 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    @onlyNativeDeviceTypes
     @dtypes(*get_all_int_dtypes())
     def test_shift_limits(self, device, dtype):
         "Ensure that integer bit shifting works as expected with out-of-limits shift values."
@@ -3235,7 +3223,6 @@ class TestBinaryUfuncs(TestCase):
                     msg=f">> {shift}",
                 )
 
-    @onlyNativeDeviceTypes
     @dtypes(
         *list(
             product(

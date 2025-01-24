@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan,
      dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
@@ -2914,7 +2914,6 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @dtypes(*floating_and_complex_types())
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/129882")
     def test_inverse_errors(self, device, dtype):
@@ -2935,7 +2934,6 @@ class TestLinalg(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -3427,12 +3425,12 @@ class TestLinalg(TestCase):
             x_cpu = x.expand(3).cpu()
             check(x_cpu, y.to(x.dtype), 'Expected all tensors to be on the same device')
 
-    @onlyNativeDeviceTypes
+
     def test_vdot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.vdot)
         self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
 
-    @onlyNativeDeviceTypes
+
     def test_dot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
@@ -3613,7 +3611,7 @@ class TestLinalg(TestCase):
         self.assertEqual(matrix_rank(a).item(), 9)
         self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
 
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double)
     # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
     def test_chain_matmul(self, device, dtype):
@@ -3628,7 +3626,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
             torch.chain_matmul(make_tensor(1, dtype=dtype, device=device), make_tensor(1, dtype=dtype, device=device))
 
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
         def check(*shapes):
@@ -3663,7 +3661,7 @@ class TestLinalg(TestCase):
         check([10, 100], [100, 5], [5, 50])
         check([10, 20], [20, 30], [30, 5])
 
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float)
     def test_multi_dot_errors(self, device, dtype):
         def check(tensors, out, msg):
@@ -6802,7 +6800,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyNativeDeviceTypes
+
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
@@ -6871,7 +6869,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyNativeDeviceTypes
+
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
@@ -6923,7 +6921,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
+
     @parametrize("k", [64, 256])
     @parametrize("n", [32, 48, 64, 128])
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
@@ -6950,7 +6948,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
+
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
@@ -7022,7 +7020,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
+
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
@@ -7154,7 +7152,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
     @slowTest
-    @onlyNativeDeviceTypes
+
     # bfloat16 doesn't have sufficient precision to pass this test
     @dtypes(torch.half, torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
@@ -7260,7 +7258,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
             _test_mm(n, m, p, dtype, genf)
 
-    @onlyNativeDeviceTypes
+
     def test_mm_bmm_non_memory_dense(self, device):
         def _slice(tensor, fn):
             return fn(tensor)[..., ::2]
@@ -7292,7 +7290,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(torch.bmm(Ab_conj, Bb_, out=out_b), torch.bmm(Ab_conj_physical, Bb_, out=out_b))
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
 
-    @onlyNativeDeviceTypes
+
     def test_mm_conjtranspose(self, device):
         A = torch.randn(3, 3, dtype=torch.cfloat, device=device)
         B = torch.randn(3, 3, dtype=torch.cfloat, device=device)
@@ -7312,14 +7310,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         out1_ref = torch.mm(A.t().conj_physical(), B.t().conj_physical())
         self.assertEqual(out1, out1_ref)
 
-    @onlyNativeDeviceTypes
+
     def test_mm_empty_inputs_mixed_dtype_errors(self, device):
         a = torch.randint(0, 10, [1, 10], dtype=torch.int16, device=device)
         b = torch.randn(10, 20, dtype=torch.float32, device=device)
         with self.assertRaisesRegex(RuntimeError, "expected .* and .* to have the same dtype, but got:"):
             torch.mm(a, b)
 
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
@@ -7336,7 +7334,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @onlyNativeDeviceTypes
+
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
     @bf32_on_and_off(0.05)
@@ -7449,7 +7447,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(res7, ref)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @onlyNativeDeviceTypes
+
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
     @bf32_on_and_off(0.05)
@@ -7523,7 +7521,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
     @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
-    @onlyNativeDeviceTypes
+
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
     @bf32_on_and_off(0.05)
@@ -8739,7 +8737,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
-    @onlyNativeDeviceTypes
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64)

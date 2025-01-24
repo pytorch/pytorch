@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCUDA,
-    onlyNativeDeviceTypes,
     skipCUDAIf,
     skipMeta,
     TEST_WITH_ROCM,
@@ -484,7 +483,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # padding indices to fill in the gaps indicated by the offset array
 
     @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
@@ -634,7 +632,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
     # against torch.nn.functional.embedding followed by a reduction.
-    @onlyNativeDeviceTypes
+
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     def test_embedding_bag_2D_padding_idx(self, device, dtype):
@@ -1582,7 +1580,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):
@@ -1605,7 +1603,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 test_backward=True,
             )
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_half(self, device, dtypes):
         self._test_EmbeddingBag(
