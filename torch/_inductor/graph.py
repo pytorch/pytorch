@@ -251,6 +251,13 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
+        if isinstance(
+            cur.target,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
         op = _get_overload_packet(cur)
         if not op:
             continue
