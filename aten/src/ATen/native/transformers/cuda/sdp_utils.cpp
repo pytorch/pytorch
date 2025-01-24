@@ -217,7 +217,6 @@ bool check_sm_version(cudaDeviceProp * dprops) {
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
-  using sm90 = SMVersion<9, 0>;
   using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
@@ -259,7 +258,6 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
 bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
-  using sm90 = SMVersion<9, 0>;
   using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
