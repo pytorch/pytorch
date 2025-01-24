@@ -360,7 +360,7 @@ __global__ void computeBlockwiseWithinKCounts(
 
   // accumulates counters from multiple blocks
   uint32_t digit_count = 0;
-  if (tidx < RADIX_DIGITS && blocks_per_slice > 1) {
+  if (tidx < RADIX_DIGITS) {
     for (int blk = 0; blk < blocks_per_slice; ++blk) {
       digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
     }
