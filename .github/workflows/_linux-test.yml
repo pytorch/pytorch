@@ -416,9 +416,8 @@ jobs:
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
 
-      - name: Process Post Test Process
-        uses: ./.github/workflows/post-test-job-process.yml
-        with:
+      - name: Upload utilization stats
+        uses: ./.github/workflows/upload-utilization-stats.yml
           job_id: ${{ steps.get-job-id.outputs.job-id }}
           job_name: ${{ steps.get-job-id.outputs.job-name }}
           workflow_name: ${{ github.workflow }}
