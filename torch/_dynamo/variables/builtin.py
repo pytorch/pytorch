@@ -1641,7 +1641,6 @@ class BuiltinVariable(VariableTracker):
             raise
 
     def call_hasattr(self, tx: "InstructionTranslator", obj, attr):
-        breakpoint()
         if attr.is_python_constant():
             name = attr.as_python_constant()
             if isinstance(obj, variables.BuiltinVariable):
