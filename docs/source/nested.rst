@@ -15,8 +15,8 @@ single tensor. Such data is stored underneath in an efficient packed representat
 a standard PyTorch tensor interface for applying operations.
 
 A common application of nested tensors is for expressing batches of variable-length sequential data
-present in various domains (e.g. varying sentence lengths, image sizes, audio / video clip lengths).
-Traditionally, such data has been handled by padding sequences to that of the max length
+present in various domains, such as varying sentence lengths, image sizes, and audio / video clip
+lengths. Traditionally, such data has been handled by padding sequences to that of the max length
 within a batch, performing computation on the padded form, and subsequently masking to remove
 padding. This is inefficient and error-prone, and nested tensors exist to address these problems.
 
@@ -45,7 +45,9 @@ Construction
 
 Construction is straightforward and involves passing a list of tensors to the
 ``torch.nested.nested_tensor`` constructor. A nested tensor with the ``torch.jagged`` layout
-(AKA an "NJT") supports a single ragged dimension.
+(AKA an "NJT") supports a single ragged dimension. This constructor will copy the input tensors
+into a packed, contiguous block of memory according to the layout described in the `data_layout`_
+section below.
 
 >>> a, b = torch.arange(3), torch.arange(5) + 3
 >>> a
@@ -75,9 +77,10 @@ usual keyword arguments.
        grad_fn=<UnbindBackwardAutogradNestedTensor0>), tensor([3., 4., 5., 6., 7.], device='cuda:0',
        grad_fn=<UnbindBackwardAutogradNestedTensor0>)]
 
-In the vein of ``torch.as_tensor``, ``torch.nested.as_nested_tensor`` can be used to preserve autograd
-history from the tensors passed to the constructor. When this constructor is utilized, gradients
-will flow through the nested tensor back into the original components.
+``torch.nested.as_nested_tensor`` can be used to preserve autograd history from the tensors passed
+to the constructor. When this constructor is utilized, gradients will flow through the nested tensor
+back into the original components. Note that this constructor still copies the input components into
+a packed, contiguous block of memory.
 
 >>> a = torch.randn(12, 512, requires_grad=True)
 >>> b = torch.randn(23, 512, requires_grad=True)
@@ -314,11 +317,16 @@ for usage examples of NJT with FlexAttention.
 Usage with torch.compile
 ++++++++++++++++++++++++
 
-NJTs are designed to be used with ``torch.compile()`` for optimal performance. In particular,
-``torch.compile()`` is important to eliminate eager-mode python tensor subclass overhead, which
-affects NJT as it is a python tensor subclass. NJTs work out-of-the-box and
+NJTs are designed to be used with ``torch.compile()`` for optimal performance, and we always
+recommend utilizing ``torch.compile()`` with NJTs when possible. NJTs work out-of-the-box and
 graph-break-free both when passed as inputs to a compiled function or module OR when
 instantiated in-line within the function.
+
+.. note::
+    If you're not able to utilize ``torch.compile()`` for your use case, performance and memory
+    usage may still benefit from the use of NJTs, but it's not as clear-cut whether this will be
+    the case. It is important that the tensors being operated on are large enough so the
+    performance gains are not outweighed by the overhead of python tensor subclasses.
 
 >>> import torch
 >>> a = torch.randn(2, 3)
@@ -337,7 +345,7 @@ torch.Size([2, j1, 3])
 >>> output2.shape
 torch.Size([2, j1, 3])
 
-By default, NJTs support
+Note that NJTs support
 `Dynamic Shapes <https://pytorch.org/docs/stable/torch.compiler_dynamic_shapes.html>`_
 to avoid unnecessary recompiles with changing ragged structure.
 
@@ -427,14 +435,15 @@ output shape. For example:
 >>> output = compiled_f(nt)
 
 In this example, calling ``chunk()`` on the batch dimension of the NJT requires examination of the
-NJT's ``offsets`` data to delineate batch item boundaries within the packed ragged dimension. The
-workaround here is as suggested in the error message.
+NJT's ``offsets`` data to delineate batch item boundaries within the packed ragged dimension. As a
+workaround, there are a couple torch.compile flags that can be set:
 
+>>> torch._dynamo.config.capture_dynamic_output_shape_ops = True
 >>> torch._dynamo.config.capture_scalar_outputs = True
 
-If, after setting this config setting, you still see data-dependent operator errors, please file
-an issue with PyTorch. This area of ``torch.compile()`` is still in heavy development and certain
-aspects of NJT support may be incomplete.
+If, after setting these, you still see data-dependent operator errors, please file an issue with
+PyTorch. This area of ``torch.compile()`` is still in heavy development and certain aspects of
+NJT support may be incomplete.
 
 .. _contributions:
 
