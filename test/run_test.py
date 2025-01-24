@@ -1441,9 +1441,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert (
-        test.name == "test_ci_sanity_check_fail"
-    ), f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    assert test.name == "test_ci_sanity_check_fail", (
+        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1951,9 +1951,9 @@ def get_sharding_opts(options) -> tuple[int, int]:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
+        assert which_shard <= num_shards, (
+            "Selected shard must be less than or equal to total number of shards"
+        )
 
     return (which_shard, num_shards)
 
@@ -1996,9 +1996,9 @@ def run_test_module(
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        assert isinstance(return_code, int) and not isinstance(
-            return_code, bool
-        ), f"While running {str(test)} got non integer return code {return_code}"
+        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
+            f"While running {str(test)} got non integer return code {return_code}"
+        )
         if return_code == 0:
             return None
 
