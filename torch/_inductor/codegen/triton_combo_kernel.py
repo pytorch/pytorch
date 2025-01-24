@@ -16,9 +16,10 @@ from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
-from ..utils import Placeholder
+from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
+    ConstexprArg,
     DeferredLine,
     IndentedBuffer,
     Kernel,
@@ -727,8 +728,12 @@ class ComboKernel(Kernel):
             code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
             code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
 
-    def add_blockd_to_args(self, argdefs: list[str]) -> list[str]:
-        block_args = {}
+    def get_block_args(self) -> list[ConstexprArg]:
+        """
+        Calculate blocks from sub_kernels and range_trees.
+        **Update self.block_args**
+        Return the block args
+        """
         block_names = {}
         for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
@@ -739,13 +744,10 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
-                block_args[f"{tree.prefix.upper()}BLOCK : tl.constexpr"] = tree.prefix
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
-        if self.enable_autotune:
-            argdefs.extend(block_args)
         self.block_args = list(block_names.keys())
 
-        return argdefs
+        return [ConstexprArg(x) for x in block_names.keys()]
 
     def add_numel_to_args(self, argdefs: list[str], signature: list[Any]) -> list[str]:
         for num, sub_kernel in enumerate(self.sub_kernels):
@@ -830,7 +832,12 @@ class ComboKernel(Kernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
-        argdefs = self.add_blockd_to_args(argdefs)
+        block_args = self.get_block_args()
+        if self.enable_autotune:
+            argdefs.extend([f"{x.name}: tl.constexpr" for x in block_args])
+            if triton_version_uses_attrs_dict():
+                signature.extend(block_args)
+
         code.splice(
             self.jit_line(
                 heuristics,

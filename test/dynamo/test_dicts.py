@@ -725,6 +725,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
         foo.scalar = 12
         self.assertEqual(fn(d, inp), opt_fn(d, inp))
 
+    def test_empty_dict_recompilation(self):
+        def fn(d, x):
+            if d:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn({}, x), opt_fn({}, x))
+        self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
