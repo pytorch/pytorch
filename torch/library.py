@@ -6,8 +6,18 @@ import re
 import sys
 import traceback
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-from typing_extensions import deprecated
+from collections.abc import Sequence
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._library as _library
@@ -38,12 +48,15 @@ __all__ = [
     "infer_schema",
 ]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
-_impls: Set[str] = set()
-_defs: Set[str] = set()
+_impls: set[str] = set()
+_defs: set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
@@ -94,9 +107,9 @@ class Library:
             kind, ns, dispatch_key, filename, lineno
         )
         self.ns = ns
-        self._op_defs: Set[str] = set()
-        self._op_impls: Set[str] = set()
-        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
+        self._op_defs: set[str] = set()
+        self._op_impls: set[str] = set()
+        self._registration_handles: list[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -442,7 +455,7 @@ def _scoped_library(*args, **kwargs):
         lib._destroy()
 
 
-_keep_alive: List[Library] = []
+_keep_alive: list[Library] = []
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
@@ -529,8 +542,43 @@ def _(lib: Library, schema, alias_analysis=""):
     return wrap
 
 
+@overload
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Literal[None] = None,
+    *,
+    lib: Optional[Library] = None,
+) -> Callable[[Callable[..., object]], None]: ...
+
+
+@overload
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Callable[..., object],
+    *,
+    lib: Optional[Library] = None,
+) -> None: ...
+
+
+# Deprecated BC API
+@overload
+def impl(
+    lib: Library,
+    name: str,
+    dispatch_key: str = "",
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
+
+
 @functools.singledispatch
-def impl(qualname, types, func=None, *, lib=None):
+def impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Optional[Callable[_P, _T]] = None,
+    *,
+    lib: Optional[Library] = None,
+) -> object:
     """Register an implementation for a device type for this operator.
 
     You may pass "default" for ``types`` to register this implementation as the
@@ -591,7 +639,52 @@ def impl(qualname, types, func=None, *, lib=None):
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
-def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
+if not TYPE_CHECKING:
+
+    @impl.register
+    def _(
+        lib: Library, name: str, dispatch_key: str = ""
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        """Legacy torch.library.impl API. Kept around for BC"""
+
+        def wrap(f: Callable[_P, _T]) -> Callable[_P, _T]:
+            lib.impl(name, f, dispatch_key)
+            return f
+
+        return wrap
+
+
+@overload
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Literal[None] = None,
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> Callable[[Callable[..., object]], None]: ...
+
+
+@overload
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Callable[..., object],
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> None: ...
+
+
+def _impl(
+    qualname: str,
+    types: Union[str, Sequence[str]],
+    func: Optional[Callable[..., object]] = None,
+    *,
+    lib: Optional[Library] = None,
+    disable_dynamo: bool = False,
+) -> Optional[Callable[[Callable[..., object]], None]]:
+    # See impl()
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -608,7 +701,7 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
         else:
             keys.add(_device_type_to_key(typ))
 
-    def register(func):
+    def register_(func: Callable[..., object]) -> None:
         namespace, _ = torch._library.utils.parse_namespace(qualname)
 
         if lib is None:
@@ -629,9 +722,10 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
                 use_lib.impl(qualname, func, key)
 
     if func is None:
-        return register
+        return register_
     else:
-        register(func)
+        register_(func)
+        return None
 
 
 def _device_type_to_key(device_type: str) -> str:
@@ -642,17 +736,6 @@ def _device_type_to_key(device_type: str) -> str:
         # device_type. I don't really care that much about the difference.
         return "CompositeExplicitAutograd"
     return torch._C._dispatch_key_for_device(device_type)
-
-
-@impl.register
-def _(lib: Library, name, dispatch_key=""):
-    """Legacy torch.library.impl API. Kept around for BC"""
-
-    def wrap(f):
-        lib.impl(name, f, dispatch_key)
-        return f
-
-    return wrap
 
 
 @deprecated(
@@ -1275,12 +1358,12 @@ _OPCHECK_DEFAULT_UTILS = (
 
 def opcheck(
     op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
     registered correctly.
 
