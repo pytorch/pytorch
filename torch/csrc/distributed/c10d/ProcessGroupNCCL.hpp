@@ -794,7 +794,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that allgathers nccl unique IDs to all ranks through the store
   void allgatherUniqueNCCLID(
-      int root,
+      int rootRank,
       ncclUniqueId* ncclID,
       std::vector<ncclUniqueId>& ncclIDs);
 
@@ -974,6 +974,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Broadcast flight-recorder dump signal
   void broadcastDumpSignal();
+
+  // Return the rank of root during NCCL scalable comm init.
+  int getRootRank(const int rank, const int nRanks, const int nIds);
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog

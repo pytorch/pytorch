@@ -1,5 +1,6 @@
 #ifdef USE_C10D_NCCL
 
+#include <nlohmann/json.hpp>
 #include <exception>
 #include <map>
 #include <mutex>
@@ -2080,6 +2081,22 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
   }
 }
 
+// NCCL recommends to evenly distribute ncclUniqueIds accross the ranks
+// https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#init-rank-config
+int ProcessGroupNCCL::getRootRank(
+    const int rank,
+    const int nRanks,
+    const int nIds) {
+  const int rmr = nRanks % nIds;
+  const int rpr = nRanks / nIds;
+  const int rlim = rmr * (rpr + 1);
+  if (rank < rlim) {
+    return 0;
+  } else {
+    return ((rank - rlim) / nIds) * nIds;
+  }
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -2439,57 +2456,53 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
 }
 
 void ProcessGroupNCCL::allgatherUniqueNCCLID(
-    int root,
+    int rootRank,
     ncclUniqueId* ncclID,
     std::vector<ncclUniqueId>& ncclIDs) {
   std::vector<std::string> storeKeys;
-  for (int r = 0; r < getSize(); r++) {
+  for (size_t r = 0; r < ncclIDs.size(); r++) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
-  if (rank_ == root) {
+  if (rank_ == rootRank) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
-    store_->set(storeKeys[root], vec);
-    std::memcpy(&ncclIDs[root], vec.data(), vec.size());
+    store_->set(storeKeys[rootRank], vec);
   }
-  store_->wait(storeKeys);
-  for (int r = 0; r < getSize(); r++) {
-    if (r != root) {
-      try {
-        auto vec = store_->get(storeKeys[r]);
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            vec.size() == NCCL_UNIQUE_ID_BYTES,
-            "Invalid size for ncclUniqueId");
-        std::memcpy(&ncclIDs[r], vec.data(), vec.size());
-      } catch (const std::exception& e) {
-        std::string exceptionMsg = c10::str(
-            "[",
-            rank_,
-            "] is setting up NCCL communicator and "
-            "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
-            storeKeys[r],
-            "', but store->get('",
-            storeKeys[r],
-            "') got error: ");
-        C10_THROW_ERROR(
-            DistBackendError,
-            exceptionMsg + e.what() +
-                ". This may indicate a possible application crash on rank 0 or a network set up issue.");
-      } catch (...) {
-        C10_THROW_ERROR(
-            DistBackendError,
-            c10::str(
-                "Unknown exception while [",
-                rank_,
-                "] is setting up NCCL communicator and "
-                "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
-                storeKeys[r],
-                "'",
-                ". This may indicate a possible application crash on rank 0 or a network set up issue."));
-      }
+  try {
+    int indx = 0;
+    for (auto& value : store_->multiGet(storeKeys)) {
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          value.size() == NCCL_UNIQUE_ID_BYTES,
+          "Invalid size for ncclUniqueId");
+      std::memcpy(&ncclIDs[indx++], value.data(), value.size());
     }
+  } catch (const std::exception& e) {
+    nlohmann::json json_vec = storeKeys;
+    std::string exceptionMsg = c10::str(
+        "[",
+        rank_,
+        "] is setting up NCCL communicators and "
+        "retrieving ncclUniqueId from roots via TCPStore by key '",
+        json_vec.dump(),
+        "', but got error: ");
+    C10_THROW_ERROR(
+        DistBackendError,
+        exceptionMsg + e.what() +
+            ". This may indicate a possible application crash on rank 0 or a network set up issue.");
+  } catch (...) {
+    nlohmann::json json_vec = storeKeys;
+    C10_THROW_ERROR(
+        DistBackendError,
+        c10::str(
+            "Unknown exception while [",
+            rank_,
+            "] is setting up NCCL communicators and "
+            "retrieving ncclUniqueIds from roots via TCPStore by key '",
+            json_vec.dump(),
+            "'",
+            ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 }
 
@@ -2635,16 +2648,23 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 #endif // NCCL_HAS_COMM_SPLIT
 
 #ifdef NCCL_HAS_INIT_RANK_SCALABLE
-  // Assuming number of roots is the same as the number of ranks
-  int root = rank;
-  std::vector<ncclUniqueId> ncclIDs(getSize());
+  // (nranks / nroots) == 128 was the default NCCL recommended
+  // accoring to
+  // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
+  auto ranksPerRoot = getCvarInt(TORCH_NCCL_SCALABLE_INIT_RANKS_PER_ROOT, 128);
+  auto numRoots = (getSize() % ranksPerRoot == 0)
+      ? (getSize() / ranksPerRoot)
+      : (getSize() / ranksPerRoot + 1);
+  std::vector<ncclUniqueId> ncclIDs(numRoots);
 
   if (!ncclComm) {
     ncclUniqueId ncclID;
+    // We only need to broadcast the ncclID if the rank is root.
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
     // Broadcast so that each process can have a unique NCCL ID
     auto timeStarted = std::chrono::steady_clock::now();
-    allgatherUniqueNCCLID(root, &ncclID, ncclIDs);
+    allgatherUniqueNCCLID(
+        getRootRank(rank_, getSize(), numRoots), &ncclID, ncclIDs);
     auto timerDeltaMs =
         std::chrono::duration_cast<std::chrono::duration<double>>(
             std::chrono::steady_clock::now() - timeStarted)
