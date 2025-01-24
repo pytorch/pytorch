@@ -409,7 +409,7 @@ class TestPublicBindings(TestCase):
         for mod, exc in failures:
             if mod in private_allowlist:
                 # make sure mod is actually private
-                assert any([t.startswith("_") for t in mod.split(".")])
+                assert any(t.startswith("_") for t in mod.split("."))
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
