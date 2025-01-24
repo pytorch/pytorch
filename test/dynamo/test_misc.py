@@ -7543,11 +7543,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 """,
         )
 
-
     def test_float_speculation_log_divergence(self):
         def fn(x, y, z):
-            a = F.interpolate(x, scale_factor=z, mode='bilinear', align_corners=False)
-            b = F.interpolate(y, scale_factor=z, mode='bilinear', align_corners=False)
+            a = F.interpolate(x, scale_factor=z, mode="bilinear", align_corners=False)
+            b = F.interpolate(y, scale_factor=z, mode="bilinear", align_corners=False)
             return a * b
 
         cnt = CompileCounterWithBackend("inductor")
@@ -7556,8 +7555,6 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(fn(y, y, 1.0), fn_opt(y, y, 1.0))
         self.assertEqual(fn(y, y, 2.0), fn_opt(y, y, 2.0))
-
-
 
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
