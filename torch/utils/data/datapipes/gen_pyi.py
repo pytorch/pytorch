@@ -2,10 +2,10 @@
 import os
 import pathlib
 from collections import defaultdict
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Union
 
 
-def materialize_lines(lines: List[str], indentation: int) -> str:
+def materialize_lines(lines: list[str], indentation: int) -> str:
     output = ""
     new_line_with_indent = "\n" + " " * indentation
     for i, line in enumerate(lines):
@@ -19,7 +19,7 @@ def gen_from_template(
     dir: str,
     template_name: str,
     output_name: str,
-    replacements: List[tuple[str, Any, int]],
+    replacements: list[tuple[str, Any, int]],
 ):
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
@@ -34,13 +34,13 @@ def gen_from_template(
             f.write(content)
 
 
-def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
+def find_file_paths(dir_paths: list[str], files_to_exclude: set[str]) -> set[str]:
     """
     When given a path to a directory, returns the paths to the relevant files within it.
 
     This function does NOT recursive traverse to subdirectories.
     """
-    paths: Set[str] = set()
+    paths: set[str] = set()
     for dir_path in dir_paths:
         all_files = os.listdir(dir_path)
         python_files = {fname for fname in all_files if ".py" == fname[-3:]}
@@ -75,7 +75,7 @@ def extract_class_name(line: str) -> str:
 
 def parse_datapipe_file(
     file_path: str,
-) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+) -> tuple[dict[str, str], dict[str, str], set[str], dict[str, list[str]]]:
     """Given a path to file, parses the file and returns a dictionary of method names to function signatures."""
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
     doc_string_dict = defaultdict(list)
@@ -126,8 +126,8 @@ def parse_datapipe_file(
 
 
 def parse_datapipe_files(
-    file_paths: Set[str],
-) -> tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
+    file_paths: set[str],
+) -> tuple[dict[str, str], dict[str, str], set[str], dict[str, list[str]]]:
     (
         methods_and_signatures,
         methods_and_class_names,
@@ -153,7 +153,7 @@ def parse_datapipe_files(
     )
 
 
-def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
+def split_outside_bracket(line: str, delimiter: str = ",") -> list[str]:
     """Given a line of text, split it on comma unless the comma is within a bracket '[]'."""
     bracket_count = 0
     curr_token = ""
@@ -179,7 +179,7 @@ def process_signature(line: str) -> str:
     This includes removing the self-referential datapipe argument, default
     arguments of input functions, newlines, and spaces.
     """
-    tokens: List[str] = split_outside_bracket(line)
+    tokens: list[str] = split_outside_bracket(line)
     for i, token in enumerate(tokens):
         tokens[i] = token.strip(" ")
         if token == "cls":
@@ -196,13 +196,13 @@ def process_signature(line: str) -> str:
 
 
 def get_method_definitions(
-    file_path: Union[str, List[str]],
-    files_to_exclude: Set[str],
-    deprecated_files: Set[str],
+    file_path: Union[str, list[str]],
+    files_to_exclude: set[str],
+    deprecated_files: set[str],
     default_output_type: str,
-    method_to_special_output_type: Dict[str, str],
+    method_to_special_output_type: dict[str, str],
     root: str = "",
-) -> List[str]:
+) -> list[str]:
     """
     #.pyi generation for functional DataPipes Process.
 
@@ -252,17 +252,17 @@ def get_method_definitions(
 
 # Defined outside of main() so they can be imported by TorchData
 iterDP_file_path: str = "iter"
-iterDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
-iterDP_deprecated_files: Set[str] = set()
-iterDP_method_to_special_output_type: Dict[str, str] = {
+iterDP_files_to_exclude: set[str] = {"__init__.py", "utils.py"}
+iterDP_deprecated_files: set[str] = set()
+iterDP_method_to_special_output_type: dict[str, str] = {
     "demux": "List[IterDataPipe]",
     "fork": "List[IterDataPipe]",
 }
 
 mapDP_file_path: str = "map"
-mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
-mapDP_deprecated_files: Set[str] = set()
-mapDP_method_to_special_output_type: Dict[str, str] = {"shuffle": "IterDataPipe"}
+mapDP_files_to_exclude: set[str] = {"__init__.py", "utils.py"}
+mapDP_deprecated_files: set[str] = set()
+mapDP_method_to_special_output_type: dict[str, str] = {"shuffle": "IterDataPipe"}
 
 
 def main() -> None:

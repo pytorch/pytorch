@@ -175,9 +175,9 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.4' || 'linux.rocm.gpu.4' }}" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.4" },
         ]}
     secrets: inherit
 

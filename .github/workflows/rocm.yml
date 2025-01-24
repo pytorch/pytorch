@@ -36,12 +36,12 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 2, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 3, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 4, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 5, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
-          { config: "default", shard: 6, num_shards: 6, runner: "${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' && 'linux.rocm.gpu.mi300.2' || 'linux.rocm.gpu.2' }}" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
         ]}
     secrets: inherit
 

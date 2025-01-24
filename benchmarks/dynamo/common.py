@@ -137,6 +137,12 @@ try:
 except ImportError:
     INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY = set()
 
+try:
+    from pytorch.benchmark.fb.run_utils import trace_handler
+except ImportError:
+    trace_handler = None
+
+
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
     # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
@@ -532,6 +538,8 @@ def output_signpost(data, args, suite, error=None):
 
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
+    wall_time_by_phase = calculate_time_spent()
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
@@ -544,7 +552,7 @@ def output_signpost(data, args, suite, error=None):
                 # NB: Externally, compilation_metrics colloquially refers to
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
-                "compilation_metrics": calculate_time_spent(),
+                "compilation_metrics": wall_time_by_phase,
                 "agg_compilation_metrics": {
                     k: sum(v) for k, v in compilation_time_metrics.items()
                 },
@@ -556,6 +564,8 @@ def output_signpost(data, args, suite, error=None):
             }
         ),
     )
+
+    return wall_time_by_phase["total_wall_time"]
 
 
 def nothing(f):
@@ -901,7 +911,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
 
     times = args.iterations_per_run
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -1056,7 +1066,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
@@ -1105,9 +1115,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
-        name += ".json"
-        name = os.path.join(torch._dynamo.config.base_dir, name)
-        p.export_chrome_trace(name)
+        if args.export_perfdoctor and trace_handler:
+            trace_handler(name, p)
+        else:
+            name += ".json"
+            name = os.path.join(torch._dynamo.config.base_dir, name)
+            p.export_chrome_trace(name)
+
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -2907,13 +2921,17 @@ class BenchmarkRunner:
                 headers.append(k)
                 fields.append(v)
 
-            write_outputs(output_filename, headers, fields)
-
-            output_signpost(
+            total_wall_time = output_signpost(
                 dict(zip(o_headers, o_fields)),
                 self.args,
                 self.suite_name,
             )
+            headers.append("compilation_latency")
+            fields.append(total_wall_time)
+            write_outputs(output_filename, headers, fields)
+
+            if self.args.print_compilation_time:
+                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
 
             return accuracy_status
 
@@ -3910,6 +3928,14 @@ def parse_args(args=None):
         help="Overwrites exported trace name",
     )
     parser.add_argument(
+        "--profile-details", action="store_true", help="More detailed profiler trace."
+    )
+    parser.add_argument(
+        "--export-perfdoctor",
+        action="store_true",
+        help="Export Chrome trace to perf doctor. (internal only)",
+    )
+    parser.add_argument(
         "--diff-branch",
         default=diff_branch_default,
         help="delta current branch against given branch.",
@@ -4745,7 +4771,16 @@ def run(runner, args, original_dir=None):
             write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    args.profile_details = {}
     if args.export_profiler_trace:
+        if args.profile_details:
+            args.profile_details = {
+                "record_shapes": True,
+                "profile_memory": True,
+                "with_stack": True,
+                "with_modules": True,
+            }
+
         if args.profiler_trace_name is None:
             if args.backend:
                 args.profiler_trace_name = args.backend

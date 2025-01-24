@@ -6,7 +6,7 @@ import functools
 import inspect
 import textwrap
 from types import FunctionType
-from typing import Any, Callable, cast, Dict, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 from torch._sources import normalize_source_lines
@@ -112,7 +112,7 @@ class RewritingTracer(Tracer):
     def trace(
         self,
         root: Union[torch.nn.Module, Callable],
-        concrete_args: Optional[Dict[str, Any]] = None,
+        concrete_args: Optional[dict[str, Any]] = None,
     ) -> Graph:
         return super().trace(_rewrite(root), concrete_args)
 

@@ -12,7 +12,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -602,7 +602,7 @@ class LazyMLP(torch.nn.Module):
 
 
 class MyInput(NamedTuple):
-    x: Dict[str, Dict[str, torch.Tensor]]
+    x: dict[str, dict[str, torch.Tensor]]
     y: torch.Tensor
 
 
@@ -2311,7 +2311,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2358,7 +2358,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 
@@ -2407,7 +2407,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
 
         def new_forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 2
 
@@ -2426,7 +2426,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m = TestModule()
 
         def forward_hook(
-            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+            module: torch.nn.Module, inputs: tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
             return 2 * output + 1
 

@@ -6,7 +6,7 @@ import math
 import types
 import unittest
 import warnings
-from typing import Any, Dict, Set
+from typing import Any
 
 import torch
 import torch._dynamo.config as config
@@ -103,10 +103,10 @@ class AllowedObjects:
     from the heuristic defined in `gen_allowed_objs_and_ids`.
     """
 
-    object_ids: Dict[int, str]
-    c_binding_in_graph_functions: Set[Any]
-    non_c_binding_in_graph_functions: Set[Any]
-    name_rule_map: Dict[str, Any]
+    object_ids: dict[int, str]
+    c_binding_in_graph_functions: set[Any]
+    non_c_binding_in_graph_functions: set[Any]
+    name_rule_map: dict[str, Any]
 
 
 def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:

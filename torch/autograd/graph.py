@@ -9,7 +9,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Deque,
     Literal,
     NamedTuple,
     Optional,
@@ -764,7 +763,7 @@ def _register_logging_hooks_on_whole_graph(
         if not roots:
             return
         seen: set[Node] = set()
-        q: Deque[Node] = deque()
+        q: deque[Node] = deque()
         for node in roots:
             if node is not None:
                 seen.add(node)

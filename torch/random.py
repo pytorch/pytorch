@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import Generator
+from collections.abc import Generator
 
 import torch
 from torch._C import default_generator

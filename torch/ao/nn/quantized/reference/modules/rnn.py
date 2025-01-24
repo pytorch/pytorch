@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -166,7 +166,7 @@ class RNNCell(RNNCellBase):
         nonlinearity: str = "tanh",
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -256,7 +256,7 @@ class LSTMCell(RNNCellBase):
         bias: bool = True,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -331,7 +331,7 @@ class GRUCell(RNNCellBase):
         bias: bool = True,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -404,7 +404,7 @@ class RNNBase(nn.RNNBase):
         proj_size: int = 0,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             mode,

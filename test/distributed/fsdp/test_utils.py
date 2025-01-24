@@ -4,7 +4,6 @@ import random
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import List
 
 import torch
 import torch.nn as nn
@@ -62,13 +61,13 @@ class TestUtils(TestCase):
         class NonFrozenDataClass:
             some_key: str
             some_float: float
-            some_tensor: List[torch.Tensor]
+            some_tensor: list[torch.Tensor]
 
         @dataclass(frozen=True)
         class FrozenDataClass:
             some_key: str
             some_float: float
-            some_tensor: List[torch.Tensor]
+            some_tensor: list[torch.Tensor]
 
         # create a mixed bag of data.
         data = [1, "str"]

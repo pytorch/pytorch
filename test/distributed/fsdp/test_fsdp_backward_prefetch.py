@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from typing import List
 from unittest.mock import patch
 
 import torch
@@ -102,7 +101,7 @@ class TestBackwardPrefetch(FSDPTest):
         tgt = torch.randn((20, 1, 1024), device=device_type)
 
         # monkey patch
-        all_handle_fqns: List[List[str]] = []
+        all_handle_fqns: list[list[str]] = []
 
         def patched_get_handle_to_prefetch(*args, **kwargs):
             handle = orig_get_handle_to_prefetch(*args, **kwargs)

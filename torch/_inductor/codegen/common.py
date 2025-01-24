@@ -190,6 +190,11 @@ class SizeArg:
 
 
 @dataclasses.dataclass
+class ConstexprArg:
+    name: str
+
+
+@dataclasses.dataclass
 class TMADescriptorArg:
     name: str
 

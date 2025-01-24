@@ -411,6 +411,9 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
+# Use C++ guard manger for symbolic shapes
+enable_cpp_symbolic_shape_guards = False
+
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 

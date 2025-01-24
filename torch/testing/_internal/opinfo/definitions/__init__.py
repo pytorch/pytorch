@@ -13,7 +13,7 @@ from torch.testing._internal.opinfo.definitions import (
 
 
 # Operator database
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     *fft.op_db,
     *linalg.op_db,
     *signal.op_db,
@@ -21,7 +21,7 @@ op_db: List[OpInfo] = [
     *_masked.op_db,
 ]
 
-python_ref_db: List[OpInfo] = [
+python_ref_db: list[OpInfo] = [
     *fft.python_ref_db,
     *linalg.python_ref_db,
     *special.python_ref_db,

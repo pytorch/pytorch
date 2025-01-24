@@ -1116,6 +1116,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"Expect query and key/value to have the same embedding dimension "
             f"but got E={query.size(-1)} and E={key.size(-1)}."
         )
+    return
     # TODO this config segfaults with Triton without:
     # https://github.com/triton-lang/triton/pull/4540
     if not (

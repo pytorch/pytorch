@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
-from typing import Any, Dict, List, Type
+from typing import Any
 
 import sympy
 
@@ -160,11 +160,11 @@ class TestFixedConfigs(TestCase):
         class MyHeuristics(InductorChoices):
             def triton_kernel_kwargs(
                 self,
-                kernel_cls: Type[TritonKernel],
+                kernel_cls: type[TritonKernel],
                 features: SIMDKernelFeatures,
-                groups: List[sympy.Expr],
-                kernel_kwargs: Dict[str, Any],
-            ) -> Dict[str, Any]:
+                groups: list[sympy.Expr],
+                kernel_kwargs: dict[str, Any],
+            ) -> dict[str, Any]:
                 return {
                     **kernel_kwargs,
                     "override_cooperative_reduction": cooperative,

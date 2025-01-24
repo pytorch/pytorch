@@ -258,7 +258,6 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Global states
   static void initMPIOnce();
   static void mpiExit();
-  static c10::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
   static int mpiThreadSupport_;

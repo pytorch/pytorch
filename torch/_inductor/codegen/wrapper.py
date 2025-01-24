@@ -42,6 +42,7 @@ from ..utils import (
     LineContext,
     sympy_product,
     sympy_str,
+    triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
 from .common import (
@@ -71,13 +72,14 @@ BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
+    storage_size = V.graph.get_allocation_storage_size(node)
     return (
         node.get_device_or_error(),
         node.get_dtype(),
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.get_layout().storage_size())),
+        sympy_str(V.graph.sizevars.simplify(storage_size)),
     )
 
 
@@ -90,8 +92,12 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
     if input_buf.get_dtype() != output_buf.get_dtype():
         return False
 
-    input_size = V.graph.sizevars.simplify(input_buf.get_layout().storage_size())
-    output_size = V.graph.sizevars.simplify(output_buf.get_layout().storage_size())
+    input_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(input_buf)
+    )
+    output_size = V.graph.sizevars.simplify(
+        V.graph.get_allocation_storage_size(output_buf)
+    )
 
     if (
         # NB: this is symbolic so that we don't try to reuse a buffer
@@ -1572,63 +1578,85 @@ class PythonWrapperCodegen(CodeGen):
 
         original_name = kernel.__name__
 
-        from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
+        from .common import (
+            ConstexprArg,
+            KernelArgType,
+            SizeArg,
+            TensorArg,
+            TMADescriptorArg,
+        )
 
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         non_constant_indices = []
         equal_to_1_args: list[str] = []
+
+        def add_to_signature(idx, arg):
+            signature.append(arg)
+            non_constant_indices.append(idx)
+
         for idx, key in enumerate(kernel.arg_names):
+            if idx in kernel.constexprs:
+                if key in kwargs:
+                    constants[key] = kwargs[key]
+                if triton_version_uses_attrs_dict():
+                    add_to_signature(idx, ConstexprArg(name=key))
+                continue
+
             if key not in kwargs:
                 continue
+
             arg = kwargs[key]
-            if idx in kernel.constexprs:
-                constants[key] = arg
-            elif kwargs[key] is None:
+
+            if kwargs[key] is None:
                 constants[key] = None
             else:
-                non_constant_indices.append(idx)
                 if isinstance(arg, ir.TMADescriptor):
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TMADescriptorArg(
                             name=key,
-                        )
+                        ),
                     )
                 elif isinstance(arg, ir.Buffer):
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TensorArg(
                             name=key,
                             buffer=arg.get_name(),
                             dtype=arg.get_dtype(),
-                        )
+                        ),
                     )
                 elif isinstance(arg, ir.ReinterpretView):
                     # for ReinterpretView we use the underlying
                     # buffer name and note the (possibly non-zero)
                     # offset relative to the underlying buffer
-                    signature.append(
+                    add_to_signature(
+                        idx,
                         TensorArg(
                             name=key,
                             buffer=arg.data.get_name(),
                             dtype=arg.get_dtype(),
                             offset=arg.layout.offset,
-                        )
+                        ),
                     )
                 else:
-                    signature.append(SizeArg(key, arg))
+                    add_to_signature(idx, SizeArg(key, arg))
                     if isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
+
+        triton_signature = signature_to_meta(
+            signature,
+            size_dtype=None,  # try to infer based on symints
+            indices=non_constant_indices,
+            argdefs=kernel.arg_names,
+        )
         triton_meta: dict[str, Any] = {
-            "signature": signature_to_meta(
-                signature,
-                size_dtype=None,  # try to infer based on symints
-                indices=non_constant_indices,
-                argdefs=kernel.arg_names,
-            ),
+            "signature": triton_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
@@ -1881,6 +1909,13 @@ class PythonWrapperCodegen(CodeGen):
                 )
                 for e in buf.get_size()
             )
+            allocation_size = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    e,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for e in V.graph.get_allocation_size(buf)
+            )
             stride = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
                     e,
@@ -1894,7 +1929,7 @@ class PythonWrapperCodegen(CodeGen):
                 buf.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             )
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
+            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
@@ -2113,25 +2148,43 @@ class PythonWrapperCodegen(CodeGen):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
+        allocation_shape = tuple(V.graph.get_allocation_size(buffer))
         stride = tuple(buffer.get_stride())
-        return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
+        return self.make_allocation(
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape
+        )
 
-    def make_allocation(self, name, device, dtype, shape, stride):
+    def make_allocation(
+        self, name, device, dtype, shape, stride, allocation_shape=None
+    ):
+        if allocation_shape is None:
+            allocation_shape = shape
+
+        codegen_shape_tuple = self.codegen_python_shape_tuple(shape)
+        codegen_allocation_shape_tuple = self.codegen_python_shape_tuple(
+            allocation_shape
+        )
+        codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
         if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            return (
+            out = (
                 f"{name} = empty_strided_{device.type}("
-                f"{self.codegen_python_shape_tuple(shape)}, "
-                f"{self.codegen_python_shape_tuple(stride)}, "
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
         # all other devices:
-        return (
-            f"{name} = empty_strided("
-            f"{self.codegen_python_shape_tuple(shape)}, "
-            f"{self.codegen_python_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
-        )
+        else:
+            out = (
+                f"{name} = empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+        if codegen_shape_tuple != codegen_allocation_shape_tuple:
+            # need an extra as_strided call
+            out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
+        return out
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"

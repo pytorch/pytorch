@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable, cast, Dict, IO, Optional
+from typing import Any, Callable, cast, IO, Optional
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -130,7 +130,7 @@ def with_temp_dir(
     assert func is not None
 
     @wraps(func)
-    def wrapper(self, *args: tuple[object], **kwargs: Dict[str, Any]) -> None:
+    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
         if dist.is_initialized():
             # Only create temp_dir when rank is 0
             if dist.get_rank() == 0:

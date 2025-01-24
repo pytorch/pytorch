@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from typing import Callable, Dict, Iterable, TypeVar
+from collections.abc import Iterable
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -57,7 +58,7 @@ from torch.nn.modules.conv import Conv2d
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_INFERENCE_RULES: Dict[Target, Callable] = {}
+_INFERENCE_RULES: dict[Target, Callable] = {}
 
 MAX_TENSOR_RANK = 4
 

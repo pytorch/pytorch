@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 import gc
 import unittest
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -161,7 +160,7 @@ class TestMemTracker(TestCase):
 
         def get_param_grad_optstate_actual_bytes(
             model: nn.Module, opt: torch.optim.Optimizer
-        ) -> Tuple[int, int, int]:
+        ) -> tuple[int, int, int]:
             param_bytes = 0
             grad_bytes = 0
             opt_state_bytes = 0
@@ -179,7 +178,7 @@ class TestMemTracker(TestCase):
 
         def get_param_grad_optstate_bytes_from_tracker(
             tracker: MemTracker,
-        ) -> Tuple[int, int, int]:
+        ) -> tuple[int, int, int]:
             snapshot = tracker.get_tracker_snapshot()
             param_bytes = snapshot[dev]["Parameter"]
             grad_bytes = snapshot[dev]["Gradient"]

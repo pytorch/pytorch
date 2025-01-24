@@ -4,7 +4,6 @@ import copy
 import csv
 import logging
 import os
-from typing import List
 
 from model_registry import MultiMLP
 
@@ -356,7 +355,7 @@ instantiate_parametrized_tests(TestSchedulePlan)
 class TestScheduleLowering(TestCase):
     """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
 
-    def _parse_actions(self, actions: List[str]) -> List[_Action]:
+    def _parse_actions(self, actions: list[str]) -> list[_Action]:
         return [_Action.from_str(s) for s in actions]
 
     @parametrize(

@@ -226,8 +226,6 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 // Static global states
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
-// We only want to initialize once
-c10::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
 void ProcessGroupMPI::mpiExit() {
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -235,8 +233,8 @@ void ProcessGroupMPI::mpiExit() {
 }
 
 void ProcessGroupMPI::initMPIOnce() {
-  // Initialize MPI environment
-  c10::call_once(onceFlagInitMPI, []() {
+  // Initialize MPI environment. We only want to initialize once.
+  static bool init_mpi_flag [[maybe_unused]] = []() {
     int mpi_was_initialized = 0;
     MPI_CHECK(MPI_Initialized(&mpi_was_initialized));
     if (mpi_was_initialized == 0) {
@@ -256,7 +254,8 @@ void ProcessGroupMPI::initMPIOnce() {
     } else {
       TORCH_WARN_ONCE("MPI was previously initialized.");
     }
-  });
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(

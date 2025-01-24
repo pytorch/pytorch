@@ -22,6 +22,11 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
 #

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -933,7 +933,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     def mul_epilogue(v1, v2):
         return V.ops.mul(v1, v2)
 
-    choices: List[Dict[Any, Any]] = []
+    choices: list[dict[Any, Any]] = []
     for config in int8_mm_configs(
         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
     ):

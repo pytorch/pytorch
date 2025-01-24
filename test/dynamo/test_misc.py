@@ -3550,6 +3550,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_function_generic_alias_annotation(self):
+        class Variable:
+            pass
+
+        def fn(x):
+            x = x / 3.0
+
+            def inner(y: list[Variable]):
+                return x + 1
+
+            return inner
+
+        x1 = torch.randn(10)
+        obj2 = fn(x1)([])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        opt_fn_inner = torch._dynamo.optimize_assert(cnts)(opt_fn(x1))
+        obj1 = opt_fn_inner([])
+        self.assertTrue(same(obj1, obj2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_nested_closure(self):
         v0 = torch.randn(10)
 
@@ -7590,6 +7613,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         opt = torch.compile(fn, fullgraph=True)
         opt(*inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_symint_copy_into_unbacked_slice(self):
+        @torch.compile()
+        def fn(a, x):
+            u0 = torch.tensor(x[0].to(torch.int64).item()).item()
+            B, H, T, D = a.shape
+            a_padding = torch.zeros((B, H, u0, D), dtype=torch.float64)
+            b = torch.cat([a, a_padding], dim=2)
+            c = torch.randn(B, H, 152, D)
+            b[:, :, :152, :] = c
+            return b
+
+        x = torch.tensor([0])
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        a = torch.zeros((1, 16, 152, 96))
+
+        # Previously would crash with guard on data dependent error
+        fn(a, x)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symint_fold_nontrivial_product_modulo(self):

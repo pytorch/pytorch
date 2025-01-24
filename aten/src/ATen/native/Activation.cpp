@@ -382,7 +382,8 @@ static bool use_mkldnn(const Tensor& input) {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+    ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float16/float32
 }
 #endif
 

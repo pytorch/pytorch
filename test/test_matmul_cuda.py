@@ -375,9 +375,10 @@ class TestFP8MatmulCuda(TestCase):
         # hipblaslt does not yet support mixed e4m3_type input
         y_type = e4m3_type if torch.version.hip else e5m2_type
         y = torch.full(size, .5, device=device, dtype=y_type).t()
+        scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)

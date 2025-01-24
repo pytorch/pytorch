@@ -25,7 +25,7 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, List[Tensor], Tuple[Tensor, ...]],
+    ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
     dtype: Optional[DType] = None,
     device: Optional[Device] = None,
     layout=None,

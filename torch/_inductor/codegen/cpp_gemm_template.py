@@ -1006,9 +1006,10 @@ class CppGemmTemplate(CppTemplate):
         def _is_int8_gemm(inputs):
             return (
                 isinstance(inputs[0], ir.IRNode)
-                and inputs[0].get_dtype() == torch.uint8
+                and inputs[0].get_dtype() in [torch.uint8, torch.int8]
             ) or (
-                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor)
+                and inputs[0].dtype in [torch.uint8, torch.int8]
             )
 
         if _is_int8_gemm(new_inputs):
@@ -1135,7 +1136,7 @@ class CppGemmTemplate(CppTemplate):
     ) -> dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
-        int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
+        int8_gemm = self.input_nodes[0].get_dtype() in [torch.uint8, torch.int8]
         x_scale = None
         x_zp = None
         w_scale = None

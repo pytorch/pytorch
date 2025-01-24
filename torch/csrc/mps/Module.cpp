@@ -1,7 +1,6 @@
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 
 #include <ATen/ATen.h>
-#include <c10/util/CallOnce.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
@@ -35,9 +34,8 @@ static void forked_mps_child() {
 // Should be called before the first mps call.
 static void track_bad_mps_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [] { pthread_atfork(nullptr, nullptr, forked_mps_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_mps_child);
 #endif
 }
 } // namespace

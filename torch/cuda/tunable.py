@@ -118,7 +118,7 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -228,12 +228,12 @@ def get_filename() -> str:
     return torch._C._cuda_tunableop_get_filename()  # type: ignore[attr-defined]
 
 
-def get_results() -> Tuple[str, str, str, float]:
+def get_results() -> tuple[str, str, str, float]:
     r"""Return all TunableOp results."""
     return torch._C._cuda_tunableop_get_results()  # type: ignore[attr-defined]
 
 
-def get_validators() -> Tuple[str, str]:
+def get_validators() -> tuple[str, str]:
     r"""Return the TunableOp validators."""
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 

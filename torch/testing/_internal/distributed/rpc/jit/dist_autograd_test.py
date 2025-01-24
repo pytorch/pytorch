@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 
-from typing import Dict
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -35,7 +34,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
     def test_get_gradients(self):
 
         @torch.jit.script
-        def dist_get_gradients(context_id: int) -> (Dict[Tensor, Tensor]):
+        def dist_get_gradients(context_id: int) -> (dict[Tensor, Tensor]):
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))

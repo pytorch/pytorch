@@ -1,5 +1,6 @@
+from collections.abc import Iterator
 from io import IOBase
-from typing import Iterator, Optional
+from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe

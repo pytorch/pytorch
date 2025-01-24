@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 from collections import defaultdict
-from typing import Dict
 
 import torch
 from torch.distributed._tensor.experimental._tp_transform import (
@@ -57,9 +56,9 @@ class TensorParallelTest(DTensorTestBase):
         super().setUp()
 
     def assert_has_c10d_ops(
-        self, gm: torch.fx.GraphModule, expected_ops_count: Dict[str, int]
+        self, gm: torch.fx.GraphModule, expected_ops_count: dict[str, int]
     ) -> None:
-        actual_ops_count: Dict[str, int] = defaultdict(int)
+        actual_ops_count: dict[str, int] = defaultdict(int)
         for node in gm.graph.nodes:
             if node.op == "call_function":
                 if "c10d_functional" in str(node.target):
@@ -100,7 +99,7 @@ class TensorParallelTest(DTensorTestBase):
         torch.manual_seed(0)
         model = MLPListModule(2).to(device=self.device_type)
         inputs = (torch.randn((10, 12)).to(device=self.device_type),)
-        parallel_strategies: Dict[str, ParallelStyle] = {
+        parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
             "mlps.1.0": ColwiseParallel,
@@ -137,7 +136,7 @@ class TensorParallelTest(DTensorTestBase):
         torch.manual_seed(0)
         model = MLPListModule(1, bias=False).to(device=self.device_type)
         inputs = (torch.randn((10, 12)).to(device=self.device_type),)
-        parallel_strategies: Dict[str, ParallelStyle] = {
+        parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
         }

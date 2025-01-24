@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.nn as nn
@@ -17,12 +17,12 @@ toq = torch.ops.quantized
 
 
 def get_type_a_related_to_b(
-    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
-) -> Set[tuple[NSNodeTargetType, NSNodeTargetType]]:
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
+) -> set[tuple[NSNodeTargetType, NSNodeTargetType]]:
     # TODO(future PR): allow customizations
     # TODO(future PR): reuse existing quantization mappings
     # TODO(future PR): add the rest of modules and ops here
-    type_a_related_to_b: Set[tuple[NSNodeTargetType, NSNodeTargetType]] = set()
+    type_a_related_to_b: set[tuple[NSNodeTargetType, NSNodeTargetType]] = set()
 
     for s in base_name_to_sets_of_related_ops.values():
         s_list = list(s)
@@ -48,7 +48,7 @@ NSFusionType = Union[
 ]
 
 
-def get_reversed_fusions() -> List[tuple[NSFusionType, int]]:
+def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
     """
     Set of potential fusions, in reverse order.  The order is reversed
     to match how fusion patterns are defined in quantization code.
@@ -61,7 +61,7 @@ def get_reversed_fusions() -> List[tuple[NSFusionType, int]]:
     of 0 represents the first op in regular (non-reverse) order, 1 represents the
     second op, etc.
     """
-    results: List[tuple[NSFusionType, int]] = []
+    results: list[tuple[NSFusionType, int]] = []
 
     # Possible syntaxes:
     # * single op: torch.nn.Conv2d
@@ -135,7 +135,7 @@ def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: NSFusionType,
     gm: GraphModule,
-    seen_nodes: Set[Node],
+    seen_nodes: set[Node],
 ) -> bool:
     """
     Returns true if a pattern ending with `end_node` matches
