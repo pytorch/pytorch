@@ -284,7 +284,7 @@ Let’s say we are benchmarking running inference with the following code:
         y = torch.matmul(x, x)
         return y
 
-    x = torch.randn(10, 10)
+    x = torch.randn(10, 10, device="cuda")
     y1 = my_model(x)
     y2 = my_model(x)
     print(y1)

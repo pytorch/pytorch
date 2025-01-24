@@ -1,12 +1,12 @@
 import os
 import sys
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from torch.types import Storage
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _dummy_fn(name: str) -> Callable:

@@ -382,7 +382,7 @@ namespace {
 }
 
 template <int kSpatialDim> int register_conv_params() {
-  static auto register_conv_params =
+  [[maybe_unused]] static auto register_conv_params =
     torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
