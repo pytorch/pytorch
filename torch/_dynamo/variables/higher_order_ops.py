@@ -2307,11 +2307,12 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         @_make_inlinable
-        def _create_scalar(query):
-            return query.new_empty([], dtype=torch.int32)
+        def _create_scalar(query, dtype=torch.int32, requires_grad=False):
+            return query.new_empty([], dtype=dtype, requires_grad=requires_grad)
 
         @_make_inlinable
         def _create_scalars(query):
+            # list comprehension is not supported for inlinig yet
             return (
                 _create_scalar(query),
                 _create_scalar(query),
@@ -2323,9 +2324,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
             @_make_inlinable
             def _fn(query, fn):
-                # list comprehension is not supported for inlinig yet
                 score, *_ = torch.ops.higher_order.speculate_subgraph(
-                    _create_scalar, (query,)
+                    _create_scalar, (query, query.dtype, query.requires_grad)
                 )
                 (b, h, m, n), *_ = torch.ops.higher_order.speculate_subgraph(
                     _create_scalars, (query,)
