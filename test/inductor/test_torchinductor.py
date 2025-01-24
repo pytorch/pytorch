@@ -16,12 +16,10 @@ import subprocess
 import sys
 import threading
 import time
-import typing
 import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
-from typing import Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -8453,6 +8451,10 @@ class CommonTemplate:
             f(*args)
             self.assertEqual(cloned_args, args)
 
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
     @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_list_tensor(self):
         @torch.library.custom_op(
@@ -8581,7 +8583,7 @@ class CommonTemplate:
             compiled_f = compile_fx_inner(mod, cloned_args)
 
         @torch.library.custom_op("mylib::sin_out", mutates_args={"outs"})
-        def sin_out(x: torch.Tensor, outs: typing.List[torch.Tensor]) -> None:
+        def sin_out(x: torch.Tensor, outs: list[torch.Tensor]) -> None:
             x_np = x.numpy()
             assert len(outs) == 2
             out_np0 = out[0].numpy()
@@ -9302,13 +9304,22 @@ class CommonTemplate:
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            # the load_seed_offset arg can be 1 or non-1; depending on whether
+            # the triton signature specializes on 1 vs non-1, you might get 1
+            # or 2 kernels. In newer versions of triton, there's no specialization
+            # so we get only 1 kernel.
+            from torch._inductor.utils import triton_version_uses_attrs_dict
+
+            expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
+            self.assertEqual(fw_code.count("tl.rand"), expected_kernels)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only valid for GPU!")
+
+        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -9320,7 +9331,15 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
         self.assertEqual(len(source_codes), 1)
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+
+        # the load_seed_offset arg can be 1 or non-1; depending on whether
+        # the triton signature specializes on 1 vs non-1, you might get 1
+        # or 2 kernels. In newer versions of triton, there's no specialization
+        # so we get only 1 kernel.
+        expected_kernels = 1 if triton_version_uses_attrs_dict() else 2
+        self.assertEqual(
+            source_codes[0].count("async_compile.triton"), expected_kernels
+        )
 
     def test_roll(self):
         def fn(a):
@@ -10618,6 +10637,14 @@ class CommonTemplate:
             return y
 
         x = torch.rand(48, 3, 512, 512)
+        self.common(fn, (x,))
+
+    def test_pad_single(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (10, 10))
+            return y
+
+        x = torch.rand(1, 1, 1)
         self.common(fn, (x,))
 
     def test_pad_cast(self):
@@ -12392,7 +12419,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str, ...]
+    suffixes: tuple[str, ...]
     is_skip: bool = False
     __test__: bool = False
 
@@ -12475,7 +12502,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def noop_backend(
                 self,
                 model_: torch.fx.GraphModule,
-                example_inputs_: typing.List[torch.Tensor],
+                example_inputs_: list[torch.Tensor],
             ):
                 """
                 The Noop backend does not compile the fx graph it is given.
@@ -12501,7 +12528,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.example_args = fake_flat_tensor_args
                 return lambda x: example_inputs_
 
-        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+        def get_kernels(self, fn, args) -> list[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
