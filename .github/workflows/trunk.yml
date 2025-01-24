@@ -2,10 +2,6 @@ name: trunk
 
 on:
   push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
     tags:
       - ciflow/trunk/*
   workflow_dispatch:
