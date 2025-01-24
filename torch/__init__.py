@@ -317,16 +317,17 @@ def _load_global_deps() -> None:
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
         # if `LD_LIBRARY_PATH` is defined
         # See https://github.com/pytorch/pytorch/issues/138460
-        if version.cuda not in ["12.4", "12.6"]:  # type: ignore[name-defined]
-            return
+        # Similar issue as above exist for cuda_nvrtc for reference
+        # See https://github.com/pytorch/pytorch/issues/145580
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
             # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
             if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
                 return
-            # If all abovementioned conditions are met, preload nvjitlink
+            # If all abovementioned conditions are met, preload nvjitlink and nvrtc
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
         except Exception:
             pass
 
