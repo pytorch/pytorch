@@ -461,6 +461,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     torch.mm(x, x, out=foo)
                     event.record()
                 out = fn(foo)
+                # let `fn` finish reading `food` before writing to it in the
+                # next iteration or `run_iters` call.
+                torch.cuda.current_stream().synchronize()
             return out
 
         ref = run_iters(func, compile=False)
