@@ -2131,6 +2131,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
+    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_non_pow_2_headdim(self, dtype, head_dim):
+        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -2512,6 +2518,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
