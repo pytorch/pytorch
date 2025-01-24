@@ -25,12 +25,18 @@ on:
 
 jobs:
   process-utilization-logs:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: post-test
     permissions:
       id-token: write
     name: process and upload utilziation logs for ${{ github.event.inputs.workflow_name }}:${{ github.event.inputs.job_name }}, with attempt ${{ github.event.inputs.workflow_attempt}}
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
       - name: Print Inputs
         run: |
           echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
