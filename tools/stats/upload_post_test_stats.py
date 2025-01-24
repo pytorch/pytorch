@@ -42,6 +42,7 @@ class SegmentGenerator:
     """
     generates test segment from utilization records, currently it only generate segments on python commands level
     """
+
     def generate(self, records: list[UtilizationRecord]) -> list[OssCiSegmentV1]:
         cmd_col_name = "cmd"
         time_col_name = "time"
@@ -411,15 +412,17 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    workflow_info = WorkflowInfo(workflow_run_id=args.workflow_run_id,
-            run_attempt=args.workflow_run_attempt,
-            job_id=args.job_id,
-            workflow_name=args.workflow_name,
-            job_name=args.job_name,
-            repo=PYTORCH_REPO,
-        )
+    workflow_info = WorkflowInfo(
+        workflow_run_id=args.workflow_run_id,
+        run_attempt=args.workflow_run_attempt,
+        job_id=args.job_id,
+        workflow_name=args.workflow_name,
+        job_name=args.job_name,
+        repo=PYTORCH_REPO,
+    )
+
     ud = UploadUtilizationData(
-        info= workflow_info,
+        info=workflow_info,
         dry_run=args.dry_run,
         debug=args.debug,
     )
