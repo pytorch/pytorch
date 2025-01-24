@@ -1030,20 +1030,17 @@ struct IValuePacker<VariableInfo> {
     return tuple;
   }
   static VariableInfo unpack(const at::IValue& t) {
-    auto tuple = t.to<std::tuple<
-        at::Layout,
-        at::Device,
-        at::ScalarType,
-        std::vector<at::SymInt>,
-        bool,
-        bool>>();
+    auto tuple = t.toTuple();
+    const auto& tuple_elements = tuple->elements();
+    const auto elements = tuple_elements.asArrayRef();
+    TORCH_INTERNAL_ASSERT(elements.size() == 6);
     VariableInfo v;
-    v.layout = std::get<0>(tuple);
-    v.device = std::get<1>(tuple);
-    v.scalar_type = std::get<2>(tuple);
-    v.size = std::get<3>(tuple);
-    v.requires_grad = std::get<4>(tuple);
-    v.is_empty = std::get<5>(tuple);
+    v.layout = elements[0].toLayout();
+    v.device = elements[1].toDevice();
+    v.scalar_type = elements[2].toScalarType();
+    v.size = elements[3].toSymIntVector();
+    v.requires_grad = elements[4].toBool();
+    v.is_empty = elements[5].toBool();
     return v;
   }
   static at::TypePtr packed_type() {
@@ -1346,6 +1343,28 @@ struct PackedArgs {
     return IValuePacker<T>::unpack(std::move(stack[idx++]));
   }
 
+  void pack_saved_data(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+    std::vector<std::string> keys;
+    std::vector<at::IValue> values;
+    for (const auto& [key, value] : dct) {
+      keys.emplace_back(key);
+      values.emplace_back(value);
+    }
+    pack(keys);
+    for (const auto& value : values) {
+      pack(value);
+    }
+  }
+
+  ska::flat_hash_map<std::string, at::IValue> unpack_saved_data() {
+    ska::flat_hash_map<std::string, at::IValue> dct;
+    auto keys = unpack<std::vector<std::string>>();
+    for (const auto& key : keys) {
+      dct.insert({key, std::move(stack[idx++])});
+    }
+    return dct;
+  }
+
  private:
   std::vector<at::IValue> stack;
   int64_t idx = 0;
@@ -1365,13 +1384,14 @@ struct TORCH_API PyCompilerInterface {
   virtual ~PyCompilerInterface() = default;
 
   // Invokes py_compiler.bind_function(fn_name, fn)
-  virtual void bind_function(
+  virtual std::string bind_function(
       PyObject* py_compiler,
       const std::string& fn_name,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       functional_apply_t fn,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<at::TypePtr> packed_args_schema) {
+      std::vector<at::TypePtr> packed_args_schema,
+      bool is_custom_function = false) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
