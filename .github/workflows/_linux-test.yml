@@ -418,6 +418,7 @@ jobs:
 
       - name: Upload utilization stats
         uses: ./.github/workflows/upload-utilization-stats.yml
+        with:
           job_id: ${{ steps.get-job-id.outputs.job-id }}
           job_name: ${{ steps.get-job-id.outputs.job-name }}
           workflow_name: ${{ github.workflow }}
