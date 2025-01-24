@@ -73,7 +73,6 @@ class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
 static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
   return at::make_generator<OpenRegGeneratorImpl>(device_index);
 }
-REGISTER_GENERATOR_PRIVATEUSE1(make_openreg_generator)
 
 // Default, global generators, one per device.
 static std::vector<at::Generator> default_generators;
@@ -119,6 +118,10 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
       TORCH_CHECK(idx >= 0 && idx < device_count());
     }
     return default_generators[idx];
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+    return make_openreg_generator(device_index);
   }
 };
 
