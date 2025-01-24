@@ -104,10 +104,10 @@ def _rejection_sample(loc, concentration, proposal_r, x):
                 done = done | accept
     else:
 
-        def cond_fn(loc, concentration, proposal_r, x, done):
+        def cond_fn(x, done):
             return (~done).any()
 
-        def func(loc, concentration, proposal_r, x, done):
+        def func(x, done):
             u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
             u1, u2, u3 = u.unbind()
             z = torch.cos(math.pi * u1)
@@ -116,11 +116,9 @@ def _rejection_sample(loc, concentration, proposal_r, x):
             accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
             x = torch.where(accept, (u3 - 0.5).sign() * f.acos(), x)
             done = done | accept
-            return loc, concentration, proposal_r, x, done
+            return x, done
 
-        loc, concentration, proposal_r, x, done = torch.while_loop(
-            cond_fn, func, (loc, concentration, proposal_r, x, done)
-        )
+        x, done = torch.while_loop(cond_fn, func, (x, done))
     return (x + math.pi + loc) % (2 * math.pi) - math.pi
 
 
