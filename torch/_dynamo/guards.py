@@ -2478,7 +2478,16 @@ class CheckFunctionManager:
                 self.guard_manager.root, output_graph.local_scope, 50
             )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
-            CompileEventLogger.compilation_metric(guard_latency_us=latency)
+            # Note: We use `increment_toplevel` instead of `compilation_metric`
+            # here.  This is because, in scenarios where `torch._dynamo.reset`
+            # is invoked, the same frame ID and compile ID may be reused during
+            # a new compilation cycle.  This behavior causes issues with
+            # `compilation_metric`, as it expects the metric field to be empty.
+            # Ideally, we would overwrite the existing entry in such cases, but
+            # we currently lack an API to support overwriting metrics.  However,
+            # since these situations are rare and typically impractical to
+            # account for, we simply increment at the toplevel instead.
+            CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
