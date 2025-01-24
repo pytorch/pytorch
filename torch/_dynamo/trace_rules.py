@@ -183,6 +183,9 @@ manual_torch_name_rule_map = {
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
+    # torch.fx map utils
+    "torch.fx.node.map_aggregate": UserFunctionVariable,
+    "torch.fx.node.map_arg": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -3159,7 +3162,6 @@ BUILTIN_SKIPLIST = (
     copy,
     copyreg,
     enum,
-    functools,
     importlib,
     inspect,
     linecache,
@@ -3779,6 +3781,10 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("get_torch_obj_rule_map")
             return rule
+    elif name == "<listcomp>":
+        if reasons is not None:
+            reasons.add("inlining frame from list comprehension")
+        return UserFunctionVariable
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:
