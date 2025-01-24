@@ -5,9 +5,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
-#include <ATen/native/layer_norm.h>
-#include <ATen/native/mps/operations/RMSNorm.h>
-#include <c10/core/GradMode.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
@@ -27,6 +24,11 @@
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/native/mps/operations/RMSNorm.h>
+#include <c10/core/GradMode.h>
 #endif
 
 #include <array>
