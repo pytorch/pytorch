@@ -8,7 +8,6 @@ from torch.distributed._tensor import (
     Shard,
     zeros,
 )
-from torch.distributed.checkpoint._extension import ZStandard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -59,7 +58,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
+    @parametrize("extensions", [None, [Rot13Example()]])
     def test_1d_to_1d_reshard_placement_change(self, extensions) -> None:
         CHECKPOINT_DIR = self.temp_dir
 

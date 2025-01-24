@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import contextlib
 import os
+from typing import Union
 
 from torch._dynamo.test_case import (
     run_tests as dynamo_run_tests,
@@ -11,7 +11,7 @@ from torch._inductor import config
 from torch._inductor.utils import fresh_inductor_cache
 
 
-def run_tests(needs=()):
+def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     dynamo_run_tests(needs)
 
 
@@ -21,7 +21,7 @@ class TestCase(DynamoTestCase):
     the cache directory for each test.
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         self._inductor_test_stack = contextlib.ExitStack()
         self._inductor_test_stack.enter_context(config.patch({"fx_graph_cache": True}))
@@ -39,6 +39,6 @@ class TestCase(DynamoTestCase):
         ):
             self._inductor_test_stack.enter_context(fresh_inductor_cache())
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         self._inductor_test_stack.close()

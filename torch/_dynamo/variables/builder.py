@@ -116,6 +116,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -143,6 +144,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -1020,6 +1022,9 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
+        elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FunctoolsWrapsVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -2973,6 +2978,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif value is functools.wraps:
+            return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
@@ -2981,6 +2988,8 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
+        elif isinstance(value, types.GenericAlias):
+            return BuiltinVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
