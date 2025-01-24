@@ -5,7 +5,6 @@ import io
 import json
 import math
 import os
-import re
 import time
 import zipfile
 from functools import lru_cache
@@ -22,6 +21,7 @@ PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 @lru_cache
 def get_s3_resource() -> Any:
     return boto3.resource("s3")
+
 
 GHA_ARTIFACTS_BUCKET = "gha-artifacts"
 
@@ -85,11 +85,13 @@ def _download_artifact(
         f.write(response.content)
     return artifact_name
 
+
 def download_s3_artifacts(
     prefix: str,
     workflow_run_id: int,
     workflow_run_attempt: int,
-    job_id:int|None = None ) -> list[Path]:
+    job_id: Optional[int] = None,
+) -> list[Path]:
     bucket = get_s3_resource().Bucket(GHA_ARTIFACTS_BUCKET)
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
