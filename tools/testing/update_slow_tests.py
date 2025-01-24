@@ -9,7 +9,7 @@ import requests
 from clickhouse import query_clickhouse  # type: ignore[import]
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 QUERY = """
 WITH most_recent_strict_commits AS (
     SELECT

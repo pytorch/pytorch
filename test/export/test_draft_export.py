@@ -2,7 +2,6 @@
 import copy
 import tempfile
 import unittest
-from typing import List, Tuple
 
 import torch
 from torch.export import Dim, export
@@ -325,7 +324,7 @@ class TestDraftExport(TestCase):
                 return torch.ops.mylib.foo(a)
 
         @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(a: torch.Tensor) -> List[torch.Tensor]:
+        def foo(a: torch.Tensor) -> list[torch.Tensor]:
             x = a * 2
             y = a.repeat(2, 2)
             z = a.to(torch.bfloat16)
@@ -342,7 +341,7 @@ class TestDraftExport(TestCase):
         inputs = (torch.randn(3, 3),)
         with self.assertRaises(RuntimeError):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-                export(mod, inputs)
+                export(mod, inputs, strict=True)
 
         ep, report = draft_export(mod, inputs)
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
@@ -370,7 +369,7 @@ class TestDraftExport(TestCase):
                 return torch.ops.mylib.foo(a)
 
         @torch.library.custom_op("mylib::foo", mutates_args={})
-        def foo(a: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        def foo(a: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return a * 2, a + 2
 
         @foo.register_fake
@@ -384,7 +383,7 @@ class TestDraftExport(TestCase):
             "Real tensor propagation found an aliasing mismatch",
         ):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-                export(mod, inputs)
+                export(mod, inputs, strict=True)
 
         ep, report = draft_export(mod, inputs)
         for ep_out, eager_out in zip(
@@ -417,7 +416,6 @@ class TestDraftExport(TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             torch._inductor.aoti_compile_and_package(
                 draft_ep,
-                example_inputs,
                 package_path=f.name,
             )
 

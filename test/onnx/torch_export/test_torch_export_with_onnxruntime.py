@@ -58,7 +58,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4, dtype=torch.float)
         dim0 = torch.export.Dim("dim0")
         exported_program = torch.export.export(
-            Model(), (x,), dynamic_shapes={"x": {0: dim0}}
+            Model(), (x,), dynamic_shapes={"x": {0: dim0}}, strict=True
         )
         onnx_program = torch.onnx.dynamo_export(exported_program, x)
 
@@ -76,7 +76,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x + 1.0
 
         x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
+        exported_program = torch.export.export(Model(), args=(x,), strict=True)
         onnx_program = torch.onnx.dynamo_export(exported_program, x)
 
         with tempfile.NamedTemporaryFile(suffix=".pte") as f:
@@ -102,7 +102,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         dynamic_shapes = {"x": {0: dim0_x}, "y": None}
         # specialized input y to 5 during tracing
         exported_program = torch.export.export(
-            f, (tensor_input, 5), dynamic_shapes=dynamic_shapes
+            f, (tensor_input, 5), dynamic_shapes=dynamic_shapes, strict=True
         )
         onnx_program = torch.onnx.dynamo_export(exported_program, tensor_input, 5)
 
@@ -135,13 +135,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return bar.sum() + self.buf.sum()
 
         tensor_input = torch.ones(5, 5)
-        exported_program = torch.export.export(Foo(), (tensor_input,))
+        exported_program = torch.export.export(Foo(), (tensor_input,), strict=True)
 
         dim0_x = torch.export.Dim("dim0_x")
         # NOTE: If input is ExportedProgram, we need to specify dynamic_shapes
         # as a tuple.
         reexported_program = torch.export.export(
-            exported_program.module(), (tensor_input,), dynamic_shapes=({0: dim0_x},)
+            exported_program.module(),
+            (tensor_input,),
+            dynamic_shapes=({0: dim0_x},),
+            strict=True,
         )
         reexported_onnx_program = torch.onnx.dynamo_export(
             reexported_program, tensor_input
@@ -163,7 +166,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         dim = torch.export.Dim("dim")
         exported_program = torch.export.export(
-            foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, {0: dim})
+            foo,
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            dynamic_shapes=(None, {0: dim}),
+            strict=True,
         )
         onnx_program = torch.onnx.dynamo_export(
             exported_program, torch.randn(4, 4), torch.randn(4, 4)
@@ -193,6 +199,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # We are specifying dynamism on the first kwarg even though user passed in
             # different order
             dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None),
+            strict=True,
         )
         onnx_program = torch.onnx.dynamo_export(
             exported_program,
@@ -238,6 +245,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     input_b,
                 ),
                 dynamic_shapes=({0: dim}, {0: dim}),
+                strict=True,
             )
             onnx_program = torch.onnx.dynamo_export(exported_program, input_x, input_b)
 
@@ -277,7 +285,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return None
 
         dynamic_shapes = torch_pytree.tree_map(dynamify_inp, inp)
-        exported_program = torch.export.export(foo, inp, dynamic_shapes=dynamic_shapes)
+        exported_program = torch.export.export(
+            foo, inp, dynamic_shapes=dynamic_shapes, strict=True
+        )
         onnx_program = torch.onnx.dynamo_export(exported_program, inp_a, inp_b)
 
         # NOTE: Careful with the input format. The input format should be
@@ -303,6 +313,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (),
             {"x": torch.randn(3, 3), "y": torch.randn(3, 3)},
             dynamic_shapes=dynamic_shapes,
+            strict=True,
         )
         onnx_program = torch.onnx.dynamo_export(
             exported_program, x=torch.randn(3, 3), y=torch.randn(3, 3)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 LAST_UPDATED = 0.0
 
 

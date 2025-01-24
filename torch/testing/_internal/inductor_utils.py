@@ -113,6 +113,15 @@ def skip_windows_ci(name: str, file: str) -> None:
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
+def requires_cuda_with_enough_memory(min_mem_required):
+    def inner(fn):
+        if not torch.cuda.is_available() or torch.cuda.get_device_properties().total_memory < min_mem_required:
+            return unittest.skip(f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe")(fn)
+        else:
+            return fn
+
+    return inner
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")

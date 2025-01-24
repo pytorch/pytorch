@@ -2,7 +2,7 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
+from typing import overload, Any, Callable, NoReturn, Optional, Union
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -41,7 +41,7 @@ class CPPTimer:
         setup: str,
         global_setup: str,
         timer: Callable[[], float],
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
     ) -> None:
         if timer is not timeit.default_timer:
             raise NotImplementedError(
@@ -180,7 +180,7 @@ class Timer:
             threadpool size which tries to utilize all cores.
     """
 
-    _timer_cls: Type[TimerClass] = timeit.Timer
+    _timer_cls: type[TimerClass] = timeit.Timer
 
     def __init__(
         self,
@@ -188,7 +188,7 @@ class Timer:
         setup: str = "pass",
         global_setup: str = "",
         timer: Callable[[], float] = timer,
-        globals: Optional[Dict[str, Any]] = None,
+        globals: Optional[dict[str, Any]] = None,
         label: Optional[str] = None,
         sub_label: Optional[str] = None,
         description: Optional[str] = None,
@@ -289,14 +289,14 @@ class Timer:
         self,
         number: int,
         time_hook: Callable[[], float],
-        stop_hook: Callable[[List[float]], bool],
+        stop_hook: Callable[[list[float]], bool],
         min_run_time: float,
         max_run_time: Optional[float] = None,
         callback: Optional[Callable[[int, float], NoReturn]] = None
-    ) -> List[float]:
+    ) -> list[float]:
         total_time = 0.0
         can_stop = False
-        times: List[float] = []
+        times: list[float] = []
         with common.set_torch_threads(self._task_spec.num_threads):
             while (total_time < min_run_time) or (not can_stop):
                 time_spent = time_hook()
@@ -374,7 +374,7 @@ class Timer:
         def time_hook() -> float:
             return self._timeit(number)
 
-        def stop_hook(times: List[float]) -> bool:
+        def stop_hook(times: list[float]) -> bool:
             return True
 
         times = self._threaded_measurement_loop(
@@ -434,7 +434,7 @@ class Timer:
         def time_hook() -> float:
             return self._timeit(number)
 
-        def stop_hook(times: List[float]) -> bool:
+        def stop_hook(times: list[float]) -> bool:
             if len(times) > 3:
                 return common.Measurement(
                     number_per_run=number,
@@ -470,7 +470,7 @@ class Timer:
         repeats: int,
         collect_baseline: bool,
         retain_out_file: bool,
-    ) -> Tuple[valgrind_timer_interface.CallgrindStats, ...]:
+    ) -> tuple[valgrind_timer_interface.CallgrindStats, ...]:
         ...
 
     def collect_callgrind(

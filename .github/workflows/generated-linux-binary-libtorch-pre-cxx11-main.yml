@@ -16,7 +16,6 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-libtorch-pre-cxx11

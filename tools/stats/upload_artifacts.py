@@ -32,7 +32,7 @@ def get_artifacts(repo: str, workflow_run_id: int, workflow_run_attempt: int) ->
                 # pytorch/pytorch/WORKFLOW_ID/RUN_ATTEMPT/artifact/NAME-SUFFIX.zip
                 s3_filename = re.sub(FILENAME_REGEX, "", artifact_path.name)
                 upload_file_to_s3(
-                    file_name=str(artifact_path.absolute()),
+                    file_name=str(artifact_path.resolve()),
                     bucket=BUCKET_NAME,
                     key=f"{repo}/{workflow_run_id}/{workflow_run_attempt}/artifact/{s3_filename}",
                 )
