@@ -944,7 +944,8 @@ auto FunctionParameter::check(
   // you still have to handle that manually
   // NB: torch function on Tensor subclasses NOT eligible here, you handled
   // that internally
-  if (check_has_torch_function(obj, /*ignore_mode*/ true) && !THPVariable_Check(obj)) {
+  if (check_has_torch_function(obj, /*ignore_mode*/ true) &&
+      !THPVariable_Check(obj)) {
     // tensor subclasses and unrelated objects with __torch_function__
     append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
     return true;
