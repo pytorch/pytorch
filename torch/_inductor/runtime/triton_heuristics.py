@@ -19,10 +19,11 @@ from collections import namedtuple
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
-from ..utils import prefix_is_reduction
+from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
@@ -516,6 +517,27 @@ class CachingAutotuner(KernelInterface):
         )
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
+    def _get_args_with_constexprs(self, args, launcher):
+        """
+        `args` is passed in with only the non-constexpr args (because the constexpr arg values
+        depend on the config). However, in later triton versions, the constexpr args need to be
+        added into the args list.
+        """
+        if triton_version_uses_attrs_dict():
+            # first: aggregate the constexpr args in (index, val) pairs
+            # so we can sort them by index.
+            constexpr_args: list[tuple[int, Any]] = []
+            for arg_name, arg_val in launcher.config.kwargs.items():
+                constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
+
+            constexpr_args.sort()
+            new_args = [*args]
+            for arg_idx, arg_val in constexpr_args:
+                new_args.insert(arg_idx, arg_val)
+
+            return new_args
+        return args
+
     def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs with spilled registers when auto-tuning custom
@@ -544,8 +566,9 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
             launcher(
-                *cloned_args,
+                *args_with_constexprs,
                 **cloned_kwargs,
                 grid=grid,
                 stream=stream,
@@ -567,7 +590,7 @@ class CachingAutotuner(KernelInterface):
         To support benchmarking in the presence of mutated args, we need to avoid
         autotuning contanminating them. We try to pass cloned args to the kernel.
         If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteratrion. Figure out the args
+        copy to cpu and restore them after each iteration. Figure out the args
         to be copied and do the copying.
         """
         if not self.optimize_mem:
@@ -580,16 +603,24 @@ class CachingAutotuner(KernelInterface):
             if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                size = arg.numel() * arg.element_size()
+                required_storage_length = compute_required_storage_length(
+                    arg.size(),
+                    arg.stride(),
+                    0,
+                )
+                size = required_storage_length * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(
-                        arg.size(),
-                        arg.stride(),
+                        (required_storage_length,),
+                        (1,),
                         dtype=arg.dtype,
                         device="cpu",
                         pin_memory=True,
                     )
-                    cpu_arg.copy_(arg, non_blocking=True)
+                    cpu_arg.copy_(
+                        arg.as_strided((required_storage_length,), (1,)),
+                        non_blocking=True,
+                    )
                     copies[name] = (arg, cpu_arg)
                 else:
                     budget -= size
@@ -605,7 +636,14 @@ class CachingAutotuner(KernelInterface):
     def restore_args_from_cpu(self, cpu_copies):
         for pair in cpu_copies.values():
             arg, cpu_arg = pair
-            arg.copy_(cpu_arg, non_blocking=True)
+            required_storage_length = compute_required_storage_length(
+                arg.size(),
+                arg.stride(),
+                0,
+            )
+            arg.as_strided((required_storage_length,), (1,)).copy_(
+                cpu_arg, non_blocking=True
+            )
 
     def reset_to_zero_args(self, *args, **kwargs):
         if not self.reset_to_zero_arg_names:
@@ -826,6 +864,8 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
+        args = self._get_args_with_constexprs(args, launcher)
+
         if self.dump_launch_params:
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
@@ -961,17 +1001,21 @@ class TritonCompileResult:
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
-        call_args = [
-            arg
-            for i, arg in enumerate(fn.arg_names)
-            if i not in fn.constexprs and arg not in none_args
-        ]
+        if triton_version_uses_attrs_dict():
+            call_args = fn.arg_names
+            def_args = fn.arg_names
+        else:
+            call_args = [
+                arg
+                for i, arg in enumerate(fn.arg_names)
+                if i not in fn.constexprs and arg not in none_args
+            ]
+            def_args = [
+                name
+                for name in fn.arg_names
+                if name not in cfg.kwargs and name not in none_args
+            ]
 
-        def_args = [
-            name
-            for name in fn.arg_names
-            if name not in cfg.kwargs and name not in none_args
-        ]
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )

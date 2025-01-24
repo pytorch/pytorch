@@ -9,7 +9,7 @@ import operator
 import random
 import sys
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import _VF
@@ -54,7 +54,7 @@ class PointwisePostOp(NamedTuple):
     binary_attr : str = "none"
     alpha : float = 1.0
     unary_attr : str = "none"
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
