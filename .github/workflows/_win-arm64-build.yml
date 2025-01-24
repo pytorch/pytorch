@@ -71,43 +71,47 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Git checkout Builder
-        uses: actions/checkout@v4
-        with:
-          repository:  iremyux/pytorch-builder
-          ref:  nightly-for-win-arm64
-          path: "builder"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_git.bat"
-      - name: Bootstrap Python
-        shell: cmd        
-        run: |
-          "builder/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_rust.bat"
-      - name: Bootstrap sccache
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_sccache.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "pytorch"
-          submodules: recursive
+          path: pytorch 
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "%PYTORCH_ROOT%"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "%PYTORCH_ROOT%"
+          submodules: recursive      
+      - name: Bootstrap Python
+        shell: cmd        
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Build
         id: build
         shell: bash

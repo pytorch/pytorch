@@ -2,8 +2,7 @@
 
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-arm64-binary-wheel
-on:
+name: windows-arm64-binary-wheelon:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -22,7 +21,6 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
-  BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
@@ -80,48 +78,52 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Git checkout Builder
-        uses: actions/checkout@v4
-        with:
-          repository:  iremyux/pytorch-builder
-          ref:  nightly-for-win-arm64
-          path: "builder"
       - name: Bootstrap folders
         shell: cmd
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_git.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_rust.bat"
-      - name: Bootstrap sccache
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_sccache.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "pytorch"
-          submodules: recursive
+          path: "%PYTORCH_ROOT%"   
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "%PYTORCH_ROOT%"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "%PYTORCH_ROOT%"
+          submodules: recursive      
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -168,35 +170,39 @@ jobs:
         with:
           name: wheel-py3_12-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Git checkout Builder
-        uses: actions/checkout@v4
-        with:
-          repository:  iremyux/pytorch-builder
-          ref:  nightly-for-win-arm64
-          path: "builder"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_git.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "builder/windows/arm64/bootstrap_buildtools.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "pytorch"
-          submodules: recursive
+          path: "%PYTORCH_ROOT%"   
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "%PYTORCH_ROOT%"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "%PYTORCH_ROOT%"
+          submodules: recursive      
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -222,6 +228,4 @@ jobs:
       build_name: wheel-py3_12-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
