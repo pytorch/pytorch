@@ -286,7 +286,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // destructs outputs_ tensors who are view tensors in autograd graph.
     WorkNCCL(const WorkNCCL& w);
 
-    ~WorkNCCL() override = default;
+    ~WorkNCCL() override;
 
     // Checks if the NCCL kernel has started to execute.
     bool isStarted();
@@ -1161,7 +1161,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
 
   // Device Indexes used for all collectives in this group
-  std::set<c10::DeviceIndex> usedDeviceIdxs_;
+  std::set<int> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
   int coalescing_state_ = 0;
