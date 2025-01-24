@@ -16,6 +16,7 @@ import functools
 import inspect
 import logging
 import os
+import random
 import sys
 import sysconfig
 import textwrap
@@ -530,6 +531,7 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
+            prev_rng_state = random.getstate()
             try:
                 if is_fx_tracing():
                     if config.error_on_nested_fx_trace:
@@ -563,6 +565,8 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
+                    # ignore random state updates since beginning of _fn
+                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -571,6 +575,8 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    # NB: assumes no random calls made between fn() and here
+                    prev_rng_state = random.getstate()
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -580,6 +586,10 @@ class _TorchDynamoContext:
                         cleanup()
             finally:
                 _maybe_set_eval_frame(prior)
+                # ignore random state updates:
+                # - since beginning of _fn if fn was not called
+                # - since end of fn if fn was called (even if exn occurs)
+                random.setstate(prev_rng_state)
 
         # hooks to properly handle inlining
         _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
@@ -736,18 +746,22 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
+            prev_rng_state = random.getstate()
             try:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
+                    random.setstate(prev_rng_state)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                    prev_rng_state = random.getstate()
             finally:
                 _maybe_set_eval_frame(prior)
+                random.setstate(prev_rng_state)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
