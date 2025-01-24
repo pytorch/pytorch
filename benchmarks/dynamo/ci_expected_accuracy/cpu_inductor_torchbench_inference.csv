@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,13
+hf_BigBird,pass,18
 
 
 
@@ -159,6 +159,10 @@ hf_Longformer,pass,4
 
 
 hf_Reformer,pass,5
+
+
+
+hf_Roberta_base,pass,0
 
 
 
@@ -194,6 +198,10 @@ maml_omniglot,pass,0
 
 
 
+microbench_unbacked_tolist_sum,pass,1
+
+
+
 mnasnet1_0,pass,0
 
 
@@ -210,7 +218,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moondream,pass,0
+moondream,pass,3
 
 
 
