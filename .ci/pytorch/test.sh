@@ -625,7 +625,7 @@ test_single_dynamo_benchmark() {
       TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
-      --ci --accuracy --timing --explain \
+      --ci --accuracy --timing --explain --print-compilation-time \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
@@ -657,7 +657,7 @@ test_inductor_halide() {
 }
 
 test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
 }
 

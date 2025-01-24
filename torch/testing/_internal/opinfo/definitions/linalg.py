@@ -3,9 +3,9 @@
 import itertools
 import random
 import unittest
+from collections.abc import Iterable
 from functools import partial
 from itertools import chain, product
-from typing import Iterable, List
 
 import numpy as np
 from numpy import inf
@@ -1003,7 +1003,7 @@ def sample_inputs_linalg_solve(
         make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
-    batches = [(), (0,), (2,)]
+    batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
     if vector_rhs_allowed:
         nrhs = [(), (1,), (3,)]
@@ -1169,7 +1169,7 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(inp, ind=len(shape_lhs))
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     OpInfo(
         "linalg.cross",
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
@@ -2408,7 +2408,7 @@ op_db: List[OpInfo] = [
     ),
 ]
 
-python_ref_db: List[OpInfo] = [
+python_ref_db: list[OpInfo] = [
     #
     # torch.linalg
     #

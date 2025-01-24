@@ -13,7 +13,8 @@ from __future__ import annotations
 import copy
 import inspect
 import logging
-from typing import Any, Iterable, Mapping, Sequence, TYPE_CHECKING, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 import onnxscript
 from onnxscript import evaluator, ir
