@@ -1886,6 +1886,13 @@ class PythonWrapperCodegen(CodeGen):
                 )
                 for e in buf.get_size()
             )
+            allocation_size = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    e,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for e in V.graph.get_allocation_size(buf)
+            )
             stride = tuple(
                 V.graph.sizevars.atomically_apply_size_hint(
                     e,
@@ -1899,7 +1906,7 @@ class PythonWrapperCodegen(CodeGen):
                 buf.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             )
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
+            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
