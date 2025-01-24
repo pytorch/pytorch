@@ -369,7 +369,10 @@ class CachingAutotuner(KernelInterface):
 
                 if seen_config_hashes is None:
                     seen_config_hashes = OrderedSet(
-                        map(triton_config_to_hashable, self.configs)
+                        [
+                            triton_config_to_hashable(x.config)
+                            for x in self.compile_results
+                        ]
                     )
                 new_config_hash = triton_config_to_hashable(new_config)
                 if new_config_hash in seen_config_hashes:
