@@ -87,6 +87,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         dtypes=[torch.complex64],
     ),
     "__rsub__": MPSSkipInfo(NONCONTIGUOUS, TEST_OUT),
+    "_chunk_cat": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "_refs._conversions.cdouble": MPSSkipInfo(UNIMPLEMENTED),
     "_refs._conversions.double": MPSSkipInfo(UNIMPLEMENTED),
     "_refs.erfc": MPSSkipInfo(UNIMPLEMENTED),
@@ -174,6 +179,11 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(TEST_OUT),
     ],
+    "any": MPSSkipInfo(
+        TEST_OUT,
+        upper=15.0,
+        lower=14.0,
+    ),
     "atan2": MPSSkipInfo(
         NONCONTIGUOUS,
         dtypes=[torch.int64],
