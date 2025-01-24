@@ -161,6 +161,7 @@ init_command = [
     'rich==10.9.0',
     'pyyaml==6.0.1',
     'optree==0.13.0',
+    'dataclasses_json==0.6.7'
 ]
 
 [[linter]]
@@ -260,7 +261,6 @@ exclude_patterns = [
     'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',

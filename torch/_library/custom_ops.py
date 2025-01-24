@@ -808,6 +808,8 @@ class CustomOpDef:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
+        if device_type not in ["cpu", "cuda"]:
+            raise ValueError(f"Unknown device type: {device_type}")
 
         def kernel(_, *args, **kwargs):
             assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
@@ -817,12 +819,13 @@ class CustomOpDef:
             with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
                 return self._opoverload(*_cast(args, device_type, cast_inputs))
 
-        if device_type == "cuda":
-            self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
-        elif device_type == "cpu":
-            self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
-        else:
-            raise AssertionError(f"Unknown device type: {device_type}")
+        key = f"{self._namespace}/{self._name}/Autocast{device_type.upper()}"
+        if key not in self._lib._op_impls:
+            if device_type == "cuda":
+                self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
+            else:
+                # device_type is "cpu"
+                self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
 
         return kernel
 

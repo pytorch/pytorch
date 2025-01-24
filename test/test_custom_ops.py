@@ -3118,6 +3118,29 @@ class TestCustomOpAPI(TestCase):
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_library_register_autocast_multiple_times(self):
+        for device in ["cuda", "cpu"]:
+
+            @torch.library.custom_op("mylib::my_sin", mutates_args=())
+            def my_sin(x: Tensor) -> Tensor:
+                return torch.sin(x)
+
+            torch.library.register_autocast(my_sin, device, torch.float16)
+
+            x = torch.randn(3, dtype=torch.float32, device=device)
+            with torch.autocast(device, dtype=torch.float16):
+                y1 = my_sin(x)
+            self.assertEqual(y1.dtype, torch.float16)
+
+            # Ensure calling register_autocast multiple times does not error out.
+            torch.library.register_autocast(my_sin, device, torch.float16)
+
+            with torch.autocast(device, dtype=torch.float16):
+                y2 = my_sin(x)
+            self.assertEqual(y2.dtype, torch.float16)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_autograd(self):
         for mode in ["function", "qualname", "opoverload"]:
 

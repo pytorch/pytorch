@@ -715,6 +715,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.pybind_include)
         include_dirs.append(build_paths.cc_include)
         include_dirs.append(build_paths.libgcc_include)
         include_dirs.append(build_paths.libgcc_arch_include)
@@ -778,7 +779,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS and platform.machine().lower() != "arm64":
+    if _IS_WINDOWS:
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries

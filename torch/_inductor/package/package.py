@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 import torch._inductor
@@ -85,7 +85,7 @@ class PT2ArchiveReader:
         assert self.archive_file is not None
         self.archive_file.extractall(path)
 
-    def get_file_names(self) -> List[str]:
+    def get_file_names(self) -> list[str]:
         assert self.archive_file is not None
         return self.archive_file.namelist()
 
@@ -98,7 +98,7 @@ def _run_command_and_check(cmd: str) -> None:
         raise exc.CppCompileError(cmd, e.output) from e
 
 
-def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
+def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     def get_aoti_file_with_suffix(suffix: str) -> str:
         for file in aoti_files:
             if file.endswith(suffix):
@@ -159,7 +159,7 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 def package_aoti(
     archive_file: Union[str, io.BytesIO],
-    aoti_files: Union[List[str], Dict[str, List[str]]],
+    aoti_files: Union[list[str], dict[str, list[str]]],
 ) -> Union[str, io.BytesIO]:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
@@ -244,12 +244,12 @@ class AOTICompiledModel:
         flat_outputs = self.loader.boxed_run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
-    def get_metadata(self) -> Dict[str, str]:
+    def get_metadata(self) -> dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
     def load_constants(
         self,
-        constants_map: Dict[str, torch.Tensor],
+        constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
     ) -> None:
@@ -265,8 +265,14 @@ class AOTICompiledModel:
         """
         self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
 
-    def get_constant_fqns(self) -> List[str]:
+    def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
+
+    def __deepcopy__(self, memo: Optional[Dict[Any, Any]]) -> "AOTICompiledModel":
+        log.warning(
+            "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
+        )
+        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
 
 
 def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
