@@ -34,7 +34,6 @@ from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -87,8 +86,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 class TestSavePlan(TestCase):
     @with_fake_comms(rank=1, world_size=4)
-    def test_local_plan(self, device):
-        tensor = torch.rand(10).to(device)
+    def test_local_plan(self):
+        tensor = torch.rand(10)
         val = [1, 2, 3]
         st = create_sharded_tensor(rank=1, world_size=4, shards_per_rank=1)
         state_dict = {"tensor": tensor, "value": val, "st": st}
@@ -100,7 +99,7 @@ class TestSavePlan(TestCase):
         self.assertEqual(wi.tensor_data.size, tensor.size())
         self.assertEqual(
             wi.tensor_data.properties,
-            TensorProperties.create_from_tensor(torch.zeros(1).to(device)),
+            TensorProperties.create_from_tensor(torch.zeros(1)),
         )
         self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([0]))
         self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([10]))
@@ -111,7 +110,7 @@ class TestSavePlan(TestCase):
         self.assertEqual(st_wi.tensor_data.size, st.size())
         self.assertEqual(
             st_wi.tensor_data.properties,
-            TensorProperties.create_from_tensor(torch.zeros(1).to(device)),
+            TensorProperties.create_from_tensor(torch.zeros(1)),
         )
         self.assertEqual(st_wi.tensor_data.chunk.offsets, torch.Size([8]))
         self.assertEqual(st_wi.tensor_data.chunk.sizes, torch.Size([8]))
@@ -137,7 +136,7 @@ class TestSavePlan(TestCase):
     def test_global_plan(self):
         def create_data(rank):
             with with_dist(rank=rank, world_size=4):
-                tensor = torch.rand(10).device
+                tensor = torch.rand(10)
                 val = [1, 2, 3]
                 st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
                 state_dict = {"tensor": tensor, "value": val, "st": st}
@@ -171,10 +170,10 @@ class TestSavePlan(TestCase):
                         item_md.chunks[new_item.index.index], old_item.tensor_data.chunk
                     )
 
-    def test_local_load_plan(self, device):
+    def test_local_load_plan(self):
         def create_state_dict(rank):
             with with_dist(rank=rank, world_size=4):
-                tensor = torch.rand(10).to(device)
+                tensor = torch.rand(10)
                 val = [1, 2, 3]
                 st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
                 return {"tensor": tensor, "value": val, "st": st}
@@ -307,11 +306,9 @@ class TestSavePlan(TestCase):
 
 
 class TestPlannerHelpers(TestCase):
-    def test_create_read_item_from_chunks(self, device):
+    def test_create_read_item_from_chunks(self):
         tensor_md = TensorStorageMetadata(
-            properties=TensorProperties.create_from_tensor(
-                torch.empty([16]).to(device)
-            ),
+            properties=TensorProperties.create_from_tensor(torch.empty([16])),
             size=torch.Size([16]),
             chunks=[
                 ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([8])),
@@ -342,12 +339,12 @@ class TestPlannerHelpers(TestCase):
 
 class TestLoadPlanner(TestCase):
     @with_temp_dir
-    def test_strict(self, device):
-        original_module = nn.Linear(2, 2).to(device)
+    def test_strict(self):
+        original_module = nn.Linear(2, 2)
         dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
 
-        new_module = nn.Linear(2, 2).to(device)
-        new_module.extra_param = nn.Parameter(torch.randn(2, 2).to(device))
+        new_module = nn.Linear(2, 2)
+        new_module.extra_param = nn.Parameter(torch.randn(2, 2))
         dcp.load(
             state_dict={"module": new_module},
             checkpoint_id=self.temp_dir,
@@ -362,11 +359,11 @@ class TestLoadPlanner(TestCase):
             )
 
     @with_temp_dir
-    def test_load_different_sizes_throws(self, device):
-        original_module = nn.Linear(2, 2).to(device)
+    def test_load_different_sizes_throws(self):
+        original_module = nn.Linear(2, 2)
         dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
 
-        new_module = nn.Linear(3, 2).to(device)
+        new_module = nn.Linear(3, 2)
         with self.assertRaisesRegex(CheckpointException, "Size mismatch"):
             dcp.load(
                 state_dict={"module": new_module},
@@ -374,11 +371,6 @@ class TestLoadPlanner(TestCase):
                 planner=DefaultLoadPlanner(),
             )
 
-
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestLoadPlanner, globals(), only_for=devices)
-instantiate_device_type_tests(TestPlannerHelpers, globals(), only_for=devices)
-instantiate_device_type_tests(TestSavePlan, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

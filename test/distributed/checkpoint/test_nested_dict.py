@@ -5,18 +5,17 @@ from torch.distributed.checkpoint._nested_dict import (
     flatten_state_dict,
     unflatten_state_dict,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFlattening(TestCase):
-    def test_flattening_round_trip(self, device) -> None:
+    def test_flattening_round_trip(self) -> None:
         state_dict = {
             "key0": 1,
             "key1": [1, 2],
             "key2": {"1": 2, "2": 3},
-            "key3": torch.tensor([1], device=device),
-            "key4": [[torch.tensor(2, device=device), "x"], [1, 2, 3], {"key6": [44]}],
+            "key3": torch.tensor([1]),
+            "key4": [[torch.tensor(2), "x"], [1, 2, 3], {"key6": [44]}],
         }
 
         flatten_dict, mapping = flatten_state_dict(state_dict)
@@ -37,14 +36,10 @@ class TestFlattening(TestCase):
 
         self.assertEqual(state_dict, restored)
 
-    def test_mapping(self, device) -> None:
+    def test_mapping(self) -> None:
         state_dict = {
             "k0": [1],
-            "k2": [
-                torch.tensor([1], device=device),
-                99,
-                [{"k3": torch.tensor(1, device=device)}],
-            ],
+            "k2": [torch.tensor([1]), 99, [{"k3": torch.tensor(1)}]],
             "k3": ["x", 99, [{"k3": "y"}]],
         }
 
@@ -64,9 +59,6 @@ class TestFlattening(TestCase):
         self.assertEqual(("k3", 1), mapping["k3.1"])
         self.assertEqual(("k3", 2, 0, "k3"), mapping["k3.2.0.k3"])
 
-
-devices = ["cpu", "cuda", "hpu"]
-instantiate_device_type_tests(TestFlattening, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

@@ -11,20 +11,18 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-
 
 class TestTraverse(TestCase):
     """
     Test class for util methods of _traverse
     """
 
-    def test_traverse_shallow(self, device) -> None:
+    def test_traverse_shallow(self) -> None:
         state_dict = {
             "key0": 1,
             "key1": [1, 2],
             "key2": {1: 2, 2: 3},
-            "key3": torch.tensor([1]).to(device),
+            "key3": torch.tensor([1]),
         }
 
         data = {}
@@ -47,13 +45,13 @@ class TestTraverse(TestCase):
         self.assertEqual(data[("key2", "2")], 3)
 
         self.assertIn(("key3",), data)
-        self.assertTrue(torch.equal(data[("key3",)], torch.tensor([1]).to(device)))
+        self.assertEqual(data[("key3",)], torch.tensor([1]))
 
-    def test_traverse_nested_list(self, device) -> None:
+    def test_traverse_nested_list(self) -> None:
         state_dict = {
             "key1": [
-                torch.tensor([1]).to(device),
-                [33, torch.tensor([2]).to(device), [44, 55]],
+                torch.tensor([1]),
+                [33, torch.tensor([2]), [44, 55]],
                 [66, 77],
             ],
         }
@@ -69,13 +67,13 @@ class TestTraverse(TestCase):
         self.assertNotIn(("key1"), data)
 
         self.assertIn(("key1", 0), data)
-        self.assertTrue(torch.equal(data[("key1", 0)], torch.tensor([1]).to(device)))
+        self.assertEqual(data[("key1", 0)], torch.tensor([1]))
 
         self.assertIn(("key1", 1, 0), data)
         self.assertEqual(data[("key1", 1, 0)], 33)
 
         self.assertIn(("key1", 1, 1), data)
-        self.assertTrue(torch.equal(data[("key1", 1, 1)], torch.tensor([2]).to(device)))
+        self.assertEqual(data[("key1", 1, 1)], torch.tensor([2]))
 
         self.assertIn(("key1", 1, 2), data)
         self.assertEqual(data[("key1", 1, 2)], [44, 55])
@@ -84,9 +82,9 @@ class TestTraverse(TestCase):
         self.assertIn(("key1", 2), data)
         self.assertEqual(data[("key1", 2)], [66, 77])
 
-    def test_traverse_nested_dict(self, device) -> None:
+    def test_traverse_nested_dict(self) -> None:
         state_dict = {
-            "key0": {"key1": 99, "key2": torch.tensor([1]).to(device)},
+            "key0": {"key1": 99, "key2": torch.tensor([1])},
         }
 
         data = {}
@@ -103,14 +101,10 @@ class TestTraverse(TestCase):
         self.assertEqual(data[("key0", "key1")], 99)
 
         self.assertIn(("key0", "key2"), data)
-        self.assertTrue(
-            torch.equal(data[("key0", "key2")], torch.tensor([1]).to(device))
-        )
+        self.assertEqual(data[("key0", "key2")], torch.tensor([1]))
 
-    def test_traverse_doesnt_ignore_intermediate_collections(self, device) -> None:
-        state_dict: STATE_DICT_TYPE = {
-            "key0": [{"key1": {"key2": torch.tensor([1]).to(device)}}]
-        }
+    def test_traverse_doesnt_ignore_intermediate_collections(self) -> None:
+        state_dict: STATE_DICT_TYPE = {"key0": [{"key1": {"key2": torch.tensor([1])}}]}
 
         data = {}
 
@@ -121,19 +115,17 @@ class TestTraverse(TestCase):
         _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertIn(("key0", 0, "key1", "key2"), data)
-        self.assertTrue(
-            torch.equal(
-                data[("key0", 0, "key1", "key2")],
-                torch.tensor([1]).to(device),
-            )
+        self.assertEqual(
+            data[("key0", 0, "key1", "key2")],
+            torch.tensor([1]),
         )
 
-    def test_traverse_with_ordered_dict(self, device) -> None:
+    def test_traverse_with_ordered_dict(self) -> None:
         state_dict = OrderedDict(
             {
                 "key0": [
                     99,
-                    torch.tensor([3]).to(device),
+                    torch.tensor([3]),
                 ]
             }
         )
@@ -150,7 +142,7 @@ class TestTraverse(TestCase):
         self.assertEqual(data[("key0", 0)], 99)
 
         self.assertIn(("key0", 1), data)
-        self.assertTrue(torch.equal(data[("key0", 1)], torch.tensor([3]).to(device)))
+        self.assertEqual(data[("key0", 1)], torch.tensor([3]))
 
     def test_set_element(self) -> None:
         state_dict: STATE_DICT_TYPE = {}
@@ -186,10 +178,6 @@ class TestTraverse(TestCase):
         self.assertIsNone(_traverse.get_element(state_dict, ("b", 1, 2)))
         self.assertIsNone(_traverse.get_element(state_dict, ("b", 1, "d")))
 
-
-devices = ["cpu", "cuda", "hpu"]
-
-instantiate_device_type_tests(TestTraverse, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
