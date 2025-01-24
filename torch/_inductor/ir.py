@@ -6603,24 +6603,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
-            # If any inputs to this fallback op are complex, they may have the Conjugate
-            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
-            # _aren't_ runtime dispatched implicitly bypass the conversions for those
-            # keys internally (since they're applied at dispatch time).  Since there's
-            # no way to tell at compile time whether a tensor will have these keys
-            # applied, pessimize complex fallback ops by always using the runtime
-            # dispatched fallback.
-            #
-            # This is not currently expected to be a performance issue, since few models
-            # utilized complex ops, but this decision may need to be reconsidered if
-            # that changes.
-            log_msg = (
-                f"Using proxy executor as fallback for {kernel} due to complex inputs."
-            )
-            log.warning(log_msg)
-            self.use_runtime_dispatch = True
-        elif kernel.namespace == "aten":  # type: ignore[union-attr]
+        if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6641,9 +6624,7 @@ class FallbackKernel(ExternKernelAlloc):
             # For non-aten OpOverload, i.e. custom ops
             self.use_runtime_dispatch = True
 
-        if self.use_runtime_dispatch:
-            self.codegen_comment(wrapper)
-
+        def do_runtime_dispatch() -> None:
             exported_args = None
             args = None
             exported_args = self.export_extern_kernel_node()
@@ -6658,12 +6639,36 @@ class FallbackKernel(ExternKernelAlloc):
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
             )
+
+        def is_number(t: torch.JitType) -> bool:
+            return isinstance(t, torch.NumberType) or (
+                isinstance(t, torch.OptionalType)
+                and isinstance(t.getElementType(), torch.NumberType)
+            )
+
+        self.codegen_comment(wrapper)
+        if self.use_runtime_dispatch:
+            do_runtime_dispatch()
         else:
-            self.codegen_comment(wrapper)
             args = [*self.codegen_args(), *self.codegen_kwargs()]
-            V.graph.wrapper_code.generate_fallback_kernel(self, args)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
+            if (
+                V.graph.cpp_wrapper
+                and isinstance(kernel, torch._ops.OpOverload)
+                and any(
+                    "c10::complex" in arg_str and is_number(op_arg.real_type)
+                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
+                )
+            ):
+                # Handle the special case where a complex number is input to a
+                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
+                # the torchgen-created shim API will use type "double", which cannot be
+                # converted to from a c10::complex.  In these cases, fallback to runtime
+                # dispatch.
+                do_runtime_dispatch()
+            else:
+                V.graph.wrapper_code.generate_fallback_kernel(self, args)
+                if isinstance(self.layout, Layout):
+                    self.codegen_size_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
