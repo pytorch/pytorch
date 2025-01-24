@@ -4,7 +4,7 @@ import pickle
 import shutil
 import tempfile
 import unittest
-from typing import List, Optional, Union
+from typing import Optional, Union
 from unittest import mock
 
 import torch
@@ -1434,7 +1434,7 @@ class TestCudaCompileCommand(TestCase):
         with mock.patch("subprocess.check_output") as check_output_mock:
             CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
             check_output_mock.assert_called()
-            cmd_parts: List[str] = check_output_mock.call_args[0][0]
+            cmd_parts: list[str] = check_output_mock.call_args[0][0]
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
