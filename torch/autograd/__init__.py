@@ -330,7 +330,7 @@ def backward(
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(
-            Union[Tuple[torch.Tensor], Tuple[graph.GradientEdge]], (tensors,)
+            Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
         )
     else:
         tensors = tuple(tensors)

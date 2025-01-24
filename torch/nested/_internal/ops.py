@@ -2455,6 +2455,17 @@ def activation_backward(func, *args, **kwargs):
     )
 
 
+@register_jagged_func(torch.ops.aten.fill.Scalar, "self: jt_all, value: any")
+def fill_Scalar(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.fill_.Scalar, "self: jt_all, value: any")
 def fill__Scalar(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2480,6 +2491,31 @@ def frexp_Tensor(func, *args, **kwargs):
     return NestedTensor(mantissa, **output_kwargs), NestedTensor(
         exponent, **output_kwargs
     )
+
+
+@register_jagged_func(
+    torch.ops.aten.matmul_backward.default,
+    "grad: jt_all, self: jt_all, other: any, mask: any",
+)
+def matmul_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    grad = new_kwargs.pop("grad")
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("other")
+    grad_input_mask = new_kwargs.pop("mask")
+
+    grad_self = None
+    if grad_input_mask[0]:
+        grad_self = torch.matmul(grad, other.transpose(-1, -2))
+
+    grad_other = None
+    if grad_input_mask[1]:
+        grad_other = torch.matmul(inp.transpose(-1, -2), grad)
+
+    return (grad_self, grad_other)
 
 
 from torch._higher_order_ops.flex_attention import (

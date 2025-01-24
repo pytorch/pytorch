@@ -264,7 +264,12 @@ def list_mode_options(
             "coordinate_descent_tuning": True,
         },
     }
-    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
+    try:
+        return mode_options[mode] if mode else mode_options
+    except KeyError as e:
+        raise RuntimeError(
+            f"Unrecognized mode={mode}, should be one of: {', '.join(mode_options.keys())}"
+        ) from e
 
 
 def list_options() -> list[str]:
