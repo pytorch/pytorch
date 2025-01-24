@@ -3,6 +3,7 @@
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: windows-arm64-binary-libtorch-release
+
 on:
   push:
     branches:
@@ -19,7 +20,7 @@ env:
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
-  MSVC_VERSION : '14.36'
+  MSVC_VERSION : latest
   AWS_DEFAULT_REGION: us-east-1
 
 jobs:
@@ -51,21 +52,6 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -121,6 +107,10 @@ jobs:
         shell: cmd
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+      - name: Bootstrap Libuv
+        shell: cmd
+        run: |
+          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -208,6 +198,10 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Prepare environment - Bootstrap tests
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/bootstrat_tests.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
