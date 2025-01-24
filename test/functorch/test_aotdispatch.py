@@ -12,7 +12,7 @@ import unittest
 import warnings
 from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
@@ -319,8 +319,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -358,11 +358,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -3960,6 +3960,10 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
             y = torch.ops.aten.dropout.default(x, 0.1, train=False)
@@ -6328,6 +6332,53 @@ metadata incorrectly.
         out.sum().backward()
         self.assertEqual(ref_x.grad, x.grad)
 
+    def test_subclass_parameters_torture_case(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(
+                            torch.ones(3, 4),
+                            TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                        ),
+                        TwoTensor(
+                            TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                            TwoTensor(torch.ones(3, 4), torch.randn(3, 4)),
+                        ),
+                    )
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2.a.b
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ref_out.sum().backward()
+        m.zero_grad()
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+        ref_out2.sum().backward()
+        self.assertEqual(ref_x2.grad, ref_x.grad)
+        m.zero_grad()
+
+        x = ref_x.detach().clone()
+        comp_fn = torch.compile(m, backend="aot_eager", fullgraph=True)
+        out = comp_fn(x)
+        self.assertEqual(ref_out, out)
+        out.sum().backward()
+        self.assertEqual(ref_x.grad, x.grad)
+
     def test_rrelu_with_noise_mutation(self):
         def fn_functional(x):
             noise = torch.ones_like(x)
@@ -6454,9 +6505,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_upsample_bilinear2d_aa"
-    ),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
@@ -6704,8 +6752,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6836,8 +6884,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6860,11 +6908,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

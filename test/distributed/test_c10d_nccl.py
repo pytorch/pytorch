@@ -27,7 +27,6 @@ if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from typing import Dict, List
 
 import test_c10d_common
 from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
@@ -438,6 +437,35 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(ValueError):
             dist.all_reduce(t1)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_cuda_event_cache_mthd_race(self):
+        # This unit test is to test the case when the collective is launched in
+        # a side thread and the thread dies before the cache has been fully recycled.
+        # More details can be found in this issue: https://github.com/pytorch/pytorch/issues/143470.
+        import threading
+
+        # initiate collectives here
+        def init_collective_task(t):
+            dist.all_reduce(t)
+            dist.all_reduce(t)
+            dist.all_reduce(t)
+
+        os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        t = torch.rand(10, 10, device=device)
+        # First allreduce to initialize state.
+        dist.all_reduce(t)
+        dist.all_reduce(t)
+        dist.all_reduce(t)
+        side_thread = threading.Thread(target=init_collective_task, args=(t,))
+        side_thread.start()
+        side_thread.join()
+        torch.cuda.synchronize()
+
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
@@ -506,7 +534,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # should not check on receive buffer
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
@@ -529,7 +557,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
@@ -557,7 +585,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         pynvml.nvmlInit()
 
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         work = c10d.all_reduce(x, async_op=True)
 
@@ -585,7 +613,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         A helper for `test_extra_cuda_context`, if pynvml is NOT avaiable.
         If extra context is created, it would manifest into device 0's memory usage.
         """
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         # Rank 0 takes a snapshot before collective -- this snapshot should have
         # included rank 0's own context.
@@ -623,7 +651,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_extra_cuda_context(self):
         # Check if non-0 ranks would create extra CUDA context on device 0
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         c10d.init_process_group(
             backend="nccl",
             store=store,
@@ -2517,7 +2545,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_broadcast(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2545,7 +2573,7 @@ class WorkHookTest(MultiProcessTestCase):
     def test_on_completion_hook_mixed_ops(self):
         pg = self._get_process_group()
         num_hook_fired = 0
-        durations: List[float] = []
+        durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2586,8 +2614,8 @@ class WorkHookTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -2644,8 +2672,8 @@ class WorkHookTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
 
         pg = self._get_process_group()
-        num_hook_fired: Dict[int, int] = {}
-        durations: Dict[OpType, List[float]] = {}
+        num_hook_fired: dict[int, int] = {}
+        durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
             nonlocal num_hook_fired, durations
@@ -3148,7 +3176,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         ranks = [0, 1]
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
@@ -3161,7 +3189,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         tensors = [
             torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
             for i in range(5)
@@ -3183,7 +3211,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         tensors = [
             torch.full(
                 (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
@@ -3204,7 +3232,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         tensors = [
             torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
             for i in range(5)
@@ -3748,7 +3776,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             return
 
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         input = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             gather_list = [torch.empty_like(input) for _ in range(subgroup.size())]
@@ -3839,7 +3867,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             expected = x + torch.ones((10,), device=device) * (self.rank + 1)
@@ -3863,7 +3891,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
             if async_op:
@@ -3899,7 +3927,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         ops = []
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
@@ -3933,7 +3961,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
             if group_rank:
@@ -3967,7 +3995,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             torch.cuda.set_device(self.rank)
             device = None
         else:
-            device = torch.device("cuda:%d" % self.rank)
+            device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = [{}]
             if group_rank:
@@ -4005,7 +4033,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             torch.cuda.set_device(self.rank)
             device = None
         else:
-            device = torch.device("cuda:%d" % self.rank)
+            device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = [{}]
             if group_rank:
@@ -4037,7 +4065,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((10,), device=device)
         expected = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:

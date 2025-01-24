@@ -95,6 +95,35 @@ class TestCase(InductorTestCase):
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
+        @requires_gpu()
+        @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+        @parametrize(
+            "reduction_func",
+            [
+                torch.prod,
+                torch.sum,
+                torch.argmax,
+                torch.argmin,
+                torch.min,
+                torch.max,
+            ],
+        )
+        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+        @config.patch("triton.use_block_ptr", True)
+        def test_low_precision_reduction(
+            self, input_shape, reduction_func, input_dtype
+        ):
+            @torch.compile
+            def func(a, b, c, d):
+                return reduction_func(a * b * c * d)
+
+            inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", False):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                self.assertTrue(".to(tl.float32)" in code)
+                self.assertEqual(func(*inps), func_opt(*inps))
+
     def test_op_dtype_support(self):
         """
         Triton codegen upcasts values to float32 for certain ops.
@@ -211,18 +240,6 @@ class TestCase(InductorTestCase):
 
         # There should be no downcast, since the input is promoted to float32.
         self.assertNotIn(".to(tl.float16)", code)
-
-    @config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @config.patch("triton.codegen_upcast_to_fp32", False)
-    def test_downcast_div_mod(self):
-        def fn(x, y):
-            return x % y, x / y
-
-        x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
-
-        out, code = run_and_get_code(torch.compile(fn), x, y)
-        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
-        self.assertEqual(fn(x, y), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):

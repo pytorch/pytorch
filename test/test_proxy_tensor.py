@@ -924,6 +924,20 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
+        from torch._guards import detect_fake_mode
+
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):

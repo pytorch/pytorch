@@ -202,6 +202,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "expected mat1 and mat2 to have the same dtype, but got: ",
+              self.dtype(),
+              " != ",
+              other.dtype())
   TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
@@ -718,7 +723,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+      uint64_t batchSize = std::accumulate(A.sizes().begin(), A.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
       uint64_t aRows = A_.size(-2);
       uint64_t bRows = B_.size(-2);
       uint64_t aCols = A_.size(-1);
