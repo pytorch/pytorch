@@ -412,6 +412,9 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
+    # Flush stdout so that any errors in the upload show up last in the logs.
+    sys.stdout.flush()
+
     workflow_info = WorkflowInfo(
         workflow_run_id=args.workflow_run_id,
         run_attempt=args.workflow_run_attempt,
@@ -427,5 +430,3 @@ if __name__ == "__main__":
         debug=args.debug,
     )
     ud.start()
-    # Flush stdout so that any errors in the upload show up last in the logs.
-    sys.stdout.flush()
