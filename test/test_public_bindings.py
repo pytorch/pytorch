@@ -288,6 +288,7 @@ class TestPublicBindings(TestCase):
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
+        # DO NOT add public modules here.
         private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
             # TODO(#133647): Remove the onnx._internal entries after
