@@ -251,7 +251,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ],
     "bitwise_and": MPSSkipInfo(
         TEST_OUT,
-        lower=15.0,  # Regressed in MacOS15 
+        lower=15.0,  # Regressed in MacOS15
     ),
     "bitwise_left": MPSSkipInfo(TEST_OUT),
     "bitwise_left_shift": MPSSkipInfo(
@@ -263,10 +263,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
             NONCONTIGUOUS,
             dtypes=[torch.int64],
         ),
-        MPSSkipInfo(
-            TEST_OUT,
-            lower=15.0  # Regressed in MacOS15
-        ),
+        MPSSkipInfo(TEST_OUT, lower=15.0),  # Regressed in MacOS15
     ],
     "bitwise_or": MPSSkipInfo(
         TEST_OUT,
@@ -341,10 +338,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ),
     "digamma": [
         MPSSkipInfo(NONCONTIGUOUS),
-        MPSSkipInfo(
-            TEST_OUT,
-            lower=15.0  # Regressed in MacOS15
-        ),
+        MPSSkipInfo(TEST_OUT, lower=15.0),  # Regressed in MacOS15
     ],
     "dist": MPSSkipInfo(
         NONCONTIGUOUS,
@@ -894,7 +888,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         NONCONTIGUOUS,
         TEST_OUT,
         variant="polygamma_n_0",
-        lower=15.0  # Regressed in MacOS15
+        lower=15.0,  # Regressed in MacOS15
     ),
     "polar": MPSSkipInfo(TEST_OUT),
     "prod": MPSSkipInfo(
@@ -1005,7 +999,8 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "special.modified_bessel_k1": MPSSkipInfo(UNIMPLEMENTED),
     "special.ndtri": MPSSkipInfo(UNIMPLEMENTED),
     "special.polygamma": MPSSkipInfo(
-        NONCONTIGUOUS, TEST_OUT,
+        NONCONTIGUOUS,
+        TEST_OUT,
         lower=15.0,  # Regressed in MacOS15
     ),
     "special.scaled_modified_bessel_k0": MPSSkipInfo(UNIMPLEMENTED),
