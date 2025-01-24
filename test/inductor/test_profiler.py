@@ -274,9 +274,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             )
 
             self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")
-            # Note: Exact match below could fail if inductor
-            # starts using a different block size for this example program.
-            self.assertEqual(args["kernel_kwargs"], "XBLOCK=16", msg=f"event = {e}")
+            self.assertTrue(
+                args["kernel_kwargs"].startswith("XBLOCK="), msg=f"event = {e}"
+            )
 
         for e in triton_events:
             check_triton_event(e)
