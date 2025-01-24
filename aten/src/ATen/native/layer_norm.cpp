@@ -278,7 +278,7 @@ Tensor rms_norm_symint(
         input.scalar_type(),
         "rms_norm",
         [&] {
-    using limits =  std::numeric_limits<at::scalar_value_type<scalar_t>::type>;
+    using limits = std::numeric_limits<at::scalar_value_type<scalar_t>::type>;
     scalar_t eps_val = eps.value_or(limits::epsilon());
 
     // upcast is needed for fp16 and bf16
