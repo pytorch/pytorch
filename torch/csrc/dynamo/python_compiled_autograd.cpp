@@ -52,148 +52,6 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
-// List[Optional[Tensor]] in Python can't be directly parsed into a
-// List[Tensor], so we need to do this conversion manually.
-static std::vector<at::Tensor> toTensorList(
-    const std::vector<std::optional<at::Tensor>>& inputs) {
-  std::vector<at::Tensor> result;
-  result.reserve(inputs.size());
-  for (const auto& inp : inputs) {
-    if (inp.has_value()) {
-      result.emplace_back(*inp);
-    } else {
-      result.emplace_back();
-    }
-  }
-  return result;
-}
-
-// Binds a function (that represents some backward computation) to Python.
-// All of these functions have a common signature, which is
-// (in C++) (vector<Tensor>, vector<ivalue>) -> vector<Tensor>
-// (in Python) (List[Optional[Tensor]], *packed_args: IValue) ->
-// List[Optional[Tensor]]
-//
-// The vector<Tensor> are the list of gradient Tensors, each of which may be
-// undefined (in C++) which corresponds to None (in Python).
-static std::string bind_function(
-    PyObject* py_compiler,
-    const std::string& fn_name,
-    functional_apply_t fn,
-    std::vector<at::TypePtr> packed_args_schema,
-    bool is_custom_function) {
-  // This is the function that can be called from Python.
-  auto py_func = py::cpp_function(
-      [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
-          std::vector<std::optional<at::Tensor>>& inputs,
-          const py::args& py_args) -> py::object {
-        // py_args is a tuple of PyObject*.
-        // We need to reconstruct a vector<IValue> to invoke `fn`.
-        // To do so, we use the packed_args_schema to convert each PyObject*
-        // to its corresponding C++ type that can be stored into IValue.
-        TORCH_INTERNAL_ASSERT(py_args.size() == packed_args_schema.size());
-        std::vector<at::IValue> args;
-        args.reserve(py_args.size());
-        auto tuple_args = jit::tuple_slice(py_args);
-        for (uint64_t idx = 0; idx < packed_args_schema.size(); idx++) {
-          args.emplace_back(jit::toIValue(
-              tuple_args[idx], packed_args_schema[idx], std::nullopt));
-        }
-        // None in Python corresponds to undefined Tensor in C++
-        auto inputs_ = toTensorList(inputs);
-        auto outputs = fn(inputs_, args);
-        return jit::toPyObject(at::IValue(outputs));
-      });
-  py::handle handle(py_compiler);
-  auto result =
-      handle.attr("bind_function")(fn_name, py_func, is_custom_function);
-  return result.cast<std::string>();
-}
-
-// Invokes py_compiler.method_name(fn_name, inputs, packed_args,
-// output_metadata)
-static variable_list call_function(
-    PyObject* py_compiler,
-    const char* method_name,
-    const std::string& fn_name,
-    const variable_list& inputs,
-    const ivalue_list& packed_args,
-    const c10::IValue& output_metadata) {
-  // convert ivalue_list -> PyObject*
-  PyObject* py_packed_args =
-      PyTuple_New(static_cast<Py_ssize_t>(packed_args.size()));
-  for (const auto i : c10::irange(packed_args.size())) {
-    py::object obj = jit::toPyObject(packed_args[i]);
-    Py_INCREF(obj.ptr());
-    PyTuple_SET_ITEM(py_packed_args, i, obj.ptr());
-  }
-
-  // call the corresponding method on the py_compiler
-  py::handle handle(py_compiler);
-  py::object stuff = handle.attr(method_name)(
-      fn_name,
-      inputs,
-      py::handle(py_packed_args),
-      jit::toPyObject(output_metadata));
-
-  // Convert the output from PyObject* to vector<Tensor>
-  auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
-  return toTensorList(tmp);
-}
-
-struct PyCompilerInterfaceImpl : PyCompilerInterface {
-  std::string bind_function(
-      PyObject* py_compiler,
-      const std::string& fn_name,
-      functional_apply_t fn,
-      std::vector<at::TypePtr> packed_args_schema,
-      bool is_custom_function = false) override {
-    return torch::dynamo::autograd::bind_function(
-        py_compiler,
-        fn_name,
-        std::move(fn),
-        std::move(packed_args_schema),
-        is_custom_function);
-  }
-  variable_list call_function(
-      PyObject* py_compiler,
-      const char* method_name,
-      const std::string& fn_name,
-      const variable_list& inputs,
-      const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) override {
-    return torch::dynamo::autograd::call_function(
-        py_compiler,
-        method_name,
-        fn_name,
-        inputs,
-        packed_args,
-        output_metadata);
-  }
-  variable_list call_copy_slices_prologue(
-      PyObject* py_compiler,
-      const variable_list& inputs,
-      const at::TensorGeometry& base,
-      const at::TensorGeometry& view) override {
-    py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("call_copy_slices_prologue")(inputs, base, view);
-    return py::cast<std::vector<at::Tensor>>(stuff);
-  }
-  variable_list call_copy_slices_epilogue(
-      PyObject* py_compiler,
-      const std::vector<bool>& needs_input_grad,
-      const at::Tensor& result,
-      const variable_list& res,
-      const at::Tensor& grad_slice) override {
-    py::handle handle(py_compiler);
-    py::object stuff = handle.attr("call_copy_slices_epilogue")(
-        needs_input_grad, result, res, grad_slice);
-    auto output = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
-    return toTensorList(output);
-  }
-};
-
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -228,22 +86,6 @@ static PyObject* check(PyObject* pyresult) {
 static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
-}
-
-static variable_list validate_outputs(
-    const variable_list& outputs,
-    const ivalue_list& args) {
-  auto r = PackedArgs(args);
-  auto value = r.unpack<std::vector<std::optional<InputMetadata>>>();
-  auto new_outputs = outputs;
-
-  torch::autograd::validate_outputs(
-      value, new_outputs, [&](const std::string& msg) {
-        std::ostringstream ss;
-        ss << "[Compiled Autograd Tracing:]" << msg;
-        return ss.str();
-      });
-  return new_outputs;
 }
 
 // snapshot of python verbose logging toggle
@@ -656,21 +498,6 @@ static void set_ivalue_proxies(
   }
 }
 
-static at::Tensor call_accumulate(
-    PyObject* py_compiler,
-    const at::Tensor& old_var,
-    const at::Tensor& new_var) {
-  if (!old_var.defined()) {
-    return new_var;
-  }
-  if (!new_var.defined()) {
-    return old_var;
-  }
-  py::handle handle(py_compiler);
-  py::object stuff = handle.attr("accumulate")(old_var, new_var);
-  return py::cast<at::Tensor>(stuff);
-}
-
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -830,8 +657,6 @@ static CacheNode* _compiled_autograd_impl(
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
-    setPyCompilerInterface(std::make_unique<PyCompilerInterfaceImpl>());
-
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
     InputBuffers input_buffers;
@@ -898,52 +723,16 @@ static CacheNode* _compiled_autograd_impl(
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+
       saved.debug_asserts();
       saved.before(call.node->next_edges());
-
-      auto input_metadata = get_input_metadata(call.node->next_edges());
-      TORCH_INTERNAL_ASSERT(input_metadata.size() == outputs.size());
-
-      // Lazily bind the `validate_outputs` function to Python.
-      static c10::once_flag flag;
-      c10::call_once(flag, [&]() {
-        auto schema = std::vector<at::TypePtr>{IValuePacker<
-            std::vector<std::optional<InputMetadata>>>::packed_type()};
-        bind_function(
-            py_compiler.get(),
-            "validate_outputs",
-            validate_outputs,
-            schema,
-            false);
-      });
-
-      // Don't emit validate_outputs nodes that follow a CompiledBackward node.
-      // These nodes would otherwise prevent reordering of accumulate_grad
-      // nodes.
-      //
-      // Note that this will not cause correctness issues, because
-      // 1) AOTAutograd already coerces gradients to have the same metadata as
-      // the inputs. 2) the AOTAutograd graph already has the necessary
-      // aten::sum_to nodes in it (so it doesn't need to rely on
-      // validate_outputs to handle that).
-      //
-      // However, we may be dropping some (edge case) safety checks compared to
-      // eager: a backward that would have errored out in eager may not error
-      // out in compiled autograd (for example, if the user provided an
-      // incorrect number of gradients).
-      if (!call.node->is_aot_backward()) {
-        PackedArgs args;
-        args.pack(input_metadata);
-        ivalue_list input_metadata_state = std::move(args).vec();
-        outputs = call_function(
-            py_compiler,
-            "validate_outputs",
-            "validate_outputs",
-            outputs,
-            input_metadata_state,
-            input_metadata_state[0]);
-      }
-
+      validate_outputs(
+          call.node->next_edges(), outputs, [&](const std::string& msg) {
+            std::ostringstream ss;
+            ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
+               << msg;
+            return ss.str();
+          });
       saved.after(call.node->next_edges());
       saved.debug_asserts();
 
@@ -965,14 +754,13 @@ static CacheNode* _compiled_autograd_impl(
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
-          auto& buffer = input_buffers.lookup(next.function.get());
-          buffer.buffer[next.input_nr] = call_accumulate(
-              py_compiler, buffer.buffer[next.input_nr], output);
+          input_buffers.lookup(next.function.get())
+              .add(
+                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
         }
       }
     }
 
-    resetPyCompilerInterface();
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
     TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
     TORCH_CHECK(
@@ -1086,9 +874,11 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   }
 
   if (prior_compiler == nullptr) {
+    Py_INCREF(Py_None);
     prior_compiler = Py_None;
   }
   PyObject* prior = PyTuple_New(2);
+  Py_INCREF(prior_dynamic);
   PyTuple_SET_ITEM(prior, 0, prior_compiler);
   PyTuple_SET_ITEM(prior, 1, prior_dynamic);
   return prior;

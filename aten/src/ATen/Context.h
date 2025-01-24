@@ -119,6 +119,7 @@ class TORCH_API Context {
 
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -336,8 +337,6 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
-  bool allowFP16AccumulationCuBLAS() const;
-  void setAllowFP16AccumulationCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -419,7 +418,6 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
-  bool allow_fp16_accumulation_cublas = false;
   bool enabled_mkldnn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
@@ -548,6 +546,10 @@ inline bool hasOpenMP() {
 
 inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
 }
 
 inline bool hasLAPACK() {
