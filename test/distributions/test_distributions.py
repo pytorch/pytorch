@@ -1476,6 +1476,26 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(actual, expected_with_expand)
 
     @parametrize("Dist, params", _get_examples())
+    @parametrize("fg", [False, True])
+    def test_compile(self, Dist, params, fg):
+        val = Distribution._validate_args
+        Distribution.set_default_validate_args(False)
+        params = _materialize_example(params)
+        try:
+            torch.compiler.reset()
+
+            def func(dist_cls, ps):
+                dist = dist_cls(**ps)
+                sample = dist.sample()
+                return dist.log_prob(sample)
+
+            func(Dist, params)
+            func = torch.compile(func, fullgraph=fg)
+            func(Dist, params)
+        finally:
+            Distribution.set_default_validate_args(val)
+
+    @parametrize("Dist, params", _get_examples())
     def test_repr(self, Dist, params):
         params = _materialize_example(params)
         dist = Dist(**params)
