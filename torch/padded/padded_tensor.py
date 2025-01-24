@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 
+from numpy import dtype
+
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -640,6 +642,24 @@ class EmbeddingDenseBackwardOp(PaddedOp):
         return [[num_weights] + list(grad_output_shape[len(indices_shape) :])]
 
 
+@register_padded_op(["constant_pad_nd"])
+class ConstantPadNdOp(PaddedOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shapes(self, input_shapes, args, kwargs):
+        input_shape = input_shapes[0]
+        padding = args[1]
+
+        # Right now, support only a padding on the innermost dimension.
+        # TODO: Parse the list of [pad_left, pad_right, pad_left, pad_right, ...]. Starting from the
+        # innermost dimension.
+        assert len(padding) == 2
+        pad_size = padding[1] - padding[0]
+
+        return [torch.Size(list(input_shape[:-1]) + [input_shape[-1] + pad_size])]
+
+
 @register_padded_op(
     [
         "slice",
@@ -721,12 +741,13 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
 
 def log_op_not_in_op_table(opname: str, args, out):
     """Logs the function name and the shapes of its arguments and outputs."""
-    log("Function '%s' is not implemented for PaddedTensor" % opname)
-    log(
+    print("Function '%s' is not implemented for PaddedTensor" % opname)
+    print("arg types", [type(arg) for arg in args])
+    print(
         "arg shapes",
         pytree.tree_map_only(PaddedTensor, lambda x: x.shape, args),
     )
-    log("out shape", pytree.tree_map_only(PaddedTensor, lambda x: x.shape, out))
+    print("out shape", pytree.tree_map_only(PaddedTensor, lambda x: x.shape, out))
 
 
 def get_strides(shape: torch.Size) -> List[int]:
@@ -927,7 +948,10 @@ class PaddedTensor(torch.Tensor):
         if tensor.shape != self.shape:
             pad = get_pad(tensor.shape, multipliers)
             self.tensor = F.pad(
-                input=tensor, pad=pad, mode="constant", value=neutral_element
+                input=tensor,
+                pad=pad,
+                mode="constant",
+                value=neutral_element,
             )
         else:
             self.tensor = tensor
