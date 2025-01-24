@@ -107,7 +107,6 @@ _ref_test_ops = tuple(
 if IS_MACOS:
     op_db = mps_op_db(op_db)
     python_ref_db = mps_op_db(python_ref_db)
-    ops_and_refs = op_db + python_ref_db
 
 
 def reduction_dtype_filter(op):
