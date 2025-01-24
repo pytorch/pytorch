@@ -723,7 +723,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+      uint64_t batchSize = std::accumulate(A.sizes().begin(), A.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
       uint64_t aRows = A_.size(-2);
       uint64_t bRows = B_.size(-2);
       uint64_t aCols = A_.size(-1);

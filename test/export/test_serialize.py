@@ -542,6 +542,8 @@ class TestDeserialize(TestCase):
                 # Check "val" metadata
                 val1 = node1.meta.get("val", None)
                 val2 = node2.meta.get("val", None)
+                self.assertEqual(len(node1.args), len(node2.args))
+                self.assertEqual(set(node1.kwargs.keys()), set(node2.kwargs.keys()))
                 if val1 is None or val2 is None:
                     # Either both are None
                     self.assertEqual(val1, val2)
@@ -981,6 +983,20 @@ class TestDeserialize(TestCase):
         g = Module()
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
         self.check_graph(g, inputs, _check_meta=False)
+
+    def test_positional_argument_with_default_value(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.randn(10, 10)
+                self.bias = torch.randn(10)
+
+            def forward(self, x):
+                # bias has an default value here but it should be preserved
+                # as a positional argument.
+                return torch.ops.aten.linear.default(x, self.weight, self.bias)
+
+        self.check_graph(MyLinear(), (torch.randn(10, 10),))
 
     def test_tensor_tensor_list(self):
         with torch.library._scoped_library("_export", "FRAGMENT") as lib:

@@ -3,7 +3,7 @@
 import os
 
 import psutil
-import pytorch_openreg
+import pytorch_openreg  # noqa: F401
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -28,7 +28,7 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(pytorch_openreg.NUM_DEVICES):
+        for i in range(torch.accelerator.device_count()):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_factory(self):
