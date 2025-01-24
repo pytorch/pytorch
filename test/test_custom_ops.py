@@ -1003,7 +1003,7 @@ def _(x):
 
             del foo
 
-        with self.assertRaisesRegex(ValueError, r"For example, typing.List\[int\]"):
+        with self.assertRaisesRegex(ValueError, r"For example, list\[int\]"):
             # test that we propose a correct and supported type.
             @torch.library.custom_op(f"{TestCustomOp.test_ns}::foo", mutates_args={})
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
@@ -3990,33 +3990,33 @@ class TestTypeConversion(TestCase):
         ]
 
     def test_simple_tuple(self):
-        self.assertEqual(List, tuple_to_list(Tuple))
+        self.assertEqual(list, tuple_to_list(Tuple))
 
     def test_supported_types(self):
         for t in self.supported_base_types:
             result_type = tuple_to_list(Tuple[t, t, t])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
             result_type = tuple_to_list(Tuple[t])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
     def test_optional(self):
         for t in self.supported_base_types:
             result_type = tuple_to_list(Tuple[t, Optional[t]])
-            self.assertEqual(result_type, List[Optional[t]])
+            self.assertEqual(result_type, list[Optional[t]])
 
             result_type = tuple_to_list(Tuple[t, t, Optional[t]])
-            self.assertEqual(result_type, List[Optional[t]])
+            self.assertEqual(result_type, list[Optional[t]])
 
             result_type = tuple_to_list(Tuple[t, ...])
-            self.assertEqual(result_type, List[t])
+            self.assertEqual(result_type, list[t])
 
     def test_mixed_types(self):
         result_type = tuple_to_list(Tuple[int, float])
-        self.assertEqual(result_type, List[typing.Union[int, float]])
+        self.assertEqual(result_type, list[typing.Union[int, float]])
 
         result_type = tuple_to_list(Tuple[int, float, str])
-        self.assertEqual(result_type, List[typing.Union[int, float, str]])
+        self.assertEqual(result_type, list[typing.Union[int, float, str]])
 
 
 only_for = ("cpu", "cuda")
