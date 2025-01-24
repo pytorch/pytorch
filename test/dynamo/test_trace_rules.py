@@ -124,6 +124,17 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
     non_c_binding_in_graph_functions = set()
     torch_name_rule_map = {}
 
+    # In some platforms, these functions were loaded as classes instead of functions.
+    # To mitigate these weired cases, we need this special check.
+    def is_special_functions(obj):
+        return hashable(obj) and obj in {
+            torch._C._cuda_isCurrentStreamCapturing,
+            torch._C._graph_pool_handle,
+            torch._C._cuda_beginAllocateToPool,
+            torch._C._cuda_endAllocateCurrentStreamToPool,
+            torch._C._cuda_releasePool,
+        }
+
     # Add obj to c_binding_in_graph_functions set or non_c_binding_in_graph_functions set
     # if it's a torch function or method.
     # This is used to generate the in graph function list based on heuristic.
@@ -141,7 +152,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                 types.MethodDescriptorType,
                 types.WrapperDescriptorType,
             ),
-        ):
+        ) or is_special_functions(obj):
             torch_name_rule_map[
                 f"{module.__name__}.{name}"
             ] = TorchInGraphFunctionVariable
@@ -207,7 +218,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._subclasses",
             "torch._tensor",
             "torch._tensor_str",
-            "torch._utils",
             "torch._utils_internal",
             "torch._vmap_internals",
             "torch.compiler",

@@ -998,7 +998,7 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
-        fake_deps = OrderedSet(
+        fake_deps: OrderedSet[Dep] = OrderedSet(
             dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
         )
 
@@ -3070,7 +3070,7 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        common_buf_names: tuple[str, ...],
+        common_buf_names: Union[tuple[str], OrderedSet[str]],
     ) -> str:
         """
         Try to decide reasons why fusion fail due to no shared memory even though
@@ -3092,7 +3092,7 @@ class Scheduler:
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
-            if sympy_product(lhs_dep.size) != sympy_product(rhs_dep.size):
+            if sympy_product(lhs_dep.size) != sympy_product(rhs_dep.size):  # type: ignore[attr-defined]
                 reasons[buf_name] = "broadcast"
                 continue
 
@@ -3174,20 +3174,20 @@ class Scheduler:
         # Pick the largest buffer to guide the loop reordering
         _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
-        if lhs_dep.num_vars != rhs_dep.num_vars:
+        if lhs_dep.num_vars != rhs_dep.num_vars:  # type: ignore[attr-defined]
             # this can happen due to we don't merge loops.
             # We can not do loop reordering in this case right now
             # Simply returning true if the two Deps are the same after
             # normalization (merging loops)
-            if lhs_dep.normalize() == rhs_dep.normalize():
+            if lhs_dep.normalize() == rhs_dep.normalize():  # type: ignore[attr-defined]
                 return self.dep_size_hint(lhs_dep)
             return 0
 
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
-            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)  # type: ignore[arg-type]
         elif not node2.is_reduction():
-            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
+            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)  # type: ignore[arg-type]
         else:
             loop_ordering_log.debug(
                 "Don't reorder loops since both nodes are reductions: %s v.s. %s",
