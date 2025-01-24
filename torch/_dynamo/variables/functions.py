@@ -691,14 +691,6 @@ class SkipFunctionVariable(VariableTracker):
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutation_type=ValueMutationNew()
             )
-        elif self.value is functools.wraps and not kwargs and len(args) == 1:
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -878,6 +870,25 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 REDUCE_OP_TO_STR[reduce_op]
             )
         return self.replacement_var.call_function(tx, args, kwargs)
+
+
+class FunctoolsWrapsVariable(UserFunctionVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if not kwargs and len(args) == 1:
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    return fn.clone(wrapped_fn=args[0])
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps)
+
+        return super().call_function(tx, args, kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):

@@ -48,7 +48,6 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -2478,7 +2477,6 @@ class CheckFunctionManager:
                 self.guard_manager.root, output_graph.local_scope, 50
             )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
-            CompileEventLogger.compilation_metric(guard_latency_us=latency)
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(

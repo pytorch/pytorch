@@ -66,7 +66,7 @@ def _lazy_init() -> None:
         if not _is_compiled():
             raise AssertionError(
                 "Torch not compiled with MTIA enabled. "
-                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "Ensure you have `import mtia.host_runtime.torch_mtia.dynamic_library` in your python "
                 "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
                 "your target dependency!"
             )
