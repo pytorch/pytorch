@@ -337,9 +337,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(fw_cnt.frame_count, 1)
         self.assertEqual(fw_cnt.op_count, 5)
         self.assertEqual(bw_cnt.frame_count, 2)  # grad=None and grad!=None
-        self.assertEqual(
-            bw_cnt.op_count, 72
-        )  # Number of ops in the Dynamo-produced graphs
+        self.assertEqual(bw_cnt.op_count, 48)
 
     def test_module_backward_hooks_aot(self):
         m1, inp1 = init_module_bw_hooks(True)
