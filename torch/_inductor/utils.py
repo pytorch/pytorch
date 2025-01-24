@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import importlib
 import inspect
 import io
 import itertools
@@ -26,18 +27,13 @@ from io import StringIO
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    Iterable,
-    List,
     NamedTuple,
     Optional,
     Protocol,
-    Sequence,
     TYPE_CHECKING,
     TypeVar,
     Union,
-    ValuesView,
 )
 from typing_extensions import Concatenate, dataclass_transform, ParamSpec, TypeGuard
 from unittest import mock
@@ -49,6 +45,8 @@ from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence, ValuesView
+
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from .codegen.common import WorkspaceArg
     from .graph import SaveOutputCodeContext
@@ -95,7 +93,7 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-VarRanges = Dict[sympy.Expr, sympy.Expr]
+VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
@@ -309,7 +307,7 @@ def _type_of(key):
 
 def convert_shape_to_inductor(
     lst: Iterable[Union[int, torch.SymInt]]
-) -> List[sympy.Expr]:
+) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -320,7 +318,7 @@ def convert_shape_to_inductor(
 
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]]
-) -> List[Union[int, torch.SymInt]]:
+) -> list[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
@@ -434,7 +432,7 @@ def precompute_method(obj: Any, method: str):
     setattr(obj, method, lambda: result)
 
 
-def precompute_methods(obj: Any, methods: List[str]):
+def precompute_methods(obj: Any, methods: list[str]):
     """Replace methods with new methods that returns a precomputed constants."""
     for method in methods:
         precompute_method(obj, method)
@@ -452,7 +450,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x: tuple[_T, ...]) -> List[_T]:
+def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
     if len(x) == 0:
         return []
 
@@ -717,7 +715,7 @@ def sympy_index_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.Expr:
     """
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.
@@ -805,7 +803,7 @@ def output_node(gm: torch.fx.GraphModule):
     return last_node
 
 
-_registered_caches: List[Any] = []
+_registered_caches: list[Any] = []
 
 
 def clear_on_fresh_inductor_cache(obj: Any):
@@ -859,20 +857,25 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            shutil.rmtree(inductor_cache_dir)
+            shutil.rmtree(
+                inductor_cache_dir,
+                # Let's not fail if we can't clean up the temp dir. Also note that for
+                # Windows, we can't delete the loaded modules because the module binaries
+                # are open.
+                onerror=lambda func, path, exc_info: log.warning(
+                    "Failed to remove temporary cache dir at %s",
+                    inductor_cache_dir,
+                    exc_info=exc_info,
+                ),
+            )
     except Exception:
-        if not _IS_WINDOWS:
-            """
-            Windows can't delete the loaded modules, because the modules binaries are opened.
-            TODO: discuss if have better solution to handle this issue.
-            """
-            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-            raise
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
     finally:
         clear_inductor_caches()
 
 
-def argsort(seq) -> List[int]:
+def argsort(seq) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -881,7 +884,7 @@ def argsort(seq) -> List[int]:
 
 def argsort_sym(
     shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
-) -> List[int]:
+) -> list[int]:
     def cmp(a, b):
         a_idx, a_val = a
         b_idx, b_val = b
@@ -1181,7 +1184,7 @@ def use_max_autotune() -> bool:
     )
 
 
-def _use_template_for_gpu(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+def _use_template_for_gpu(layout, allowed_layout_dtypes: list[torch.dtype]) -> bool:
     return (
         is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
@@ -1402,7 +1405,7 @@ def use_cpp_gemm_template(
     if not config.cpp.weight_prepack:
         return False
 
-    int8_gemm = mat1.get_dtype() == torch.uint8
+    int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
@@ -1468,10 +1471,10 @@ def _run_and_get_code_for_context(
     for_context: SaveOutputCodeContext,
     args: P.args,
     kwargs: P.kwargs,
-) -> tuple[_T, List[str]]:
+) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str, context: SaveOutputCodeContext):
         if context == for_context:
@@ -1483,7 +1486,7 @@ def _run_and_get_code_for_context(
     return result, source_codes
 
 
-def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     from .graph import SaveOutputCodeContext
 
     return _run_and_get_code_for_context(
@@ -1491,7 +1494,7 @@ def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, List[str]]:
     )
 
 
-def run_and_get_code_before_compile(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+def run_and_get_code_before_compile(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     from .graph import SaveOutputCodeContext
 
     return _run_and_get_code_for_context(
@@ -1499,7 +1502,7 @@ def run_and_get_code_before_compile(fn, *args, **kwargs) -> tuple[Any, List[str]
     )
 
 
-def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, List[str]]:
+def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1520,7 +1523,7 @@ def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering, SaveOutputCodeContext
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str, context: SaveOutputCodeContext):
         if context == SaveOutputCodeContext.AFTER_COMPILE:
@@ -2241,13 +2244,13 @@ def shape_env_from_inputs(inputs: Sequence[InputType]):
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[List[InputType]], Any],
+    model: Callable[[list[InputType]], Any],
     inputs_to_check: Sequence[int],
-) -> Callable[[List[InputType]], Any]:
+) -> Callable[[list[InputType]], Any]:
     if len(inputs_to_check) == 0:
         return model
 
-    def run(new_inputs: List[InputType]):
+    def run(new_inputs: list[InputType]):
         copy_misaligned_inputs(new_inputs, inputs_to_check)
         return model(new_inputs)
 
@@ -2267,7 +2270,7 @@ def clone_preserve_strides(x: torch.Tensor):
 
 
 def copy_misaligned_inputs(
-    new_inputs: List[InputType], check_inputs_idxs: Sequence[int]
+    new_inputs: list[InputType], check_inputs_idxs: Sequence[int]
 ) -> None:
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
@@ -2432,7 +2435,7 @@ class OpDtypeRule:
     override_return_dtype: Optional[torch.dtype]
 
 
-op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+op_dtype_propagation_rules: dict[str, OpDtypeRule] = {}
 
 
 def register_op_dtype_propagation_rules(
@@ -2469,7 +2472,7 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     return wrap(cls)
 
 
-def get_donated_idxs() -> Optional[List[int]]:
+def get_donated_idxs() -> Optional[list[int]]:
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
@@ -2486,3 +2489,43 @@ def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
                     origin.name for origin in node.node.origins
                 ]
+
+
+class TritonAttrsDescriptorVersion(enum.Enum):
+    V0_NO_TRITON = 0
+    V1_COMPILER = 1  # triton.compiler.compiler.AttrsDescriptor
+    V2_BACKENDS = 2  # triton.backends.compiler.AttrsDescriptor
+    V3_BACKENDS_TUPLE = (
+        3  # triton.backends.compiler.AttrsDescriptor, but with tuple support
+    )
+    V4_DICT = 4  # a raw dict
+
+
+@functools.lru_cache(None)
+def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
+    if importlib.util.find_spec("triton") is None:
+        return TritonAttrsDescriptorVersion.V0_NO_TRITON
+
+    import triton.backends.compiler
+    import triton.compiler.compiler
+
+    if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # Triton 3.2.0
+        # AttrsDescriptor was moved from triton.compiler.compiler to triton.backends.compiler.
+        # AttrsDescriptor and its serialization format were also changed.
+
+        # TODO: implement V3_BACKENDS_TUPLE
+        # On Dec 9, 2024, tuple support (triton #5220) was implemented and breaks handling.
+        # We don't have a way to detect this (and haven't implemented this version)
+        return TritonAttrsDescriptorVersion.V2_BACKENDS
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        # Triton 3.0.0
+        return TritonAttrsDescriptorVersion.V1_COMPILER
+    else:
+        # After Jan 1, 2025
+        # AttrsDescriptor was removed and replaced with a raw dict.
+        return TritonAttrsDescriptorVersion.V4_DICT
+
+
+def triton_version_uses_attrs_dict() -> bool:
+    return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
