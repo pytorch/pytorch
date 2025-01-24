@@ -84,6 +84,7 @@ default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e
 
 isSM8XDevice = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 7), (8, 9)]
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
+isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 0)
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
@@ -1504,7 +1505,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice or not isSM120Device,
         "Does not support fused SDPA or not SM86+ hardware",
     )
     @parametrize("head_dim", [193, 256])
@@ -3068,7 +3069,7 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize(
         "head_dim",
-        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64],
+        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 and not isSM120Device else [8, 16, 32, 64],
     )
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
@@ -3178,7 +3179,7 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize(
         "head_dim",
-        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64],
+        [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 and not isSM120Device else [8, 16, 32, 64],
     )
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.0, 0.22])
@@ -3302,8 +3303,8 @@ class TestSDPACudaOnly(NNTestCase):
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: list[int]):
-        if isSM8XDevice and head_dim in range(193, 256 + 1):
+                                               scale: str, enable_gqa: bool, n_heads: List[int]):
+        if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
@@ -3382,7 +3383,7 @@ class TestSDPACudaOnly(NNTestCase):
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
         # backward for flash attention on sm86, sm87, and sm89 for headdim >= 193 currently disabled
-        if isSM8XDevice and head_dim in range(193, 256):
+        if isSM8XDevice or isSM120Device and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
 
