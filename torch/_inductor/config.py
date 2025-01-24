@@ -1164,6 +1164,13 @@ class aot_inductor:
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
+    # Compiler compilation debug info
+    # 1: Dumps the original graph out to repro.py if compilation fails
+    # 2: Dumps a minifier_launcher.py if aoti fails.
+    # 3: Always dumps a minifier_launcher.py. Good for segfaults.
+    # 4: Dumps a minifier_launcher.py if the accuracy fails.
+    repro_level: int = int(os.environ.get("AOTINDUCTOR_REPRO_LEVEL", 2))
+
     # Dictionary of presets that can be passed in
     presets: dict[str, Any] = {}
 
@@ -1418,6 +1425,8 @@ _save_config_ignore: list[str] = [
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
     "pre_grad_custom_pass",
+    "aot_inductor.repro_level",
+    "aot_inductor.dump_aoti_minifier",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
