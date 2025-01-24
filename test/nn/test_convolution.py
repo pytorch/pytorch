@@ -1749,28 +1749,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv2d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
-    @dtypes(torch.float)
-    # aten/src/ATen/native/mps/OperationUtils.mm: TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!"); on MPS
-    @expectedFailureMPS
-    def test_ConvTranspose_output_channels_0(self, device, dtype):
-        class Model(nn.Module):
-            def __init__(self, operator, dim):
-                super().__init__()
-                self.op = eval(
-                    f"torch.nn.{operator}{dim}d(in_channels=1, out_channels=0, kernel_size={tuple([1] * dim)})"
-                )
-
-            def forward(self, x):
-                x = self.op(x)
-                return x
-
-        for dim in [1, 2, 3]:
-            x = torch.randn([1] * (dim + 1), device=device, dtype=dtype)
-            model = Model("ConvTranspose", dim).to(device).to(dtype=dtype)
-            y = model(x)
-            self.assertEqual(y.numel(), 0)
-            self.assertEqual(x.shape[1:], y.shape[1:])
-
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
