@@ -85,7 +85,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "intel-sycl-rt==2025.0.2 | "
         "tcmlib==1.2.0 | "
         "umf==0.9.1 | "
-        "intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "intel-pti==0.10.0"
     ),
 }
 
@@ -331,11 +331,7 @@ def generate_wheels_matrix(
             )
 
             # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS or Windows
-            if (
-                gpu_arch_type in ["xpu", "cpu-s390x"]
-                or os == "macos-arm64"
-                or os == "windows"
-            ) and python_version == "3.13t":
+            if (gpu_arch_type in ["xpu", "cpu-s390x"]) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
