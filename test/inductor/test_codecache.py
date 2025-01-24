@@ -1127,12 +1127,12 @@ class TestFxGraphCache(TestCase):
 
 
 class TestFxGraphCacheHashing(TestCase):
-    def test_tensor_constants(self):
+    def test_parameter_constants(self):
         """
-        Test the hashing of tensor constants.
+        Test the hashing of parameter constants.
         """
-        small = torch.tensor(list(range(8)))
-        large = torch.tensor(list(range(32)))
+        small = torch.nn.Parameter(torch.rand(8))
+        large = torch.nn.Parameter(torch.rand(32))
 
         self.assertTrue(GraphLowering.can_inline_constant(small))
         self.assertFalse(GraphLowering.can_inline_constant(large))
@@ -1146,8 +1146,11 @@ class TestFxGraphCacheHashing(TestCase):
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
-        # If include_non_inlined=False, we only hash the values of small tensors.
-        pickler = FxGraphCachePickler(gm, False)
+        # For frozen parameters, we only hash the values of small tensors.
+        gm._has_frozen_params = True
+        gm._frozen_param0 = small
+        gm._frozen_param1 = large
+        pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)

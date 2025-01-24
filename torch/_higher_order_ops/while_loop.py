@@ -451,8 +451,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
-            (functional_cond_fn, "cond_fn"),
-            (functional_body_fn, "body_fn"),
+            (cond_fn, "cond_fn"),
+            (body_fn, "body_fn"),
         ]:
             if _has_potential_branch_input_mutation(
                 fn, unwrapped_inputs, pre_dispatch=pre_dispatch

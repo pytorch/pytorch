@@ -4,7 +4,6 @@ import glob
 import importlib
 import importlib.abc
 import os
-import platform
 import re
 import shlex
 import shutil
@@ -1015,7 +1014,7 @@ def CppExtension(name, sources, *args, **kwargs):
     if not kwargs.get('py_limited_api', False):
         # torch_python uses more than the python limited api
         libraries.append('torch_python')
-    if IS_WINDOWS and platform.machine().lower() != "arm64":
+    if IS_WINDOWS:
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -2056,7 +2055,7 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0', '10.1', '12.0']
+                        '10.0', '10.0a', '10.1', '10.1a', '12.0', '12.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
