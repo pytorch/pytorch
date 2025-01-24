@@ -16,17 +16,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import (
-    Any,
-    Callable,
-    Container,
-    Dict,
-    Hashable,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -75,13 +65,15 @@ from .triton_compat import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Container, Hashable
+
     LauncherType = Any
 
 
 log = logging.getLogger(__name__)
 
 
-def get_total_reduction_numel(numels: Dict[str, int]) -> int:
+def get_total_reduction_numel(numels: dict[str, int]) -> int:
     return conditional_product(
         *[numel for prefix, numel in numels.items() if prefix_is_reduction(prefix)]
     )
@@ -92,7 +84,7 @@ def autotune_hints_to_configs(
     size_hints,
     block_size: int,
     device_props: DeviceProperties,
-) -> List[Config]:
+) -> list[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
     suggestions about what to try for autotuning. One reason to do this is if there are
@@ -103,7 +95,7 @@ def autotune_hints_to_configs(
     configs to try.
     """
     xyz_options: tuple[tuple[int, Optional[int], Optional[int]], ...]
-    configs: List[Config] = []
+    configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
             if len(size_hints) == 1:
@@ -179,14 +171,14 @@ class CachingAutotuner(KernelInterface):
         triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
-        mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
+        mutated_arg_names: list[str],  # see [Note: clone mutated buffers]
         optimize_mem,
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: Optional[str] = None,
-        reset_to_zero_arg_names: Optional[List[str]] = None,
+        reset_to_zero_arg_names: Optional[list[str]] = None,
     ):
         super().__init__()
 
@@ -222,8 +214,8 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.compile_results: List[TritonCompileResult] = []
-        self.launchers: List[LauncherType] = []
+        self.compile_results: list[TritonCompileResult] = []
+        self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
@@ -311,7 +303,7 @@ class CachingAutotuner(KernelInterface):
             assert device_prop.regs_per_multiprocessor
             assert device_prop.max_threads_per_multi_processor
             assert device_prop.multi_processor_count
-            seen_configs: OrderedSet[Config] = OrderedSet(self.configs)
+            seen_config_hashes: Optional[OrderedSet[Hashable]] = None
             warp_size = device_prop.warp_size or 32
             for result in self.compile_results:
                 triton_config = result.config
@@ -375,9 +367,14 @@ class CachingAutotuner(KernelInterface):
                 )
                 new_config.kwargs[largest_rkwarg] //= 2
 
-                if new_config in seen_configs:
+                if seen_config_hashes is None:
+                    seen_config_hashes = OrderedSet(
+                        map(triton_config_to_hashable, self.configs)
+                    )
+                new_config_hash = triton_config_to_hashable(new_config)
+                if new_config_hash in seen_config_hashes:
                     continue
-                seen_configs.add(new_config)
+                seen_config_hashes.add(new_config_hash)
                 log.debug(
                     "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
                     largest_rkwarg,
@@ -429,7 +426,7 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         assert (
             not self.launchers
         ), "pickle should not be called with after make_launchers()"
@@ -438,7 +435,7 @@ class CachingAutotuner(KernelInterface):
             "lock": None,
         }
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.lock = threading.Lock()
 
@@ -635,7 +632,7 @@ class CachingAutotuner(KernelInterface):
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
-    ) -> tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[list[Any], dict[str, Any]]:
         """
         Prepare new args and kwargs by cloning any in-place buffers
         (that are not in the provided exclusion list), to avoid autotune
@@ -658,7 +655,7 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    def clone_args(self, *args, **kwargs) -> tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
@@ -887,15 +884,15 @@ class TritonCompileResult:
 
     @staticmethod
     @functools.lru_cache(32)
-    def _kernel_metadata_cls(fields: Tuple[str, ...]) -> Any:
+    def _kernel_metadata_cls(fields: tuple[str, ...]) -> Any:
         return namedtuple("KernelMetadata", sorted(fields))
 
     def __init__(
         self,
         kernel: CompiledKernel,
         config: Config,
-        compile_meta: Dict[str, Any],
-        inductor_meta: Dict[str, Any],
+        compile_meta: dict[str, Any],
+        inductor_meta: dict[str, Any],
     ) -> None:
         super().__init__()
         self.kernel = kernel
@@ -903,7 +900,7 @@ class TritonCompileResult:
         self.compile_meta = compile_meta
         self.inductor_meta = inductor_meta
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         kernel = self.kernel
         # replace the fields that don't pickle nicely
         kernel_state = {
@@ -915,7 +912,7 @@ class TritonCompileResult:
         }
         return {**self.__dict__, "kernel": kernel_state}  # type: ignore[dict-item]
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         # src = ASTSource.__new__(ASTSource)
         # src.__setstate__(state["kernel"]["src"])
         # TODO(jansel): need to fixup src.fn which is now None
@@ -1100,7 +1097,7 @@ def _find_names(obj):
     return obj_names
 
 
-collected_calls: List[Any] = []
+collected_calls: list[Any] = []
 
 
 def start_graph():
@@ -1219,7 +1216,7 @@ class DebugAutotuner(CachingAutotuner):
                 collected_calls.append(self.cached)
 
 
-def hash_configs(configs: List[Config]):
+def hash_configs(configs: list[Config]):
     """
     Hash used to check for changes in configurations
     """
@@ -1232,8 +1229,8 @@ def hash_configs(configs: List[Config]):
 
 
 def cached_autotune(
-    size_hints: Optional[List[int]],
-    configs: List[Config],
+    size_hints: Optional[list[int]],
+    configs: list[Config],
     triton_meta,
     heuristic_type,
     filename=None,
@@ -1275,7 +1272,7 @@ def cached_autotune(
     if "restore_value" in triton_meta:
         mutated_arg_names += triton_meta.pop("restore_value")
 
-    reset_to_zero_arg_names: List[str] = []
+    reset_to_zero_arg_names: list[str] = []
     if "reset_to_zero" in triton_meta:
         reset_to_zero_arg_names.extend(triton_meta.pop("reset_to_zero"))
 
@@ -1330,7 +1327,7 @@ def cached_autotune(
     return decorator
 
 
-def unique_configs(configs: List[Config]):
+def unique_configs(configs: list[Config]):
     """Remove duplicate configurations"""
     seen: OrderedSet[Hashable] = OrderedSet()
     pruned_configs = []
@@ -1361,7 +1358,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def check_max_block(cfg: Dict[str, int]):
+def check_max_block(cfg: dict[str, int]):
     """
     Check that block sizes are within the maximum allowed.
     """
@@ -1504,7 +1501,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def _get_nd_reduction_numels(r: int, size_hints: Dict[str, int]) -> Dict[str, int]:
+def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
     """
     Converts a linear reduction numel to ND, in row major order.
     This order is often desirable as it presents opportunities to coalesce memory
@@ -1595,7 +1592,7 @@ def triton_config_reduction(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def _get_config(numels: Dict[str, int]) -> Dict[str, int]:
+def _get_config(numels: dict[str, int]) -> dict[str, int]:
     """
     Convert numels ("x", "r0_", etc.) to block sizes ("XBLOCK", "R0_BLOCK"), etc.
     """
@@ -1728,8 +1725,8 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: Dict[str, int], inductor_meta: Dict[str, Any]
-) -> List[Config]:
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
+) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
     # Convert reductions to 1D, to simplify heuristics.
@@ -1977,7 +1974,7 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
-def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     """Extract triton.Config options that should become kwargs"""
     popped = {}
     for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):

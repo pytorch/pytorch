@@ -242,6 +242,13 @@ class MemoryEstimator:
         self.num_reductions_dims = 1
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
+        # We are doing two estimates simultaneously:
+        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # we add an item to loops each corresponding to each reduction loop in the kernel
+        # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
+        # 2) the second is for a persistent kernel, using self.persistent
+        # persistent kernels don't have loops, so we only have one MemoryEstimate()
+        # for point-wise ops the two estimates will be the same, they matter for reductions only
         self.outside_loop = MemoryEstimate()
         self.loops = [MemoryEstimate()]
         self.persistent = MemoryEstimate()
@@ -279,6 +286,9 @@ class MemoryEstimator:
                 dep = dep.simplify_with_ranges()
                 if not self.persistent.writes.get(dep.name):  # cache miss?
                     self.persistent.reads[dep.name].add(dep)
+                # the cache behavior of looped kernels is more complex than the persistent case above
+                # some operations are lifted outside the loop (if they don't use the reduction dimension)
+                # other operations are inside the loop, and can only be reused within the same loop
                 if not (
                     self.outside_loop.writes.get(dep.name)
                     or self.loops[-1].writes.get(dep.name)
@@ -586,7 +596,9 @@ class MemoryStats:
     @classmethod
     def compute(cls, estimator: MemoryEstimator) -> typing.Self:
         persistent = StatsForKernelType.compute([estimator.persistent], estimator)
-        if len(estimator.loops) == 1 and not estimator.outside_loop:
+        if len(estimator.loops) == 1 and not (
+            estimator.outside_loop and estimator.loops[0]
+        ):
             looped = persistent  # loops/persistent is the same in this common case
         else:
             looped = StatsForKernelType.compute(

@@ -2727,13 +2727,7 @@ class TritonKernel(SIMDKernel):
                     )
                 ),
             )
-        # TODO(jansel): values larger than 128 can cause hangs on some GPUs, should determine this from GPU properties
-        max_split = next_power_of_2(
-            DeviceProperties.create(
-                V.graph.get_current_device_or_throw()
-            ).multi_processor_count
-        )
-        return min(split, max_split)
+        return split
 
     def codegen_cooperative_reduction_peer_combine(self, result_var, dtype):
         """

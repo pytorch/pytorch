@@ -52,14 +52,13 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         (groups,) = kernel_args
         device = V.graph.get_current_device_or_throw()
-        if not (
-            (
-                config.max_autotune
-                or config.max_autotune_pointwise
-                or config.coordinate_descent_tuning
-                or config.triton.multi_kernel
-            )
-            and kernel_cls is TritonKernel
+        if (
+            config.max_autotune
+            or config.max_autotune_pointwise
+            or config.coordinate_descent_tuning
+            or config.triton.multi_kernel
+        ) or not (
+            kernel_cls is TritonKernel
             and features.is_reduction()
             and len(groups) == 2
             and device.type != "cpu"
