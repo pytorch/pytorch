@@ -72,11 +72,16 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class ReplicateTest(DistributedTestBase, InductorTestCase):
+class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
+    """
+    A version of MultiProcessTestCase that derives from the Inductor TestCase
+    to handle isolation of the inductor cache dir.
+    """
+
+class ReplicateTest(MultiProcessInductorTestCase):
     def _test_compile(
         self,
         *,
-        use_gpu: bool,
         no_sync: bool,
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
@@ -175,7 +180,7 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-        self._test_compile(use_gpu=False, no_sync=False, device="cpu")
+        self._test_compile(no_sync=False, device="cpu")
 
     def test_compile_cpu_no_sync(self):
         # Test the coalesced_op with CPU.
@@ -183,7 +188,7 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-        self._test_compile(use_gpu=False, no_sync=True, device="cpu")
+        self._test_compile(no_sync=True, device="cpu")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
@@ -191,8 +196,8 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu(self):
-        self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
+    def test_compile_gpu(self, device):
+        self._test_compile(no_sync=False, checkpoint=False, device=device)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
@@ -200,8 +205,8 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu_ac(self):
-        self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
+    def test_compile_gpu_ac(self, device):
+        self._test_compile(no_sync=False, checkpoint=True, device=device)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
@@ -219,12 +224,12 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
+        self._test_compile(no_sync=False, setup_func=setup, device=device)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    def test_compile_fp16(self):
+    def test_compile_fp16(self, device):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
@@ -235,15 +240,14 @@ class ReplicateTest(DistributedTestBase, InductorTestCase):
 
         # TODO: figure out why we need to disable Inductor to avoid test errors.
         self._test_compile(
-            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
+            no_sync=False, setup_func=setup, no_inductor=True, device=device
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self, device):
-        self._test_compile(
-            use_gpu=True, no_sync=False, no_compile_forward=True, device=device)
+        self._test_compile(no_sync=False, no_compile_forward=True, device=device)
 
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
