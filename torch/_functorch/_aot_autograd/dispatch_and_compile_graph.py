@@ -102,23 +102,10 @@ def aot_dispatch_base_graph(
         subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
         return subclass_tracing_info[:2]
 
-    steps = WrapSteps()
-    steps.add(
-        fn_input_mutations_to_outputs,
-        keep_data_input_mutations=aot_config.keep_inference_input_mutations,
-    ).add(
-        create_functionalized_fn,
-        aot_config=aot_config,
-        trace_joint=False,
-    ).add(
-        _aot_dispatch_subclass,
-        is_joint_structure=False,
-        fw_only=flat_fn,
-    ).add(
-        handle_effect_tokens_fn,
-        trace_joint=False,
+    state, subclass_traing_info = wrap_and_run(
+        flat_fn, flat_args, fw_metadata, aot_config, is_autograd=False
     )
-    state = steps.run(WrapState(flat_fn, flat_args, fw_metadata))
+
     fn_to_trace, updated_flat_args_subclasses_desugared, fw_metadata = state
     maybe_subclass_meta = subclass_tracing_info[-1] if subclass_tracing_info else None
 
@@ -287,26 +274,9 @@ def aot_dispatch_autograd_graph(
         joint_inputs = flat_args, fw_metadata.traced_tangents
         return create_functionalized_fn(fn, joint_inputs, **kwargs)
 
-    steps = WrapSteps()
-    steps.add(fn_prepped_for_autograd).add(
-        create_joint,
-    ).add(
-        _create_functionalized_fn,
-        aot_config=aot_config,
-        trace_joint=True,
-    ).add(
-        # TODO: replace with AOTDispatchSubclassWrapper once we refactor
-        # fn_input_mutations_to_outputs and create_functionalized_fn
-        # into CompilerWrappers.
-        _aot_dispatch_subclass,
-        is_joint_structure=True,
-        fw_only=flat_fn,
-    ).add(
-        handle_effect_tokens_fn,
-        trace_joint=True,
+    state, subclass_traing_info = wrap_and_run(
+        flat_fn, flat_args, fw_metadata, aot_config, is_autograd=True
     )
-
-    state = steps.run(WrapState(flat_fn, flat_args, fw_metadata))
     joint_fn_to_trace, updated_joint_inputs, _ = state
 
     # When we call _create_graph, this may mutate the metadata of joint
@@ -399,3 +369,61 @@ class WrapSteps:
 
     def run(self, state: WrapState) -> WrapState:
         return self.run_all(state)[-1]
+
+
+def wrap_and_run(
+    flat_fn: Callable[..., Any],
+    flat_args: list[Tensor],
+    fw_metadata: ViewAndMutationMeta,
+    aot_config: AOTConfig,
+    *,
+    is_autograd: bool,
+) -> tuple[WrapState, Optional[SubclassTracingInfo]]:
+    # This gets mutated by _aot_dispatch_subclass
+    subclass_tracing_info: Optional[SubclassTracingInfo] = None
+
+    @functools.wraps(aot_dispatch_subclass)
+    def _aot_dispatch_subclass(
+        fn: Callable[..., Any],
+        args: list[Tensor],
+        **kwargs: Any,
+    ) -> tuple[Callable[..., Any], list[Tensor]]:
+        nonlocal subclass_tracing_info
+        subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
+        return subclass_tracing_info[:2]
+
+    @functools.wraps(create_functionalized_fn)
+    def _create_functionalized_fn(
+        fn: Callable[..., Any],
+        args: list[Tensor],
+        **kwargs: Any,
+    ) -> tuple[Callable[..., Any], list[Tensor]]:
+        if is_autograd:
+            joint_inputs: Sequence[Any] = flat_args, fw_metadata.traced_tangents
+        else:
+            joint_inputs = args
+        return create_functionalized_fn(fn, joint_inputs, **kwargs)
+
+    steps = WrapSteps()
+    if is_autograd:
+        steps.add(fn_prepped_for_autograd)
+        steps.add(create_joint)
+    else:
+        steps.add(
+            fn_input_mutations_to_outputs,
+            keep_data_input_mutations=aot_config.keep_inference_input_mutations,
+        )
+    steps.add(
+        create_functionalized_fn,
+        aot_config=aot_config,
+        trace_joint=is_autograd,
+    ).add(
+        _aot_dispatch_subclass,
+        is_joint_structure=is_autograd,
+        fw_only=flat_fn,
+    ).add(
+        handle_effect_tokens_fn,
+        trace_joint=is_autograd,
+    )
+    state = steps.run(WrapState(flat_fn, flat_args, fw_metadata))
+    return state, subclass_tracing_info
