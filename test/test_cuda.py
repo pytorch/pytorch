@@ -3909,7 +3909,7 @@ class TestCudaMallocAsync(TestCase):
                 raw_alloc_size, stream
             )
             finish = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
-            torch.cuda.caching_allocator_delete(mem_ptr)
+            torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
             return finish - start
 
         torch.cuda.empty_cache()
