@@ -2417,6 +2417,10 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
             return {
                 key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
             }
+        elif isinstance(arg, (tuple, list)):
+            return type(arg)(
+                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+            )
         return arg
 
     args = tuple(

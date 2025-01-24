@@ -3276,12 +3276,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        x = torch.randn(2, 2, device="cuda")
-        other = torch.randn(2, 2, device="cuda")
+        x = torch.randn(4, 4, 2, 2, device="cuda")
+        other = torch.randn(4, 4, 2, 2, device="cuda")
 
         def f(x, other):
-            y = x.t().contiguous().t()
-            z = y.sin().t()
+            y = x.transpose(2, 3).contiguous().transpose(2, 3)
+            z = y.sin().transpose(2, 3)
             grid = (z.numel(),)
             out = torch.empty_like(other)
             add_kernel[grid](z, other, out, z.numel(), BLOCK_SIZE=16)
@@ -3306,7 +3306,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def decomp(*flat_args):
                 args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.aten.permute(*args, **kwargs).clone()
+                return torch.ops.aten.permute(*args, **kwargs).clone(
+                    memory_format=torch.channels_last
+                )
 
             nonlocal called
             called = True
