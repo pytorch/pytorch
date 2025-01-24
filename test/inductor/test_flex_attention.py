@@ -9,7 +9,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -511,7 +511,7 @@ class TestFlexAttention(InductorTestCase):
         block_mask,
         dtype: torch.dtype = torch.float16,
         page_size: int = 128,
-    ) -> Tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
+    ) -> tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
         assert block_mask is not None, "Must provide block_mask"
         Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
@@ -596,7 +596,7 @@ class TestFlexAttention(InductorTestCase):
         v: Tensor,
         dtype: torch.dtype = torch.float16,
         block_mask: Optional[BlockMask] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
             q.shape[1],
@@ -797,7 +797,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_dynamic_test(
         self,
-        score_mask_mod: Tuple[Callable, Callable],
+        score_mask_mod: tuple[Callable, Callable],
         dtype: torch.dtype = torch.float16,
         B: int = B,
         H: int = H,
@@ -1089,7 +1089,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
     def test_builtin_score_mods_dynamic(
-        self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
+        self, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
     ):
         self.run_dynamic_test(score_mask_mod, dtype)
 
@@ -1127,7 +1127,7 @@ class TestFlexAttention(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, Tuple[int, int]],
+        BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
         block_mask = create_block_mask(
             noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=self.device
@@ -1142,8 +1142,8 @@ class TestFlexAttention(InductorTestCase):
     def test_kv_batch_broadcast(
         self,
         dtype: torch.dtype,
-        batch_dims: Tuple[int, int],
-        head_dims: Tuple[int, int],
+        batch_dims: tuple[int, int],
+        head_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
@@ -1175,8 +1175,8 @@ class TestFlexAttention(InductorTestCase):
     def test_kv_batch_broadcast_causal_mask(
         self,
         dtype: torch.dtype,
-        batch_dims: Tuple[int, int],
-        head_dims: Tuple[int, int],
+        batch_dims: tuple[int, int],
+        head_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
@@ -2131,6 +2131,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
+    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_non_pow_2_headdim(self, dtype, head_dim):
+        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -2512,6 +2518,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -3616,7 +3626,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
-    def test_block_size_changes(self, BLOCK_SIZE: Union[int, Tuple[int, int]]):
+    def test_block_size_changes(self, BLOCK_SIZE: Union[int, tuple[int, int]]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
 
         if isinstance(BLOCK_SIZE, int):
@@ -3990,7 +4000,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
         def length_to_offsets(
-            lengths: List[int], device: Union[str, torch.device]
+            lengths: list[int], device: Union[str, torch.device]
         ) -> Tensor:
             offsets = [0]
             offsets.extend(lengths)
@@ -4561,7 +4571,7 @@ class Params:
         return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
 
 
-def get_params(dtypes: List[torch.dtype]) -> List[Params]:
+def get_params(dtypes: list[torch.dtype]) -> list[Params]:
     params = []
     seq_lengths = [37, 256, 277]
     for seq_len, dtype in product(seq_lengths, dtypes):

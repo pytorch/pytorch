@@ -7,7 +7,6 @@ import operator
 import os
 import unittest
 import warnings
-from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -2326,7 +2325,7 @@ class TestTEFuser(JitTestCase):
 
             @torch.jit.script
             def repro(
-                xs: List[torch.Tensor], ys: List[torch.Tensor], zs: List[torch.Tensor]
+                xs: list[torch.Tensor], ys: list[torch.Tensor], zs: list[torch.Tensor]
             ):
                 return [
                     torch.cat([x, torch.cat([y, z], dim=-1)], dim=-1)
