@@ -65,32 +65,35 @@ void ExtraState::invalidate(
   Py_DECREF(this->orig_code);
 }
 
-static bool is_extra_state_unset(ExtraState* extra_state) {
-  return extra_state == nullptr || extra_state == SKIP_CODE ||
-      extra_state == SKIP_CODE_RECURSIVE;
-}
-
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
-  if (is_extra_state_unset(extra_state)) {
+  if (extra_state == nullptr) {
     return nullptr;
   }
   return extra_state->get_first_entry();
 }
 
 FrameState* extract_frame_state(ExtraState* extra_state) {
-  if (is_extra_state_unset(extra_state)) {
+  if (extra_state == nullptr) {
     return nullptr;
   }
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
-bool extra_state_cache_limit_hit(ExtraState* extra_state) {
-  return extra_state->cache_limit_hit;
+Action extra_state_get_action(ExtraState* extra_state) {
+  return extra_state->action;
 }
 
-void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value) {
-  extra_state->cache_limit_hit = value;
+void extra_state_set_action(ExtraState* extra_state, Action action) {
+  extra_state->action = action;
 }
+
+// bool extra_state_cache_limit_hit(ExtraState* extra_state) {
+//   return extra_state->cache_limit_hit;
+// }
+
+// void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value) {
+//   extra_state->cache_limit_hit = value;
+// }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = nullptr;
@@ -100,14 +103,12 @@ ExtraState* get_extra_state(PyCodeObject* code) {
 
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
-  if (!is_extra_state_unset(extra)) {
-    delete extra;
-  }
+  delete extra;
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
-  CHECK(is_extra_state_unset(extra_state) || old_extra_state != extra_state);
+  CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
@@ -218,7 +219,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
-  if (!is_extra_state_unset(extra)) {
+  if (extra != nullptr) {
     for (CacheEntry& e : extra->cache_entry_list) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
