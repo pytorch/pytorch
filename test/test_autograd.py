@@ -8083,7 +8083,7 @@ for shape in [(1,), ()]:
         view_a = a.unbind()[0]
         with self.assertRaisesRegex(
             RuntimeError,
-            "This view is the output of a function that returns " "multiple views.",
+            "This view is the output of a function that returns multiple views.",
         ):
             view_a.copy_(b)
 

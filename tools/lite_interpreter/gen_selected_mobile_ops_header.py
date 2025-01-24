@@ -161,8 +161,7 @@ def main() -> None:
         "--output_file_path",
         type=str,
         required=True,
-        help="Path to destination"
-        "folder where selected_mobile_ops.h will be written.",
+        help="Path to destinationfolder where selected_mobile_ops.h will be written.",
     )
     parsed_args = parser.parse_args()
     model_file_name = parsed_args.yaml_file_path

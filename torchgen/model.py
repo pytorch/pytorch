@@ -1815,7 +1815,7 @@ class Annotation:
             alias_set = f"{alias_set}!"
         alias_set_after = "|".join(self.alias_set_after)
         if alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+            alias_set = f"{alias_set} -> {alias_set_after}"
         return alias_set
 
 
