@@ -45,8 +45,10 @@ from torch._export.utils import (
     _get_decomp_for_cia,
     _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
+    _override_graph_signature_for_temp_registered_constants,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
+    _register_constants_as_buffers,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
 )
@@ -359,6 +361,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
+
+    # from torch.export.unflatten import _assign_attr, _AttrKind
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     def _is_joint_ir_decomp(ep, joint_loss_index):
@@ -415,6 +419,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
         _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
+
+        # When we have a module with constant attributes, AotDispatcher doesn't actually
+        # wrap them as functional tensors, because dynamo would have already made it buffer.
+        # In non-strict case, however, AotDispatcher can intercept constants, causing it to not
+        # functionalize the operators that are operating on constant tensors. Since dynamo already
+        # wraps constants as buffers, we temporarily register the constants as buffers and undo this
+        # operation after AOTDispatcher is done.
+        temp_registered_constants = _register_constants_as_buffers(mod)
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
@@ -489,6 +501,15 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
+
+        # In the previous step, we assume constants as buffers for AOTDispatcher to
+        # functianalize properly, so undo that here.
+        (
+            gm,
+            new_graph_signature,
+        ) = _override_graph_signature_for_temp_registered_constants(
+            new_graph_signature, gm, temp_registered_constants
+        )
 
         _populate_param_buffer_metadata_to_new_gm(
             params_buffers_to_node_meta, gm, new_graph_signature

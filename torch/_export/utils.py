@@ -89,6 +89,46 @@ def _collect_and_set_constant_attrs(
     return constant_attrs
 
 
+def _register_constants_as_buffers(mod: torch.nn.Module):
+    # TODO some annoying circular dependency issue
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    registered_buffers = set([k for k, _ in mod.named_buffers()])
+    temp_registered_constants = set()
+
+    for node in mod.graph.nodes:
+        if node.op == "get_attr":
+            if node.target not in registered_buffers:
+                target = torch.fx.graph_module._get_attr(mod, node.target)
+                torch.fx.graph_module._del_attr(mod, node.target)
+                _assign_attr(target, mod, node.target, _AttrKind.BUFFER)
+                temp_registered_constants.add(node.target)
+
+    return temp_registered_constants
+
+
+def _override_graph_signature_for_temp_registered_constants(
+    sig: "ExportGraphSignature", gm: torch.fx.GraphModule, temp_registered_constants
+):
+    remap = {}
+
+    for spec in sig.input_specs:
+        if spec.target in temp_registered_constants:
+            assert spec.arg.name.startswith("b_")
+            new_name = "c_" + spec.arg.name[2:]
+            remap[spec.arg.name] = new_name
+            spec.arg.name = new_name
+            spec.kind = InputKind.CONSTANT_TENSOR
+            spec.persistent = None
+
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if node.name in remap:
+                node.name = node.target = remap[node.name]
+
+    return gm, sig
+
+
 def _overwrite_signature_for_non_persistent_buffers(
     old_sig: "ExportGraphSignature", new_sig: "ExportGraphSignature"
 ):
