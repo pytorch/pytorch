@@ -156,7 +156,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         ),
         MPSSkipInfo(
             NONCONTIGUOUS,
-            variant="",
+            variant=" ",
             dtypes=[torch.complex64],
         ),
     ],
@@ -323,7 +323,6 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     ),
     "linalg.det": MPSSkipInfo(
         UNIMPLEMENTED,
-        variant="",
     ),
     "linalg.eig": MPSSkipInfo(NONCONTIGUOUS),
     "linalg.eigh": MPSSkipInfo(NONCONTIGUOUS),
@@ -758,10 +757,19 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
     "special.spherical_bessel_j0": MPSSkipInfo(UNIMPLEMENTED),
     "special.xlog1py": MPSSkipInfo(UNIMPLEMENTED),
     "special.zeta": MPSSkipInfo(UNIMPLEMENTED),
-    "std": MPSSkipInfo(UNIMPLEMENTED),
+    "std": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            variant=" ",
+        ),
+    ],
     "svd": MPSSkipInfo(
         NONCONTIGUOUS,
-        variant="",
+        variant=" ",
         dtypes=[torch.complex64],
     ),
     "svd_lowrank": MPSSkipInfo(UNIMPLEMENTED),
@@ -779,6 +787,7 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         dtypes=[torch.complex64],
     ),
     "to": MPSSkipInfo(UNIMPLEMENTED),
+    "to_sparse": MPSSkipInfo(TEST_OUT),
     "torch.ops.aten._efficient_attention_forward": MPSSkipInfo(UNIMPLEMENTED),
     "torch.ops.aten._flash_attention_forward": MPSSkipInfo(UNIMPLEMENTED),
     "trace": MPSSkipInfo(
@@ -804,7 +813,16 @@ MPS_OPINFO_SKIPLIST: Dict[str, Union[MPSSkipInfo, List[MPSSkipInfo]]] = {
         lower=14.0,
     ),
     "unique": MPSSkipInfo(NONCONTIGUOUS),
-    "var": MPSSkipInfo(UNIMPLEMENTED),
+    "var": [
+        MPSSkipInfo(
+            NONCONTIGUOUS,
+            dtypes=[torch.complex64],
+        ),
+        MPSSkipInfo(
+            TEST_OUT,
+            variant=" ",
+        ),
+    ],
     "vdot": MPSSkipInfo(UNIMPLEMENTED),
     "zeros_like": MPSSkipInfo(NONCONTIGUOUS),
 }
@@ -827,7 +845,7 @@ def mps_op_db(op_db: List[OpInfo]) -> List[OpInfo]:
                     and (not skip.lower or MACOS_VERSION >= skip.lower)
                     and (
                         (not skip.variant or op.variant_test_name == skip.variant)
-                        or (op.variant_test_name is None and skip.variant == "")
+                        or (op.variant_test_name == "" and skip.variant == " ")
                     )
                 ):
                     if not isinstance(skip.tests, List):
