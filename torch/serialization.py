@@ -15,19 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    Dict,
-    IO,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, IO, Optional, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -79,11 +67,18 @@ STORAGE_KEY_SEPARATOR = ","
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[
-    Union[Callable[[Storage, str], Storage], torch.device, str, Dict[str, str]]
+    Union[Callable[[Storage, str], Storage], torch.device, str, dict[str, str]]
 ]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 IS_WINDOWS = sys.platform == "win32"
+
+UNSAFE_MESSAGE = (
+    "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+    "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+    "but it can result in arbitrary code execution. Do it only if you got the file from a "
+    "trusted source."
+)
 
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
@@ -125,8 +120,8 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry: List[
-    Tuple[
+_package_registry: list[
+    tuple[
         int,
         Callable[[STORAGE], Optional[str]],
         Callable[[STORAGE, str], Optional[STORAGE]],
@@ -263,14 +258,14 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
+def add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
@@ -331,7 +326,7 @@ class safe_globals(_weights_only_unpickler._safe_globals):
     """
 
 
-def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
+def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> list[str]:
     """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
 
     For a given function or class ``f``, the corresponding string will be of the form
@@ -797,7 +792,7 @@ class _open_zipfile_writer_buffer(_opener):
 
 
 def _open_zipfile_writer(name_or_buffer):
-    container: Type[_opener]
+    container: type[_opener]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
     else:
@@ -958,15 +953,15 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
+    serialized_storages: dict[str, tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
     # storage data_ptr and throw an error if the dtype is ever different.
     # TODO: This feature could be added in the future
-    storage_dtypes: Dict[int, torch.dtype] = {}
+    storage_dtypes: dict[int, torch.dtype] = {}
 
-    def persistent_id(obj: Any) -> Optional[Tuple]:
+    def persistent_id(obj: Any) -> Optional[tuple]:
         # FIXME: the docs say that persistent_id should only return a string
         # but torch store returns tuples. This works only in the binary protocol
         # see
@@ -1025,7 +1020,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 else:
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
-            view_metadata: Optional[Tuple[str, int, int]]
+            view_metadata: Optional[tuple[str, int, int]]
 
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
@@ -1120,13 +1115,13 @@ def _save(
     _disable_byteorder_record,
 ):
     serialized_storages = {}
-    id_map: Dict[int, str] = {}
+    id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
     # storage data_ptr and throw an error if the dtype is ever different.
     # TODO: This feature could be added in the future
-    storage_dtypes: Dict[int, torch.dtype] = {}
+    storage_dtypes: dict[int, torch.dtype] = {}
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -1341,12 +1336,6 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
-    UNSAFE_MESSAGE = (
-        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
-        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
-        "but it can result in arbitrary code execution. Do it only if you got the file from a "
-        "trusted source."
-    )
     DOCS_MESSAGE = (
         "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
         "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
@@ -1533,7 +1522,7 @@ copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
 def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
-    deserialized_objects: Dict[int, Any] = {}
+    deserialized_objects: dict[int, Any] = {}
 
     restore_location = _get_restore_location(map_location)
 
@@ -1598,7 +1587,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             warnings.warn(msg, SourceChangeWarning)
 
     def legacy_load(f):
-        deserialized_objects: Dict[int, Any] = {}
+        deserialized_objects: dict[int, Any] = {}
 
         def persistent_load(saved_id):
             if isinstance(saved_id, tuple):
@@ -1611,6 +1600,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         with closing(
             tarfile.open(fileobj=f, mode="r:", format=tarfile.PAX_FORMAT)
         ) as tar, mkdtemp() as tmpdir:
+            if pickle_module is _weights_only_unpickler:
+                raise RuntimeError(
+                    "Cannot use ``weights_only=True`` with files saved in the "
+                    "legacy .tar format. " + UNSAFE_MESSAGE
+                )
             tar.extract("storages", path=tmpdir)
             with open(os.path.join(tmpdir, "storages"), "rb", 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
@@ -1944,7 +1938,7 @@ def _load(
 
         return typed_storage
 
-    load_module_mapping: Dict[str, str] = {
+    load_module_mapping: dict[str, str] = {
         # See https://github.com/pytorch/pytorch/pull/51633
         "torch.tensor": "torch._tensor"
     }
