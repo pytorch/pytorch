@@ -1644,6 +1644,14 @@ class BuiltinVariable(VariableTracker):
                 return arg.items[0]
             raise
 
+    def call_hasattr(self, tx: "InstructionTranslator", obj, attr):
+        breakpoint()
+        if attr.is_python_constant():
+            name = attr.as_python_constant()
+            if isinstance(obj, variables.BuiltinVariable):
+                return variables.ConstantVariable(hasattr(obj.fn, name))
+            return obj.call_obj_hasattr(tx, name)
+
     def call_map(self, tx: "InstructionTranslator", fn, *seqs):
         seqs = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
@@ -1690,14 +1698,9 @@ class BuiltinVariable(VariableTracker):
             return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
-            # At this point we know `name_var.is_python_constant()` is True and
-            # the value is in `name`.
-            if isinstance(obj, variables.BuiltinVariable):
-                hasattr_value = hasattr(obj.fn, name)
-            else:
-                hasattr_value = obj.call_hasattr(tx, name).as_python_constant()
-                assert hasattr_value in (True, False)
-            if not hasattr_value:
+            hasattr_var = self.call_hasattr(tx, obj, name_var)
+            assert hasattr_var.as_python_constant() in (True, False)
+            if not hasattr_var.as_python_constant():
                 return default
 
         source = obj.source and AttrSource(obj.source, name)
