@@ -520,7 +520,7 @@ def _insert_fused_all_gather_matmul(
 
 def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> bool:
     """
-    Fused the pattern
+    Fuse the pattern
 
         A = all_gather_tensor(A_shard, gather_dim, group_name)
         C_0 = torch.matmul(A, B_0)
@@ -647,6 +647,63 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> bool:
     return True
 
 
+def fuse_a_scale_all_gather(all_gather: _AllGatherMatch) -> bool:
+    """
+    Fuse the pattern
+
+        A_scale = all_gather_tensor(A_scale_shard, gather_dim, group_name)
+        A, Cs = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+            A_shard, [B_0, B_1, B_2, ...], A_scale, B_scales, gather_dim, group_name, ...,
+        )
+
+    into
+
+        A, Cs = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+            A_shard, [B_0, B_1, B_2, ...], A_scale_shard, B_scales, gather_dim, group_name, ...,
+        )
+
+    This works because fused_all_gather_scaled_matmul internally knows how to
+    efficiently pipeline A_scale_shard all-gather with A_shard all-gather.
+    """
+    # TODO(yifu): we don't yet support the case where gathered a_scale is
+    # returned as the graph output. This can be addressed by augmenting
+    # fused_all_gather_scaled_matmul to return gathered a_scale.
+    if len(all_gather.res_node.users) != 1:
+        return False
+    user = next(iter(all_gather.res_node.users))
+
+    if user.target == torch.ops.aten.reshape.default:
+        # TODO: reshape args?
+        if len(user.users) != 1:
+            return False
+        reshape_node = user
+        target_node = next(iter(user.users))
+        if (
+            target_node.target
+            != torch.ops.symm_mem.fused_all_gather_scaled_matmul.default
+        ):
+            return False
+    elif user.target == torch.ops.symm_mem.fused_all_gather_scaled_matmul.default:
+        reshape_node = None
+        target_node = user
+    else:
+        return False
+
+    args = list(target_node.args)
+    if all_gather.gather_dim != args[4] or all_gather.group_name != args[5]:
+        return False
+
+    args[2] = all_gather.shard_node
+    target_node.args = tuple(args)
+    if reshape_node is not None:
+        # TODO: use count?
+        reshape_node.graph.erase_node(reshape_node)
+    all_gather.erase()
+
+    fusion_log.info("fused %s into %s", all_gather, target_node)
+    return True
+
+
 def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
     if node.target == aten.mm.default:
         return _Matmul.from_match(match=[node])
@@ -709,7 +766,7 @@ def _insert_fused_matmul_reduce_scatter(
 
 def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     """
-    Fused the pattern
+    Fuse the pattern
 
         reduce_scatter_tensor(A @ B, scatter_dim, group_name)
 
@@ -895,15 +952,21 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             x for x in reduce_scatters if x.rs_node not in unexposed_collectives
         ]
 
+    unfused_all_gathers = []
     num_fused = 0
     for all_gather in all_gathers:
         if fuse_all_gather_matmul(all_gather):
             num_fused += 1
+        else:
+            unfused_all_gathers.append(all_gather)
     fusion_log.info(
         "===== fused %d/%d all-gathers with downstream matmuls =====",
         num_fused,
         len(all_gathers),
     )
+
+    for all_gather in unfused_all_gathers:
+        fuse_a_scale_all_gather(all_gather)
 
     for reduce_scatter in reduce_scatters:
         fuse_matmul_reduce_scatter(reduce_scatter)

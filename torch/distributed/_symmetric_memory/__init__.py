@@ -494,7 +494,7 @@ def _check_and_verify_fp8_all_gather_scale_mode(
         return _ScaleMode.ROW_WISE_SHARDED
     elif scale.numel() == 1:
         return _ScaleMode.TENSOR_WISE
-    elif list(scale.shape[:-1]) == full_shape[:-1]:
+    elif math.prod(scale.shape[:-1]) == math.prod(full_shape[:-1]):
         return _ScaleMode.ROW_WISE_REPLICATED
     else:
         raise ValueError(
@@ -583,6 +583,10 @@ def _fused_all_gather_matmul_impl(
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         assert A_scale is not None
+        A_scale_shape = list(A_shard.shape)
+        A_scale_shape[gather_dim] *= group.size()
+        A_scale_shape[-1] = 1
+        A_scale = A_scale.view(A_scale_shape)
         A_scale_shards = (
             A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
         )
@@ -840,7 +844,6 @@ def _fused_all_gather_scaled_matmul_fallback(
         A_shard.contiguous(), group_size, group_name
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
-    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
         shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group_size
@@ -857,6 +860,7 @@ def _fused_all_gather_scaled_matmul_fallback(
             .flatten(0, -2)
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
+        A_scale = A_scale.view(*A.shape[:-1], 1)
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
     else:
         assert scale_mode == _ScaleMode.TENSOR_WISE
@@ -884,6 +888,7 @@ def _fused_all_gather_scaled_matmul_fallback(
         )
         return res.unflatten(0, leading_dims)
 
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
     return A.movedim(0, gather_dim), [
         scaled_matmul(
             A, B, A_scale, B_scale, bias, result_scale, out_dtype, fast_accum
