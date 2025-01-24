@@ -190,7 +190,7 @@ class UsageLogger:
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
-            start_at=datetime.datetime.now().timestamp()
+            start_at=datetime.datetime.now().timestamp(),
         )
         self._data_collect_interval = data_collect_interval
         self._has_pynvml = pynvml_enabled
@@ -280,7 +280,6 @@ class UsageLogger:
                 if not data_list:
                     # pass since no data is collected
                     continue
-
 
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
