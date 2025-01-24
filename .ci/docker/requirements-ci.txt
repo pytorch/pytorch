@@ -372,3 +372,8 @@ pulp==2.9.0 ; python_version >= "3.8"
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py
+
+dataclasses_json==0.6.7
+#Description: required for data pipeline and scripts under tools/stats
+#Pinned versions: 0.6.7
+#test that import:
