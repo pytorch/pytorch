@@ -164,24 +164,24 @@ function install_128 {
   echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.3"
   rm -rf /usr/local/cuda-12.8 /usr/local/cuda
   # install CUDA 12.8.0 in the same container
-  wget -q https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_560.35.05_linux.run
-  chmod +x cuda_12.8.0_560.35.05_linux.run
-  ./cuda_12.8.0_560.35.05_linux.run --toolkit --silent
-  rm -f cuda_12.8.0_560.35.05_linux.run
+  wget -q https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_560.35.05_linux_sbsa.run
+  chmod +x cuda_12.8.0_560.35.05_linux_sbsa.run
+  ./cuda_12.8.0_560.35.05_linux_sbsa.run --toolkit --silent
+  rm -f cuda_12.8.0_560.35.05_linux_sbsa.run
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.8 /usr/local/cuda
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   mkdir tmp_cudnn && cd tmp_cudnn
-  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive.tar.xz -O cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive.tar.xz
-  tar xf cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive.tar.xz
-  cp -a cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive/include/* /usr/local/cuda/include/
-  cp -a cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive/lib/* /usr/local/cuda/lib64/
+  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-sbsa/cudnn-linux-sbsa-${CUDNN_VERSION}_cuda12-archive.tar.xz -O cudnn-linux-sbsa-${CUDNN_VERSION}_cuda12-archive.tar.xz
+  tar xf cudnn-linux-sbsa-${CUDNN_VERSION}_cuda12-archive.tar.xz
+  cp -a cudnn-linux-sbsa-${CUDNN_VERSION}_cuda12-archive/include/* /usr/local/cuda/include/
+  cp -a cudnn-linux-sbsa-${CUDNN_VERSION}_cuda12-archive/lib/* /usr/local/cuda/lib64/
   cd ..
   rm -rf tmp_cudnn
 
   # NCCL license: https://docs.nvidia.com/deeplearning/nccl/#licenses
   # Follow build: https://github.com/NVIDIA/nccl/tree/master?tab=readme-ov-file#build
-  git clone -b $NCCL_VERSION --depth 1 https://github.com/NVIDIA/nccl.git
+  git clone -b ${NCCL_VERSION} --depth 1 https://github.com/NVIDIA/nccl.git
   cd nccl && make -j src.build
   cp -a build/include/* /usr/local/cuda/include/
   cp -a build/lib/* /usr/local/cuda/lib64/
@@ -202,7 +202,7 @@ function prune_128 {
   export CUDA_LIB_DIR="/usr/local/cuda-12.8/lib64"
 
   export GENCODE="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120"
-  export GENCODE_CUDNN="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120"
+  export GENCODE_CUDNN="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90"
 
   if [[ -n "$OVERRIDE_GENCODE" ]]; then
       export GENCODE=$OVERRIDE_GENCODE
