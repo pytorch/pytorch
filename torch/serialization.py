@@ -15,7 +15,7 @@ import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, BinaryIO, Callable, cast, Dict, IO, Optional, Union
+from typing import Any, BinaryIO, Callable, cast, IO, Optional, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -1180,10 +1180,6 @@ def _save(
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
-    # .format_version is used to track
-    #     1. version 1 represents the order of storages being changed from
-    #        lexicographical based on keys to numerically ordered based on keys
-    zip_file.write_record(".format_version", "1", len("1"))
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -1193,7 +1189,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in serialized_storages.keys():
+    for key in sorted(serialized_storages.keys()):
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
@@ -1851,8 +1847,6 @@ def _load(
 
     loaded_storages = {}
 
-    has_version = zip_file.has_record(".format_version")
-
     # check if byteswapping is needed
     byteordername = "byteorder"
     byteorderdata = None
@@ -1888,79 +1882,15 @@ def _load(
             UserWarning,
         )
 
-    from torch.utils.serialization import config
-
-    calculate_storage_offsets = config.load.calculate_storage_offsets
-    run_debug_asserts = os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1"
-    current_offset = None
-    data_descriptor_size64 = 24
-    data_descriptor_size32 = 16
-    offsets: Dict[str, int] = dict()
-
-    def _get_offset(key, name, numel):
-        """
-        Return the offset of the storage associated with key with record name `name` and size numel.
-        It is expected that the zipfile header of this storage starts at current_offset.
-
-        After reading a storage of size numel that starts at storage_offset
-        if it is the first time that storage was read, update nonlocal variable
-        current_offset to the start of the next zipfile header by incrementing
-        it by numel and the data descriptor size.
-        """
-        nonlocal current_offset, offsets
-        if name in offsets:
-            storage_offset = offsets[name]
-            return storage_offset
-
-        if current_offset is None:
-            assert key == "0"
-            current_offset = zip_file.get_record_offset(name)
-            storage_offset = current_offset
-        else:
-            storage_offset = zip_file.get_record_offset_no_read(
-                current_offset, name, numel
-            )
-
-        # This is only actually needed for storages that have typed_storage._data_ptr() == 0
-        # after being read. Otherwise persistent_load would never "re-call" load_tensor
-        # for a given key.
-        offsets[name] = storage_offset
-
-        # Increment current_offset of offset where next zipfile header starts
-        local_header_offset = current_offset
-        current_offset = storage_offset + numel
-        # add size of data descriptor after payload
-        if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
-            current_offset += data_descriptor_size64
-        else:
-            current_offset += data_descriptor_size32
-
-        return storage_offset
-
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            if has_version and calculate_storage_offsets:
-                storage_offset = _get_offset(key, name, numel)
-                if run_debug_asserts:
-                    assert (
-                        storage_offset == zip_file.get_record_offset(name)
-                    ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
-
-            else:
-                storage_offset = zip_file.get_record_offset(name)
+            storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset : storage_offset + numel]
         else:
-            if has_version and run_debug_asserts:
-                # This is debug code that we use to test the validity of
-                # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
-                storage_offset = _get_offset(key, name, numel)
-                assert (
-                    storage_offset == zip_file.get_record_offset(name)
-                ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
                 ._typed_storage()
