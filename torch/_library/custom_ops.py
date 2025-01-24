@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import inspect
 import logging
 import weakref
@@ -8,6 +9,7 @@ from typing import Any, Callable, Literal, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
+from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
@@ -762,6 +764,56 @@ class CustomOpDef:
             return register
         else:
             return register(func)
+
+    def register_autocast(
+        self,
+        device_type: str,
+        cast_inputs: Optional[_dtype] = None,
+    ):
+        if not isinstance(device_type, str):
+            raise ValueError(
+                f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+            )
+        if cast_inputs is not None:
+
+            def kernel(_, *args, **kwargs):
+                assert len(kwargs) == 0
+                autocast_keyset = torch._C.DispatchKeySet(
+                    torch._C.DispatchKey.AutocastCPU
+                ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
+                with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+                    return self._opoverload(*_cast(args, device_type, cast_inputs))
+
+            if device_type == "cuda":
+                self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
+            elif device_type == "cpu":
+                self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
+            else:
+                raise AssertionError(f"Unknown device type: {device_type}")
+
+            return kernel
+
+
+# TODO: Merge this function with torch.amp.autocast_mode._cast, and refactor it
+# into a utility function once custom ops support arbitrary input types.
+def _cast(value, device_type: str, dtype: _dtype):
+    if isinstance(value, torch.Tensor):
+        is_eligible = (
+            value.is_floating_point()
+            and value.device.type == device_type
+            and (value.dtype is not torch.float64)
+        )
+        return value.to(dtype) if is_eligible else value
+    elif isinstance(value, (str, bytes)):
+        return value
+    elif isinstance(value, collections.abc.Iterable):
+        iterable = (_cast(v, device_type, dtype) for v in value)
+        if isinstance(value, (list, tuple)):
+            return type(value)(iterable)
+        else:
+            return iterable
+    else:
+        return value
 
 
 def increment_version(val: Any) -> None:

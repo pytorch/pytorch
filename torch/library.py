@@ -26,6 +26,7 @@ from typing_extensions import deprecated, ParamSpec
 import torch
 import torch._library as _library
 from torch._library.custom_ops import (
+    _cast,
     _maybe_get_opdef,
     custom_op,
     CustomOpDef,
@@ -34,6 +35,7 @@ from torch._library.custom_ops import (
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
+from torch.types import _dtype
 
 
 __all__ = [
@@ -825,6 +827,54 @@ def register_kernel(
         device_types = "CompositeExplicitAutograd"
 
     return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
+
+
+def register_autocast(
+    op: _op_identifier,
+    device_type: str,
+    cast_inputs: Optional[_dtype] = None,
+    /,
+    *,
+    lib: Optional[Library] = None,
+):
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            f"register_autocast(op): got unexpected type for op: {type(op)}"
+        )
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef.register_autocast(device_type, cast_inputs)
+
+    if cast_inputs is not None:
+        assert isinstance(op, str)
+        qualname = op
+        _op = torch._library.utils.lookup_op(qualname)
+
+        namespace, opname = torch._library.utils.parse_namespace(qualname)
+        if lib is None:
+            lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(lib)
+
+        def kernel(_, *args, **kwargs):
+            nonlocal _op
+
+            assert len(kwargs) == 0
+            autocast_keyset = torch._C.DispatchKeySet(
+                torch._C.DispatchKey.AutocastCPU
+            ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
+            with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+                return _op(*_cast(args, device_type, cast_inputs))
+
+        if device_type == "cuda":
+            return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
+        elif device_type == "cpu":
+            return lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+        else:
+            raise AssertionError(f"Unknown device type: {device_type}")
 
 
 def register_fake(
