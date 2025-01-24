@@ -8150,13 +8150,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="binary_noncontig_holes_broadcasting_1_over_ragged",
     ),
-    # Bug: fill doesn't work with NJTs at all for some reason
-    XFailRule(
-        error_type=TypeError,
-        error_msg="received an invalid combination of arguments",
-        op_match_fn=lambda device, op: op.full_name == "fill",
-        name="fill_bug",
-    ),
 ]
 
 BACKWARD_SKIPS_AND_XFAILS = [
@@ -8312,13 +8305,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_reduction_with_dim_backward_on_ragged_dim",
     ),
-    # matmul(): unimplemented backward
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="aten.matmul_backward.default",
-        op_match_fn=lambda device, op: (op.full_name == "matmul"),
-        name="broken_matmul_backward",
-    ),
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=RuntimeError,
@@ -8389,6 +8375,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
+    # e.g. Expected 5 == 4
+    XFailRule(
+        error_type=AssertionError,
+        op_match_fn=lambda device, op: (op.full_name == "fill"),
+        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
+        name="fill_aot_autograd_bug_with_transposed_input",
+    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
