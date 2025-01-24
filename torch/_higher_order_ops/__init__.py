@@ -9,7 +9,6 @@ from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
 from torch._higher_order_ops.prim_hop_base import PrimHOPBase
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
-from torch._higher_order_ops.wrap import speculate_subgraph
 
 
 __all__ = [

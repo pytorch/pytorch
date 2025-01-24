@@ -75,6 +75,8 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
     "foreach_map",
+    # it's not user-facing and only works in dynamo
+    "speculate_subgraph",
 ]
 
 torch.library.define(

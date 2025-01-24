@@ -10,11 +10,22 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
-from torch._ops import OperatorBase
+from torch._ops import HigherOrderOperator, OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
+class SpecualteSubgraphOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("speculate_subgraph")
+
+    def __call__(self, fn, operands):
+        return super().__call__(fn, operands)
+
+
+speculate_subgraph = SpecualteSubgraphOp()
 
 
 @dataclass

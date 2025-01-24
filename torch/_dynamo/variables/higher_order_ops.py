@@ -2310,18 +2310,26 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def _create_scalar(query):
             return query.new_empty([], dtype=torch.int32)
 
+        @_make_inlinable
+        def _create_scalars(query):
+            return (
+                _create_scalar(query),
+                _create_scalar(query),
+                _create_scalar(query),
+                _create_scalar(query),
+            )
+
         if fn_name == "score_mod":
 
             @_make_inlinable
             def _fn(query, fn):
                 # list comprehension is not supported for inlinig yet
-                b, h, m, n = (
-                    _create_scalar(query),
-                    _create_scalar(query),
-                    _create_scalar(query),
-                    _create_scalar(query),
+                score, *_ = torch.ops.higher_order.speculate_subgraph(
+                    _create_scalar, (query,)
                 )
-                score = query.new_empty([], requires_grad=query.requires_grad)
+                (b, h, m, n), *_ = torch.ops.higher_order.speculate_subgraph(
+                    _create_scalars, (query,)
+                )
                 return torch.ops.higher_order.speculate_subgraph(
                     fn, (score, b, h, m, n)
                 )
@@ -2332,15 +2340,12 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             @_make_inlinable
             def _fn(query, fn):
                 # list comprehension is not supported for inlinig yet
-                b, h, m, n = (
-                    _create_scalar(query),
-                    _create_scalar(query),
-                    _create_scalar(query),
-                    _create_scalar(query),
+                (b, h, m, n), *_ = torch.ops.higher_order.speculate_subgraph(
+                    _create_scalars, (query,)
                 )
                 return torch.ops.higher_order.speculate_subgraph(fn, (b, h, m, n))
 
-        with discard_graph_changes(tx), TransformGetItemToIndex():
+        with TransformGetItemToIndex():
             (
                 _body_output,
                 _body_tree_spec,
