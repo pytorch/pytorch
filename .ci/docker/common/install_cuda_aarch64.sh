@@ -212,8 +212,8 @@ function prune_128 {
       export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
   fi
 
-  # all CUDA libs except CuDNN and CuBLAS
-  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis"  \
+  # all CUDA static libs except CuDNN and CuBLAS
+  ls $CUDA_LIB_DIR/ | grep "\.a$" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis"  \
       | xargs -I {} bash -c \
                 "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
 
