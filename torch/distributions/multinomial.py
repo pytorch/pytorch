@@ -108,8 +108,9 @@ class Multinomial(Distribution):
         shifted_idx = list(range(samples.dim()))
         shifted_idx.append(shifted_idx.pop(0))
         samples = samples.permute(*shifted_idx)
-        counts = samples.new(self._extended_shape(sample_shape)).zero_()
-        counts.scatter_add_(-1, samples, torch.ones_like(samples))
+        counts = samples.new_zeros(self._extended_shape(sample_shape))
+        counts = counts.scatter_add(-1, samples, torch.ones_like(samples))
+        # counts[..., samples] += 1
         return counts.type_as(self.probs)
 
     def entropy(self):

@@ -222,6 +222,16 @@ def logcumsumexp(self, dim):
     maybe_wrap_dim(dim, self.ndim)
     return torch.empty_like(self).contiguous()
 
+@register_meta([aten._sample_dirichlet.default, aten._sample_dirichlet.out])
+@out_wrapper()
+def _sample_dirichlet(tensor):
+    return torch.empty_like(tensor).contiguous()
+
+@register_meta([aten._dirichlet_grad.default, aten._dirichlet_grad.out])
+@out_wrapper()
+def _dirichlet_grad(x, alpha, total):
+    return torch.empty_like(x).contiguous()
+
 
 # Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
 def _exec_fft(out, self, out_sizes, dim, forward):
