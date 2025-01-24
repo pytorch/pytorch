@@ -226,12 +226,13 @@ class UploadUtilizationData:
             print("[dry-run-mode]: no upload in dry run mode")
             return
 
-        collection = f"utilization_v{db_metadata.data_model_version}"
+        version = f"v_{db_metadata.data_model_version}"
         if self.debug_mode:
-            collection = f"debug_util_v{db_metadata.data_model_version}"
+            version= f"debug_util_v{db_metadata.data_model_version}"
 
         self._upload_utilization_data_to_s3(
-            collection=collection,
+            collection="util_matadata",
+            version=version,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -240,7 +241,8 @@ class UploadUtilizationData:
         )
 
         self._upload_utilization_data_to_s3(
-            collection=collection,
+            collection="util_timeseries",
+            version=version,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -251,6 +253,7 @@ class UploadUtilizationData:
     def _upload_utilization_data_to_s3(
         self,
         collection: str,
+        version: str,
         workflow_run_id: int,
         workflow_run_attempt: int,
         job_id: int,
