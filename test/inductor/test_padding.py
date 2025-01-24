@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     parametrize,
     serialTest,
+    skipIfRocmArch,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
@@ -566,7 +567,7 @@ class PaddingTest(TestCaseBase):
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
         )
 
-    @skipIfRocm(MI300_ARCH)  # Currently flakey on MI300 CI
+    @skipIfRocmArch(MI300_ARCH)  # Currently flakey on MI300 CI
     def test_pad_3d_tensor(self):
         """
         Constructing this test case guided by the fact that we don't pad
