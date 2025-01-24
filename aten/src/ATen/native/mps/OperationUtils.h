@@ -25,6 +25,16 @@
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+@interface MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name;
+@end
+
 // Fwd declarations
 namespace at {
 struct TensorIteratorBase;

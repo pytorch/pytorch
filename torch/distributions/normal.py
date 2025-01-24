@@ -3,6 +3,7 @@ import math
 from numbers import Number, Real
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
@@ -35,19 +36,19 @@ class Normal(ExponentialFamily):
     _mean_carrier_measure = 0
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return self.scale
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.stddev.pow(2)
 
     def __init__(self, loc, scale, validate_args=None):
@@ -72,7 +73,7 @@ class Normal(ExponentialFamily):
         with torch.no_grad():
             return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + eps * self.scale
@@ -105,7 +106,7 @@ class Normal(ExponentialFamily):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
     def _log_normalizer(self, x, y):

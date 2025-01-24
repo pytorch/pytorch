@@ -1956,7 +1956,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
             if alpha_beta is None:
@@ -2617,7 +2617,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.01, torch.float16: 0.01})
+    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)

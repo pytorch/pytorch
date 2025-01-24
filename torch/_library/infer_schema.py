@@ -1,8 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import collections
 import inspect
 import typing
-from typing import List, Optional, Sequence, Union  # noqa: F401
+from types import GenericAlias
+from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
@@ -89,7 +90,7 @@ def infer_schema(
         if type(annotation_type) == str:
             annotation_type = convert_type_string(annotation_type)
 
-        if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
+        if annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
@@ -162,18 +163,24 @@ def infer_schema(
 
 
 def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+    base_type: Union[type, typing._SpecialForm],
+    cpp_type: str,
+    list_base: bool,
+    optional_base_list: bool,
+    optional_list_base: bool,
 ):
-    result = [
+    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(typ):
-        return [
+    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
+        return (
             typing.Sequence[typ],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]
-        ]
+            GenericAlias(collections.abc.Sequence, (typ,)),
+            GenericAlias(list, (typ,)),
+        )
 
     if list_base:
         result.extend(
@@ -193,7 +200,7 @@ def derived_types(
 
 
 def get_supported_param_types():
-    data = [
+    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -213,6 +220,7 @@ def get_supported_param_types():
 SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
     typing.List[Tensor]: "Tensor[]",
+    list[Tensor]: "Tensor[]",
     int: "SymInt",
     float: "float",
     bool: "bool",
@@ -257,20 +265,25 @@ def supported_param(param: inspect.Parameter) -> bool:
     )
 
 
-def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.List]:
+def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
     type_args = getattr(tuple_type, "__args__", None)
     # Account for different python versions, e.g. python 3.8 would give ()
     # but python 3.12 would give None.
-    if tuple_type is typing.Tuple or type_args == () or type_args is None:
+    if (
+        tuple_type is typing.Tuple
+        or tuple_type is tuple
+        or type_args == ()
+        or type_args is None
+    ):
         # Handle the case of an empty tuple type
-        return typing.List
+        return list
     elif len(type_args) == 1:
         # General case: create a List with the same type arguments
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
+        return list[type_args[0]]  # type: ignore[valid-type]
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
-        return typing.List[type_args[0]]  # type: ignore[valid-type]
+        return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

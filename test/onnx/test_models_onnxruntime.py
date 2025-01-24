@@ -3,7 +3,7 @@
 import os
 import unittest
 from collections import OrderedDict
-from typing import List, Mapping, Tuple
+from collections.abc import Mapping
 
 import onnx_test_common
 import parameterized
@@ -89,7 +89,7 @@ TestModels_new_jit_API = type(
 )
 
 
-def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
+def _get_image(rel_path: str, size: tuple[int, int]) -> torch.Tensor:
     data_dir = os.path.join(os.path.dirname(__file__), "assets")
     path = os.path.join(data_dir, *rel_path.split("/"))
     image = PIL.Image.open(path).convert("RGB").resize(size, PIL.Image.BILINEAR)
@@ -97,7 +97,7 @@ def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
     return torchvision.transforms.ToTensor()(image)
 
 
-def _get_test_images() -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+def _get_test_images() -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     return (
         [_get_image("grace_hopper_517x606.jpg", (100, 320))],
         [_get_image("rgb_pytorch.png", (250, 380))],

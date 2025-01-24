@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 import functools
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -131,17 +133,13 @@ def _set_compilation_env():
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
-def _detect_input_mutation(gm):
-    input_nodes = set()
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            input_nodes.add(node)
-        if node.op == "call_function":
-            target = node.target
-            if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
-                for arg in node.args:
-                    if arg in input_nodes:
-                        return True
+def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
+    example_inputs = [
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
+    ]
+    inp_mutation, _, _, _ = check_input_alias_and_mutation(gm, example_inputs)
+    if len(inp_mutation) > 0:
+        return True
 
     for _, module in gm.named_children():
         if isinstance(module, torch.fx.GraphModule):
@@ -151,43 +149,40 @@ def _detect_input_mutation(gm):
     return False
 
 
-def _detect_input_alias(gm):
-    input_storages = set()
-    for node in gm.graph.nodes:
-        # We need to check existence of "val" because we reuse the logic here
-        # for map operator, where num_mapped_args is a scalar
-        # and doesn't have a "val" meta.
-        if (
-            node.op == "placeholder"
-            and "val" in node.meta
-            and isinstance(node.meta["val"], torch.Tensor)
-        ):
-            input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
-        if node.op == "output":
-
-            def check_alias(out):
-                if (
-                    out is not None
-                    and "val" in out.meta
-                    and isinstance(out.meta["val"], torch.Tensor)
-                ):
-                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                    return out_storage in input_storages
-                return False
-
-            if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
-                return True
-
-    for _, module in gm.named_children():
-        if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
-            return True
-
+def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
+    example_inputs = [
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
+    ]
+    _, inp_inp_alias_map, inp_out_alias_map, _ = check_input_alias_and_mutation(
+        gm, example_inputs
+    )
+    if len(inp_out_alias_map) > 0 or len(inp_inp_alias_map) > 0:
+        return True
     return False
+
+
+# The invariant here is that we always trace the branch with fake tensor
+def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
+    fake_mode = detect_fake_mode(inputs)
+    tracing_mode = "real"
+    if fake_mode is None:
+        tracing_mode = "fake"
+
+    # Note: we need to turn off proxy tensor mode to avoid tracing infra
+    # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
+    # as fake tensor.
+    with disable_proxy_modes_tracing():
+        return make_fx(
+            fn,
+            tracing_mode=tracing_mode,
+            pre_dispatch=pre_dispatch,
+            _error_on_data_dependent_ops=False,
+        )(*inputs)
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     try:
-        gm = make_fx(gm, pre_dispatch=pre_dispatch)(*inputs)
+        gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -205,7 +200,7 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = _maybe_fake_tracing(branch, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -223,7 +218,7 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = _maybe_fake_tracing(branch, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -460,9 +455,9 @@ def save_tensors_and_symints_for_backward(ctx, args):
     assert all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
     ), args
-    partitioned_args: List[Any] = [[], []]
+    partitioned_args: list[Any] = [[], []]
     pos = []
-    for i, arg in enumerate(args):
+    for arg in args:
         idx = 0 if isinstance(arg, torch.Tensor) else 1
         partitioned_args[idx].append(arg)
         pos.append(idx)
@@ -512,7 +507,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
     meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
-) -> List[str]:
+) -> list[str]:
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
     pair_diffs = []
@@ -539,8 +534,83 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: Union[Tuple[Any, ...], List[Any]]):
+def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
     ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+
+
+def check_input_alias_and_mutation(
+    gm: torch.fx.GraphModule,
+    fake_args: List[FakeTensor],
+) -> Tuple[List[int], dict[int, int], dict[int, int], dict[int, int]]:
+    with disable_proxy_modes_tracing():
+        """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
+        in the graph module gm. It checks whether input tensor versions have
+        changed after run gm once to detect mutation and checks tensor storage
+        to detect alias.
+        """
+        from torch._prims_common import clone_preserve_strides
+
+        def _tensor_version(t) -> Optional[int]:
+            if isinstance(t, torch.Tensor):
+                assert isinstance(t, FakeTensor), "Only fake tensor is allowed"
+                return t._version
+            return None
+
+        def _tensor_storage(t) -> StorageWeakRef:
+            return StorageWeakRef(t._typed_storage())
+
+        # Clone the fake args to avoid mutating the original fake args
+        with ExitStack() as ctx_stack:
+            # We need to temporarily turn inference_mode off because
+            # under inference mode, tensor version counter is not tracked.
+            ctx_stack.enter_context(torch.inference_mode(False))
+            if (fake_mode := detect_fake_mode(fake_args)) is not None:
+                ctx_stack.enter_context(fake_mode)
+                if fake_mode.shape_env is not None:
+                    ctx_stack.enter_context(
+                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    )
+            cloned = [
+                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in fake_args
+            ]
+            before = [_tensor_version(arg) for arg in cloned]
+            outputs = gm(*cloned)
+            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
+            after = [_tensor_version(arg) for arg in cloned]
+            mutated_inputs = [
+                i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
+            ]
+        # We need to analyze the original fake_args to detect
+        # inp-inp alias.
+        inp_storage_map = {
+            _tensor_storage(inp): i
+            for i, inp in enumerate(fake_args)
+            if isinstance(inp, torch.Tensor)
+        }
+        inp_inp_alias_map = {
+            i: inp_storage_map[_tensor_storage(inp)]
+            for i, inp in enumerate(fake_args)
+            if isinstance(inp, torch.Tensor)
+            and inp_storage_map[_tensor_storage(inp)] != i
+        }
+        out_storage_map = {
+            _tensor_storage(out): i
+            for i, out in enumerate(outputs)
+            if isinstance(out, torch.Tensor)
+        }
+        out_out_alias_map = {
+            i: out_storage_map[_tensor_storage(out)]
+            for i, out in enumerate(outputs)
+            if isinstance(out, torch.Tensor)
+            and out_storage_map[_tensor_storage(out)] != i
+        }
+        inp_out_alias_map = {
+            i: out_storage_map[_tensor_storage(inp)]
+            for i, inp in enumerate(cloned)
+            if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
+        }
+        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map

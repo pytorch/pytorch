@@ -403,6 +403,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: angle
+    MPS: angle_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr
   tags: pointwise
 
@@ -410,6 +411,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: angle_out
+    MPS: angle_out_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr_out
   tags: pointwise
 
@@ -3864,6 +3866,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: value_selecting_reduction_backward_symint
+    NestedTensorCPU, NestedTensorCUDA: value_selecting_reduction_backward_nested_symint
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -13066,7 +13069,6 @@
   autogen: _slow_conv2d_backward.output_mask_out
 
 - func: _conv_depthwise2d.out(Tensor self, Tensor weight, SymInt[2] kernel_size, Tensor? bias, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: nn
   dispatch:
     CUDA: conv_depthwise2d_cuda_out
@@ -13752,7 +13754,6 @@
     CompositeImplicitAutograd: fft_hfft2_symint
 
 - func: fft_hfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13766,7 +13767,6 @@
     CompositeImplicitAutograd: fft_ihfft2_symint
 
 - func: fft_ihfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13828,7 +13828,6 @@
     CompositeImplicitAutograd: fft_hfftn_symint
 
 - func: fft_hfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
@@ -13842,7 +13841,6 @@
     CompositeImplicitAutograd: fft_ihfftn_symint
 
 - func: fft_ihfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
   dispatch:
