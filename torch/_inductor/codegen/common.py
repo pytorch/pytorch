@@ -1120,11 +1120,11 @@ class InplacedBuffer(NamedTuple):
 
 @dataclasses.dataclass
 class ArgName:
-    arg_name: str
+    name: str
     suffix: str = ""  # used to attach a " : tl.constexpr" in the argument list
 
     def full_name(self):
-        return f"{self.arg_name}{self.suffix}"
+        return f"{self.name}{self.suffix}"
 
 
 class KernelArgs:
