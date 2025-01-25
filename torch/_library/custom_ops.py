@@ -2,20 +2,9 @@
 import inspect
 import logging
 import weakref
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Literal,
-    Optional,
-    overload,
-    Sequence,
-    Set,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -200,16 +189,16 @@ class CustomOpDef:
 
         self._init_fn = fn
 
-        self._backend_fns: Dict[Union[str, None], Callable] = {}
+        self._backend_fns: dict[Union[str, None], Callable] = {}
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
-        self._torch_dispatch_fns: Dict[type, Callable] = {}
+        self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
-        self._disabled_kernel: Set = set()
+        self._disabled_kernel: set = set()
         OPDEFS[self._qualname] = self
 
     @property
@@ -332,7 +321,7 @@ class CustomOpDef:
 
         def inner(fn):
             if device_types is None or isinstance(device_types, str):
-                dtypes: List[Union[str, None]] = [device_types]
+                dtypes: list[Union[str, None]] = [device_types]
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
@@ -807,7 +796,7 @@ def increment_version(val: Any) -> None:
 # decorator.
 
 
-OPDEF_TO_LIB: Dict[str, "torch.library.Library"] = {}
+OPDEF_TO_LIB: dict[str, "torch.library.Library"] = {}
 OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 

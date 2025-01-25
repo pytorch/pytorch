@@ -17,19 +17,8 @@ import re
 import types
 import warnings
 import weakref
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    MutableMapping,
-    NamedTuple,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import MutableMapping
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -127,6 +116,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -151,9 +141,11 @@ from .distributed import (
     WorldMetaClassVariable,
 )
 from .functions import (
+    CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -254,7 +246,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-DimList = List
+DimList = list
 
 
 def safe_has_grad(t):
@@ -350,13 +342,13 @@ class BackwardStateGraphArg(GraphArg):
 
 # All class-based iterators in itertools
 # NOTE: use id() because some objects are not hashable, it will raise error during lookup
-ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
+ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
     id(member)
     for name, member in vars(itertools).items()
     if not name.startswith("_") and inspect.isclass(member)
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
+ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 
 
 class VariableBuilder:
@@ -489,7 +481,7 @@ class VariableBuilder:
     @functools.lru_cache(None)
     def _id_dispatch(
         cls,
-    ) -> Dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
+    ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
         from ..comptime import comptime
 
         entries = [
@@ -1031,6 +1023,12 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
+        elif value is functools.wraps:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return FunctoolsWrapsVariable(value, source=self.source)
+        elif value is collections.namedtuple:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CollectionsNamedTupleFunction(value, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -2984,6 +2982,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif value is functools.wraps:
+            return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
@@ -2992,6 +2992,8 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
+        elif isinstance(value, types.GenericAlias):
+            return BuiltinVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )

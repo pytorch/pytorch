@@ -5,7 +5,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch.nn
 
@@ -248,6 +248,7 @@ class NNModuleVariable(VariableTracker):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
+        print("VAR_GETAATTR")
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -287,9 +288,8 @@ class NNModuleVariable(VariableTracker):
                 if result is not None:
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise unimplemented
-                unimplemented(
-                    f"missing attribute {name} - {typestr(base)}"
-                )
+                print("HIT IT")
+                unimplemented(f"missing attribute {name} - {typestr(base)}")
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
@@ -345,8 +345,8 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
 
@@ -453,8 +453,8 @@ class NNModuleVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
@@ -854,8 +854,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
@@ -922,8 +922,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)

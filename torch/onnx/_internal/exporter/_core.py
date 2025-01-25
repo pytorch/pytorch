@@ -12,7 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Literal, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Literal
 
 import onnxscript
 import onnxscript.evaluator
