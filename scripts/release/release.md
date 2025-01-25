@@ -329,18 +329,18 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 * Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
 * Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
 * New config option `annotate_training` that adds Inductor annotations to NVTX.  ([#130429](https://github.com/pytorch/pytorch/pull/130429))
-* Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility (#135530).
-* User can patch inductor config to enable strict custom kernel layout constraints by changing `triton_kernel_default_layout_constraint="needs_fixed_stride_order"` for torch._inductor.config. Thus, inductor will keep the same stride with user code(#135581). 
-* External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor (#130774).
-* Adds support for Windows Arm64 to enhance platform compatibility (#133088).
-* Integrates support for AMD triton stream pipeliner in ROCm to enhance performance (#139881).
-* Adds support for TRITON_INTERPRET in Inductor (#140841).
-* Adds update_constant_buffer pybind support in AOTInductor (#140755).
-* Provides an option `package_constants_in_so` to exclude weights from .so files in AOTInductor (#141997).
-* Adds `load_constants` to the package API (#142246).
-* Enables auto functionalize v2 by default (#136685).
-* Adds raise_error_on_ignored_optimization to the aoti config for improved error handling (#138035).
-* Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing (#135887).
+* Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility ([#135530](https://github.com/pytorch/pytorch/pull/135530)).
+* User can patch inductor config to enable strict custom kernel layout constraints by changing `triton_kernel_default_layout_constraint="needs_fixed_stride_order"` for torch._inductor.config. Thus, inductor will keep the same stride with user code([#135581](https://github.com/pytorch/pytorch/pull/135581)). 
+* External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor ([#130774](https://github.com/pytorch/pytorch/pull/130774)).
+* Adds support for Windows Arm64 to enhance platform compatibility ([#133088](https://github.com/pytorch/pytorch/pull/133088)).
+* Integrates support for AMD triton stream pipeliner in ROCm to enhance performance ([#139881](https://github.com/pytorch/pytorch/pull/139881)).
+* Adds support for TRITON_INTERPRET in Inductor ([#140841](https://github.com/pytorch/pytorch/pull/140841)).
+* Adds update_constant_buffer pybind support in AOTInductor ([#140755](https://github.com/pytorch/pytorch/pull/140755)).
+* Provides an option `package_constants_in_so` to exclude weights from .so files in AOTInductor ([#141997](https://github.com/pytorch/pytorch/pull/141997)).
+* Adds `load_constants` to the package API ([#142246](https://github.com/pytorch/pytorch/pull/142246)).
+* Enables auto functionalize v2 by default ([#136685](https://github.com/pytorch/pytorch/pull/136685)).
+* Adds raise_error_on_ignored_optimization to the aoti config for improved error handling ([#138035](https://github.com/pytorch/pytorch/pull/138035)).
+* Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing ([#135887](https://github.com/pytorch/pytorch/pull/135887)).
 
 
 ### Nested Tensor Frontend
