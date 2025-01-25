@@ -657,21 +657,9 @@ We improved the existing `torch.library` APIs and added new ones.
 * Introduces multi-kernel support alongside cooperative reductions in Inductor to improve performance ([#138893](https://github.com/pytorch/pytorch/pull/138893)).
 * Adds `env_name_default` and `env_name_force` to Config for better configuration management ([#138956](https://github.com/pytorch/pytorch/pull/138956)).
 * Adjusts loop split optimization heuristic ([#137550](https://github.com/pytorch/pytorch/pull/137550)).
-* Splits reduction loops when there are no shared reads to optimize performance ([#134307](https://github.com/pytorch/pytorch/pull/134307)).
-* Enhances numerical precision for fp32 in FlexAttention on ROCm devices using IEEE standards ([#135702](https://github.com/pytorch/pytorch/pull/135702)).
-* Adds higher-order operator names to cache bypass exceptions for better debugging and handling of uncached operators ([#135876](https://github.com/pytorch/pytorch/pull/135876)).
-* Port `merge_concats_pass` to PT2 pre grad passes for enhanced optimization capabilities ([#135527](https://github.com/pytorch/pytorch/pull/135527)).
-* Adds logging for precompilation time in Inductor to aid in profiling and optimization efforts ([#136395](https://github.com/pytorch/pytorch/pull/136395)).
-* Removes stride-0 dimensions from more complex block pointers to enhance tensor handling efficiency ([#135557](https://github.com/pytorch/pytorch/pull/135557)).
-* Substitute unbacked symints in expressions to enhance code correctness ([#137020](https://github.com/pytorch/pytorch/pull/137020)).
+* Enhances numerical precision for fp32 in FlexAttention on ROCm devices using IEEE ([#135702](https://github.com/pytorch/pytorch/pull/135702)).
 * Enables SDPA pattern matching in Inductor for CUDA, enhancing optimization capabilities ([#137085](https://github.com/pytorch/pytorch/pull/137085)).
-* Introduces a check for fused kernels before inplace updates to optimize performance and prevent issues ([#137042](https://github.com/pytorch/pytorch/pull/137042)).
-* Enhances flexibility by adding kwargs to bypass unexpected keyword errors in Inductor ([#137329](https://github.com/pytorch/pytorch/pull/137329)).
-* Ensure Triton CPU backend respects `max_autotune` setting for better performance ([#137276](https://github.com/pytorch/pytorch/pull/137276)).
-* Updates Inductor's support for Triton AttrsDescriptor to enhance compatibility ([#137757](https://github.com/pytorch/pytorch/pull/137757)).
-* Restructures triton dtype helpers for better maintainability ([#137946](https://github.com/pytorch/pytorch/pull/137946)).
-* Refines variable finding in graph.py to enhance code clarity and efficiency ([#137303](https://github.com/pytorch/pytorch/pull/137303)).
-* Disables TF32 in `test_slice_scatter_reinplace` to enhance numerical stability ([#135709](https://github.com/pytorch/pytorch/pull/135709)).
+* Updates Inductor's support for Triton AttrsDescriptor ([#137757](https://github.com/pytorch/pytorch/pull/137757)).
 
 
 ### Mps
