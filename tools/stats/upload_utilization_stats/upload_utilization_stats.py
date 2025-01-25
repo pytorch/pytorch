@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd  # type: ignore[import]
-
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
@@ -45,7 +44,7 @@ class SegmentGenerator:
     """
 
     def generate(
-        self, records: list[UtilizationRecord], segment_delta_threshold=60
+        self, records: list[UtilizationRecord], segment_delta_threshold: int = 60
     ) -> list[OssCiSegmentV1]:
         if len(records) == 0:
             return []
@@ -217,12 +216,12 @@ class UploadUtilizationData:
             self.info, metadata, valid_records, segments
         ).convert()
         print(
-            f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata),indent=4)}"
+            f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata), indent=4)}"
         )
 
         if len(db_records) > 0:
             print(
-                f"[db model] Peek db timeseries \n:{json.dumps(asdict(db_records[0]),indent=4)}"
+                f"[db model] Peek db timeseries \n:{json.dumps(asdict(db_records[0]), indent=4)}"
             )
 
         if self.dry_run:

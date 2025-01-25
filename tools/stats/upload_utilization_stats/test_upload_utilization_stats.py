@@ -1,16 +1,17 @@
-import unittest
-from unittest.mock import patch
-from datetime import datetime, timedelta
-from collections import Counter
 import os
 import sys
+import unittest
+from collections import Counter
+from datetime import datetime, timedelta
+
 
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-from tools.stats.utilization_stats_lib import UtilizationRecord
 from tools.stats.upload_utilization_stats.upload_utilization_stats import (
     SegmentGenerator,
 )
+from tools.stats.utilization_stats_lib import OssCiSegmentV1, UtilizationRecord
+
 
 # datetimes from January 1, 2022 12:00:00
 TEST_DT_BASE = datetime(2022, 1, 1, 12, 0, 0)
@@ -35,8 +36,8 @@ PYPIP_INSTALL_NAME = "python pip install install1"
 
 
 class TestSegmentGenerator(unittest.TestCase):
-    def test_generate_empty_records(self):
-        records = []
+    def test_generate_empty_records(self) -> None:
+        records: list[UtilizationRecord] = []
 
         # execute
         generator = SegmentGenerator()
@@ -45,7 +46,7 @@ class TestSegmentGenerator(unittest.TestCase):
         # assert
         self.assertEqual(segments, [])
 
-    def test_generate_single_record(self):
+    def test_generate_single_record(self) -> None:
         record = UtilizationRecord(
             timestamp=TEST_TS_BASE, cmd_names=[PYTEST1_NAME], level="PYTHON_CMD"
         )
@@ -58,7 +59,7 @@ class TestSegmentGenerator(unittest.TestCase):
         # assert
         self.assertEqual(len(segments), 1)
 
-    def test_generate_single_record_with_multiple_cmds(self):
+    def test_generate_single_record_with_multiple_cmds(self) -> None:
         record = UtilizationRecord(
             timestamp=TEST_TS_BASE,
             cmd_names=[PYTEST1_NAME, PYPIP_INSTALL_NAME],
@@ -73,7 +74,7 @@ class TestSegmentGenerator(unittest.TestCase):
         # assert
         self.assertEqual(len(segments), 2)
 
-    def test_generate_multiple_records(self):
+    def test_generate_multiple_records(self) -> None:
         records = get_base_test_records()
 
         # execute
@@ -87,7 +88,7 @@ class TestSegmentGenerator(unittest.TestCase):
             segments[1], PYPIP_INSTALL_NAME, TEST_TS_PLUS_10S, TEST_TS_PLUS_15S
         )
 
-    def test_generate_cmd_interval_larger_than_default_threshold_setting(self):
+    def test_generate_cmd_interval_larger_than_default_threshold_setting(self) -> None:
         records = get_base_test_records()
 
         # record has more than 1 minute gap than last default record
@@ -126,7 +127,7 @@ class TestSegmentGenerator(unittest.TestCase):
             segments[2], PYPIP_INSTALL_NAME, TEST_TS_PLUS_10S, TEST_TS_PLUS_15S
         )
 
-    def test_generate_multiple_segments_with_customized_threshold(self):
+    def test_generate_multiple_segments_with_customized_threshold(self) -> None:
         # set threshold to consider as continuous segment to 10 seconds
         test_threshold = 10
 
@@ -150,13 +151,15 @@ class TestSegmentGenerator(unittest.TestCase):
             segments[2], PYPIP_INSTALL_NAME, TEST_TS_PLUS_10S, TEST_TS_PLUS_15S
         )
 
-    def validate_segment(self, segment, name, start_at, end_at):
+    def validate_segment(
+        self, segment: OssCiSegmentV1, name: str, start_at: float, end_at: float
+    ) -> None:
         self.assertEqual(segment.name, name)
         self.assertEqual(segment.start_at, start_at)
         self.assertEqual(segment.end_at, end_at)
 
 
-def get_base_test_records():
+def get_base_test_records() -> list[UtilizationRecord]:
     record1 = UtilizationRecord(
         timestamp=TEST_TS_BASE, cmd_names=[PYTEST1_NAME], level="PYTHON_CMD"
     )
