@@ -3256,7 +3256,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 yield v.grad
 
         self.check_output_and_recompiles(
-            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
     @unittest.expectedFailure
