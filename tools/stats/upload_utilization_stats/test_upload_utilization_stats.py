@@ -34,6 +34,7 @@ PYTEST1_NAME = "python test1.py"
 PYTEST2_NAME = "python test2.py"
 PYPIP_INSTALL_NAME = "python pip install install1"
 
+
 class TestSegmentGenerator(unittest.TestCase):
     def test_generate_empty_records(self):
         records = []
