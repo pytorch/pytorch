@@ -411,6 +411,12 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="id of the workflow to get artifacts from",
     )
+    parser.add_argument(
+        "--repo",
+        type=str,
+        required=False,
+        help="which GitHub repo this workflow run belongs to",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     parser.add_argument("--dry-run", action="store_true", help="Enable dry-run mode")
@@ -424,13 +430,18 @@ if __name__ == "__main__":
     # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
 
+    repo = PYTORCH_REPO
+    if args.repo:
+        repo = args.repo
+    print(f"repo: {repo}")
+
     workflow_info = WorkflowInfo(
         workflow_run_id=args.workflow_run_id,
         run_attempt=args.workflow_run_attempt,
         job_id=args.job_id,
         workflow_name=args.workflow_name,
         job_name=args.job_name,
-        repo=PYTORCH_REPO,
+        repo=repo,
     )
 
     ud = UploadUtilizationData(
