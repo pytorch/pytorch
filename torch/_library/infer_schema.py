@@ -209,8 +209,8 @@ def derived_types(
 
     def derived_seq_types(typ: Union[type, typing._SpecialForm]):
         return (
-            typing.Sequence[typ],  # type: ignore[valid-type]
-            typing.List[typ],  # type: ignore[valid-type]
+            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
+            typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),
         )
@@ -252,7 +252,7 @@ def get_supported_param_types():
 
 SUPPORTED_RETURN_TYPES = {
     Tensor: "Tensor",
-    typing.List[Tensor]: "Tensor[]",
+    typing.List[Tensor]: "Tensor[]",  # noqa: UP006
     list[Tensor]: "Tensor[]",
     int: "SymInt",
     float: "float",
@@ -306,7 +306,7 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     # Account for different python versions, e.g. python 3.8 would give ()
     # but python 3.12 would give None.
     if (
-        tuple_type is typing.Tuple
+        tuple_type is typing.Tuple  # noqa: UP006
         or tuple_type is tuple
         or type_args == ()
         or type_args is None
