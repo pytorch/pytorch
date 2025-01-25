@@ -643,7 +643,6 @@ We improved the existing `torch.library` APIs and added new ones.
 ### Inductor
 
 
-* Add type annotations to Configs ([#139833](https://github.com/pytorch/pytorch/pull/139833))
 * Switch GPU codegen to one-pass in AOTI ([#141980](https://github.com/pytorch/pytorch/pull/141980))
 * Fix multi-kernel codegen when using one-pass in AOTI ([#142333](https://github.com/pytorch/pytorch/pull/142333))
 * Fix an issue when fallback op does not return a value in AOTI ([#142339](https://github.com/pytorch/pytorch/pull/142339))
@@ -660,7 +659,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Enhances numerical precision for fp32 in FlexAttention on ROCm devices using IEEE ([#135702](https://github.com/pytorch/pytorch/pull/135702)).
 * Enables SDPA pattern matching in Inductor for CUDA, enhancing optimization capabilities ([#137085](https://github.com/pytorch/pytorch/pull/137085)).
 * Updates Inductor's support for Triton AttrsDescriptor ([#137757](https://github.com/pytorch/pytorch/pull/137757)).
-
+* Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
 
 ### Mps
 
@@ -957,37 +956,34 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
-* Fix "expand: SymIntArrayRef expected to contain only concrete integers" in AOTInductor ([#135933](https://github.com/pytorch/pytorch/pull/135933))
+* Fix a bug with not enabling the Python dispatcher in AOTInductor ([#135933](https://github.com/pytorch/pytorch/pull/135933))
 * Don't run reshape pattern match on dynamic shape size tensor ([#136100](https://github.com/pytorch/pytorch/pull/136100))
 * Make DtypeView work with cpp_wrapper without `abi_compatible` ([#136233](https://github.com/pytorch/pytorch/pull/136233))
-* Check size hints to determine indexing dtype ([#137234](https://github.com/pytorch/pytorch/pull/137234))
+* Check size hints to determine indexing dtype in Triton ([#137234](https://github.com/pytorch/pytorch/pull/137234))
 * Fix an error in `_dynamo.compiled_autograd.reset()` ([#137889](https://github.com/pytorch/pytorch/pull/137889))
 * Fix out-of-bounds array access in atomic_add_vec ([#138744](https://github.com/pytorch/pytorch/pull/138744))
 * Update zero size computation in `clone_preserve_strides` ([#139224](https://github.com/pytorch/pytorch/pull/139224), [#139458](https://github.com/pytorch/pytorch/pull/139458))
 * Fix for gcc10 `torch.compile` compiler error when march=aarch64+sve ([#137795](https://github.com/pytorch/pytorch/pull/137795))
 * Fix a cubin file path issue ([#139848](https://github.com/pytorch/pytorch/pull/139848))
-* Remove dir after packaging ([#140022](https://github.com/pytorch/pytorch/pull/140022))
-* Fix a two-pass kernel missmatch ([#141041](https://github.com/pytorch/pytorch/pull/141041))
-* Unbreak dynamic shape minimal arrayref interface tests ([#142091](https://github.com/pytorch/pytorch/pull/142091))
-* Assert misaligned input ([#142136](https://github.com/pytorch/pytorch/pull/142136))
-* Reapply #142091 (Unbreak dynamic shape minimal arrayref interface tests) ([#142340](https://github.com/pytorch/pytorch/pull/142340))
-* Add Current Mask Var To CSE Cache Key ([#140838](https://github.com/pytorch/pytorch/pull/140838))
+* Fix caching issue with AOTI packaging ([#140022](https://github.com/pytorch/pytorch/pull/140022))
+* Fix a two-pass kernel missmatch in AOTI ([#141041](https://github.com/pytorch/pytorch/pull/141041))
+* Fix performance bug by removing `copy_misaligned_inputs` from AOTI ([#142136](https://github.com/pytorch/pytorch/pull/142136))
+* Fix mask bug in torch.cat kernel ([#140838](https://github.com/pytorch/pytorch/pull/140838))
 * Fixed max-autotune in FlexAttention to reset kernel options appropriately ([#138733](https://github.com/pytorch/pytorch/pull/138733))
 * Don't set XBLOCK larger than xnumel ([#138730](https://github.com/pytorch/pytorch/pull/138730))
-* Fix inductor CPU` masked()` body codegen when result dtype is bool and operator is where ([#138486](https://github.com/pytorch/pytorch/pull/138486))
-* fix typo in `codegen_dynamic_scalar` ([#138760](https://github.com/pytorch/pytorch/pull/138760))
+* Fix inductor CPU `masked()` body codegen when result dtype is bool and operator is where ([#138486](https://github.com/pytorch/pytorch/pull/138486))
+* Fix typo in `codegen_dynamic_scalar` ([#138760](https://github.com/pytorch/pytorch/pull/138760))
 * Fix `ReinterpretView` call in `TMADescriptor` IR ([#138759](https://github.com/pytorch/pytorch/pull/138759))
 * Fix free symbol handling in FlexAttention ([#138794](https://github.com/pytorch/pytorch/pull/138794))
-* fix codegen for tl.constexpr globals ([#138757](https://github.com/pytorch/pytorch/pull/138757))
-* force strides for efficient attn bwd ([#138879](https://github.com/pytorch/pytorch/pull/138879))
-* getting AOT inductor to treat None args correctly ([#139114](https://github.com/pytorch/pytorch/pull/139114))
-* Fix dynamic shapes ([#139777](https://github.com/pytorch/pytorch/pull/139777))
-* (ROCM) Fixing missing ck package warning when the backend is disabled ([#139790](https://github.com/pytorch/pytorch/pull/139790))
-* Fix SDPA seed/offset issue ([#140070](https://github.com/pytorch/pytorch/pull/140070))
-* force contiguous layout for implicit fallback ([#140996](https://github.com/pytorch/pytorch/pull/140996))
+* Fix codegen for tl.constexpr globals ([#138757](https://github.com/pytorch/pytorch/pull/138757))
+* Force strides for efficient attention backward ([#138879](https://github.com/pytorch/pytorch/pull/138879))
+* Make AOT inductor treat None args correctly ([#139114](https://github.com/pytorch/pytorch/pull/139114))
+* Fix a bug with arg ordering in handling dynamic shapes ([#139777](https://github.com/pytorch/pytorch/pull/139777))
+* Fixing missing ck package warning when the backend is disabled ([#139790](https://github.com/pytorch/pytorch/pull/139790))
+* Force contiguous layout for implicit fallback ([#140996](https://github.com/pytorch/pytorch/pull/140996))
 * Fix another IMA with captured buffers ([#141164](https://github.com/pytorch/pytorch/pull/141164))
-* inductor dtype propagation fixes ([#141495](https://github.com/pytorch/pytorch/pull/141495))
-* fix broadcast logic for Triton ([#141027](https://github.com/pytorch/pytorch/pull/141027)) ([#141693](https://github.com/pytorch/pytorch/pull/141693))
+* Inductor dtype propagation fixes ([#141495](https://github.com/pytorch/pytorch/pull/141495))
+* Fix broadcast logic for Triton ([#141027](https://github.com/pytorch/pytorch/pull/141027)) ([#141693](https://github.com/pytorch/pytorch/pull/141693))
 * Fix grid codegen for configs with empty kwargs ([#141824](https://github.com/pytorch/pytorch/pull/141824))
 * Fix issue in CPP GEMM Template Prune Tensor ([#141798](https://github.com/pytorch/pytorch/pull/141798))
 * Fix max-autotune bug with captured buffer grads ([#141531](https://github.com/pytorch/pytorch/pull/141531))
@@ -999,11 +995,11 @@ We improved the existing `torch.library` APIs and added new ones.
 * Corrects the maximum autotuning for single-thread dynamic shapes in Inductor ([#136418](https://github.com/pytorch/pytorch/pull/136418)).
 * Fixes FMA codegen for Halide backend to ensure correct operation behavior ([#136810](https://github.com/pytorch/pytorch/pull/136810)).
 * Corrects max-autotune behavior when dealing with View nodes in FlexAttention ([#137204](https://github.com/pytorch/pytorch/pull/137204)).
-* Adjust BlockMask handling when reused from a larger sequence length to prevent issues ([#137255](https://github.com/pytorch/pytorch/pull/137255)).
+* Adjust BlockMask handling when reused from a larger sequence length ([#137255](https://github.com/pytorch/pytorch/pull/137255)).
 * Corrects `triton_reshape` by properly expanding the Min keyword in code generation ([#137357](https://github.com/pytorch/pytorch/pull/137357)).
 * Corrects `reduction_hint` behavior for single-element sums ([#137754](https://github.com/pytorch/pytorch/pull/137754)).
-* Resolves a codecache `write_atomic` issue on Windows, ensuring thread-safe file operations ([#138331](https://github.com/pytorch/pytorch/pull/138331)).
-* Fixes AOTI data type codegen for symbolic integers, improving compiler correctness ([#138106](https://github.com/pytorch/pytorch/pull/138106)).
+* Resolves a codecache `write_atomic` issue on Windows ([#138331](https://github.com/pytorch/pytorch/pull/138331)).
+* Fixes AOTI data type codegen for symbolic integers ([#138106](https://github.com/pytorch/pytorch/pull/138106)).
 * Resolves an issue where passing `None` arguments to user-defined Triton kernels caused errors ([#138472](https://github.com/pytorch/pytorch/pull/138472)).
 * Correctly sets keyword arguments when creating Buffers in ROCmTemplate for proper initialization ([#138521](https://github.com/pytorch/pytorch/pull/138521)).
 
@@ -1337,18 +1333,9 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 * Update the OSS tutorial ([#139956](https://github.com/pytorch/pytorch/pull/139956))
-* Add some error messages for flexattention ([#138891](https://github.com/pytorch/pytorch/pull/138891))
-* type annotations for meta_utils ([#140203](https://github.com/pytorch/pytorch/pull/140203))
-* Add typing to ir.py 1 ([#140912](https://github.com/pytorch/pytorch/pull/140912))
-* Add typing to ir.py 2 ([#140915](https://github.com/pytorch/pytorch/pull/140915))
-* Add ExportedProgram type annotation ([#141247](https://github.com/pytorch/pytorch/pull/141247))
 * Add README for `torch._inductor.runtime` ([#141492](https://github.com/pytorch/pytorch/pull/141492))
 * Improve OSSProxyExecutor error messages ([#141501](https://github.com/pytorch/pytorch/pull/141501))
-* Minor typing changes ([#142219](https://github.com/pytorch/pytorch/pull/142219))
-* Add TypeGuard to is_symbolic ([#142304](https://github.com/pytorch/pytorch/pull/142304))
 * Enhances documentation for the bundled autotune cache to provide clearer guidance ([#138298](https://github.com/pytorch/pytorch/pull/138298)).
-* Fixes a typo in debug logs for the FX graph cache to improve clarity ([#136889](https://github.com/pytorch/pytorch/pull/136889)).
-* Updates messages for incompatible CudaGraph operations to improve clarity ([#137015](https://github.com/pytorch/pytorch/pull/137015)).
 
 
 ### Mps
@@ -1478,12 +1465,9 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
-* Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
 * Remove the non-ABI-compatible mode ([#138009](https://github.com/pytorch/pytorch/pull/138009), [#138047](https://github.com/pytorch/pytorch/pull/138047))
 * Move `use_minimal_arrayref_interface` logic ([#138250](https://github.com/pytorch/pytorch/pull/138250))
-* Separate header codegen ([#138882](https://github.com/pytorch/pytorch/pull/138882))
 * Refactor `ir.Layout` into `ir.OutputSpec` ([#140910](https://github.com/pytorch/pytorch/pull/140910))
-* Default impl refactors to IRNode ([#141321](https://github.com/pytorch/pytorch/pull/141321))
 * Refactor `dependencies.extract_loop_body_with_args` ([#141404](https://github.com/pytorch/pytorch/pull/141404))
 * Modest code motion in compile_fx ([#141574](https://github.com/pytorch/pytorch/pull/141574))
 * Move post compile steps into post_compile1/post_compile2 method ([#141656](https://github.com/pytorch/pytorch/pull/141656))
@@ -1495,7 +1479,6 @@ We improved the existing `torch.library` APIs and added new ones.
 * move block pointer analysis to a new module ([#141733](https://github.com/pytorch/pytorch/pull/141733))
 * Factor `_fx_graph_cache_key` and _time_taken_ns to common base class ([#141878](https://github.com/pytorch/pytorch/pull/141878))
 * codecache: pull out some Graph serialization code into common helpers ([#141502](https://github.com/pytorch/pytorch/pull/141502))
-* Structured compile_fx ([#141505](https://github.com/pytorch/pytorch/pull/141505))
 * Refactor optional graph module into `CompiledFxGraphConstants` ([#141897](https://github.com/pytorch/pytorch/pull/141897))
 * Adds a compiler bisector tool to aid in debugging and development processes within PyTorch ([#131936](https://github.com/pytorch/pytorch/pull/131936)).
 
