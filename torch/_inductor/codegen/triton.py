@@ -1505,6 +1505,9 @@ class FixedTritonConfig:
     def __getitem__(self, item):
         return self.config[item]
 
+    def __contains__(self, item):
+        return item in self.config
+
 
 class TritonCSE(CSE):
     """
@@ -2743,7 +2746,7 @@ class TritonKernel(SIMDKernel):
         value independently.
         """
         xnumel = self.numels["x"]
-        mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
+        mask = "xindex < xnumel" if not self._has_constant_xmask() else None
         expand = "" if self.no_x_dim else "[None,:]"
 
         nbytes = xnumel * dtype.itemsize * self.cooperative_reduction_rsplit()
@@ -3688,8 +3691,13 @@ class TritonKernel(SIMDKernel):
     def _has_constant_mask(self, tree: IterationRangesRoot):
         if not self.optimize_mask:
             return False
-        if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
-            return True
+
+        if self.fixed_config and f"{tree.prefix.upper()}BLOCK" in self.fixed_config:
+            if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
+                return True
+        else:
+            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
+                return True
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
@@ -3721,6 +3729,11 @@ class TritonKernel(SIMDKernel):
             )
 
         return False
+
+    def _has_constant_xmask(self):
+        xtree = self.range_trees[0]
+        assert xtree.prefix == "x"
+        return self._has_constant_mask(xtree)
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
