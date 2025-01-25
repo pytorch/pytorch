@@ -1370,14 +1370,10 @@ def record_compilation_metrics(
 ):
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
-            from torch._inductor.fb.remote_cache import (
-                FbRemoteFxGraphCache,
-                REMOTE_CACHE_VERSION,
-            )
+            from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
 
             remote_cache_version = REMOTE_CACHE_VERSION
-            backend = FbRemoteFxGraphCache.get_remote_backend()
-            inductor_fx_remote_cache_backend_type = type(backend).__name__
+            inductor_fx_remote_cache_backend_type = "_ManifoldCache"
         except ModuleNotFoundError:
             remote_cache_version = None
             inductor_fx_remote_cache_backend_type = None

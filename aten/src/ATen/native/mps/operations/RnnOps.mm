@@ -322,13 +322,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     Placeholder outputPlaceholder3 = Placeholder(cachedGraph->outputTensors_[3], zState);
     Placeholder outputPlaceholder4 = Placeholder(cachedGraph->outputTensors_[4], cellStateFwd);
 
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [@{
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [[@{
       outputPlaceholder0.getMPSGraphTensor() : outputPlaceholder0.getMPSGraphTensorData(),
       outputPlaceholder1.getMPSGraphTensor() : outputPlaceholder1.getMPSGraphTensorData(),
       outputPlaceholder2.getMPSGraphTensor() : outputPlaceholder2.getMPSGraphTensorData(),
       outputPlaceholder3.getMPSGraphTensor() : outputPlaceholder3.getMPSGraphTensorData(),
       outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData(),
-    } mutableCopy];
+    } mutableCopy] autorelease];
 
     if (num_layers > 1) {
       Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);

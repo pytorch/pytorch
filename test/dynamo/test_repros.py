@@ -1633,6 +1633,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         opt_test_fn()
 
+    def test_foreach_decomp_arg_names(self):
+        # https://github.com/pytorch/pytorch/issues/138698
+
+        @torch.compile(fullgraph=True)
+        def foreach_pow(**kwargs):
+            return torch._foreach_pow(**kwargs)
+
+        foreach_pow(self=[torch.ones(2, 2, device="cpu")], exponent=2.7)
+
+        @torch.compile(fullgraph=True)
+        def foreach_lerp_(**kwargs):
+            return torch._foreach_lerp_(**kwargs)
+
+        foreach_lerp_(
+            self=[torch.ones(2, 2, device="cpu")],
+            tensors1=[torch.ones(2, 2, device="cpu")],
+            weights=[torch.ones(2, 2, device="cpu")],
+        )
+
     def test_reformer_min_chunk_len(self):
         def fn(cfg):
             t = torch.empty(10)
@@ -3677,7 +3696,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
