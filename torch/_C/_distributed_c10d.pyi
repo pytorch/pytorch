@@ -17,6 +17,8 @@ _DEFAULT_NO_TIMEOUT: timedelta
 _DEFAULT_PG_TIMEOUT: timedelta
 _DEFAULT_PG_NCCL_TIMEOUT: timedelta
 
+nccl_mem_allocator: Any
+
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
     FP16_COMPRESS = ...

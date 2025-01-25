@@ -59,6 +59,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/custom_class.h>
 
 namespace {
@@ -359,6 +360,34 @@ class PythonResponse : public ::c10d::control_plane::Response {
         void, ::c10d::control_plane::Response, "set_status", setStatus, status);
   }
 };
+
+#ifdef USE_C10D_NCCL
+// Create a memory allocator for NCCL. This allocator is used to allocate memory
+// that supports NVLink Sharp functionality. This allocator is later pybinded to
+// python, so that users can use it to create MemPool. For example:
+// >>> pool = torch.cuda.MemPool(dist.nccl_mem_allocator)
+
+// Allocate function
+void* nccl_mem_alloc(size_t size, int device, void* stream) {
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  void* ptr = nullptr;
+  TORCH_CHECK(ncclMemAlloc(&ptr, size) == ncclSuccess, "ncclMemAlloc failed");
+  return ptr;
+}
+
+// Free function
+void nccl_mem_free(void* ptr, size_t size, int device, void* stream) {
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  TORCH_CHECK(ncclMemFree(ptr) == ncclSuccess, "ncclMemFree failed");
+}
+
+// Create a `CUDAPluggableAllocator` that uses the above functions.
+std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+    nccl_mem_allocator =
+        torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+            nccl_mem_alloc,
+            nccl_mem_free);
+#endif
 
 // Called from DDP's Python API to create a c10d Python comm hook object.
 // The input state and callable comm_hook are Python objects. It later calls
@@ -3526,6 +3555,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       py::cast(::c10d::kProcessGroupNCCLDefaultTimeout);
 #endif
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
+
+#ifdef USE_C10D_NCCL
+  module.attr("nccl_mem_allocator") = nccl_mem_allocator;
+#endif
 
   module.def(
       "_set_global_rank",
