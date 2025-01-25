@@ -408,7 +408,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
       constexpr int double_threads = 768;
 #else
-      constexpr int double_threads = 768;
+      constexpr int double_threads = 1024;
 #endif
       const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, std::is_same<scalar_t, double>::value ? double_threads : 1024);
       const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
