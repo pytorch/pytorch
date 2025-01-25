@@ -38,7 +38,10 @@ class CooperativeReductionTests(TestCase):
         fn = torch.compile(fn, fullgraph=True)
         result, (source_code,) = run_and_get_code(fn, *args)
         self.assertEqual(result, expected)
-        self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        if "@triton_heuristics.fixed_config" in source_code:
+            self.assertIn("cooperative_reduction_grid", source_code)
+        else:
+            self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count, expect_kernel_count
@@ -176,6 +179,42 @@ class TestFixedConfigs(TestCase):
             return torch.softmax(x + 1, dim=-1) + x
 
         args = [torch.randn(8, 8000, device="cuda")]
+        with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
+            expected = fn(*args)
+            fn = torch.compile(fn, fullgraph=True)
+            result, (source_code,) = run_and_get_code(fn, *args)
+            self.assertEqual(result, expected)
+            self.assertIn("@triton_heuristics.fixed_config(", source_code)
+
+    def test_fixed_config_with_larger_xblock_than_xnumel(self):
+        class MyHeuristics(InductorChoices):
+            def triton_kernel_kwargs(
+                self,
+                kernel_cls: type[TritonKernel],
+                features: SIMDKernelFeatures,
+                groups: list[sympy.Expr],
+                kernel_kwargs: dict[str, Any],
+            ) -> dict[str, Any]:
+                return {
+                    **kernel_kwargs,
+                    "override_cooperative_reduction": True,
+                    "override_persistent_reduction": True,
+                    "fixed_config": FixedTritonConfig(
+                        {"XBLOCK": 128, "RSPLIT": 32, "num_warps": 16, "num_stages": 1}
+                    ),
+                }
+
+        def fn(x, y):
+            return [
+                torch.any(x == y),
+                torch.all(x == y),
+                torch.any(x != y),
+                torch.all(x != y),
+                torch.any(x < y),
+                torch.all(x > y),
+            ]
+
+        args = [torch.randn(1024, device="cuda") for _ in range(2)]
         with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
             expected = fn(*args)
             fn = torch.compile(fn, fullgraph=True)
