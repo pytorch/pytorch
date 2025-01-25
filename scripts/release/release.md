@@ -1161,8 +1161,7 @@ We improved the existing `torch.library` APIs and added new ones.
 * Build bf16 gemv fast path & entry points for non-ARM architectures too ([#139208](https://github.com/pytorch/pytorch/pull/139208))
 * Hook up `bf16_gemv_trans` to x86 bf16 GEMM ([#139220](https://github.com/pytorch/pytorch/pull/139220))
 * Don't go through dispatch for *_dot_with_fp32_arith ([#140834](https://github.com/pytorch/pytorch/pull/140834))
-* Add efficient isnan for NEON float ([#139082](https://github.com/pytorch/pytorch/pull/139082), [#139083](https://github.com/pytorch/pytorch/pull/139083))
-* Add efficient isnan for NEON half ()
+* Add efficient isnan for NEON float/half ([#139082](https://github.com/pytorch/pytorch/pull/139082), [#139083](https://github.com/pytorch/pytorch/pull/139083))
 * Hook up `fp16_gemv_trans` to x86 fp16 GEMM ([#137918](https://github.com/pytorch/pytorch/pull/137918))
 * Support non-zero beta in `fp16_gemv_trans` ([#138275](https://github.com/pytorch/pytorch/pull/138275))
 * Port X86_F16 from executorch half to PyTorch half ([#140720](https://github.com/pytorch/pytorch/pull/140720))
@@ -1173,35 +1172,32 @@ We improved the existing `torch.library` APIs and added new ones.
 * Constant folding for lifted graph ([#135060](https://github.com/pytorch/pytorch/pull/135060))
 * Add host-side TMA support to AOTInductor ([#138878](https://github.com/pytorch/pytorch/pull/138878))
 * Allow inplacing buffer when other users are inconsequential ([#138383](https://github.com/pytorch/pytorch/pull/138383))
-* loaf-fix ([#139376](https://github.com/pytorch/pytorch/pull/139376))
-* don't fuse two nodes if likely increase peak memory ([#138756](https://github.com/pytorch/pytorch/pull/138756))
+* Don't fuse two nodes if likely increase peak memory ([#138756](https://github.com/pytorch/pytorch/pull/138756))
 * Add oneDNN BRGEMM config for Half cpp gemm template ([#136255](https://github.com/pytorch/pytorch/pull/136255))
 * Enable the oneDNN Linear fusion for special case ([#139172](https://github.com/pytorch/pytorch/pull/139172))
 * Remove uses of deleted operations ([#139447](https://github.com/pytorch/pytorch/pull/139447))
-* make `decompose_mm_pass` support cpu case ([#139696](https://github.com/pytorch/pytorch/pull/139696))
-* (ROCM) Enable scaled mm with bias in gemm max autotune with CK backend ([#140674](https://github.com/pytorch/pytorch/pull/140674))
-* support linear+binary foldinig for freezing path ([#138807](https://github.com/pytorch/pytorch/pull/138807))
+* Enable scaled mm with bias in gemm max autotune with CK backend ([#140674](https://github.com/pytorch/pytorch/pull/140674))
+* Support linear+binary folding for freezing path ([#138807](https://github.com/pytorch/pytorch/pull/138807))
 * Simplify & rectify dequantized B buffer loading for AMX GEMM micro-kernel for WoQ int8 case ([#140258](https://github.com/pytorch/pytorch/pull/140258))
-* refine loop split logic ([#128812](https://github.com/pytorch/pytorch/pull/128812))
-* Lift shape & stride information as kernel args ([#138611](https://github.com/pytorch/pytorch/pull/138611))
+* Improve parallelization by collapsing vectorized loop ([#128812](https://github.com/pytorch/pytorch/pull/128812))
 * qconv at XPU backend ([#133080](https://github.com/pytorch/pytorch/pull/133080))
 * Dont use constant mask if y numel potentially overflows y grids ([#139751](https://github.com/pytorch/pytorch/pull/139751))
-* (ROCM) Add batched gemms into gemm max autotune with CK backend ([#141520](https://github.com/pytorch/pytorch/pull/141520))
+* Add batched gemms into gemm max autotune with CK backend ([#141520](https://github.com/pytorch/pytorch/pull/141520))
 * Adding lowering to persistent-tma device kernel for `_scaled_mm` ([#142045](https://github.com/pytorch/pytorch/pull/142045))
-* add fusion pass for `linear_dynamic_fp16` with relu ([#141556](https://github.com/pytorch/pytorch/pull/141556))
+* Add fusion pass for `linear_dynamic_fp16` with RELU ([#141556](https://github.com/pytorch/pytorch/pull/141556))
 * Reverts runtime numeric check in Inductor to reduce compilation time, optimizing the build process ([#137324](https://github.com/pytorch/pytorch/pull/137324)).
-* Optimizes ARM64 performance by utilizing 128-bit vectors for improved computation speed ([#137426](https://github.com/pytorch/pytorch/pull/137426)).
-* Adjusts `score_fusion_memory_threshold` application strategy in Inductor for optimized memory usage and fusion efficiency ([#138970](https://github.com/pytorch/pytorch/pull/138970)).
-* Enhances reduction operations with cooperative multi-kernel support in Inductor, improving computational speed ([#138893](https://github.com/pytorch/pytorch/pull/138893138893)).
-* Disables `sanitize_overflow` in Inductor kernels, optimizing computation speed ([#139502](https://github.com/pytorch/pytorch/pull/139502)).
-* Implements caching for `get_operation_names` and `get_buffer_names` to enhance performance ([#135446](https://github.com/pytorch/pytorch/pull/135446)).
+* Optimizes ARM64 performance by utilizing 128-bit vectors ([#137426](https://github.com/pytorch/pytorch/pull/137426)).
+* Adjusts `score_fusion_memory_threshold` application strategy in Inductor ([#138970](https://github.com/pytorch/pytorch/pull/138970)).
+* Enhances reduction operations with cooperative multi-kernel support in Inductor ([#138893](https://github.com/pytorch/pytorch/pull/138893138893)).
+* Disables `sanitize_overflow` in Inductor kernels ([#139502](https://github.com/pytorch/pytorch/pull/139502)).
+* Implements caching for `get_operation_names` and `get_buffer_names` ([#135446](https://github.com/pytorch/pytorch/pull/135446)).
 * Reorders scheduler nodes after fusion to reduce peak memory usage ([#134874](https://github.com/pytorch/pytorch/pull/134874)).
-* Optimize WOQ INT8 weight dequantization in AMX GEMM template for enhanced efficiency ([#136630](https://github.com/pytorch/pytorch/pull/136630)).
-* Uses scalar for f64 constants in Triton codegen to improve efficiency ([#136858](https://github.com/pytorch/pytorch/pull/136858)).
+* Optimize WOQ INT8 weight dequantization in AMX GEMM template ([#136630](https://github.com/pytorch/pytorch/pull/136630)).
+* Uses scalar for f64 constants in Triton codegen ([#136858](https://github.com/pytorch/pytorch/pull/136858)).
 * Reduces block sizes for improved performance when using the Triton CPU backend ([#136612](https://github.com/pytorch/pytorch/pull/136612)).
-* Optimizes CPU copies during autotuning by restricting them to CUDA devices, improving performance ([#137509](https://github.com/pytorch/pytorch/pull/137509)).
-* Adds host-side Triton TMA support to enhance Inductor efficiency ([#137950](https://github.com/pytorch/pytorch/pull/137950)).
-* Optimizes the `can_fuse_vertical()` function to enhance performance efficiency ([#135788](https://github.com/pytorch/pytorch/pull/135788)).
+* Optimizes CPU copies during autotuning by restricting them to CUDA devices ([#137509](https://github.com/pytorch/pytorch/pull/137509)).
+* Adds host-side Triton TMA support ([#137950](https://github.com/pytorch/pytorch/pull/137950)).
+* Optimizes the `can_fuse_vertical()` function ([#135788](https://github.com/pytorch/pytorch/pull/135788)).
 
 
 ### Mps
