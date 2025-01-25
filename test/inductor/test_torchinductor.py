@@ -6471,11 +6471,10 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        device_interface = get_interface_for_device(self.device)
         _dtype = torch.float64
         ctx = (
             contextlib.nullcontext()
-            if device_interface.is_dtype_supported(_dtype)
+            if self.is_dtype_supported(_dtype)
             else self.assertRaises(TypeError)
         )
         with ctx:
