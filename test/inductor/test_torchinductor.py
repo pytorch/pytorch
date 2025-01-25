@@ -6471,10 +6471,18 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        self.common(
-            fn,
-            (torch.randn([1024], dtype=torch.float64) + 10,),
+        device_interface = get_interface_for_device(self.device)
+        _dtype = torch.float64
+        ctx = (
+            contextlib.nullcontext()
+            if device_interface.is_dtype_supported(_dtype)
+            else self.assertRaises(TypeError)
         )
+        with ctx:
+            self.common(
+                fn,
+                (torch.randn([1024], dtype=_dtype) + 10,),
+            )
 
     def test_bitwise(self):
         def fn(x, y):

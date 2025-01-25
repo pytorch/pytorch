@@ -58,6 +58,7 @@ class MPSBasicTests(TestCase):
     test_inf = CommonTemplate.test_inf
     test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
+    test_log_fp64 = CommonTemplate.test_log_fp64
     test_low_memory_max_pool = CommonTemplate.test_low_memory_max_pool
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
