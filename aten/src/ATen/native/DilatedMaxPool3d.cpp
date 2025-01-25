@@ -120,6 +120,9 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
+
+  check_dim_size(gradOutput, indices.dim(), 0, indices.size(0));
+
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
     "max_pool3d: kernel_size must either be a single int, or a tuple of three ints")

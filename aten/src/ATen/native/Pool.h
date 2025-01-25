@@ -324,7 +324,6 @@ max_pool3d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-2, oheight);
   check_dim_size(indices, ndim, ndim-1, owidth);
 
-  TORCH_CHECK_VALUE(indices.size(0) > 0, "Expected non-empty indices tensor.");
 }
 
 inline void
