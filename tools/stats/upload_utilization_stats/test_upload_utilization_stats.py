@@ -90,7 +90,7 @@ class TestSegmentGenerator(unittest.TestCase):
     def test_generate_cmd_interval_larger_than_default_threshold_setting(self):
         records = get_base_test_records()
 
-        # record has more than 1 minute gap than last default record 
+        # record has more than 1 minute gap than last default record
         test_gap_dt1 = TEST_DT_PLUS_30S + timedelta(seconds=80)
         test_gap_dt2 = TEST_DT_PLUS_30S + timedelta(seconds=85)
         record_gap_1 = UtilizationRecord(
