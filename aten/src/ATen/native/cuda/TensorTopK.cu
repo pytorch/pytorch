@@ -376,7 +376,7 @@ __global__ void computeBlockwiseWithinKCounts(
   }
   __syncthreads();
 
-  Bitwise __shared__ desired; 
+  __shared__ Bitwise desired;
   uint32_t k_to_find = ks_to_find_in[slice_idx];
 
   if (tidx < RADIX_DIGITS) {
@@ -680,6 +680,8 @@ void launch(
 
   auto kthCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
   uint32_t* kthCounts = reinterpret_cast<uint32_t*>(kthCounts_buffer.get());
+#else
+  uint32_t* withinKCounts = nullptr;
 #endif
 
   Bitwise desiredMask = 0;
