@@ -3778,7 +3778,7 @@ def l1_loss(
     target: Tensor,
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
-    reduction: str = "mean",
+    reduction: str = "sum",
     weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -3787,6 +3787,9 @@ def l1_loss(
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if reduction == "sum":
+        raise ValueError("Reduction mode 'sum' is not supported for l1_loss")
+        
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
