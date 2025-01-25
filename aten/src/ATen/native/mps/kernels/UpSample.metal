@@ -146,18 +146,33 @@ void upsample_increment_value_bounded(
       value);
 }
 
+template <typename T>
+struct linear_return_type {
+  typedef float type;
+};
+template <>
+struct linear_return_type<uchar> {
+  typedef uchar type;
+};
+template <typename T>
+using linear_return_t = typename linear_return_type<T>::type;
+
+template <typename T>
+inline linear_return_t<T> linear_interp(T v0, T v1, float x) {
+  return x * v1 + (1 - x) * v0;
+}
+
 // See Note [ Weights computation for uint8_t and multiplication trick ]
 // Not sure if it make sense though, but on cpu mid point between
 // 152+249+172+35 is 153 rather than 152, as results of horizontal interp
 // are rounded before vertical interp is done
-template <typename T>
-inline float round_if_uchar(float v) {
-  return v;
-}
-
 template <>
-inline float round_if_uchar<uchar>(float v) {
-  return round(v);
+inline uchar linear_interp(uchar v0, uchar v1, float x) {
+  constexpr auto PRECISION_BITS = 22;
+  auto ix = static_cast<int>(.5 + x * (1 << PRECISION_BITS));
+  auto iomx = static_cast<int>(.5 + (1.0 - x) * (1 << PRECISION_BITS));
+  int rc = 1 << (PRECISION_BITS - 1);
+  return (rc + v0 * iomx + v1 * ix) >> PRECISION_BITS;
 }
 
 template <typename T>
@@ -196,9 +211,9 @@ kernel void upsample_bilinear2d(
           c,
           real_y + 1,
           real_x + 1);
-      auto i0_l = round_if_uchar<T>(t_x * i01 + (1.0 - t_x) * i00);
-      auto i1_l = round_if_uchar<T>(t_x * i11 + (1.0 - t_x) * i10);
-      auto res = round_if_uchar<T>(t_y * i1_l + (1.0 - t_y) * i0_l);
+      auto i0_l = linear_interp(i00, i01, t_x);
+      auto i1_l = linear_interp(i10, i11, t_x);
+      auto res = linear_interp(i0_l, i1_l, t_y);
       outputData
           [n * output_strides.w + c * output_strides.z +
            output_x * output_strides.x + output_y * output_strides.y] =
