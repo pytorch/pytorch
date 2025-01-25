@@ -69,7 +69,7 @@ def infer_schema(
 
     def convert_type_string(annotation_type: str):
         try:
-            return eval(annotation_type, globals=pf_globals, locals=pf_locals)
+            return eval(annotation_type, pf_globals, pf_locals)
         except Exception:
             error_fn(
                 f"Unsupported type annotation {annotation_type}. It is not a type."
