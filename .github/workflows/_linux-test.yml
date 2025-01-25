@@ -417,7 +417,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
-        uses: ./.github/workflows/upload-utilization-stats.yml
+        uses: ./.github/actions/upload-utilization-stats
         with:
           job_id: ${{ steps.get-job-id.outputs.job-id }}
           job_name: ${{ steps.get-job-id.outputs.job-name }}
