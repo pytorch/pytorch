@@ -53,11 +53,11 @@ def infer_schema(
         (Tensor x) -> Tensor
     """
     UNKNOWN_MUTATES = "unknown"
-    globals = prototype_function.__globals__
+    pf_globals = prototype_function.__globals__
     # To do this properly we really need `locals()` from the scope of the
-    # calling function. Unfortunately there doesn't seem to be any way to get
+    # prototype_function. Unfortunately there doesn't seem to be any way to get
     # that consistently.
-    locals = None
+    pf_locals = None
     # TODO: py3.10+ pass the `globals` parameter and we no longer need to deal
     # with stringified annotations.
     sig = inspect.signature(prototype_function)
@@ -67,9 +67,9 @@ def infer_schema(
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
 
-    def convert_type_string(annotation_type: str, globals: dict[str, object]):
+    def convert_type_string(annotation_type: str):
         try:
-            return eval(annotation_type, globals, locals)
+            return eval(annotation_type, globals=pf_globals, locals=pf_locals)
         except Exception:
             error_fn(
                 f"Unsupported type annotation {annotation_type}. It is not a type."
@@ -95,7 +95,7 @@ def infer_schema(
         # we convert it to the actual type.
         annotation_type = param.annotation
         if type(annotation_type) == str:
-            annotation_type = convert_type_string(annotation_type, globals)
+            annotation_type = convert_type_string(annotation_type)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type.__origin__ is tuple:
@@ -162,7 +162,7 @@ def infer_schema(
             )
     return_annotation = sig.return_annotation
     if type(return_annotation) == str:
-        return_annotation = convert_type_string(return_annotation, globals)
+        return_annotation = convert_type_string(return_annotation)
     ret = parse_return(return_annotation, error_fn)
     if op_name is not None:
         return f"{op_name}({', '.join(params)}) -> {ret}"
