@@ -186,7 +186,8 @@ class TestFixedConfigs(TestCase):
             self.assertEqual(result, expected)
             self.assertIn("@triton_heuristics.fixed_config(", source_code)
 
-    def test_fixed_config_with_larger_xblock_than_xnumel(self):
+    @parametrize("persistent", [False, True])
+    def test_fixed_config_with_larger_xblock_than_xnumel(self, persistent):
         class MyHeuristics(InductorChoices):
             def triton_kernel_kwargs(
                 self,
@@ -198,10 +199,8 @@ class TestFixedConfigs(TestCase):
                 return {
                     **kernel_kwargs,
                     "override_cooperative_reduction": True,
-                    "override_persistent_reduction": True,
-                    "fixed_config": FixedTritonConfig(
-                        {"XBLOCK": 128, "RSPLIT": 32, "num_warps": 16, "num_stages": 1}
-                    ),
+                    "override_persistent_reduction": persistent,
+                    "fixed_config": FixedTritonConfig(cfg),
                 }
 
         def fn(x, y):
@@ -210,10 +209,12 @@ class TestFixedConfigs(TestCase):
                 torch.all(x == y),
                 torch.any(x != y),
                 torch.all(x != y),
-                torch.any(x < y),
-                torch.all(x > y),
+                torch.mean(x + y),
             ]
 
+        cfg = {"XBLOCK": 128, "RSPLIT": 32, "num_warps": 16, "num_stages": 1}
+        if not persistent:
+            cfg["R0_BLOCK"] = 64
         args = [torch.randn(1024, device="cuda") for _ in range(2)]
         with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
             expected = fn(*args)

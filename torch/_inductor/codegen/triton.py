@@ -1934,9 +1934,10 @@ class TritonKernel(SIMDKernel):
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            mask_vars = OrderedSet()
+            mask_vars = dense_mask_vars
             if self._load_mask:
                 mask_vars.add(self._load_mask)
+            self.filter_masks(mask_vars)
             mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
             return IndexingOptions(
                 index_str, mask_vars, mask_str, expand_str, has_rindex, index
