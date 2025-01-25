@@ -197,6 +197,8 @@ class CustomOpDef:
         self._backward_fn: Optional[Callable] = None
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Optional[Callable] = None
+        self._autocast_cuda_dtype: Optional[_dtype] = None
+        self._autocast_cpu_dtype: Optional[_dtype] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
@@ -811,6 +813,13 @@ class CustomOpDef:
         if device_type not in ["cpu", "cuda"]:
             raise ValueError(f"Unknown device type: {device_type}")
 
+        need_register_cuda = self._autocast_cuda_dtype is None
+        need_register_cpu = self._autocast_cpu_dtype is None
+        if device_type == "cuda":
+            self._autocast_cuda_dtype = cast_inputs
+        else:
+            self._autocast_cpu_dtype = cast_inputs
+
         def kernel(_, *args, **kwargs):
             assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
             autocast_keyset = torch._C.DispatchKeySet(
@@ -819,13 +828,10 @@ class CustomOpDef:
             with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
                 return self._opoverload(*_cast(args, device_type, cast_inputs))
 
-        key = f"{self._namespace}/{self._name}/Autocast{device_type.upper()}"
-        if key not in self._lib._op_impls:
-            if device_type == "cuda":
-                self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
-            else:
-                # device_type is "cpu"
-                self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
+        if need_register_cuda and self._autocast_cuda_dtype:
+            self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
+        elif need_register_cpu and self._autocast_cpu_dtype:
+            self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
 
         return kernel
 

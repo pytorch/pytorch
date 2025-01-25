@@ -900,13 +900,11 @@ def register_autocast(
         with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
             return _op(*_cast(args, device_type, cast_inputs))
 
-    key = f"{namespace}/{opname}/Autocast{device_type.upper()}"
-    if key not in lib._op_impls:
-        if device_type == "cuda":
-            return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
-        else:
-            # device_type is "cpu"
-            return lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+    if device_type == "cuda":
+        return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
+    else:
+        # device_type is "cpu"
+        return lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
 
 
 def register_fake(

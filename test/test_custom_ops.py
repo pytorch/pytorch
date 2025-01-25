@@ -3141,6 +3141,43 @@ class TestCustomOpAPI(TestCase):
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_library_register_autocast_multiple_times_different_devices(self):
+        @torch.library.custom_op("mylib::my_sin", mutates_args=())
+        def my_sin(x: Tensor) -> Tensor:
+            return torch.sin(x)
+
+        # Register autocast for CUDA
+        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+
+        x1 = torch.randn(3, dtype=torch.float32, device="cuda")
+        with torch.autocast("cuda", dtype=torch.float16):
+            y1 = my_sin(x1)
+        self.assertEqual(y1.dtype, torch.float16)
+
+        # Register autocast for CPU
+        torch.library.register_autocast(my_sin, "cpu", torch.float16)
+
+        x2 = torch.randn(3, dtype=torch.float32, device="cpu")
+        with torch.autocast("cpu", dtype=torch.float16):
+            y2 = my_sin(x2)
+        self.assertEqual(y2.dtype, torch.float16)
+
+        # Register CUDA autocast for the second time
+        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+
+        with torch.autocast("cuda", dtype=torch.float16):
+            y3 = my_sin(x1)
+        self.assertEqual(y3.dtype, torch.float16)
+
+        # Register CPU autocast for the second time
+        torch.library.register_autocast(my_sin, "cpu", torch.float16)
+
+        with torch.autocast("cpu", dtype=torch.float16):
+            y4 = my_sin(x2)
+        self.assertEqual(y4.dtype, torch.float16)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_autograd(self):
         for mode in ["function", "qualname", "opoverload"]:
 
