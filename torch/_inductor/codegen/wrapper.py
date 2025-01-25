@@ -1078,7 +1078,7 @@ class PythonWrapperCodegen(CodeGen):
             arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
-        # Because generate_kernel_call can be overriden by a subclass, explictly call
+        # Because generate_kernel_call can be overriden by a subclass, explicitly call
         # PythonWrapperCodegen.generate_kernel_call here
         PythonWrapperCodegen.generate_kernel_call(
             self,
@@ -2376,7 +2376,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         # All inputs of hops must be explicitly passed in.
-        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
         assert len(outer_inputs) == len(
             subgraph.graph.graph_input_names
         ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
