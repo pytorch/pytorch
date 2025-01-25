@@ -27,7 +27,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
 
-    if "rocm" in expected_csv:
+    if "rocm" in expected_filename:
         flaky_models.update(
             {
                 "alexnet",
