@@ -870,8 +870,8 @@ class cpp:
     vec_isa_ok: Optional[bool] = None
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+    descriptive_names: Optional[
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
@@ -1032,8 +1032,8 @@ class triton:
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+    descriptive_names: Optional[
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # use alternate codegen for smaller reductions

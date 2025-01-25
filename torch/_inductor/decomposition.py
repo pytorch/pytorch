@@ -971,19 +971,10 @@ def max_pool2d_with_indices(
     dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if dilation == 1:
-        dilation = [1, 1]
-
-    if padding == 0:
-        padding = [0, 0]
-
-    if not stride:
-        stride = kernel_size
-
     kernel_size = pad_listlike(kernel_size, 2)
     dilation = pad_listlike(dilation, 2)
     padding = pad_listlike(padding, 2)
-    stride = pad_listlike(stride, 2)
+    stride = pad_listlike(stride or kernel_size, 2)
 
     window_size = kernel_size[0] * kernel_size[1]
     # We fallback when using non-default dilation or when the window size is too large
