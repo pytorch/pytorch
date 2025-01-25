@@ -12327,7 +12327,6 @@ class TestConsistency(TestCaseMPS):
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
-        'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
@@ -12415,9 +12414,6 @@ class TestConsistency(TestCaseMPS):
             mps_out = op(*mps_args, **mps_kwargs)
 
             atol, rtol = self._compute_tolerances(op, dtype)
-            if op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
-                atol = 1.0
-                rtol = 0.0
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 

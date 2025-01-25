@@ -146,6 +146,20 @@ void upsample_increment_value_bounded(
       value);
 }
 
+// See Note [ Weights computation for uint8_t and multiplication trick ]
+// Not sure if it make sense though, but on cpu mid point between
+// 152+249+172+35 is 153 rather than 152, as results of horizontal interp
+// are rounded before vertical interp is done
+template <typename T>
+inline float round_if_uchar(float v) {
+  return v;
+}
+
+template <>
+inline float round_if_uchar<uchar>(float v) {
+  return round(v);
+}
+
 template <typename T>
 kernel void upsample_bilinear2d(
     constant T* inputData [[buffer(0)]],
@@ -184,9 +198,9 @@ kernel void upsample_bilinear2d(
           c,
           real_y + 1,
           real_x + 1);
-      auto i0_l = t_x * i01 + (1.0 - t_x) * i00;
-      auto i1_l = t_x * i11 + (1.0 - t_x) * i10;
-      auto res = t_y * i1_l + (1.0 - t_y) * i0_l;
+      auto i0_l = round_if_uchar<T>(t_x * i01 + (1.0 - t_x) * i00);
+      auto i1_l = round_if_uchar<T>(t_x * i11 + (1.0 - t_x) * i10);
+      auto res = round_if_uchar<T>(t_y * i1_l + (1.0 - t_y) * i0_l);
       outputData
           [n * output_strides.w + c * output_strides.z +
            output_x * output_strides.x + output_y * output_strides.y] =
