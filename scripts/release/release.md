@@ -961,21 +961,21 @@ We improved the existing `torch.library` APIs and added new ones.
 * Make DtypeView work with cpp_wrapper without `abi_compatible` ([#136233](https://github.com/pytorch/pytorch/pull/136233))
 * Check size hints to determine indexing dtype in Triton ([#137234](https://github.com/pytorch/pytorch/pull/137234))
 * Fix an error in `_dynamo.compiled_autograd.reset()` ([#137889](https://github.com/pytorch/pytorch/pull/137889))
-* Fix out-of-bounds array access in atomic_add_vec ([#138744](https://github.com/pytorch/pytorch/pull/138744))
+* Fix out-of-bounds array access in `atomic_add_vec` ([#138744](https://github.com/pytorch/pytorch/pull/138744))
 * Update zero size computation in `clone_preserve_strides` ([#139224](https://github.com/pytorch/pytorch/pull/139224), [#139458](https://github.com/pytorch/pytorch/pull/139458))
-* Fix for gcc10 `torch.compile` compiler error when march=aarch64+sve ([#137795](https://github.com/pytorch/pytorch/pull/137795))
+* Fix for gcc10 `torch.compile` compiler error when `march=aarch64+sve` ([#137795](https://github.com/pytorch/pytorch/pull/137795))
 * Fix a cubin file path issue ([#139848](https://github.com/pytorch/pytorch/pull/139848))
 * Fix caching issue with AOTI packaging ([#140022](https://github.com/pytorch/pytorch/pull/140022))
 * Fix a two-pass kernel missmatch in AOTI ([#141041](https://github.com/pytorch/pytorch/pull/141041))
 * Fix performance bug by removing `copy_misaligned_inputs` from AOTI ([#142136](https://github.com/pytorch/pytorch/pull/142136))
-* Fix mask bug in torch.cat kernel ([#140838](https://github.com/pytorch/pytorch/pull/140838))
+* Fix mask bug in `torch.cat` kernel ([#140838](https://github.com/pytorch/pytorch/pull/140838))
 * Fixed max-autotune in FlexAttention to reset kernel options appropriately ([#138733](https://github.com/pytorch/pytorch/pull/138733))
 * Don't set XBLOCK larger than xnumel ([#138730](https://github.com/pytorch/pytorch/pull/138730))
 * Fix inductor CPU `masked()` body codegen when result dtype is bool and operator is where ([#138486](https://github.com/pytorch/pytorch/pull/138486))
 * Fix typo in `codegen_dynamic_scalar` ([#138760](https://github.com/pytorch/pytorch/pull/138760))
 * Fix `ReinterpretView` call in `TMADescriptor` IR ([#138759](https://github.com/pytorch/pytorch/pull/138759))
 * Fix free symbol handling in FlexAttention ([#138794](https://github.com/pytorch/pytorch/pull/138794))
-* Fix codegen for tl.constexpr globals ([#138757](https://github.com/pytorch/pytorch/pull/138757))
+* Fix codegen for `tl.constexpr` globals ([#138757](https://github.com/pytorch/pytorch/pull/138757))
 * Force strides for efficient attention backward ([#138879](https://github.com/pytorch/pytorch/pull/138879))
 * Make AOT inductor treat None args correctly ([#139114](https://github.com/pytorch/pytorch/pull/139114))
 * Fix a bug with arg ordering in handling dynamic shapes ([#139777](https://github.com/pytorch/pytorch/pull/139777))
@@ -988,13 +988,13 @@ We improved the existing `torch.library` APIs and added new ones.
 * Fix issue in CPP GEMM Template Prune Tensor ([#141798](https://github.com/pytorch/pytorch/pull/141798))
 * Fix max-autotune bug with captured buffer grads ([#141531](https://github.com/pytorch/pytorch/pull/141531))
 * TritonTemplate dtype fixes ([#141991](https://github.com/pytorch/pytorch/pull/141991))
-* Fix device error for NopKernelSchedulerNode ([#141372](https://github.com/pytorch/pytorch/pull/141372))
+* Fix device error for `NopKernelSchedulerNode` ([#141372](https://github.com/pytorch/pytorch/pull/141372))
 * Resolves an issue where `try_solve` fails when both symbols are unknown and their product is zero ([#137919](https://github.com/pytorch/pytorch/pull/137919)).
 * Resolves an issue where a fallback operation returned `None`, preventing potential errors in AOTI initialization ([#135997](https://github.com/pytorch/pytorch/pull/135997)).
 * Resolves test failures following the update of pybind11 to version 2.13.6 ([#136280](https://github.com/pytorch/pytorch/pull/136280)).
 * Corrects the maximum autotuning for single-thread dynamic shapes in Inductor ([#136418](https://github.com/pytorch/pytorch/pull/136418)).
 * Fixes FMA codegen for Halide backend to ensure correct operation behavior ([#136810](https://github.com/pytorch/pytorch/pull/136810)).
-* Corrects max-autotune behavior when dealing with View nodes in FlexAttention ([#137204](https://github.com/pytorch/pytorch/pull/137204)).
+* Corrects `max-autotune` behavior when dealing with View nodes in FlexAttention ([#137204](https://github.com/pytorch/pytorch/pull/137204)).
 * Adjust BlockMask handling when reused from a larger sequence length ([#137255](https://github.com/pytorch/pytorch/pull/137255)).
 * Corrects `triton_reshape` by properly expanding the Min keyword in code generation ([#137357](https://github.com/pytorch/pytorch/pull/137357)).
 * Corrects `reduction_hint` behavior for single-element sums ([#137754](https://github.com/pytorch/pytorch/pull/137754)).
