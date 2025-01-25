@@ -813,7 +813,9 @@ def register_kernel(
     if not isinstance(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
-        raise ValueError("register_kernel(op): got unexpected type for op: {type(op)}")
+        raise ValueError(
+            f"register_kernel({op}): got unexpected type for op: {type(op)}"
+        )
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
     opdef = _maybe_get_opdef(op)
@@ -872,7 +874,7 @@ def register_autocast(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
         raise ValueError(
-            f"register_autocast(op): got unexpected type for op: {type(op)}"
+            f"register_autocast({op}): got unexpected type for op: {type(op)}"
         )
     if device_type not in ["cpu", "cuda"]:
         raise ValueError(f"Unknown device type: {device_type}")
@@ -998,7 +1000,7 @@ def register_fake(
     if not isinstance(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
-        raise ValueError("register_fake(op): got unexpected type for op: {type(op)}")
+        raise ValueError(f"register_fake({op}): got unexpected type for op: {type(op)}")
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
     opdef = _maybe_get_opdef(op)
@@ -1123,7 +1125,7 @@ def register_autograd(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
         raise ValueError(
-            f"register_autograd(op): got unexpected type for op: {type(op)}"
+            f"register_autograd({op}): got unexpected type for op: {type(op)}"
         )
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
@@ -1214,7 +1216,7 @@ def register_torch_dispatch(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
         raise ValueError(
-            "register_torch_dispatch(op): got unexpected type for op: {type(op)}"
+            f"register_torch_dispatch({op}): got unexpected type for op: {type(op)}"
         )
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
@@ -1327,7 +1329,7 @@ def register_vmap(
     if not isinstance(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
     ):
-        raise ValueError(f"register_vmap(op): got unexpected type for op: {type(op)}")
+        raise ValueError(f"register_vmap({op}): got unexpected type for op: {type(op)}")
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
     opdef = _maybe_get_opdef(op)
