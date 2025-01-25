@@ -5,6 +5,10 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+
 #if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
     CUDA_VERSION >= 12000
 #define BUILD_ASYNC_MM_KERNEL
@@ -32,6 +36,9 @@
 #include <cutlass/util/packed_stride.hpp>
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
+
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 namespace {
 
