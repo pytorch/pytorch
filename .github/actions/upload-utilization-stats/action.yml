@@ -1,5 +1,7 @@
 name: upload-utilization-stats
 
+description: Upload utilization stats to artifacts
+
 inputs:
     workflow_run_id:
       type: string
@@ -24,12 +26,12 @@ inputs:
 
 runs:
   using: composite
-    steps:
-      - name: Print Inputs
-        run: |
-          echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
-          echo "workflow_attempt: ${{github.event.inputs.workflow_attempt}}"
-          echo "workflow_Name: ${{github.event.inputs.workflow_name}}"
-          echo "job_id: ${{github.event.inputs.job_id}}"
-          echo "job_name:  ${{github.event.inputs.job_name}}"
+  steps:
+    - name: Print Inputs
+      run: |
+        echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
+        echo "workflow_attempt: ${{github.event.inputs.workflow_attempt}}"
+        echo "workflow_Name: ${{github.event.inputs.workflow_name}}"
+        echo "job_id: ${{github.event.inputs.job_id}}"
+        echo "job_name:  ${{github.event.inputs.job_name}}"
 # TODO():add upload utilization tests script
