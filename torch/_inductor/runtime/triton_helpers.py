@@ -1,8 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
+from typing import Any, TypeVar
 
 from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
+
+
+_T = TypeVar("_T")
 
 
 def set_driver_to_cpu():
@@ -627,3 +631,42 @@ def x_grid_barrier(sem):
 
     # TODO(jansel): is this needed?
     tl.debug_barrier()
+
+
+def triton_builtin(f: _T) -> _T:
+    """
+    Decorator to mark a function as a Triton built-in function.  These functions
+    are evaluated at compile time.
+
+    Args:
+        f (function): The function to be marked as a Triton built-in.
+
+    Returns:
+        function: The same function, marked as a Triton built-in.
+    """
+    f.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return f
+
+
+@triton_builtin
+def constexpr_next_power_of_2(
+    n: tl.constexpr, *, _builder: object = None
+) -> tl.constexpr:
+    """
+    A version triton.next_power_of_two that can be used within a kernel on constants.
+    """
+    assert isinstance(n, tl.constexpr)
+    return tl.constexpr(triton.next_power_of_2(n.value))
+
+
+@triton_builtin
+def zero_other(ptr: Any, mask: Any, *, _builder: object = None) -> tl.constexpr:
+    """
+    Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
+    A compile-time to check to return either 0 or None depending on the value of mask.
+    """
+    if isinstance(mask, tl.constexpr) and mask.value is None:
+        return tl.constexpr(None)
+    if isinstance(ptr, tl.core.tensor) and ptr.dtype.is_floating():
+        return tl.constexpr(0.0)
+    return tl.constexpr(0)
