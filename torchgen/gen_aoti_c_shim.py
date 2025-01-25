@@ -155,7 +155,7 @@ def convert_arg_type_and_name(
             new_callsite_exprs,
         )
     elif isinstance(typ, ListType):
-        # Need to explictly pass the list as pointer + length
+        # Need to explicitly pass the list as pointer + length
         c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
         assert len(c_types) == 1, "ListType with unsupported element type " + repr(typ)
 
