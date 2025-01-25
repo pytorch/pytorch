@@ -2277,11 +2277,8 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-<<<<<<< HEAD
         from torch._inductor.compiler_bisector import CompilerBisector
 
-=======
->>>>>>> 294a667dc4e (Improve typing in torch/__init__.py)
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
@@ -2308,22 +2305,6 @@ class _TorchCompileInductorWrapper:
             from torch._inductor import list_mode_options
 
             self.apply_options(list_mode_options(mode, self.dynamic))
-<<<<<<< HEAD
-=======
-        else:
-            raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
-            )
-
-    def apply_options(self, options: _Optional[dict[str, _Any]]):
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        if bisect_changes := CompilerBisector.get_config_change("inductor"):
-            options = {} if options is None else options
-            options = (
-                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
-            )
->>>>>>> 294a667dc4e (Improve typing in torch/__init__.py)
 
     def apply_options(self, options: _Optional[dict[str, _Any]]):
         if not options:
