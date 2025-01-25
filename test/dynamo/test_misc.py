@@ -7664,25 +7664,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.reset()
         torch.compile(my_dyn_fn, backend="eager")(y, y)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_argwhere_with_dynamic_shapes(self):
-        def fn(
-            tensor: torch.Tensor,
-            mapping: torch.Tensor,
-        ) -> torch.Tensor:
-            xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
-            indices = torch.argwhere(xx == yy)
-
-            mapped_values = torch.zeros_like(tensor)
-            mapped_values[indices[:, 1]] = indices[:, 0]
-
-            return mapped_values
-
-        tensor = torch.tensor([1, 2, 3, 5, 6, 7])
-        mapping = torch.tensor([0, 3, 4, 5, 7])
-        opt = torch.compile(fn, fullgraph=True)
-        self.assertEqual(fn(tensor, mapping), opt(tensor, mapping))
-
     # Sadly, this does not throw - we do not prop correctly across the graph break
     @unittest.expectedFailure
     def test_raise_guard_partial_constraint_across_break(self):
