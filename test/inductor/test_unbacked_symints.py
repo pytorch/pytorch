@@ -209,9 +209,9 @@ class TestUnbackedSymints(InductorTestCase):
             return pointwise, reduction
 
         example_inputs = (
-            torch.randn(32, 16).to(GPU_TYPE),
-            torch.randn(1, 16).to(GPU_TYPE),
-            torch.tensor(32).to(GPU_TYPE),
+            torch.randn(32, 16, device=device),
+            torch.randn(1, 16, device=device),
+            torch.tensor(32, device=device),
         )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
