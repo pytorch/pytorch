@@ -110,3 +110,8 @@ class Gamma(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         return torch.special.gammainc(self.concentration, self.rate * value)
+    
+    def icdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        return torch.special.gammainc(self.concentration, self.rate / value)
