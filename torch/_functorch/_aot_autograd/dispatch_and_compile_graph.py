@@ -87,7 +87,6 @@ def aot_dispatch_base_graph(
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-
     state, subclass_tracing_info = wrap_and_run(
         flat_fn, flat_args, fw_metadata, aot_config, is_autograd=False
     )
@@ -340,8 +339,7 @@ def wrap_and_run(
     *,
     is_autograd: bool,
 ) -> tuple[WrapState, Optional[SubclassTracingInfo]]:
-    # This gets mutated by _aot_dispatch_subclass
-    subclass_tracing_info: Optional[SubclassTracingInfo] = None
+    subclass_tracing_info: SubclassTracingInfo | None = None
 
     @functools.wraps(aot_dispatch_subclass)
     def _aot_dispatch_subclass(
@@ -367,24 +365,24 @@ def wrap_and_run(
 
     steps = WrapSteps()
     if is_autograd:
-        steps.add(fn_prepped_for_autograd)
-        steps.add(create_joint, aot_config=aot_config)
+        steps.add(fn_prepped_for_autograd).add(create_joint, aot_config=aot_config)
     else:
         steps.add(
             fn_input_mutations_to_outputs,
             keep_data_input_mutations=aot_config.keep_inference_input_mutations,
         )
     steps.add(
-        create_functionalized_fn,
-        aot_config=aot_config,
-        trace_joint=is_autograd,
+        _create_functionalized_fn, aot_config=aot_config, trace_joint=is_autograd
     ).add(
+        # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+        # fn_input_mutations_to_outputs and create_functionalized_fn
+        # into CompilerWrappers.
         _aot_dispatch_subclass,
         is_joint_structure=is_autograd,
         fw_only=flat_fn,
     ).add(
-        handle_effect_tokens_fn,
-        trace_joint=is_autograd,
+        handle_effect_tokens_fn, trace_joint=is_autograd
     )
+
     state = steps.run(WrapState(flat_fn, flat_args, fw_metadata))
     return state, subclass_tracing_info
