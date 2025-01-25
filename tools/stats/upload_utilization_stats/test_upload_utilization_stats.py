@@ -5,7 +5,6 @@ from collections import Counter
 import os
 import sys
 
-# python script is mainly for uploading test logs to s3 for a test job
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from tools.stats.utilization_stats_lib import UtilizationRecord
