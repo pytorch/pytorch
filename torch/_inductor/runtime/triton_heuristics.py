@@ -339,9 +339,10 @@ class CachingAutotuner(KernelInterface):
                 )
 
                 rsplit = triton_config.kwargs.get("RSPLIT", 1)
-                if max_concurrent_blocks < rsplit:
-                    # would deadlock, since we can't launch rsplit kernels at the same time
-                    while max_concurrent_blocks < rsplit:
+                safety_factor = 2
+                if max_concurrent_blocks < rsplit * safety_factor:
+                    # might deadlock, since we can't launch rsplit kernels at the same time
+                    while max_concurrent_blocks < rsplit * safety_factor:
                         rsplit //= 2
                     new_config = copy.deepcopy(triton_config)
                     new_config.kwargs["RSPLIT"] = rsplit
