@@ -4,13 +4,12 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     from pathlib import Path
 
 # python script is mainly for uploading test logs to s3 for a test job
 # adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..",".."))
 import argparse
 import json
 import zipfile
@@ -238,6 +237,7 @@ class UploadUtilizationData:
         self._upload_utilization_data_to_s3(
             collection=metadata_collection,
             version=version,
+            repo=self.info.repo,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -248,6 +248,7 @@ class UploadUtilizationData:
         self._upload_utilization_data_to_s3(
             collection=ts_collection,
             version=version,
+            repo = self.info.repo,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
@@ -259,6 +260,7 @@ class UploadUtilizationData:
         self,
         collection: str,
         version: str,
+        repo: str,
         workflow_run_id: int,
         workflow_run_attempt: int,
         job_id: int,
@@ -266,7 +268,7 @@ class UploadUtilizationData:
         docs: list[dict[str, Any]],
     ) -> None:
         bucket_name = UTILIZATION_BUCKET
-        key = f"{collection}/{version}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
+        key = f"{collection}/{version}/{repo}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
         upload_to_s3(bucket_name, key, docs)
 
     def get_log_data(
