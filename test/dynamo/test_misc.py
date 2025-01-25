@@ -12140,6 +12140,33 @@ fn
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    def test_unbacked_expr_deduction_with_runtime_asserts(self):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, b, c):
+            u0 = a.size()[0]
+            u1 = b.size()[0]
+            u2 = c.size()[0]
+            torch._check(u0 + u2 == u1)
+
+            # Should deduce from `u0 + u2 == u1` that `u1 - u0 == u2`.
+            # Since we are using `guard_size_oblivious`, we should get that
+            # `u2 == 0` is always false.
+            guard_size_oblivious(u1 - u0 == 0)
+
+            return torch.tensor(True)
+
+        a = torch.ones(10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        b = torch.ones(20)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        c = torch.ones(10)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        fn(a, b, c)
+
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
