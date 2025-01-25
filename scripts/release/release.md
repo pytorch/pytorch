@@ -217,7 +217,9 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
     `reorder_for_peak_memory` is now enabled by default. If old behavior is desired, edit `reorder_for_peak_memory` in `torch._inductor/config.py`.
 
 * Remove option for fork-based compile pool ([#142001](https://github.com/pytorch/pytorch/pull/142001)). `worker_start_method` is no longer a valid config.
+* Move stack allocation related configs in AOTI ([#139093](https://github.com/pytorch/pytorch/pull/139093)). 
 
+    All configs now have a aot_inductor prefix, so `config.use_minimal_arrayref_interface` is now `config.aot_inductor.use_minimal_arrayref_interface` and `config.allow_stack_allocation` is now `config.aot_inductor.allow_stack_allocation`.
 
 ### Releng
 
@@ -324,25 +326,21 @@ The CUTLASS and CK backend adds kernel choices for GEMM autotuning in Inductor. 
 
 
 
-* Turn on the ABI-compatible mode as default ([#136534](https://github.com/pytorch/pytorch/pull/136534))
-* Added option to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
-* pytorch/feature: Record if parallel compile is enabled ([#141074](https://github.com/pytorch/pytorch/pull/141074))
-* cpp_wrapper: Add support for MemoryFormat arguments ([#141367](https://github.com/pytorch/pytorch/pull/141367))
-* Move stack allocation related configs ([#139093](https://github.com/pytorch/pytorch/pull/139093))
-* Enable concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966))
-* Inductor annotations ([#130429](https://github.com/pytorch/pytorch/pull/130429))
-* Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility ([#135530](https://github.com/pytorch/pytorch/pull/135530)).
-* User can patch inductor config to enable strict custom kernel layout constraints by changing `triton_kernel_default_layout_constraint="needs_fixed_stride_order"` for `torch._inductor.config`. Thus, inductor will keep the same stride with user code([#135581](https://github.com/pytorch/pytorch/pull/135581)).
-* External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor ([#130774](https://github.com/pytorch/pytorch/pull/130774)).
-* Adds support for Windows Arm64 to enhance platform compatibility ([#133088](https://github.com/pytorch/pytorch/pull/133088)).
-* Integrates support for AMD triton stream pipeliner in ROCm to enhance performance ([#139881](https://github.com/pytorch/pytorch/pull/139881)).
-* Adds support for `TRITON_INTERPRET` in Inductor ([#140841](https://github.com/pytorch/pytorch/pull/140841)).
-* Adds update_constant_buffer pybind support in AOTInductor ([#140755](https://github.com/pytorch/pytorch/pull/140755)).
-* Provides an option `package_constants_in_so` to exclude weights from .so files in AOTInductor ([#141997](https://github.com/pytorch/pytorch/pull/141997)).
-* Adds `load_constants` to the package API ([#142246](https://github.com/pytorch/pytorch/pull/142246)).
-* Enables auto functionalize v2 by default ([#136685](https://github.com/pytorch/pytorch/pull/136685)).
-* Adds `raise_error_on_ignored_optimization` to the aoti config for improved error handling ([#138035](https://github.com/pytorch/pytorch/pull/138035)).
-* Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing ([#135887](https://github.com/pytorch/pytorch/pull/135887)).
+* Added option `​​autotune_num_choices_displayed` to control number of kernel options displayed ([#138788](https://github.com/pytorch/pytorch/pull/138788))
+* Added option `force_pointwise_cat` concat support through inductor using pointwise kernels ([#141966](https://github.com/pytorch/pytorch/pull/141966)). This forces concat to be generated as a pointwise op with masked loads.
+* New config option `annotate_training` that adds Inductor annotations to NVTX.  ([#130429](https://github.com/pytorch/pytorch/pull/130429))
+* Introduces an option `triton_kernel_default_layout_constraint` to tweak stride settings for user-defined Triton kernels, enhancing customization and flexibility (#135530).
+* User can patch inductor config to enable strict custom kernel layout constraints by changing `triton_kernel_default_layout_constraint="needs_fixed_stride_order"` for torch._inductor.config. Thus, inductor will keep the same stride with user code(#135581). 
+* External callable registration API `register_external_matmul` for Matmul tuning candidates in Inductor (#130774).
+* Adds support for Windows Arm64 to enhance platform compatibility (#133088).
+* Integrates support for AMD triton stream pipeliner in ROCm to enhance performance (#139881).
+* Adds support for TRITON_INTERPRET in Inductor (#140841).
+* Adds update_constant_buffer pybind support in AOTInductor (#140755).
+* Provides an option `package_constants_in_so` to exclude weights from .so files in AOTInductor (#141997).
+* Adds `load_constants` to the package API (#142246).
+* Enables auto functionalize v2 by default (#136685).
+* Adds raise_error_on_ignored_optimization to the aoti config for improved error handling (#138035).
+* Adds stats summary (mean/min/max, etc) for jit inductor tensor value printing (#135887).
 
 
 ### Nested Tensor Frontend
@@ -646,14 +644,11 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
-* Add C shim for MKLDNN `_convolution_pointwise` ([#137269](https://github.com/pytorch/pytorch/pull/137269))
-* Handle inplace output in ProxyExecutor ([#137660](https://github.com/pytorch/pytorch/pull/137660))
-* Unify how weights are stored as data section ([#139471](https://github.com/pytorch/pytorch/pull/139471))
 * Ignore .o files in package_aoti ([#139153](https://github.com/pytorch/pytorch/pull/139153))
 * Simplify the return code ([#139889](https://github.com/pytorch/pytorch/pull/139889))
 * Add type annotations to Configs ([#139833](https://github.com/pytorch/pytorch/pull/139833))
 * Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
-* Swith GPU codegen to one-pass ([#141980](https://github.com/pytorch/pytorch/pull/141980))
+* Switch GPU codegen to one-pass ([#141980](https://github.com/pytorch/pytorch/pull/141980))
 * Fix multi-kernel codegen when using one-pass ([#142333](https://github.com/pytorch/pytorch/pull/142333))
 * Fix an issue when fallback op does not return a value ([#142339](https://github.com/pytorch/pytorch/pull/142339))
 * improve the stride preservation logic of user-visible outputs ([#136732](https://github.com/pytorch/pytorch/pull/136732))
