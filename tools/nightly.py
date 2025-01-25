@@ -345,6 +345,7 @@ class Venv:
         if LINUX:
             activate_script = self.activate_script
             st_mode = activate_script.stat().st_mode
+            # The activate script may be read-only and we need to add write permissions
             activate_script.chmod(st_mode | 0o200)
             with activate_script.open(mode="a", encoding="utf-8") as f:
                 f.write(
@@ -353,7 +354,7 @@ class Venv:
                         f"""
                         # Add NVIDIA PyPI packages to LD_LIBRARY_PATH
                         export LD_LIBRARY_PATH="$(
-                            {self.executable.name} - <<EOS
+                            {shlex.quote(self.executable.name)} - <<EOS
                         import glob
                         import itertools
                         import os
@@ -367,14 +368,15 @@ class Venv:
                                 for pattern in ("nvidia/**/lib", "cu*/**/lib")
                             )
                         ]
-                        ld_library_path = os.getenv("LD_LIBRARY_PATH", "").split(":")
-                        print(":".join(dict.fromkeys((*nvidia_libs, *ld_library_path))))
+                        ld_library_path = os.getenv("LD_LIBRARY_PATH", "").split(os.pathsep)
+                        print(os.pathsep.join(dict.fromkeys(nvidia_libs + ld_library_path)))
                         EOS
                         )"
                         """
                     ).strip()
                     + "\n"
                 )
+            # Change the file mode back
             activate_script.chmod(st_mode)
 
         return self.ensure()

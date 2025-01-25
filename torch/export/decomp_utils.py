@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Dict
+from typing import Callable
 
 import torch
 from torch._export.utils import (
@@ -13,7 +13,7 @@ from torch._export.utils import (
 __all__ = ["CustomDecompTable"]
 
 
-class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
+class CustomDecompTable(dict[torch._ops.OperatorBase, Callable]):
     """
     This is a custom dictionary that is specifically used for handling decomp_table in export.
     The reason we need this is because in the new world, you can only *delete* an op from decomp
@@ -126,7 +126,7 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self._materialize_if_needed()
         return self.decomp_table.items()
 
-    def materialize(self) -> Dict[torch._ops.OperatorBase, Callable]:
+    def materialize(self) -> dict[torch._ops.OperatorBase, Callable]:
         for op in _collect_all_valid_cia_ops():
             if _is_aten_op(op):
                 continue

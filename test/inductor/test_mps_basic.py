@@ -125,6 +125,15 @@ class MPSBasicTests(TestCase):
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
+    def test_pointwise_i0(self):
+        self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_i1(self):
+        self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_erf(self):
+        self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -135,6 +144,15 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+
+# Copy tests
+for test_name in [
+    "test_builtins_round",
+    "test_builtins_round_float_ndigits_neg",
+    "test_lgamma",
+    "test_erfinv",
+]:
+    setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
 instantiate_parametrized_tests(MPSBasicTests)
 

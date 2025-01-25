@@ -9,20 +9,9 @@ import itertools
 import logging
 import os
 import textwrap
+from collections.abc import Iterable, Sequence
 from functools import lru_cache
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -67,6 +56,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     triton_type,
+    triton_version_uses_attrs_dict,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
@@ -74,6 +64,7 @@ from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
+    ConstexprArg,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -96,8 +87,8 @@ from .simd import (
 )
 from .triton_utils import (
     config_of,
+    non_constexpr_signature,
     should_unwrap_unspec_arg,
-    signature_of,
     signature_to_meta,
 )
 
@@ -119,8 +110,8 @@ class OpDtypeSupport:
     This class records which dtypes are supported by specific IR ops.
     """
 
-    supported_dtypes: Dict[str, OrderedSet[torch.dtype]] = {}
-    convert_outputs: Dict[str, bool] = {}
+    supported_dtypes: dict[str, OrderedSet[torch.dtype]] = {}
+    convert_outputs: dict[str, bool] = {}
 
     @classmethod
     def register_upcast(cls, func: Callable[..., str], convert_output: bool):
@@ -228,27 +219,27 @@ class IndexingOptions:
 class BlockPtrOptions:
     params: BlockParameters
     constant_offset: sympy.Expr
-    order: List[int]
+    order: list[int]
     mask_vars: OrderedSet[str]
     broadcast_shape: Sequence[sympy.Expr]
-    broadcasting_dims: List[bool]
+    broadcasting_dims: list[bool]
     final_shape: Sequence[sympy.Expr]
-    _boundary_check: Optional[List[int]] = None
+    _boundary_check: Optional[list[int]] = None
 
     @property
-    def shape(self) -> List[sympy.Expr]:
+    def shape(self) -> list[sympy.Expr]:
         return self.params.shape
 
     @property
-    def block_shape(self) -> List[sympy.Expr]:
+    def block_shape(self) -> list[sympy.Expr]:
         return self.params.block_shape
 
     @property
-    def strides(self) -> List[sympy.Expr]:
+    def strides(self) -> list[sympy.Expr]:
         return self.params.strides
 
     @property
-    def offsets(self) -> List[sympy.Expr]:
+    def offsets(self) -> list[sympy.Expr]:
         return self.params.offsets
 
     def codegen_broadcast_and_reshape(
@@ -301,7 +292,7 @@ class BlockPtrOptions:
         *,
         params: BlockParameters,
         constant_offset: sympy.Expr,
-        range_trees: List[IterationRangesEntry],
+        range_trees: list[IterationRangesEntry],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
     ) -> BlockPtrOptions:
@@ -309,7 +300,7 @@ class BlockPtrOptions:
 
         sizevars = V.graph.sizevars
 
-        def lookup_size(exprs: Iterable[sympy.Expr]) -> List[sympy.Expr]:
+        def lookup_size(exprs: Iterable[sympy.Expr]) -> list[sympy.Expr]:
             return [sizevars.lookup_precomputed_size(expr) for expr in exprs]
 
         # Look up precomputed sizes
@@ -433,7 +424,7 @@ class BlockPtrOptions:
 
         # Substitute maximum block sizes in shape expressions.
         # This works in multiple_of checks because block sizes are powers of 2.
-        block_to_max: Dict[sympy.Expr, Any] = {
+        block_to_max: dict[sympy.Expr, Any] = {
             block_size: get_max_block(prefix_str[symt])
             for symt, block_size in TritonSymbols.block_sizes.items()
         }
@@ -1418,8 +1409,8 @@ def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str
 class HelperFunctions:
     """An ordered set of helper functions."""
 
-    _templates_seen: Dict[str, str]  # Template code to function name
-    finalized_helpers: List[str]
+    _templates_seen: dict[str, str]  # Template code to function name
+    finalized_helpers: list[str]
 
     def __init__(self) -> None:
         self._templates_seen = {}
@@ -1460,10 +1451,10 @@ class BlockParameters:
     Class representing ND block dimensions, for block pointer analysis.
     """
 
-    shape: List[sympy.Expr] = dataclasses.field(default_factory=list)
-    block_shape: List[sympy.Expr] = dataclasses.field(default_factory=list)
-    strides: List[sympy.Expr] = dataclasses.field(default_factory=list)
-    offsets: List[sympy.Expr] = dataclasses.field(default_factory=list)
+    shape: list[sympy.Expr] = dataclasses.field(default_factory=list)
+    block_shape: list[sympy.Expr] = dataclasses.field(default_factory=list)
+    strides: list[sympy.Expr] = dataclasses.field(default_factory=list)
+    offsets: list[sympy.Expr] = dataclasses.field(default_factory=list)
 
     def __add__(self, other: BlockParameters) -> BlockParameters:
         """
@@ -1512,7 +1503,7 @@ class CooperativeReductionWorkspaceCache:
 
 @dataclasses.dataclass
 class FixedTritonConfig:
-    config: Dict[str, int]
+    config: dict[str, int]
 
     def __getitem__(self, item):
         return self.config[item]
@@ -1539,7 +1530,7 @@ class TritonKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
@@ -1555,14 +1546,14 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
-        self.pointer_advancements: Dict[
-            SymT, Dict[str, List[sympy.Expr]]
+        self.pointer_advancements: dict[
+            SymT, dict[str, list[sympy.Expr]]
         ] = collections.defaultdict(dict)
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
-        self.triton_meta: Optional[Dict[str, Any]] = None
+        self.triton_meta: Optional[dict[str, Any]] = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -1846,7 +1837,7 @@ class TritonKernel(SIMDKernel):
                 # while the leading dimension can exceed this to accomodate a larger
                 # block size.
                 linear_block_size = TritonSymbols.get_block_size(range_tree)
-                block_shape: List[sympy.Expr] = [
+                block_shape: list[sympy.Expr] = [
                     CeilDiv(linear_block_size, slice_numels[0])
                 ] + [
                     sympy.Min(CeilDiv(linear_block_size, numel), dim)
@@ -1854,7 +1845,7 @@ class TritonKernel(SIMDKernel):
                 ]
 
                 # Compute block offsets from {xyzr}offset and the matched expressions.
-                block_offsets: List[sympy.Expr] = [
+                block_offsets: list[sympy.Expr] = [
                     sympy_subs(
                         expr, {index_var: TritonSymbols.get_block_offset(range_tree)}
                     )
@@ -3361,10 +3352,39 @@ class TritonKernel(SIMDKernel):
 
         mutated_args = sorted(mutated_args)
 
+        for tree in self.active_range_trees():
+            sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+            signature.append(sizearg)
+            argdefs.append(sizearg.name)
+            # constexpr version causes issues, see
+            # https://github.com/pytorch/torchdynamo/pull/1362
+            # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
+            #     tree.numel
+            # )
+            # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+
+        def add_constexpr_arg(arg_name):
+            # new versions (but not old versions) of Triton need constexprs included in the signature
+            if triton_version_uses_attrs_dict():
+                signature.append(ConstexprArg(arg_name))
+            argdefs.append(f"{arg_name} : tl.constexpr")
+
+        for tree in self.range_trees:
+            if tree.is_reduction and self.persistent_reduction:
+                # Rn_BLOCK for persistent_reduction is defined in codegen_static_numels
+                continue
+            if tree.tensor_dim is None:
+                continue
+
+            add_constexpr_arg(f"{tree.prefix.upper()}BLOCK")
+
+        if self.cooperative_reduction:
+            add_constexpr_arg("RSPLIT")
+
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        triton_meta: Dict[str, Any] = {
+        triton_meta: dict[str, Any] = {
             "signature": triton_meta_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
@@ -3394,41 +3414,18 @@ class TritonKernel(SIMDKernel):
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
 
-        for tree in self.active_range_trees():
-            sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
-            signature.append(sizearg)
-            triton_meta_signature[sizearg.name] = signature_of(
-                sizearg, size_dtype=self.index_dtype
-            )
-            argdefs.append(f"{tree.prefix}numel")
-            # constexpr version causes issues, see
-            # https://github.com/pytorch/torchdynamo/pull/1362
-            # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
-            #     tree.numel
-            # )
-            # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
         triton_meta["configs"] = [config_of(signature)]
 
-        # Triton compiler includes equal_to_1 args into constants even
-        # when they are not constexpr. otherwise there may be a segfault
-        # during launching the Inductor-compiled Triton kernel.
-        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        if not triton_version_uses_attrs_dict():
+            # Triton compiler includes equal_to_1 args into constants even
+            # when they are not constexpr. otherwise there may be a segfault
+            # during launching the Inductor-compiled Triton kernel.
+            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
+                triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
-
-        for tree in self.range_trees:
-            if tree.is_reduction and self.persistent_reduction:
-                # Rn_BLOCK for persistent_reduction is defined in codegen_static_numels
-                continue
-            if tree.tensor_dim is None:
-                continue
-            argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
-
-        if self.cooperative_reduction:
-            argdefs.append("RSPLIT : tl.constexpr")
 
         self.codegen_body()
 
@@ -3461,7 +3458,9 @@ class TritonKernel(SIMDKernel):
         else:
             tile_hint = ""
             if len(size_hints) == 2:
-                if len(signature) == 4:  # input, output and 2 args
+                if (
+                    len(non_constexpr_signature(signature)) == 4
+                ):  # input, output and 2 args
                     tile_hint = "tile_hint=TileHint.SQUARE,"
                 else:
                     tile_hint = "tile_hint=TileHint.DEFAULT,"
@@ -3574,7 +3573,7 @@ class TritonKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
-        grid: List[Any] = []
+        grid: list[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.get_current_device_or_throw()
 
@@ -3715,7 +3714,7 @@ class TritonKernel(SIMDKernel):
         mask_vars.discard("None")
 
     @cache_on_self
-    def get_reduction_prefixes(self) -> List[str]:
+    def get_reduction_prefixes(self) -> list[str]:
         return [
             prefix_str[symt]
             for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
@@ -3739,7 +3738,7 @@ class TritonKernel(SIMDKernel):
         rblock = sympy_product(rn_blocks)
         buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
-    def _get_reduction_symbols(self, suffix: str, **kwargs) -> List[sympy.Symbol]:
+    def _get_reduction_symbols(self, suffix: str, **kwargs) -> list[sympy.Symbol]:
         """
         Helper to initialize symbols like rn_numel, rn_base, etc.
         """
@@ -3747,7 +3746,7 @@ class TritonKernel(SIMDKernel):
         return [sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rn_prefixes]
 
     @cache_on_self
-    def _get_reduction_index_coeffs(self) -> List[sympy.Expr]:
+    def _get_reduction_index_coeffs(self) -> list[sympy.Expr]:
         """
         Compute coefficients to convert ND reduction indices to linear indices.
         For example:
@@ -3759,7 +3758,7 @@ class TritonKernel(SIMDKernel):
             sympy_product(rn_numels[idx + 1 :]) for idx in range(len(rn_prefixes) - 1)
         ] + [sympy.Integer(1)]
 
-    def _flatten_reduction_indices(self, multi_inds: List[sympy.Expr]) -> sympy.Expr:
+    def _flatten_reduction_indices(self, multi_inds: list[sympy.Expr]) -> sympy.Expr:
         """
         Compute linear reduction indices from N dimensional ones.
         """
@@ -3810,7 +3809,7 @@ class TritonKernel(SIMDKernel):
 
 
 class TritonScheduling(SIMDScheduling):
-    kernel_type: Type[Any] = TritonKernel
+    kernel_type: type[Any] = TritonKernel
     backend_features = dict.fromkeys(  # dict for deterministic order
         [
             BackendFeature.FOREACH,
@@ -4014,12 +4013,12 @@ class TritonScheduling(SIMDScheduling):
 
     def create_kernel_choices(
         self, kernel_features, kernel_args, kernel_kwargs
-    ) -> List[SIMDKernel]:
+    ) -> list[SIMDKernel]:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
         )
-        kernel_type: Type[TritonKernel] = self.kernel_type
+        kernel_type: type[TritonKernel] = self.kernel_type
         if is_split_scan:
             from .triton_split_scan import TritonSplitScanKernel
 
@@ -4049,10 +4048,10 @@ class TritonScheduling(SIMDScheduling):
     def add_multi_kernel_choices(
         self,
         kernel: SIMDKernel,
-        kernel_args: List[Any],
-        kernel_kwargs: Dict[str, Any],
-    ) -> List[SIMDKernel]:
-        kernels: List[SIMDKernel] = [kernel]
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[SIMDKernel]:
+        kernels: list[SIMDKernel] = [kernel]
         if not config.triton.multi_kernel:
             return kernels
 
@@ -4192,7 +4191,7 @@ class TritonScheduling(SIMDScheduling):
         return total_ms, total_clone_ms, file_list
 
 
-def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
+def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
     lines = []
     multi_template = node.get_template_node()
     assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
