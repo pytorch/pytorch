@@ -893,15 +893,15 @@ def visualize_results(
     """
 
     html_content += "<tr><th>\\</th>"
-    for i, col_name in enumerate(input_list):
+    for col_name in input_list:
         col = "<br>".join(col_name)
         html_content += f"<th>{col}</th>"
     html_content += "</tr></thead><tbody>"
 
     # Add table rows
-    for i, row_name in enumerate(input_list):
+    for row_name in input_list:
         html_content += f"<tr><th>{row_name}</th>"
-        for j, col_name in enumerate(input_list):
+        for col_name in input_list:
             # Determine the status class for the cell
             status_enum = results.lookup((row_name, col_name))
             status_class = ""

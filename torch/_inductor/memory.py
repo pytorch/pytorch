@@ -411,7 +411,7 @@ def topological_sort_lpmf(
 
     # compute the amount of memory that is allocated when a node is scheduled
     # and the amount of memory that can be freed when a node is scheduled
-    for i, node in enumerate(nodes):
+    for node in nodes:
         # 1. if a buffer read by this node is last used by this node
         for buf in node.mpi_node.pred_buffers:
             if buf_info[buf]["outdegree"] == 1:

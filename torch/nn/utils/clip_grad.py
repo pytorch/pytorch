@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Iterable
+import typing
 from typing import cast, Optional, Union
 from typing_extensions import deprecated
 
@@ -21,7 +21,10 @@ __all__ = [
 ]
 
 
-_tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
+_tensor_or_tensors = Union[
+    torch.Tensor,
+    typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
+]
 
 
 def _no_grad(func):
