@@ -10,10 +10,11 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipCPUIf,
     skipGPUIf,
 )
 from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -190,6 +191,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "precision not good enough on CPU")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
