@@ -643,32 +643,13 @@ We improved the existing `torch.library` APIs and added new ones.
 ### Inductor
 
 
-
-* Ignore .o files in package_aoti ([#139153](https://github.com/pytorch/pytorch/pull/139153))
-* Simplify the return code ([#139889](https://github.com/pytorch/pytorch/pull/139889))
 * Add type annotations to Configs ([#139833](https://github.com/pytorch/pytorch/pull/139833))
-* Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
-* Switch GPU codegen to one-pass ([#141980](https://github.com/pytorch/pytorch/pull/141980))
-* Fix multi-kernel codegen when using one-pass ([#142333](https://github.com/pytorch/pytorch/pull/142333))
-* Fix an issue when fallback op does not return a value ([#142339](https://github.com/pytorch/pytorch/pull/142339))
-* improve the stride preservation logic of user-visible outputs ([#136732](https://github.com/pytorch/pytorch/pull/136732))
+* Switch GPU codegen to one-pass in AOTI ([#141980](https://github.com/pytorch/pytorch/pull/141980))
+* Fix multi-kernel codegen when using one-pass in AOTI ([#142333](https://github.com/pytorch/pytorch/pull/142333))
+* Fix an issue when fallback op does not return a value in AOTI ([#142339](https://github.com/pytorch/pytorch/pull/142339))
+* Improve the stride preservation logic of user-visible outputs ([#136732](https://github.com/pytorch/pytorch/pull/136732))
 * Add workspace to TritonTemplates ([#138050](https://github.com/pytorch/pytorch/pull/138050))
-* fix `test_codegen_config_option_dont_assume_alignment` for triton 3.2 ([#139640](https://github.com/pytorch/pytorch/pull/139640))
-* Add `data_ptr` to `RAIIAtenTensorHandle` ([#139895](https://github.com/pytorch/pytorch/pull/139895))
-* Add standalone runner to debug CK gemms ([#139441](https://github.com/pytorch/pytorch/pull/139441))
-* Refine `triton_bundler.py` to support correctly on Intel GPU and fix CI failures. ([#139705](https://github.com/pytorch/pytorch/pull/139705))
-* Generalize device-bias code newly introduced in scheduler.py ([#139872](https://github.com/pytorch/pytorch/pull/139872))
-* Support autotune `restore_value` for user-defined Triton kernels ([#139851](https://github.com/pytorch/pytorch/pull/139851))
-* hash -> base64 conversion for triton 3.2 ([#140190](https://github.com/pytorch/pytorch/pull/140190))
-* Add support to debug printing for all AOTI model run input args ([#140064](https://github.com/pytorch/pytorch/pull/140064))
-* enable concat linear with mkldnn linear by flag ([#139048](https://github.com/pytorch/pytorch/pull/139048))
-* Add sizes and strides util functions ([#140449](https://github.com/pytorch/pytorch/pull/140449))
-* Implement caching for user defined triton kernels ([#140326](https://github.com/pytorch/pytorch/pull/140326))
-* reset to zero support for user defined Triton kernels ([#140982](https://github.com/pytorch/pytorch/pull/140982))
-* Add support for learnable biases in Inductor ([#137452](https://github.com/pytorch/pytorch/pull/137452))
 * Enable Cpp wraper for Intel GPU. ([#135318](https://github.com/pytorch/pytorch/pull/135318))
-* Refactor dtype propagation ([#139945](https://github.com/pytorch/pytorch/pull/139945))
-* non-contiguous NestedTensor mutation in compile ([#139630](https://github.com/pytorch/pytorch/pull/139630))
 * Flip `custom_op_default_layout_constraint` in Inductor to optimize tensor layout for improved computation efficiency ([#135239](https://github.com/pytorch/pytorch/pull/135239)).
 * Enables coordinate descent tuning with max-autotune in Inductor, improving the efficiency of kernel optimization ([#136867](https://github.com/pytorch/pytorch/pull/136867)).
 * Adds `relu_nan_to_num` option for handling NaNs in pre-grad passes in AOTInductor ([#138545](https://github.com/pytorch/pytorch/pull/138545)).
@@ -1509,6 +1490,7 @@ We improved the existing `torch.library` APIs and added new ones.
 
 
 
+* Update C++ runner API to take a const vector ([#139955](https://github.com/pytorch/pytorch/pull/139955))
 * Remove the non-ABI-compatible mode ([#138009](https://github.com/pytorch/pytorch/pull/138009), [#138047](https://github.com/pytorch/pytorch/pull/138047))
 * Move `use_minimal_arrayref_interface` logic ([#138250](https://github.com/pytorch/pytorch/pull/138250))
 * Separate header codegen ([#138882](https://github.com/pytorch/pytorch/pull/138882))
