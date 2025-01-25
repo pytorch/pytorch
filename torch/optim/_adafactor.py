@@ -32,8 +32,8 @@ class Adafactor(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
     ):
-        if isinstance(lr, Tensor) and lr.numel() != 1:
-            raise ValueError("Tensor lr must be 1-element")
+        if isinstance(lr, Tensor) and lr.dim() != 0:
+            raise ValueError("Tensor lr must be 0-dimension")
         if not 0.0 <= lr:
             raise ValueError(f"Learning rate should be >= 0 but is: {lr}")
         if not 0.0 >= beta2_decay:

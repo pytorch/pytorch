@@ -41,8 +41,8 @@ class RAdam(Optimizer):  # noqa: D101
         capturable: bool = False,
         differentiable: bool = False,
     ):  # noqa: D107
-        if isinstance(lr, Tensor) and lr.numel() != 1:
-            raise ValueError("Tensor lr must be 1-element")
+        if isinstance(lr, Tensor) and lr.dim() != 0:
+            raise ValueError("Tensor lr must be 0-dimension")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:

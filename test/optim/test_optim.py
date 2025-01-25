@@ -472,7 +472,7 @@ class TestDifferentiableOptimizer(TestCase):
         params = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
 
-        lr = torch.tensor([0.001], requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
         betas = (
             torch.tensor(0.9, requires_grad=True, dtype=torch.float64),
             torch.tensor(0.999, requires_grad=True, dtype=torch.float64),

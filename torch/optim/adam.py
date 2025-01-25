@@ -52,8 +52,8 @@ class Adam(Optimizer):
                 raise ValueError(
                     "lr as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if lr.numel() != 1:
-                raise ValueError("Tensor lr must be 1-element")
+            if lr.dim() != 0:
+                raise ValueError("Tensor lr must be 0-dimension")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -74,15 +74,15 @@ class Adam(Optimizer):
                 raise ValueError(
                     "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if betas[0].numel() != 1:
-                raise ValueError("Tensor betas[0] must be 1-element")
+            if betas[0].dim() != 0:
+                raise ValueError("Tensor betas[0] must be 0-dimension")
         if isinstance(betas[1], Tensor):
             if not capturable and foreach:
                 raise ValueError(
                     "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
                 )
-            if betas[1].numel() != 1:
-                raise ValueError("Tensor betas[1] must be 1-element")
+            if betas[1].dim() != 0:
+                raise ValueError("Tensor betas[1] must be 0-dimension")
 
         defaults = dict(
             lr=lr,
