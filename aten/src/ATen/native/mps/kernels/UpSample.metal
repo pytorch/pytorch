@@ -175,13 +175,11 @@ kernel void upsample_bilinear2d(
   auto output_y = thread_index / output_sizes.x;
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/false);
-  int in_x = floor(real_x);
-  auto t_x = real_x - in_x;
+  auto t_x = fract(real_x);
 
   auto real_y = area_pixel_compute_source_index(
       scales.y, output_y, align_corners, /*cubic=*/false);
-  int in_y = floor(real_y);
-  auto t_y = real_y - in_y;
+  auto t_y = fract(real_y);
   for (int n = 0; n < output_sizes.w; n++) {
     for (int c = 0; c < output_sizes.z; c++) {
       auto i00 = upsample_get_value_bounded<T>(
