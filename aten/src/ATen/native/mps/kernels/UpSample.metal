@@ -163,16 +163,21 @@ inline linear_return_t<T> linear_interp(T v0, T v1, float x) {
 }
 
 // See Note [ Weights computation for uint8_t and multiplication trick ]
-// Not sure if it make sense though, but on cpu mid point between
-// 152+249+172+35 is 153 rather than 152, as results of horizontal interp
-// are rounded before vertical interp is done
+// Essentially fall back to fixed floating point arithmetic during uint8
+// interpolation, which is not necesserily more accurate (see example below),
+// but matches closes to what CPU can deliver
+// I.e. mid-point 152+249+172+35 is 152, but algorithm yields 153 as horizontal
+// and vertical interpolation is done in separate steps and results are rounded
+// to uint8 Also, as Metal is currently limited to 32-bit floats, results will
+// never match those on CPU especially for 1/3, 2/3 scale
 template <>
 inline uchar linear_interp(uchar v0, uchar v1, float x) {
-  constexpr auto PRECISION_BITS = 22;
-  auto ix = static_cast<int>(.5 + x * (1 << PRECISION_BITS));
-  auto iomx = static_cast<int>(.5 + (1.0 - x) * (1 << PRECISION_BITS));
-  int rc = 1 << (PRECISION_BITS - 1);
-  return (rc + v0 * iomx + v1 * ix) >> PRECISION_BITS;
+  constexpr auto PRECISION_BITS = 15;
+  constexpr auto one = 1L << (PRECISION_BITS);
+  constexpr auto onehalf = 1L << (PRECISION_BITS - 1);
+  auto ix = static_cast<long>(x * one + .5);
+  auto iomx = static_cast<long>((1.0 - x) * one + .5);
+  return (onehalf + v0 * iomx + v1 * ix) >> PRECISION_BITS;
 }
 
 template <typename T>
