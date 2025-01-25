@@ -85,11 +85,11 @@ if(INTERN_BUILD_ATEN_OPS)
 
     # Check NVCC version and existing arch flags
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
-      if (EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
         set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
           PROPERTIES COMPILE_FLAGS "-gencode arch=compute_89,code=sm_89")
       endif()
-      if (EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
         set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
           PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
       endif()
