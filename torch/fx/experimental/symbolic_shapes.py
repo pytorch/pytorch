@@ -5665,6 +5665,55 @@ class ShapeEnv:
             or self._maybe_evaluate_static(result_expr) is not None
         )
 
+    # Tries to use runtime asserts for simplifying the given expression into a
+    # statically known expression. This is used whenever we are about to raise
+    # a `GuardOnDataDependentSymNode` error.
+    #
+    # In summary, it iterates the collection of runtime asserts, replacing each
+    # free symbol found in `expr`.
+    def _maybe_simplify_with_runtime_asserts(
+        self,
+        expr: sympy.Expr,
+        size_oblivious: bool = False,
+    ) -> Optional[Tuple[sympy.Basic, sympy.Basic]]:
+        # Generates new expressions by substituting the free symbols in `self.expr` by
+        # expressions taken from `ShapeEnv.deferred_runtime_asserts`.
+        def exprs():
+            yield expr
+
+            # Collects all runtime assert expressions.
+            runtime_asserts = (
+                ra.expr
+                for _, runtime_asserts in self.deferred_runtime_asserts.items()
+                for ra in runtime_asserts
+            )
+
+            for ra in runtime_asserts:
+                # Compute the set of free symbols that appear both in the current
+                # expression and in the current runtime assert.
+                intersection = set(expr.free_symbols).intersection(set(ra.free_symbols))
+
+                if len(intersection) == 0:
+                    continue
+
+                # For each symbol, isolate it in the runtime assert (s = rhs), and
+                # replace all occurrences of `s` by `rhs` in the given `expr`.
+                for s in intersection:
+                    result = try_solve(ra, s)
+
+                    if result is None:
+                        continue
+
+                    _, rhs = result
+                    yield expr.xreplace({ s: rhs })
+
+        # Any expression returned by `exprs()` generator is equivalent to the given
+        # `expr`. So, if any of them are statically known, so is `expr`.
+        for e in exprs():
+            r = self._maybe_evaluate_static(e, size_oblivious=size_oblivious)
+            if r is not None:
+                return (r, e)
+
     def _make_data_dependent_error(
         self,
         expr: sympy.Basic,
@@ -6411,6 +6460,18 @@ class ShapeEnv:
                         transmute_into_runtime_assert = True
                         concrete_val = unsound_result
                     else:
+                        result = self._maybe_simplify_with_runtime_asserts(expr, size_oblivious=size_oblivious)
+                        if result is not None:
+                            r, simplified = result
+                            self.log.debug(
+                                "eval %s == %s [statically known] due to: %s -> %s [runtime assert deduction]",
+                                expr,
+                                r,
+                                expr,
+                                simplified
+                            )
+                            return r
+
                         raise self._make_data_dependent_error(
                             expr.xreplace(self.var_to_val),
                             expr,
