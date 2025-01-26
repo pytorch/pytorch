@@ -2742,25 +2742,19 @@ class TritonKernel(SIMDKernel):
         assert len(self.numels) == 2
         if self.fixed_config:
             return self.fixed_config["RSPLIT"]
-        split = next_power_of_2(
-            V.choices.reduction_split_factor(
-                V.graph.get_current_device_or_throw(),
-                V.graph.sizevars.size_hint(
-                    self.features.reduction_numel, fallback=8192
-                ),
-                V.graph.sizevars.size_hint(self.features.numel, fallback=8192),
-                self.features.memory_stats().persistent.reads.dim[1].contiguous_score
-                >= 0.5,
-            )
+        split = V.choices.reduction_split_factor(
+            V.graph.get_current_device_or_throw(),
+            V.graph.sizevars.size_hint(self.features.reduction_numel, fallback=8192),
+            V.graph.sizevars.size_hint(self.features.numel, fallback=8192),
+            self.features.memory_stats().persistent.reads.dim[1].contiguous_score
+            >= 0.5,
         )
         if split == 1:
             assert config.triton.force_cooperative_reductions
             return min(
                 32,
-                next_power_of_2(
-                    V.graph.sizevars.size_hint(
-                        self.features.reduction_numel, fallback=8192
-                    )
+                V.graph.sizevars.size_hint(
+                    self.features.reduction_numel, fallback=8192
                 ),
             )
         return split
