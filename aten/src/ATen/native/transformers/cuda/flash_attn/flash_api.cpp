@@ -515,8 +515,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
             seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
             offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         } else {
-            seed_t = at::empty({}, at::dtype(at::kLong));
-            offset_t = at::empty({}, at::dtype(at::kLong));
+            seed_t = at::empty({}, at::dtype(at::kUInt64));
+            offset_t = at::empty({}, at::dtype(at::kUInt64));
         }
 
     }
