@@ -251,6 +251,7 @@ class OutputGraph:
     we construct a InliningInstructionTranslator that continues to write into
     the root InstructionTranslator's OutputGraph.
     """
+
     side_effects: SideEffects
 
     def __init__(
