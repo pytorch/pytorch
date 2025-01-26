@@ -54,7 +54,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
         std::any_of(
                platform.get_devices().begin(),
                platform.get_devices().end(),
-               [&is_igpu](const sycl::device& device) {
+               [&is_igpu, check_igpu](const sycl::device& device) {
                  return device.is_gpu() &&
                      (check_igpu ? is_igpu(device) : !is_igpu(device));
                });
