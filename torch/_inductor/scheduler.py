@@ -1,4 +1,3 @@
-# mypy: disallow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -69,11 +68,16 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 class SchedulerBuffer:
     scheduler: Scheduler
     node: ir.Buffer
-    defining_op: BaseSchedulerNode
+    defining_op: Optional[BaseSchedulerNode]
     users: list[NodeUser] = dataclasses.field(default_factory=list)
     mpi_buffer: MemoryPlanningInfoForBuffer = dataclasses.field(
         default_factory=MemoryPlanningInfoForBuffer
     )
+
+    def defining_op_name(self) -> str:
+        op = self.defining_op
+        assert op
+        return op.get_name()
 
     def __hash__(self) -> int:
         return hash(self.node.name)
@@ -167,7 +171,7 @@ class SchedulerBuffer:
 
 @dataclasses.dataclass
 class SchedulerDonatedBuffer(SchedulerBuffer):
-    defining_op: Optional[BaseSchedulerNode] = None  # type: ignore[assignment]
+    defining_op: Optional[BaseSchedulerNode] = None
 
 
 class BaseSchedulerNode:
@@ -335,8 +339,8 @@ class BaseSchedulerNode:
         def should_prune(dep: Dep) -> bool:
             if not isinstance(dep, WeakDep):
                 return False
-            op = self.scheduler.name_to_buf[dep.name].defining_op
-            return op.get_name() in V.graph.removed_operations
+            op_name = self.scheduler.name_to_buf[dep.name].defining_op_name()
+            return op_name in V.graph.removed_operations
 
         to_remove = OrderedSet(
             dep for dep in self.read_writes.reads if should_prune(dep)
@@ -881,12 +885,12 @@ def _prune_redundant_deps(
 
     for dep in node.unmet_dependencies:
         if not isinstance(dep, WeakDep):
-            op = name_to_buf[dep.name].defining_op
-            name_to_dep_count[name_to_fused_node[op.get_name()].get_name()] += 1
+            op_name = name_to_buf[dep.name].defining_op_name()
+            name_to_dep_count[name_to_fused_node[op_name].get_name()] += 1
 
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
-            op_name = name_to_buf[dep.name].defining_op.get_name()
+            op_name = name_to_buf[dep.name].defining_op_name()
             is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
@@ -1193,8 +1197,10 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def refresh_group_node_dependencies(group_snode: BaseSchedulerNode) -> None:
-    snodes = group_snode.snodes  # type: ignore[attr-defined]
+def refresh_group_node_dependencies(
+    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode]
+) -> None:
+    snodes = group_snode.snodes
     group_snode.set_read_writes(
         dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
     )
@@ -1210,7 +1216,7 @@ def refresh_group_node_dependencies(group_snode: BaseSchedulerNode) -> None:
 
 
 def init_group_node(
-    group_snode: BaseSchedulerNode,
+    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
     scheduler: Scheduler,
     snodes: list[BaseSchedulerNode],
 ) -> None:
@@ -1307,7 +1313,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         )
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
-            snode.apply_new_loop_order(new_order)  # type: ignore[arg-type]
+            snode.apply_new_loop_order(new_order)
 
         refresh_group_node_dependencies(self)
 
@@ -1465,7 +1471,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if rd.name not in self.scheduler.name_to_buf:
                 continue
 
-            node_name = self.scheduler.name_to_buf[rd.name].defining_op.get_name()
+            node_name = self.scheduler.name_to_buf[rd.name].defining_op_name()
             if node_name in self.name_to_node:
                 producers.add(self.name_to_node[node_name])
 
@@ -1774,7 +1780,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def create(cls, snodes: list[BaseSchedulerNode]) -> GroupedSchedulerNode:
         scheduler = snodes[0].scheduler
         assert all(node.scheduler is scheduler for node in snodes)
-        grouped_snode = cls(scheduler, snodes)  # type: ignore[arg-type]
+        grouped_snode = cls(scheduler, snodes)
         for snode in snodes:
             scheduler.name_to_fused_node[snode.get_name()] = grouped_snode
         scheduler.name_to_fused_node[grouped_snode.get_name()] = grouped_snode
@@ -2402,10 +2408,9 @@ class Scheduler:
             raise RuntimeError(
                 f"get_unmet_dep_nodes is not implemented for {type(snode)}."
             )
-        unmet_dep_ops = (self.name_to_buf[dep].defining_op for dep in unmet_deps)
-        return list(
-            OrderedSet(self.name_to_fused_node[n.get_name()] for n in unmet_dep_ops)
-        )
+        return [
+            *OrderedSet(self.name_to_buf[dep].defining_op_name() for dep in unmet_deps)
+        ]
 
     def _topological_sort_nodes(self) -> list[list[BaseSchedulerNode]]:
         """
@@ -2442,7 +2447,7 @@ class Scheduler:
         for node in self.nodes:
             ancestors = OrderedSet[str]()
             for dep in node.unmet_dependencies:
-                dep_node_name = self.name_to_buf[dep.name].defining_op.get_name()
+                dep_node_name = self.name_to_buf[dep.name].defining_op_name()
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
@@ -2580,9 +2585,7 @@ class Scheduler:
                                 torch._inductor.select_algorithm.ExternKernelCaller,
                             )
                         ),
-                        None,  # type: ignore[arg-type]
                     )
-                    assert min_node_unfused is not None
 
                 if isinstance(
                     min_node_unfused,
@@ -3085,6 +3088,12 @@ class Scheduler:
             lhs_dep = node1_name2dep[buf_name]
             rhs_dep = node2_name2dep[buf_name]
 
+            if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
+                reasons[
+                    buf_name
+                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                continue
+
             if lhs_dep.get_numel() != rhs_dep.get_numel():
                 reasons[
                     buf_name
@@ -3092,14 +3101,8 @@ class Scheduler:
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
-            if sympy_product(lhs_dep.size) != sympy_product(rhs_dep.size):  # type: ignore[attr-defined]
+            if sympy_product(lhs_dep.size) != sympy_product(rhs_dep.size):
                 reasons[buf_name] = "broadcast"
-                continue
-
-            if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
                 continue
 
             lhs_off = lhs_dep.get_offset()
@@ -3174,20 +3177,23 @@ class Scheduler:
         # Pick the largest buffer to guide the loop reordering
         _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
-        if lhs_dep.num_vars != rhs_dep.num_vars:  # type: ignore[attr-defined]
+        if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
+            return 0
+
+        if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
             # We can not do loop reordering in this case right now
             # Simply returning true if the two Deps are the same after
             # normalization (merging loops)
-            if lhs_dep.normalize() == rhs_dep.normalize():  # type: ignore[attr-defined]
+            if lhs_dep.normalize() == rhs_dep.normalize():
                 return self.dep_size_hint(lhs_dep)
             return 0
 
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
-            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)  # type: ignore[arg-type]
+            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
         elif not node2.is_reduction():
-            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)  # type: ignore[arg-type]
+            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
         else:
             loop_ordering_log.debug(
                 "Don't reorder loops since both nodes are reductions: %s v.s. %s",
@@ -3429,7 +3435,7 @@ class Scheduler:
 
         node1_op_names = node1.get_operation_names()
         for name in remaining_deps:
-            op_name = self.name_to_buf[name].defining_op.get_name()
+            op_name = self.name_to_buf[name].defining_op_name()
             if node1_op_names & self.name_to_fused_node[op_name].ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
