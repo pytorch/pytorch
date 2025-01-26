@@ -9,6 +9,7 @@ import pickle
 import sys
 import sympy
 import tempfile
+import typing
 import unittest
 from types import BuiltinFunctionType
 from typing import Callable, NamedTuple, Optional, Union, List
@@ -1547,25 +1548,25 @@ class {test_classname}(torch.nn.Module):
             (Optional[list[int]], list[int]),
         ] + [
             # pre-PEP585 signatures
-            (list[int], int),
-            (list[int], create_type_hint([int, int])),
-            (list[int], create_type_hint((int, int))),
-            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (typing.List[int], int),
+            (typing.List[int], create_type_hint([int, int])),
+            (typing.List[int], create_type_hint((int, int))),
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
             (
-                list[torch.Tensor],
+                typing.List[torch.Tensor],
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
-            (list[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
-            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
-            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
             (
-                list[torch.Tensor],
+                typing.List[torch.Tensor],
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
-            (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
-            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[list[torch.Tensor]], list[torch.Tensor]),
-            (Optional[list[int]], list[int]),
+            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),
+            (Optional[typing.List[int]], typing.List[int]),
         ]
 
         for sig_type, arg_type in should_be_equal:

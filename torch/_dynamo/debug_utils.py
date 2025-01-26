@@ -678,14 +678,16 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
         args = []
         # NB: this is positional, must come first
-        if _stride_or_default(None, shape=t.shape) != t.stride():
+        if not statically_known_true(
+            sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
+        ):
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")

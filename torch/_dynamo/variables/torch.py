@@ -654,7 +654,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
+            _, tx: "InstructionTranslator", *args, **kwargs
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
@@ -664,9 +664,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch._foreach_pow)
-        def handle_foreach_pow_scalar(
-            self, tx: "InstructionTranslator", *args, **kwargs
-        ):
+        def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
