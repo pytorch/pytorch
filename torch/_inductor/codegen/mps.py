@@ -300,7 +300,7 @@ class MetalOverrides(OpOverrides):
         return f"metal::ceil({x})"
 
     @staticmethod
-    def randn(seed, offset) -> str:
+    def randn(seed: CSEVariable, offset: CSEVariable) -> str:
         return f"c10::metal::randn({seed}, {offset})"
 
     @staticmethod
