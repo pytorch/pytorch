@@ -414,7 +414,7 @@ class SIMDKernel(Kernel):
 
     def construct_range_trees(
         self,
-        pid_cache: dict[str, str],
+        pid_cache: Optional[dict[str, str]],
         inside_reduction: bool,
         is_reduction: bool,
         numels: dict[str, sympy.Expr],
