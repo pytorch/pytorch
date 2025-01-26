@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
     _T = TypeVar("_T")
     SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
-    WrapperConstructor = Callable[[], Optional[PythonWrapperCodegen]]
+    WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -211,7 +211,7 @@ class TMADescriptorArg:
 class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
-    cpp_wrapper_codegen: WrapperConstructor = type(None)
+    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
@@ -300,7 +300,7 @@ def register_backend_for_device(
     device: str,
     device_scheduling: SchedulingConstructor,
     device_wrapper_codegen: WrapperConstructor,
-    device_cpp_wrapper_codegen: WrapperConstructor = type(None),
+    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
@@ -454,7 +454,7 @@ def register_device_op_overrides(
     device_op_overrides_dict[device] = device_op_overrides
 
 
-def get_device_op_overrides(device: str) -> Optional[DeviceOpOverrides]:
+def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str)
 
     if not device_op_overrides_dict:
@@ -462,7 +462,7 @@ def get_device_op_overrides(device: str) -> Optional[DeviceOpOverrides]:
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    return device_op_overrides_dict.get(device)
+    return device_op_overrides_dict[device]
 
 
 DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
