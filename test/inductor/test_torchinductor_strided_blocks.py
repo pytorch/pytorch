@@ -609,6 +609,7 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
+    @config.patch("triton.cooperative_reductions", False)
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
@@ -695,6 +696,10 @@ class CommonTemplate:
         the block pointer analysis, those cases would fall back to 1D.
         """
         view = self._discontiguous_tensor(size, self.device)
+
+        if config.triton.cooperative_reductions:
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = min(2, expected_num_block_pointers)
 
         # We expect many block pointers for this one.
         result, (code,) = run_and_compare(
