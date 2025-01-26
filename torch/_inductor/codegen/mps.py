@@ -437,7 +437,7 @@ class MetalKernel(SIMDKernel):
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:

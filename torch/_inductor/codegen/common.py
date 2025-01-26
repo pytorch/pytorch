@@ -14,12 +14,6 @@ from enum import auto, Enum
 from itertools import chain
 from typing import Any, Callable, ClassVar, NamedTuple, Optional, TYPE_CHECKING, Union
 
-from torch.utils._ordered_set import OrderedSet
-
-
-if TYPE_CHECKING:
-    from typing import Never
-
 import sympy
 
 import torch
@@ -27,6 +21,7 @@ import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -46,11 +41,24 @@ from ..utils import (
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
+if TYPE_CHECKING:
+    from typing import Never, TypeVar
+
+    from ..ir import FixedLayout
+    from ..loop_body import LoopBody
+    from ..scheduler import BaseScheduling, Scheduler
+    from .wrapper import PythonWrapperCodegen
+
+    _T = TypeVar("_T")
+    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
+    WrapperConstructor = Callable[[], Optional[PythonWrapperCodegen]]
+    SymbolLike = Union[str, sympy.Symbol]
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
 
 
-def data_type_logger(msg):
+def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
 
@@ -61,7 +69,7 @@ class WorkspaceZeroMode(enum.Enum):
     ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
 
     @staticmethod
-    def combine(a, b):
+    def combine(a: WorkspaceZeroMode, b: WorkspaceZeroMode) -> WorkspaceZeroMode:
         if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
             return a
         if a == WorkspaceZeroMode.UNINITIALIZED:
@@ -69,7 +77,7 @@ class WorkspaceZeroMode(enum.Enum):
         raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
 
     @staticmethod
-    def from_bool(zero_fill):
+    def from_bool(zero_fill: bool) -> WorkspaceZeroMode:
         if zero_fill:
             return WorkspaceZeroMode.ZERO_ON_CALL
         return WorkspaceZeroMode.UNINITIALIZED
@@ -96,17 +104,17 @@ class WorkspaceArg:
     dtype: torch.dtype = torch.uint8
 
     @staticmethod
-    def unique_name(prefix="workspace_"):
+    def unique_name(prefix="workspace_") -> str:
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
-    def can_join(a, b) -> bool:
+    def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
         return (
             a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
         )
 
     @staticmethod
-    def join(a, b):
+    def join(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         return WorkspaceArg(
             count=a.count + b.count,
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
@@ -117,7 +125,7 @@ class WorkspaceArg:
         )
 
     @staticmethod
-    def maximum(a, b):
+    def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         assert (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
@@ -131,15 +139,15 @@ class WorkspaceArg:
         )
 
     # These methods let WorkspaceArg pretend it is a buffer to reuse allocation code
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.device
 
     get_device_or_error = get_device
 
-    def get_dtype(self):
+    def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_layout(self):
+    def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
         return FixedLayout(
@@ -150,23 +158,23 @@ class WorkspaceArg:
         )
 
     @property
-    def layout(self):
+    def layout(self) -> FixedLayout:
         return self.get_layout()
 
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
 
-    def get_size(self):
+    def get_size(self) -> list[sympy.Expr]:
         return [self.count]
 
-    def get_stride(self):
-        return [1]
+    def get_stride(self) -> list[sympy.Expr]:
+        return [sympy.S.One]
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.outer_name
 
-    def get_inputs_that_alias_output(self):
+    def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
 
@@ -185,7 +193,7 @@ class SizeArg:
     expr: sympy.Expr
 
     @property
-    def alias_of(self):
+    def alias_of(self) -> None:
         return None
 
 
@@ -201,9 +209,9 @@ class TMADescriptorArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: Any
-    wrapper_codegen: type
-    cpp_wrapper_codegen: type = type(None)
+    scheduling: SchedulingConstructor
+    wrapper_codegen: WrapperConstructor
+    cpp_wrapper_codegen: WrapperConstructor = type(None)
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
@@ -212,16 +220,16 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
-    def import_get_raw_stream_as(self, name):
+    def import_get_raw_stream_as(self, name: str):
         raise NotImplementedError
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int):
         raise NotImplementedError
 
     def synchronize(self):
         raise NotImplementedError
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int):
         raise NotImplementedError
 
     def cpp_device_guard(self):
@@ -290,10 +298,10 @@ device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: Any,
-    device_wrapper_codegen: type,
-    device_cpp_wrapper_codegen: type = type(None),
-):
+    device_scheduling: SchedulingConstructor,
+    device_wrapper_codegen: WrapperConstructor,
+    device_cpp_wrapper_codegen: WrapperConstructor = type(None),
+) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
     )
@@ -322,21 +330,27 @@ def get_backend_features(device: Union[torch.device, str, None]):
         assert isinstance(device, str)
         device_type = device
         device = torch.device(device_type)
-    scheduling = get_scheduling_for_device(device_type)
-    return scheduling(None).get_backend_features(device)
+    scheduling_ctor = get_scheduling_for_device(device_type)
+    assert scheduling_ctor
+    scheduling = scheduling_ctor(None)
+    return scheduling.get_backend_features(device)
 
 
-def has_backend_feature(device, feature):
+def has_backend_feature(
+    device: Union[torch.device, str, None], feature: BackendFeature
+) -> bool:
     """See also V.graph.has_feature"""
     assert isinstance(feature, BackendFeature)
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str):
+def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+def get_wrapper_codegen_for_device(
+    device: str, cpp_wrapper: bool = False
+) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         return (
@@ -348,7 +362,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 
 
 @functools.lru_cache(None)
-def init_backend_registration():
+def init_backend_registration() -> None:
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
@@ -367,7 +381,7 @@ def init_backend_registration():
         }
         register_backend_for_device(
             "cpu",
-            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperCpuArrayRef
             if config.aot_inductor.allow_stack_allocation
@@ -376,10 +390,13 @@ def init_backend_registration():
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
+        cuda_backends = {
+            "triton": CUDACombinedScheduling,
+            "halide": HalideScheduling,
+        }
         register_backend_for_device(
             "cuda",
-            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
@@ -422,30 +439,33 @@ def init_backend_registration():
             pass
 
 
-def index_prevent_reordering(index: list[sympy.Expr], index_vars, sizes):
+def index_prevent_reordering(
+    index: list[sympy.Expr], index_vars, sizes
+) -> list[sympy.Expr]:
     from ..ir import FlexibleLayout
 
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def register_device_op_overrides(device: str, device_op_overrides: DeviceOpOverrides):
+def register_device_op_overrides(
+    device: str, device_op_overrides: DeviceOpOverrides
+) -> None:
     device_op_overrides_dict[device] = device_op_overrides
 
 
-def get_device_op_overrides(device: str):
+def get_device_op_overrides(device: str) -> Optional[DeviceOpOverrides]:
     assert isinstance(device, str)
 
-    if not device_op_overrides_dict.keys():
+    if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    if device in device_op_overrides_dict.keys():
-        return device_op_overrides_dict[device]
+    return device_op_overrides_dict.get(device)
 
 
-DTYPE_TO_COMPUTATION_DTYPE = {
+DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
     torch.bfloat16: torch.float,
     torch.float16: torch.float,
     **{
@@ -469,8 +489,8 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 
 def deduce_output_dtype_by_name(
     op_name: str,
-    *args,
-    **kwargs,
+    *args: Any,
+    **kwargs: Any,
 ) -> Optional[torch.dtype]:
     """
     Given op name and a list of input dtypes, deduce the output dtype
@@ -511,7 +531,7 @@ def deduce_output_dtype_by_name(
 
 
 class DataTypePropagation:
-    def __init__(self, body) -> None:
+    def __init__(self, body: LoopBody) -> None:
         self.body = body
         self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
@@ -519,7 +539,7 @@ class DataTypePropagation:
         for k, v in body.subblocks.items():
             self.graphs[k] = v.graph
 
-    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         inputs = node.all_input_nodes
         input_nodes = [
             n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
@@ -540,13 +560,13 @@ class DataTypePropagation:
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
 
-    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node) -> torch.dtype:
         sub_graph = self.graphs[node.target]
         dtype = self.propagate_graph(sub_graph)
         assert dtype
         return dtype
 
-    def deduce_node_dtype(self, node: torch.fx.Node):
+    def deduce_node_dtype(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         if node.op == "placeholder":
             return None
 
@@ -573,9 +593,9 @@ class DataTypePropagation:
 
         return self.deduce_node_dtype_by_inputs(node)
 
-    def propagate_graph(self, graph: torch.fx.Graph):
+    def propagate_graph(self, graph: torch.fx.Graph) -> Optional[torch.dtype]:
         assert graph.nodes
-        graph_dtype = None
+        graph_dtype: Optional[torch.dtype] = None
         # For masked_subblock, we use output's dtype to represent
         # the dtype of this subgraph. For other cases, graph_dtype
         # might be None
@@ -591,25 +611,27 @@ class DataTypePropagation:
                 graph_dtype = opt_ctx.dtype
         return graph_dtype
 
-    def propagate(self):
-        self.propagate_graph(self.graphs["root"])
+    def propagate(self) -> Optional[torch.dtype]:
+        return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body):
+    def propagate_loopbody(cls, body) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node):
+    def propagate_scheduler_node(cls, node) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
         assert isinstance(node, SchedulerNode)
         assert isinstance(node._body, LoopBody)
-        DataTypePropagation.propagate_loopbody(node._body)
+        return DataTypePropagation.propagate_loopbody(node._body)
 
 
 class PythonPrinter(_PythonPrinter):
-    def doprint(self, expr, *, simplify: bool = True, p=True):
+    def doprint(
+        self, expr: sympy.Expr, *, simplify: bool = True, p: bool = True
+    ) -> str:
         # TODO: why are people passing strings to the printer here :think:
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
@@ -622,7 +644,7 @@ class OpDecompositions:
     """
 
     @staticmethod
-    def identity(value):
+    def identity(value: _T) -> _T:
         # used to trigger cse
         return value
 
@@ -1093,7 +1115,7 @@ class DeferredLine(DeferredLineBase):
 
 
 class BracesBuffer(IndentedBuffer):
-    def indent(self, offset=1):
+    def indent(self, offset=1) -> contextlib.AbstractContextManager[None]:
         @contextlib.contextmanager
         def ctx():
             for _ in range(offset):
@@ -1120,7 +1142,7 @@ class InplacedBuffer(NamedTuple):
 
 class KernelArgs:
     @staticmethod
-    def _lookup(prefix, odict, name):
+    def _lookup(prefix: str, odict: dict[SymbolLike, str], name: SymbolLike) -> str:
         assert isinstance(name, (str, sympy.Symbol))
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
@@ -1133,7 +1155,7 @@ class KernelArgs:
         self.sizevars = sizevars or {}
         self.workspace_args = []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "KernelArgs({})".format(
             ", ".join(
                 map(
@@ -1185,7 +1207,7 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
         """
         Allocate or extend a workspace buffer of nbytes bytes.
 
@@ -1226,7 +1248,7 @@ class KernelArgs:
         self.workspace_args.append(arg)
         return arg.inner_name, 0
 
-    def semaphores(self, min_size: sympy.Expr):
+    def semaphores(self, min_size: sympy.Expr) -> str:
         """
         Lazily allocate a graph-wide semaphores buffer with at least min_size.  This is a single buffer shared by
         all kernels and zero initialized once at graph start.  Each kernel must leave the buffer zeroed on exit.
