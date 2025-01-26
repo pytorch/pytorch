@@ -87,7 +87,7 @@ struct WeightRecp {
           scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
     }
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
-    depth = ceil(log2(m));
+    depth = m > 0 ? ceil(log2(m)) : 0;
     welford_stk.assign(depth, Welford<T>());
   }
   void clean_stack() {
