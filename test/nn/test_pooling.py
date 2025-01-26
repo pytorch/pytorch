@@ -556,8 +556,20 @@ class TestPoolingNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
+    @onlyCPU
+    def test_adaptive_avg_pooling_backward_fails(self, device):
+        grad_output = torch.randn(1, 2, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
     @onlyNativeDeviceTypes
-    def test_adaptive_pooling_backward_fails(self, device):
+    def test_adaptive_max_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
         indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
