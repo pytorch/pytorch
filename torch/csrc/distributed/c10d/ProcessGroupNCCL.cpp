@@ -906,6 +906,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -986,6 +987,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1140,6 +1142,11 @@ bool ProcessGroupNCCL::isInitialized() {
     }
   }
   return initialized;
+}
+
+ErrorType ProcessGroupNCCL::getError() {
+  std::lock_guard<std::mutex> lock(errorMutex_);
+  return error_;
 }
 
 void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
@@ -1608,8 +1615,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   std::string errorMsg;
   std::string exitReason;
   bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
-  int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
-                                            : heartbeatTimeoutInSec_ * 1000;
+  int monitorPollInterval = checkDumpSignal || propagatePgError_
+      ? coordCheckIntervalMilSec_
+      : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::optional<DumpPipe> dumpPipe = std::nullopt;
@@ -1633,6 +1641,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       return;
     }
     auto currentTime = std::chrono::steady_clock::now();
+
+    if (propagatePgError_) {
+      // Check and set remote error if it has not been set before
+      checkAndSetRemoteError();
+    }
 
     // We put extra functionality in the thread for the default PG (aka,
     // local_id_=0) because the signal is same across different PGs. We only
@@ -1675,7 +1688,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
-              globalStore_->check({std::string(EXCEPTION_DUMP)});
+              globalStore_->check({std::string(kStoreDumpKey)});
         } catch (const c10::DistNetworkError& e) {
           handleError(e.msg());
         } catch (const std::exception& e) {
@@ -1691,7 +1704,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           shouldDump_.store(true);
           try {
-            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
+            auto vec = globalStore_->get(std::string(kStoreDumpKey));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -2047,41 +2060,98 @@ bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
       DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
-// Broadcast flight-recorder dump signal
-void ProcessGroupNCCL::broadcastDumpSignal() {
+void ProcessGroupNCCL::broadcastSignal(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal,
+    int srcRank) {
   try {
-    auto rank = globalRank();
     auto vec = std::vector<uint8_t>(
-        reinterpret_cast<uint8_t*>(&rank),
-        reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
-    globalStore_->set(std::string(EXCEPTION_DUMP), vec);
-    if (!shouldDump_.load()) {
-      LOG(INFO)
-          << logPrefix()
-          << "Broadcasting flight recorder dump signal to other processes via TCPStore.";
-    }
-    // signal the monitor thread on PG0 to start dumping
-    shouldDump_.store(true);
-    // Give time for dumping before throwing exception
-    auto start = std::chrono::steady_clock::now();
-    // Give 2 * waitTimeoutDumpInMilSec_ to dump the flight recorder.
-    // We try capturing with stack traces first, and if it fails, we try without
-    // stack traces.
-    auto status = promiseFlightRecorderDump_.get_future().wait_for(
-        std::chrono::milliseconds(2 * waitTimeoutDumpInMilSec_));
-    if (status == std::future_status::timeout) {
-      LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                   << 2 * waitTimeoutDumpInMilSec_ << "ms"
-                   << " flight recorder dumps to finish.";
-    } else if (status == std::future_status::ready) {
-      auto end = std::chrono::steady_clock::now();
-      LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-                << "ms"
-                << " giving time for flight recorder dumps to finish.";
-    }
+        reinterpret_cast<uint8_t*>(&srcRank),
+        reinterpret_cast<uint8_t*>(&srcRank) + sizeof(srcRank));
+    store->set(signal, vec);
+    LOG(INFO) << logPrefix() << "Broadcasting signal " << signal
+              << " to other ranks via TCPStore.";
   } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Failed to set dump signal in tcpstore. "
-               << "Error: " << e.what();
+    LOG(ERROR) << logPrefix() << "Failed to broadcast signal " << signal
+               << " through TCPStore. Error: " << e.what();
+  }
+}
+
+int ProcessGroupNCCL::getSignalSrcRank(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal) {
+  // This function is 'non blocking'. We first 'check' if the key exists in the
+  // store, then read/get the value only if the key exists.
+  int srcRank = -1;
+  bool signalExists = false;
+  try {
+    signalExists = store->check({signal});
+  } catch (const std::exception& e) {
+    LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
+                 << " on TCPStore, " << e.what();
+  }
+  if (!signalExists) {
+    return srcRank;
+  }
+
+  // key exists, now read and parse the value (source rank)
+  std::vector<uint8_t> vec;
+  try {
+    vec = store->get(std::string(signal));
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
+               << signal << " from TCPStore." << e.what();
+  }
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      vec.size() == sizeof(int),
+      "Invalid size for the timeout rank ID");
+  std::memcpy(&srcRank, vec.data(), vec.size());
+  return srcRank;
+}
+
+void ProcessGroupNCCL::broadcastDumpSignal() {
+  // broadcast dump signal to all other global ranks.
+  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
+  // signal the local rank to start dumping
+  if (shouldDump_.load()) {
+    // already signaled dump, skipping signal again and wait for the dump
+    // future.
+    return;
+  }
+  LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+  // signal the monitor thread on PG0 to start dumping
+  shouldDump_.store(true);
+  // Give time for dumping before throwing exception
+  auto start = std::chrono::steady_clock::now();
+  auto status = promiseFlightRecorderDump_.get_future().wait_for(
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+  if (status == std::future_status::timeout) {
+    LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                 << waitTimeoutDumpInMilSec_ << "ms"
+                 << " flight recorder dumps to finish.";
+  } else if (status == std::future_status::ready) {
+    auto end = std::chrono::steady_clock::now();
+    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
+              << "ms"
+              << " giving time for flight recorder dumps to finish.";
+  }
+}
+
+void ProcessGroupNCCL::checkAndSetRemoteError() {
+  // if the error is already set, no need to check again
+  if (getError() != ErrorType::SUCCESS) {
+    return;
+  }
+  // key/signal to read from the tcpstore is a string and pg specific:
+  // format is: remote_error:pg_uid
+  int remoteErrorRank = getSignalSrcRank(
+      store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_);
+  if (remoteErrorRank != -1) {
+    std::lock_guard<std::mutex> lock(errorMutex_);
+    error_ = ErrorType::REMOTE_ERROR;
+    LOG(ERROR) << c10::str(
+        logPrefix(), " remote error detected from rank: ", remoteErrorRank);
   }
 }
 
@@ -2163,6 +2233,15 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
+
+      if (work.exception()) {
+        // set the error to the first error found
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (error_ == ErrorType::SUCCESS) {
+          error_ = ErrorType::COMM_ERROR;
+        }
+      }
+
       // Then check if work has timed out
       // Skip if work has encountered an error
       bool timedout = !work.exception() && work.checkTimeout();
@@ -2170,6 +2249,10 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
       if (timedout) {
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (error_ == ErrorType::SUCCESS) {
+          error_ = ErrorType::TIMEOUT;
+        }
         desyncDebugger_.run();
       }
 
@@ -2186,6 +2269,14 @@ void ProcessGroupNCCL::watchdogHandler() {
 
         // Print the traceback of the collective at call time
         work.printTraceback();
+
+        // broadcast remote error signal to all other ranks in this specific PG.
+        // key/signal to write in the tcpstore is a string and pg specific:
+        // format is: remote_error:pg_uid
+        if (propagatePgError_) {
+          broadcastSignal(
+              store_, std::string(kStoreErrorSignalKey) + ':' + pg_uid_, rank_);
+        }
 
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight

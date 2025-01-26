@@ -8,7 +8,6 @@ import dataclasses
 import functools
 import inspect
 from typing import Any, Callable, NamedTuple, Optional, Sequence
-from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -87,10 +86,17 @@ def aot_dispatch_base_graph(
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    state, subclass_tracing_info = wrap_and_run(
-        flat_fn, flat_args, fw_metadata, aot_config, is_autograd=False
+    state, subclass_tracing_info = _aot_dispatch_function_wrapper(
+        flat_fn,
+        flat_args,
+        [fn_input_mutations_to_outputs],
+        aot_config=aot_config,
+        is_joint_structure=False,
+        meta=fw_metadata,
+        trace_joint=False,
     )
-    fn_to_trace, updated_flat_args_subclasses_desugared, fw_metadata = state
+
+    fn_to_trace, updated_flat_args_subclasses_desugared = state
     maybe_subclass_meta = subclass_tracing_info[-1] if subclass_tracing_info else None
 
     aot_graphs_log.debug(
@@ -234,10 +240,17 @@ def aot_dispatch_autograd_graph(
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
 
-    state, subclass_tracing_info = wrap_and_run(
-        flat_fn, flat_args, fw_metadata, aot_config, is_autograd=True
+    state, subclass_tracing_info = _aot_dispatch_function_wrapper(
+        flat_fn,
+        flat_args,
+        [fn_prepped_for_autograd, create_joint],
+        aot_config=aot_config,
+        functionalized_inputs=[flat_args, fw_metadata.traced_tangents],
+        is_joint_structure=True,
+        meta=fw_metadata,
+        trace_joint=True,
     )
-    joint_fn_to_trace, updated_joint_inputs, _ = state
+    joint_fn_to_trace, updated_joint_inputs = state
 
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
@@ -285,60 +298,25 @@ def aot_dispatch_autograd_graph(
 
 
 # aot_dispatch_autograd_graph()` and `aot_dispatch_base_graph()` have the same pattern:
-# a series of steps where a base function is repeatedly wrapped, resulting each time in
-# successive new functions with the same signature but more functionality.
-
+# a series of steps where a function with its arguments is repeatedly wrapped,
+# resulting in a sequence of functions with the same signature, each wrapping
+# the previous one.
 
 class WrapState(NamedTuple):
     fn: Callable[..., Any]
     args: Sequence[Tensor]
-    meta: ViewAndMutationMeta
 
 
-@dataclasses.dataclass(frozen=True)
-class WrapStep:
-    step_fn: Callable[..., Any]
-    kwargs: dict[str, Any]
-
-    def __call__(self, s: WrapState) -> WrapState:
-        kwargs = {k: getattr(s, k) for k in ("args", "meta") if k in self._params}
-        r = self.step_fn(s.fn, **kwargs, **self.kwargs)
-
-        if isinstance(r, tuple):
-            assert len(r) == 2
-            return WrapState(*r, s.meta)
-        else:
-            assert callable(r)
-            return WrapState(r, s.args, s.meta)
-
-    @functools.cached_property
-    def _params(self) -> frozenset[str]:
-        return frozenset(inspect.signature(self.step_fn).parameters)
-
-
-class WrapSteps:
-    def __init__(self):
-        self.steps = list[WrapStep]()
-
-    def add(self, step_fn: Callable[..., Any], **kwargs: Any) -> Self:
-        self.steps.append(WrapStep(step_fn, kwargs))
-        return self
-
-    def run_all(self, state: WrapState) -> list[WrapState]:
-        return [state] + [state := step(state) for step in self.steps]
-
-    def run(self, state: WrapState) -> WrapState:
-        return self.run_all(state)[-1]
-
-
-def wrap_and_run(
-    flat_fn: Callable[..., Any],
-    flat_args: list[Tensor],
-    fw_metadata: ViewAndMutationMeta,
-    aot_config: AOTConfig,
+def _aot_dispatch_function_wrapper(
+    fn: Callable[..., Any],
+    args: list[Tensor],
+    wrappers: Sequence[Callable[..., Any]],
     *,
-    is_autograd: bool,
+    aot_config: AOTConfig,
+    functionalized_inputs: Optional[Sequence[Any]] = None,
+    **kwargs: Any,
 ) -> tuple[WrapState, Optional[SubclassTracingInfo]]:
+    """Wrap a function with a list of tensor arguments"""
     subclass_tracing_info: SubclassTracingInfo | None = None
 
     @functools.wraps(aot_dispatch_subclass)
@@ -347,6 +325,7 @@ def wrap_and_run(
         args: list[Tensor],
         **kwargs: Any,
     ) -> tuple[Callable[..., Any], list[Tensor]]:
+        # TODO(rec): this is our one side-effect!
         nonlocal subclass_tracing_info
         subclass_tracing_info = aot_dispatch_subclass(fn, args, **kwargs)
         return subclass_tracing_info[:2]
@@ -357,32 +336,61 @@ def wrap_and_run(
         args: list[Tensor],
         **kwargs: Any,
     ) -> tuple[Callable[..., Any], list[Tensor]]:
-        if is_autograd:
-            joint_inputs: Sequence[Any] = flat_args, fw_metadata.traced_tangents
-        else:
-            joint_inputs = args
-        return create_functionalized_fn(fn, joint_inputs, **kwargs)
+        # TODO(rec): the functionalized_inputs logic faithfully represents
+        # existing behavior but the reasons behind it are unclear.
+        inputs = functionalized_inputs or args
+        return create_functionalized_fn(fn, inputs, **kwargs)
 
-    steps = WrapSteps()
-    if is_autograd:
-        steps.add(fn_prepped_for_autograd).add(create_joint, aot_config=aot_config)
-    else:
-        steps.add(
-            fn_input_mutations_to_outputs,
-            keep_data_input_mutations=aot_config.keep_inference_input_mutations,
-        )
-    steps.add(
-        _create_functionalized_fn, aot_config=aot_config, trace_joint=is_autograd
-    ).add(
-        # TODO: replace with AOTDispatchSubclassWrapper once we refactor
-        # fn_input_mutations_to_outputs and create_functionalized_fn
-        # into CompilerWrappers.
+    steps = WrapSteps(
+        *wrappers,
+        _create_functionalized_fn,
         _aot_dispatch_subclass,
-        is_joint_structure=is_autograd,
-        fw_only=flat_fn,
-    ).add(
-        handle_effect_tokens_fn, trace_joint=is_autograd
+        handle_effect_tokens_fn,
     )
+    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+    # fn_input_mutations_to_outputs and create_functionalized_fn
+    # into CompilerWrappers.
 
-    state = steps.run(WrapState(flat_fn, flat_args, fw_metadata))
+    state = steps.run(
+        WrapState(fn, args),
+        aot_config=aot_config,
+        fw_only=fn,
+        keep_data_input_mutations=aot_config.keep_inference_input_mutations,
+        **kwargs,
+    )
     return state, subclass_tracing_info
+
+
+class WrapStep:
+    def __init__(self, step_fn: Callable[..., Any], kwargs: dict[str, Any]) -> None:
+        self.step_fn = step_fn
+        self.kwargs = kwargs
+        self._params = frozenset(inspect.signature(self.step_fn).parameters)
+
+    def __call__(self, state: WrapState, **kwargs: Any) -> WrapState:
+        # Add any parameters that step_fn uses.
+        kwargs["args"] = state.args
+        kwargs = {k: v for k, v in kwargs.items() if k in self._params}
+
+        r = self.step_fn(state.fn, **kwargs, **self.kwargs)
+        if isinstance(r, tuple):
+            assert len(r) == 2, str(r)
+            fn, args = r
+        else:
+            fn, args = r, state.args
+
+        assert callable(fn)
+        assert isinstance(args, Sequence)
+
+        return WrapState(fn, args)
+
+
+class WrapSteps:
+    def __init__(self, *step_fn: Callable[..., Any], **kwargs: Any) -> None:
+        self.steps = [WrapStep(s, kwargs) for s in step_fn]
+
+    def run_all(self, state: WrapState, **kwargs: Any) -> list[WrapState]:
+        return [s := state] + [s := step(s, **kwargs) for step in self.steps]
+
+    def run(self, state: WrapState, **kwargs: Any) -> WrapState:
+        return self.run_all(state, **kwargs)[-1]
