@@ -300,6 +300,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::ceil({x})"
 
     @staticmethod
+    def randn(seed, offset) -> str:
+        return f"c10::metal::randn({seed}, {offset})"
+
+    @staticmethod
     def round(x: CSEVariable) -> str:
         return f"metal::round({x})"
 
@@ -360,6 +364,7 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
+            #include <c10/metal/random.h>
             #include <c10/metal/special_math.h>
             #include <c10/metal/utils.h>
             """,
