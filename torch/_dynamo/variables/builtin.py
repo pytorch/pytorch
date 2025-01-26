@@ -110,7 +110,8 @@ _TrackersType = Union[type[VariableTracker], tuple[type[VariableTracker], ...]]
 
 class BuiltinVariable(VariableTracker):
     """
-    A VariableTracker that represents a built-in function object.
+    A VariableTracker that represents a built-in value. A lot of the code
+    here assumes it will be a function object.
     """
 
     _SENTINEL = object()
@@ -1942,6 +1943,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_format(self, tx: "InstructionTranslator", _format_string, *args, **kwargs):
         format_string = _format_string.as_python_constant()
+        format_string = str(format_string)
         return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(self, tx: "InstructionTranslator", *args):
