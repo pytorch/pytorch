@@ -3742,6 +3742,7 @@ class CppKernelProxy(CppKernel):
                 if input_dtype := get_input_dtype(node):
                     return input_dtype == dt
                 elif node.target == "to_dtype":
+                    # The `src_dtype` of a `to_dtype` node might miss, in which case the node accept any input dtype.
                     return True
                 else:
                     return False
