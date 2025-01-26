@@ -66,6 +66,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
@@ -13321,8 +13322,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
         @skipIfRocm
         @expectedFailureXPU
         @unittest.skipIf(
-            torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
-            "Triton does not support fp8 on A100",
+            not PLATFORM_SUPPORTS_FP8,
+            "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
         )
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
