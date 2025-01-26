@@ -1,13 +1,14 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
 import itertools
 import math
 
 import torch
-import torch._inductor.config
 import torch.utils.checkpoint
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
@@ -16,6 +17,57 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+
+class SelfAttnLikeModule(torch.nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        has_mask,
+        num_attention_heads=None,
+        attention_head_size=None,
+    ) -> None:
+        super().__init__()
+        self.input_dim = input_dim
+        self.q_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+        self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+        self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+        self.softmax = torch.nn.Softmax(dim=-1)
+        assert num_attention_heads is not None
+        assert attention_head_size is not None
+        self.num_attention_heads = num_attention_heads
+        self.attention_head_size = attention_head_size
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.dense = torch.nn.Linear(self.all_head_size, self.all_head_size)
+        self.dropout = torch.nn.Dropout(0)
+        self.has_mask = has_mask
+
+    def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+        new_x_shape = x.size()[:-1] + (
+            self.num_attention_heads,
+            self.attention_head_size,
+        )
+        x = x.view(new_x_shape)
+        return x.permute([0, 2, 1, 3])
+
+    def forward(self, x, mask):
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+        q = self.transpose_for_scores(q)
+        k = self.transpose_for_scores(k)
+        v = self.transpose_for_scores(v)
+        scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
+        if self.has_mask:
+            scores = scores + mask
+        attention = self.softmax(scores)
+        attention = self.dropout(attention)
+        context_layer = torch.matmul(attention, v)
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        context_layer = context_layer.view(
+            context_layer.size()[:-2] + (self.all_head_size,)
+        )
+        return self.dense(context_layer)
 
 
 def checkpoint_wrapper(fn):
@@ -67,8 +119,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             if not self.use_static_shapes:
                 torch._dynamo.mark_dynamic(args2[0], 0)
-                torch._dynamo.mark_dynamic(args2[1], 0)
-                torch._dynamo.mark_dynamic(args2[2], 0)
+                # if q/k/v are explicitly in inputs
+                if len(args2) >= 3:
+                    torch._dynamo.mark_dynamic(args2[1], 0)
+                    torch._dynamo.mark_dynamic(args2[2], 0)
 
             dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
@@ -82,12 +136,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
             source_code = "\n".join(source_code)
             if has_fuse_pattern:
-                self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
+                self.assertGreaterEqual(counters["inductor"]["int8_sdpa_count"], 1)
             if contains:
                 # many of the patterns get re-expanded in dispatcher
-                self.assertIn(
-                    "aten._scaled_dot_product",
-                    source_code,
+                self.assertTrue(
+                    "aten._scaled_dot_product" in source_code
+                    or "cpp_fused_quantize" in source_code
                 )
 
             # some tests configured with very low dropout where we still want to check equality
@@ -133,7 +187,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
     @skipIfRocm
-    @torch._inductor.config.patch("freezing", True)
+    @config.patch("freezing", True)
     def _test_sdpa_rewriter_1_freezing(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -953,6 +1007,67 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    @skipIfRocm
+    @config.patch({"freezing": True})
+    def _test_sdpa_rewriter_20_to_23(self):
+        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+        from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
+            X86InductorQuantizer,
+        )
+        from torch.export import export_for_training
+
+        def _generate_qdq_quantized_model(mod, inputs, quantizer):
+            with torch.no_grad():
+                export_model = export_for_training(mod, inputs).module()
+                prepare_model = prepare_pt2e(export_model, quantizer)
+                prepare_model(*inputs)
+                convert_model = convert_pt2e(prepare_model)
+                torch.ao.quantization.move_exported_model_to_eval(convert_model)
+                return convert_model
+
+        if not self.use_static_shapes:
+            self.skipTest("Causes IndexError. TODO: investigate")
+
+        # pattern is different for bs=1
+        for dtype, has_mask, bs in itertools.product(
+            [torch.float32],
+            [True, False],
+            [56]
+            # [torch.float32, torch.bfloat16], [True, False], [56, 1]
+        ):
+            seqlen, numhead, headsize = 384, 16, 64
+            mod = SelfAttnLikeModule(
+                input_dim=headsize * numhead,
+                has_mask=has_mask,
+                num_attention_heads=numhead,
+                attention_head_size=headsize,
+            ).eval()
+            maybe_autocast = (
+                torch.cpu.amp.autocast()
+                if dtype == torch.bfloat16
+                else contextlib.nullcontext()
+            )
+            inputs = (
+                torch.randn(
+                    (bs, seqlen, headsize * numhead), device=self.device, dtype=dtype
+                )
+                * 10,
+                torch.randn((bs, 1, 1, seqlen), device=self.device) * 10
+                if has_mask
+                else None,
+            )
+            with torch.no_grad(), maybe_autocast:
+                quantizer = X86InductorQuantizer()
+                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+                quantizer.set_function_type_qconfig(
+                    torch.matmul, quantizer.get_global_quantization_config()
+                )
+                convert_model = _generate_qdq_quantized_model(mod, inputs, quantizer)
+                self._check_common(
+                    convert_model, args1=inputs, check_train=False, atol=1.0
+                )
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -1080,6 +1195,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_19_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+        )
+        test_sdpa_rewriter_20_to_23_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20_to_23
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

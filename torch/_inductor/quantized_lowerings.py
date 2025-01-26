@@ -1,12 +1,17 @@
 import logging
-from typing import Any
+from typing import Any, List, Optional
+
+import sympy
 
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate
+from .codegen.cpp_int8_sdpa_template import CppInt8SdpaTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
+from .ir import FixedLayout, get_fill_order, TensorBox
+from .kernel.flex_attention import construct_strides, maybe_realize
 from .lowering import expand, register_lowering
 from .select_algorithm import (
     autotune_select_algorithm,
@@ -97,3 +102,93 @@ def register_woq_mm_ops() -> None:
 
     lowering.make_fallback(aten._dyn_quant_matmul_4bit)
     lowering.make_fallback(aten._dyn_quant_pack_4bit_weight)
+
+
+def int8_sdpa_lowering(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
+    inv_scale: float,
+    attn_mask: Optional[TensorBox],
+    q_zp: Optional[int] = 0,
+    q_scale: Optional[float] = 1.0,
+    k_zp: Optional[int] = 0,
+    k_scale: Optional[float] = 1.0,
+    v_zp: Optional[int] = 0,
+    v_scale: Optional[float] = 1.0,
+    a_zp: Optional[int] = 0,
+    a_scale: Optional[float] = 1.0,
+    o_zp: Optional[int] = 0,
+    o_scale: Optional[float] = 1.0,
+) -> TensorBox:
+    (
+        query,
+        key,
+        value,
+        attn_mask,
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            attn_mask,
+        ]
+    )
+
+    if (
+        query.get_dtype() is not torch.uint8
+        or key.get_dtype() is not torch.uint8
+        or value.get_dtype() is not torch.uint8
+    ):
+        raise NotImplementedError(
+            "Only `torch.uint8` is supported in Int8 SDPA template for CPU device. "
+            f"Found input tensors are `{query.get_dtype()}`,`{key.get_dtype()}`,`{value.get_dtype()}`."
+        )
+
+    # Construct output layout with strides matching the query.
+    out_size = query.get_size()
+    fill_order = get_fill_order(query.get_stride())
+    out_strides = construct_strides(out_size, fill_order)
+
+    layout = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        out_size,
+        stride=[sympy.sympify(s) for s in out_strides],
+    )
+    _choices: List[Any] = []
+    input_nodes = [query, key, value]
+    if attn_mask is not None:
+        input_nodes.append(attn_mask)
+
+    CppInt8SdpaTemplate.add_choices(
+        choices=_choices,
+        input_nodes=input_nodes,
+        layout=layout,
+        scale=1.0 / inv_scale,
+        q_zp=q_zp,
+        q_scale=q_scale,
+        k_zp=k_zp,
+        k_scale=k_scale,
+        v_zp=v_zp,
+        v_scale=v_scale,
+        a_zp=a_zp,
+        a_scale=a_scale,
+        o_zp=o_zp,
+        o_scale=o_scale,
+    )
+    inputs_for_autotuning = [
+        query,
+        key,
+        value,
+    ]
+    res = autotune_select_algorithm(
+        "int8_sdpa",
+        _choices,
+        inputs_for_autotuning,
+        layout,
+    )
+    return res
+
+
+int8_sdpa_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]

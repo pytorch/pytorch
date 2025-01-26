@@ -1188,6 +1188,435 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_int8_sdpa_pattern():
+    def fn(match):
+        assert all(k in match.kwargs for k in ("query", "key", "value"))
+        query = match.kwargs["query"].meta["val"]
+        key = match.kwargs["key"].meta["val"]
+        value = match.kwargs["value"].meta["val"]
+        return (
+            query.dtype == torch.uint8
+            and key.dtype == torch.uint8
+            and value.dtype == torch.uint8
+            and query.device.type == "cpu"
+            and key.device == query.device
+            and value.device == query.device
+        )
+
+    return fn
+
+
+def _register_int8_sdpa_pattern(pattern, pass_number):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_int8_sdpa_pattern(),
+        pass_number=pass_number,
+    )
+    def int8_sdpa(match: Match, *args, **kwargs):
+        print("\n***hit int8_sdpa_pattern***")
+        query = kwargs["query"]
+        key = kwargs["key"]
+        value = kwargs["value"]
+        inv_scale = kwargs["inv_scale"]
+        attn_mask = kwargs["attn_mask"] if "attn_mask" in kwargs else None
+        q_zp = kwargs["q_zp"]
+        q_scale = kwargs["q_scale"]
+        k_zp = kwargs["k_zp"]
+        k_scale = kwargs["k_scale"]
+        v_zp = kwargs["v_zp"]
+        v_scale = kwargs["v_scale"]
+        a_zp = kwargs["a_zp"]
+        a_scale = kwargs["a_scale"]
+        o_zp = kwargs["o_zp"]
+        o_scale = kwargs["o_scale"]
+        counters["inductor"]["int8_sdpa_count"] += 1
+        counters["inductor"]["int8_sdpa_nodes"] += len(match.nodes)
+
+        from ..quantized_lowerings import int8_sdpa_lowering
+
+        return int8_sdpa_lowering(
+            query,
+            key,
+            value,
+            inv_scale,
+            attn_mask,
+            q_zp,
+            q_scale,
+            k_zp,
+            k_scale,
+            v_zp,
+            v_scale,
+            a_zp,
+            a_scale,
+            o_zp,
+            o_scale,
+        )
+
+    return int8_sdpa
+
+
+def _register_int8_sdpa_lowering1(pass_number):
+    # dtype = float32, without attention mask, batch size > 1
+    q_pattern = CallFunction(
+        aten.reshape.default,  # view_9
+        CallFunction(
+            aten.clone.default,  # clone
+            CallFunction(
+                aten.expand.default,  # expand
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_3
+                    CallFunction(
+                        aten.permute.default,  # permute_3
+                        KeywordArg("query"),
+                        Arg(),
+                    ),
+                    KeywordArg("q_scale"),
+                    KeywordArg("q_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    k_pattern = CallFunction(
+        aten.reshape.default,  # view_10
+        CallFunction(
+            aten.clone.default,  # clone_1
+            CallFunction(
+                aten.expand.default,  # expand_1
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_5
+                    CallFunction(
+                        aten.permute.default,  # permute_6
+                        CallFunction(
+                            aten.permute.default,  # permute_4
+                            KeywordArg("key"),
+                            Arg(),
+                        ),
+                        Arg(),
+                    ),
+                    KeywordArg("k_scale"),
+                    KeywordArg("k_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    add_pattern = CallFunction(
+        aten.mul.Tensor,  # mul_tensor
+        CallFunction(
+            aten.reshape.default,  # view_11
+            CallFunction(
+                aten.bmm.default,  # bmm
+                q_pattern,  # view_9
+                k_pattern,  # view_10
+            ),
+            Arg(),
+        ),
+        Arg(),
+        _users=2,
+    )
+
+    exp_pattern = CallFunction(
+        aten.exp.default,  # exp
+        CallFunction(
+            aten.div.Tensor,  # div_tensor
+            CallFunction(
+                aten.sub.Tensor,  # sub
+                add_pattern,  # add
+                CallFunction(
+                    aten.amax.default,  # amax
+                    add_pattern,  # add
+                    Arg(),
+                    Arg(),
+                ),
+            ),
+            KeywordArg("inv_scale"),
+        ),
+        _users=2,
+    )
+
+    attn_pattern = CallFunction(
+        aten.reshape.default,  # view_12
+        CallFunction(
+            aten.expand.default,  # expand_2
+            CallFunction(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_6
+                CallFunction(
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_4
+                    CallFunction(
+                        aten.div.Tensor,  # div_1
+                        exp_pattern,  # exp
+                        CallFunction(
+                            aten.sum.dim_IntList,  # sum_1
+                            exp_pattern,  # exp
+                            Arg(),
+                            Arg(),
+                        ),
+                    ),
+                    KeywordArg("a_scale"),
+                    KeywordArg("a_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                KeywordArg("a_scale"),
+                KeywordArg("a_zp"),
+                Arg(),
+                Arg(),
+                Arg(),
+            ),
+            Arg(),
+        ),
+        Arg(),
+    )
+
+    v_pattern = CallFunction(
+        aten.reshape.default,  # view_13
+        CallFunction(
+            aten.clone.default,  # clone_3
+            CallFunction(
+                aten.expand.default,  # expand_3
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_4
+                    CallFunction(
+                        aten.permute.default,  # permute_5
+                        KeywordArg("value"),
+                        Arg(),
+                    ),
+                    KeywordArg("v_scale"),
+                    KeywordArg("v_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    _int8_sdpa_pattern = CallFunction(
+        torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_5
+        CallFunction(
+            aten.clone.default,  # clone_4
+            CallFunction(
+                aten.permute.default,  # permute_7
+                CallFunction(
+                    aten.reshape.default,  # view_14
+                    CallFunction(
+                        aten.bmm.default,  # bmm_1
+                        attn_pattern,  # view_12
+                        v_pattern,  # view_13
+                    ),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        KeywordArg("o_scale"),
+        KeywordArg("o_zp"),
+        Arg(),
+        Arg(),
+        Arg(),
+    )
+    _register_int8_sdpa_pattern(_int8_sdpa_pattern, pass_number)
+
+
+def _register_int8_sdpa_lowering2(pass_number):
+    # dtype = float32, with attention mask, batch size > 1
+    q_pattern = CallFunction(
+        aten.reshape.default,  # view_9
+        CallFunction(
+            aten.clone.default,  # clone
+            CallFunction(
+                aten.expand.default,  # expand
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_3
+                    CallFunction(
+                        aten.permute.default,  # permute_3
+                        KeywordArg("query"),
+                        Arg(),
+                    ),
+                    KeywordArg("q_scale"),
+                    KeywordArg("q_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    k_pattern = CallFunction(
+        aten.reshape.default,  # view_10
+        CallFunction(
+            aten.clone.default,  # clone_1
+            CallFunction(
+                aten.expand.default,  # expand_1
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_5
+                    CallFunction(
+                        aten.permute.default,  # permute_6
+                        CallFunction(
+                            aten.permute.default,  # permute_4
+                            KeywordArg("key"),
+                            Arg(),
+                        ),
+                        Arg(),
+                    ),
+                    KeywordArg("k_scale"),
+                    KeywordArg("k_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    add_pattern = CallFunction(
+        aten.add.Tensor,  # add
+        CallFunction(
+            aten.div.Tensor,  # div
+            CallFunction(
+                aten.reshape.default,  # view_11
+                CallFunction(
+                    aten.bmm.default,  # bmm
+                    q_pattern,  # view_9
+                    k_pattern,  # view_10
+                ),
+                Arg(),
+            ),
+            KeywordArg("inv_scale"),
+        ),
+        KeywordArg("attn_mask"),
+        _users=2,
+    )
+
+    exp_pattern = CallFunction(
+        aten.exp.default,  # exp
+        CallFunction(
+            aten.sub.Tensor,  # sub
+            add_pattern,  # add
+            CallFunction(
+                aten.amax.default,  # amax
+                add_pattern,  # add
+                Arg(),
+                Arg(),
+            ),
+        ),
+        _users=2,
+    )
+
+    attn_pattern = CallFunction(
+        aten.reshape.default,  # view_12
+        CallFunction(
+            aten.expand.default,  # expand_2
+            CallFunction(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_6
+                CallFunction(
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_4
+                    CallFunction(
+                        aten.div.Tensor,  # div_1
+                        exp_pattern,  # exp
+                        CallFunction(
+                            aten.sum.dim_IntList,  # sum_1
+                            exp_pattern,  # exp
+                            Arg(),
+                            Arg(),
+                        ),
+                    ),
+                    KeywordArg("a_scale"),
+                    KeywordArg("a_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                KeywordArg("a_scale"),
+                KeywordArg("a_zp"),
+                Arg(),
+                Arg(),
+                Arg(),
+            ),
+            Arg(),
+        ),
+        Arg(),
+    )
+
+    v_pattern = CallFunction(
+        aten.reshape.default,  # view_13
+        CallFunction(
+            aten.clone.default,  # clone_3
+            CallFunction(
+                aten.expand.default,  # expand_3
+                CallFunction(
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,  # dequantize_per_tensor_4
+                    CallFunction(
+                        aten.permute.default,  # permute_5
+                        KeywordArg("value"),
+                        Arg(),
+                    ),
+                    KeywordArg("v_scale"),
+                    KeywordArg("v_zp"),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        Arg(),
+    )
+
+    _int8_sdpa_pattern = CallFunction(
+        torch.ops.quantized_decomposed.quantize_per_tensor.default,  # quantize_per_tensor_5
+        CallFunction(
+            aten.clone.default,  # clone_4
+            CallFunction(
+                aten.permute.default,  # permute_7
+                CallFunction(
+                    aten.reshape.default,  # view_14
+                    CallFunction(
+                        aten.bmm.default,  # bmm_1
+                        attn_pattern,  # view_12
+                        v_pattern,  # view_13
+                    ),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+            memory_format=Arg(),
+        ),
+        KeywordArg("o_scale"),
+        KeywordArg("o_zp"),
+        Arg(),
+        Arg(),
+        Arg(),
+    )
+    _register_int8_sdpa_pattern(_int8_sdpa_pattern, pass_number)
+
+
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
@@ -1343,6 +1772,11 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
     _register_woq_mm_int8_pattern4()
+
+
+def _register_quantized_sdpa_lowerings():
+    _register_int8_sdpa_lowering1(pass_number=0)
+    _register_int8_sdpa_lowering2(pass_number=0)
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
