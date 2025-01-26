@@ -59,5 +59,11 @@ float randn(long seed, long index) {
   return ::metal::sqrt(-2.0 * ::metal::log(u1)) *
       ::metal::cos(2.0 * M_PI_F * u2);
 }
+
+float rand(long seed, long index) {
+  auto value = philox4::rand(seed, index);
+  return detail::uint32_to_uniform_float(value.x);
+}
+
 } // namespace metal
 } // namespace c10
