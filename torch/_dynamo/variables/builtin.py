@@ -1938,6 +1938,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_format(self, tx: "InstructionTranslator", _format_string, *args, **kwargs):
         format_string = _format_string.as_python_constant()
+        format_string = str(format_string)
         return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(self, tx: "InstructionTranslator", *args):
