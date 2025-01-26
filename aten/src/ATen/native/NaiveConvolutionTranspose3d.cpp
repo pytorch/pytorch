@@ -98,8 +98,8 @@ static inline void slow_conv_transpose3d_shape_check(
   if (weight.defined()) {
     /* TODO: TORCH_CHECK just have 2 args: condition and message */
     TORCH_CHECK(
-        weight.numel() != 0 && weight.dim() == 5,
-        "non-empty 5D (n_output_plane x n_input_plane x kernel_depth",
+        weight.dim() == 5,
+        "5D (n_output_plane x n_input_plane x kernel_depth",
         " x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());

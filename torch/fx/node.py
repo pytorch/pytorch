@@ -764,8 +764,7 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            tags: Optional[list[torch.Tag]] = getattr(self.target, "_tags", None)
-            if tags is not None and torch.Tag.nondeterministic_seeded in tags:
+            if getattr(self.target, "_nondeterministic_seeded", False):
                 # impure since it mutates RNG state
                 return True
 
