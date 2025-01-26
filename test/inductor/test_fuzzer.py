@@ -2,7 +2,7 @@
 
 import sys
 import unittest
-from typing import List, Literal
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -50,8 +50,8 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(toggle("", bool, True), False)
         self.assertEqual(toggle("", Literal["foo", "bar"], "foo"), "bar")
         self.assertEqual(toggle("", Literal["foo", "bar"], "bar"), "foo")
-        self.assertTrue("bar" in toggle("", List[Literal["foo", "bar"]], ["foo"]))
-        self.assertTrue("foo" in toggle("", List[Literal["foo", "bar"]], ["bar"]))
+        self.assertTrue("bar" in toggle("", list[Literal["foo", "bar"]], ["foo"]))
+        self.assertTrue("foo" in toggle("", list[Literal["foo", "bar"]], ["bar"]))
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_sampling_method_random(self):
