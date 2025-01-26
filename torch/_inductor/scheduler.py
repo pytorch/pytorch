@@ -3923,10 +3923,9 @@ class BaseScheduling:
         if self.scheduler:
             self.scheduler.free_buffers()
 
-    @classmethod
-    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+    def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
-        return ()
+        return OrderedSet()
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
