@@ -1186,6 +1186,7 @@ class CompilationMetrics:
     tensorify_float_attempt: Optional[bool] = None
     tensorify_float_success: Optional[bool] = None
     tensorify_float_failure: Optional[set[str]] = None
+    guard_latency_us: Optional[float] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1370,14 +1371,10 @@ def record_compilation_metrics(
 ):
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
-            from torch._inductor.fb.remote_cache import (
-                FbRemoteFxGraphCache,
-                REMOTE_CACHE_VERSION,
-            )
+            from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
 
             remote_cache_version = REMOTE_CACHE_VERSION
-            backend = FbRemoteFxGraphCache.get_remote_backend()
-            inductor_fx_remote_cache_backend_type = type(backend).__name__
+            inductor_fx_remote_cache_backend_type = "_ManifoldCache"
         except ModuleNotFoundError:
             remote_cache_version = None
             inductor_fx_remote_cache_backend_type = None
