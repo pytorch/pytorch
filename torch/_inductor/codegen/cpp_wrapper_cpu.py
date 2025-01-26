@@ -155,7 +155,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 #include <Python.h>
 
                 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
+                """
+            )
+            self.header.splice(
+                "#include <pybind11/pybind11.h>"
+                if config.is_fbcode()
+                else "#include <pybind11/gil.h>"
+            )
+            self.header.splice(
+                """
                 namespace py = pybind11;
 
                 class RAIIPyObject {
@@ -1970,11 +1978,37 @@ if (custom_op_wrapper.get() == NULL) {
                     # Py_NewRef is only available since Python 3.10
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
 
+            def handle_scalar(scalar):
+                if isinstance(scalar, int):
+                    return f"PyLong_FromLongLong({scalar})"
+                if isinstance(scalar, float):
+                    return f"PyFloat_FromDouble({self.generate_float_value(scalar)})"
+                if isinstance(scalar, bool):
+                    return f"PyBool_FromLong({1 if scalar else 0})"
+                if isinstance(scalar, complex):
+                    real = self.generate_float_value(scalar.real)
+                    imag = self.generate_float_value(scalar.imag)
+                    return f"PyComplex_FromDoubles({real}, {imag})"
+                if isinstance(scalar, SymTypes):
+                    scalar_var = cexpr(scalar.node.expr)
+                    if isinstance(scalar, torch.SymBool):
+                        return f"PyBool_FromLong({scalar_var})"
+                    if isinstance(scalar, torch.SymFloat):
+                        return f"PyFloat_FromDouble({scalar_var})"
+                    return f"PyLong_FromLongLong({scalar_var})"
+                raise NotImplementedError(
+                    f"scalar {scalar}, {type(scalar)} cannot be handled by handle_scalar"
+                )
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
                 return "Py_None"
             elif isinstance(arg_type, torch.TensorType):
+                # In some cases, scalar arguments may be passed in place of tensors.
+                if not hasattr(raw_arg, "codegen_reference"):
+                    return handle_scalar(raw_arg)
+
                 # Store AtenTensorHandle as void*
                 base_handle = raw_arg.codegen_reference()
                 (
@@ -2005,23 +2039,7 @@ if (custom_op_wrapper.get() == NULL) {
             elif isinstance(arg_type, torch.NumberType):
                 # Union[bool, int, float, complex]
                 # torch/_prims_common/__init__.py
-                if isinstance(raw_arg, int):
-                    return f"PyLong_FromLongLong({raw_arg})"
-                elif isinstance(raw_arg, float):
-                    return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
-                elif isinstance(raw_arg, bool):
-                    return f"PyBool_FromLong({1 if raw_arg else 0})"
-                elif isinstance(raw_arg, complex):
-                    real = self.generate_float_value(raw_arg.real)
-                    imag = self.generate_float_value(raw_arg.imag)
-                    return f"PyComplex_FromDoubles({real}, {imag})"
-                elif isinstance(raw_arg, torch.SymInt):
-                    expr = raw_arg.node.expr
-                    return f"PyLong_FromLongLong({cexpr(expr)})"
-                else:
-                    raise NotImplementedError(
-                        f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
-                    )
+                return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
                 # device
                 self.include_extra_header("torch/csrc/Device.h")
@@ -2221,6 +2239,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         elif isinstance(val, int):
             # uint64_t is long on Linux, but long long on MacOS and Windows
             return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
+        elif isinstance(val, complex):
+            return f"c10::complex<double>{{ {self.generate_float_value(val.real)}, {self.generate_float_value(val.imag)} }}"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
@@ -2309,7 +2329,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        elif isinstance(type_, torch.ListType):
+        if isinstance(type_, torch.ListType):
             assert isinstance(
                 val, (list, tuple)
             ), f"{val} does not match with arg type {type_}"
@@ -2328,6 +2348,11 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
                 )
             # Need to pass the array length because we can't use std::vector
             return f"{var_name}, {len(val)}"
+
+        val_is_scalar = isinstance(val, (bool, complex, float, int, *SymTypes))
+        if isinstance(type_, torch.TensorType) and val_is_scalar:
+            val_str = self.val_to_arg_str_for_prim_type(val, None)
+            return self.codegen_scalar_to_tensor(val_str)
 
         return self.val_to_arg_str_for_prim_type(val, type_)
 
