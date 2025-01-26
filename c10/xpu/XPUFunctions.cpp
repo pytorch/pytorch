@@ -78,10 +78,6 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   }
 
   return;
-  auto is_dgpu = [](const sycl::device& device) {
-    return device.is_gpu() &&
-        !device.get_info<sycl::info::device::host_unified_memory>();
-  };
 
   // Case 1: Platform with dGPU found. Most platforms with dGPU only have dGPU
   // or a combination of dGPU and iGPU.

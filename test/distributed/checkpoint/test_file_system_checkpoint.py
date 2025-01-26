@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -22,6 +21,7 @@ from torch.distributed.checkpoint import (
     load_state_dict,
     save_state_dict,
 )
+from torch.distributed.checkpoint._extension import ZStandard
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -53,8 +53,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def assert_state_dict_equal(
     self: TestCase,
-    state_dict_1: Dict[str, torch.Tensor],
-    state_dict_2: Dict[str, torch.Tensor],
+    state_dict_1: dict[str, torch.Tensor],
+    state_dict_2: dict[str, torch.Tensor],
 ) -> bool:
     self.assertEqual(
         len(state_dict_1), len(state_dict_2), "state_dict must be the same size"
@@ -165,7 +165,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("extensions", [None, [Rot13Example()]])
+    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
     def test_read_write_shard_tensor(self, extensions) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
