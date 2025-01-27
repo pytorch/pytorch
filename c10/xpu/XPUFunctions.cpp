@@ -42,18 +42,6 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-// Check if a platform contains at least one GPU (either iGPU or dGPU).
-bool has_gpu(const sycl::platform& platform, bool check_igpu) {
-  return platform.get_backend() == sycl::backend::ext_oneapi_level_zero &&
-      std::any_of(
-             platform.get_devices().begin(),
-             platform.get_devices().end(),
-             [check_igpu](const sycl::device& device) {
-               return device.is_gpu() &&
-                   (check_igpu ? is_igpu(device) : !is_igpu(device));
-             });
-}
-
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
