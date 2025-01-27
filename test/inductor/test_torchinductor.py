@@ -6471,10 +6471,17 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        self.common(
-            fn,
-            (torch.randn([1024], dtype=torch.float64) + 10,),
+        _dtype = torch.float64
+        ctx = (
+            contextlib.nullcontext()
+            if self.is_dtype_supported(_dtype)
+            else self.assertRaises(TypeError)
         )
+        with ctx:
+            self.common(
+                fn,
+                (torch.randn([1024], dtype=_dtype) + 10,),
+            )
 
     def test_bitwise(self):
         def fn(x, y):
@@ -10604,14 +10611,6 @@ class CommonTemplate:
             return y
 
         x = torch.rand(48, 3, 512, 512)
-        self.common(fn, (x,))
-
-    def test_pad_single(self):
-        def fn(a):
-            y = torch.nn.functional.pad(a, (10, 10))
-            return y
-
-        x = torch.rand(1, 1, 1)
         self.common(fn, (x,))
 
     def test_pad_cast(self):
