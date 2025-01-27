@@ -126,18 +126,20 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
 
 template <typename T>
 Welford<T> welford_combine(Welford<T>& acc, T& data, WeightRecp<T>* w=nullptr) {
-  if (w != nullptr && acc.index == kChunkSize) {
-    w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
-    acc.mean = T(0);
-    acc.m2 = T(0);
-    acc.weight = T(0);
-    acc.index = 0;
-    acc.chunk_index += 1;
-    uint64_t mask = acc.chunk_index;
-    for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
-      w->welford_stk[j] = welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
-      w->welford_stk[j - 1] = Welford<T>();
-      mask >>= 1;
+  if constexpr (IsVecType<T>::value) {
+    if (w != nullptr && acc.index == kChunkSize) {
+      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+      acc.mean = T(0);
+      acc.m2 = T(0);
+      acc.weight = T(0);
+      acc.index = 0;
+      acc.chunk_index += 1;
+      uint64_t mask = acc.chunk_index;
+      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+        w->welford_stk[j] = welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+        w->welford_stk[j - 1] = Welford<T>();
+        mask >>= 1;
+      }
     }
   }
   // Add a single data point
