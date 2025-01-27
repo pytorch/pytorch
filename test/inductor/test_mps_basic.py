@@ -127,6 +127,7 @@ for test_name in [
     "test_isinf",
     "test_isinf2",
     "test_lgamma",
+    "test_log_fp64",
     "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
