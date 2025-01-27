@@ -123,7 +123,7 @@ class UvTcpSocket : public UvHandle {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
-    } else if (nread <= 0) {
+    } else {
       // Handle error and EOF cases
       if (nread < 0) {
         C10D_DEBUG(
