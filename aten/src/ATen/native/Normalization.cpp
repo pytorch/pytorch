@@ -515,6 +515,9 @@ BatchNormBackend _select_batch_norm_backend(
       input.is_cuda()
       && input.dim() <= MIOPEN_DIM_MAX
       && input.scalar_type() != at::kDouble
+#if (defined(USE_ROCM) && ROCM_VERSION < 60400)
+      && input.scalar_type() != at::kBFloat16
+#endif
       && (weight.scalar_type() != at::kHalf)
       && (weight.scalar_type() != at::kBFloat16)
       && weight.defined() && bias.defined()
