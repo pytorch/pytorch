@@ -42,6 +42,7 @@ uint4 multiple_rounds(uint4 ctr, uint2 key, uint rounds) {
     ctr = single_round(ctr, key);
     key += kPhilox10;
   }
+  return ctr;
 }
 
 uint4 rand(long seed, long index) {
@@ -63,6 +64,13 @@ float randn(long seed, long index) {
 float rand(long seed, long index) {
   auto value = philox4::rand(seed, index);
   return detail::uint32_to_uniform_float(value.x);
+}
+
+long randint64(long seed, long index, long low, long high) {
+  auto range = high - low;
+  auto value = philox4::rand(seed, index);
+  // TODO: Implement better algorithm for large ranges
+  return low + static_cast<long>(detail::uint32_to_uniform_float(value.x)*range);
 }
 
 } // namespace metal

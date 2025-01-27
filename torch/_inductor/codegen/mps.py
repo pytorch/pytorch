@@ -308,6 +308,12 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::randn({seed}, {offset})"
 
     @staticmethod
+    def randint64(
+        seed: CSEVariable, offset: CSEVariable, low: CSEVariable, high: CSEVariable
+    ) -> str:
+        return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
+
+    @staticmethod
     def round(x: CSEVariable) -> str:
         return f"metal::round({x})"
 
