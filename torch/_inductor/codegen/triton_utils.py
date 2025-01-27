@@ -147,6 +147,14 @@ def is_unaligned_buffer(arg: TensorArg):
         return False
 
 
+def _arg_equals_1(arg: KernelArgType) -> bool:
+    return (
+        isinstance(arg, SizeArg)
+        and isinstance(arg.expr, (int, sympy.Integer))
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+    )
+
+
 def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
@@ -155,13 +163,7 @@ def equal_1_arg_indices(
     if indices is None:
         indices = list(range(len(args)))
 
-    equal_to_1 = [
-        i
-        for i, arg in zip(indices, args)
-        if isinstance(arg, SizeArg)
-        and isinstance(arg.expr, (int, sympy.Integer))
-        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
-    ]
+    equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
 
     return equal_to_1
 
