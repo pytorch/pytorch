@@ -3915,6 +3915,14 @@ class Scheduler:
 
 
 class BaseScheduling:
+    def __init__(self, scheduler: Optional[Scheduler]):
+        super().__init__()
+        self.scheduler = scheduler
+
+    def free_buffers_in_scheduler(self) -> None:
+        if self.scheduler:
+            self.scheduler.free_buffers()
+
     @classmethod
     def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
