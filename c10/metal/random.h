@@ -70,7 +70,8 @@ long randint64(long seed, long index, long low, long high) {
   auto range = high - low;
   auto value = philox4::rand(seed, index);
   // TODO: Implement better algorithm for large ranges
-  return low + static_cast<long>(detail::uint32_to_uniform_float(value.x)*range);
+  return low +
+      static_cast<long>(detail::uint32_to_uniform_float(value.x) * range);
 }
 
 } // namespace metal
