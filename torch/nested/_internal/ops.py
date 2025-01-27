@@ -585,8 +585,14 @@ def linear_backward_default(func, *args, **kwargs):
         input_2d = inp._values.reshape(-1, weight.size(1))
         dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
-        # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
-        db = grad_output._values.detach()
+        # Sum over all but the last dim to get a 1D bias grad. We cannot
+        # rely on the autograd engine to reduce for us, because returning a
+        # tensor aliasing the input would violate the aten signature annotation
+        reduce_dims = tuple(range(grad_output._values.ndim - 1))
+        if reduce_dims == ():
+            db = grad_output._values.clone()
+        else:
+            db = torch.sum(grad_output._values, reduce_dims, keepdim=False)
     return (ds, dw, db)
 
 
