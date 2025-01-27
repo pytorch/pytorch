@@ -19,7 +19,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: |
-          pip install -r tools/stats/test-requirements.txt
+          pip install -r tools/stats/script-test-requirements.txt
 
       - name: Run pytest
         run: |

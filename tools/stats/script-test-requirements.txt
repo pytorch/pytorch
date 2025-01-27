@@ -1,0 +1,9 @@
+
+# script-test-requirements: Python dependencies required for script unit test
+pytest
+psutil
+requests
+setuptools
+boto3
+pandas
+dataclasses_json==0.6.7
