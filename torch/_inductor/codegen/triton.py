@@ -195,7 +195,6 @@ class TritonSymbols:
 class IndexingOptions:
     index_str: str
     mask_vars: OrderedSet[str]
-    mask_str: str
     expand_str: Optional[str]
     _has_rindex: bool
     index: sympy.Expr
@@ -210,10 +209,14 @@ class IndexingOptions:
         return self._has_rindex
 
     def has_tmpmask(self):
-        return "tmp" in self.mask_str
+        return any(str(mask).startswith("tmp") for mask in self.mask_vars)
 
     def has_rmask(self):
         return any(str(mask).startswith("r") for mask in self.mask_vars)
+
+    @property
+    def mask_str(self) -> str:
+        return " & ".join(map(str, self.mask_vars)) if self.mask_vars else "None"
 
 
 @dataclasses.dataclass
@@ -1934,17 +1937,10 @@ class TritonKernel(SIMDKernel):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
-                mask_vars = dense_mask_vars
-                self.filter_masks(mask_vars)
-                mask_str = (
-                    " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-                )
+                mask_vars = OrderedSet(["xmask"])
             else:
                 mask_vars = OrderedSet()
-                mask_str = "None"
-            return IndexingOptions(
-                index_str, mask_vars, mask_str, expand_str, has_rindex, index
-            )
+            return IndexingOptions(index_str, mask_vars, expand_str, has_rindex, index)
 
         if need_dense and not have_dense:
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
@@ -1962,10 +1958,7 @@ class TritonKernel(SIMDKernel):
 
         self.filter_masks(mask_vars)
 
-        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(
-            index_str, mask_vars, mask_str, expand_str, has_rindex, index
-        )  # type: ignore[arg-type]
+        return IndexingOptions(index_str, mask_vars, expand_str, has_rindex, index)
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
