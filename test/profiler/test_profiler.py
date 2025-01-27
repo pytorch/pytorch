@@ -845,7 +845,7 @@ class TestProfiler(TestCase):
                 super().__init__(*args, **kwargs)
 
         def train():
-            for _, data in enumerate(dataloader):
+            for data in dataloader:
                 x, y = data[0], data[1]
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
