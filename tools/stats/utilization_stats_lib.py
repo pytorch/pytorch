@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 from typing import Optional
 
 from dataclasses_json import DataClassJsonMixin
@@ -82,8 +82,7 @@ class OssCiUtilizationMetadataV1:
     start_at: float
     end_at: float
     segments: list[OssCiSegmentV1]
-    tags: list[str] = []
-
+    tags: list[str] = field(default_factory=list)
 
 # this data model is for the time series data:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
