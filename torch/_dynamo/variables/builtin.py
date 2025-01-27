@@ -1061,7 +1061,12 @@ class BuiltinVariable(VariableTracker):
                         args[0]
                     )
                 )
-                result.set_init_args(init_args)
+                # side_effects data structure does not support methods like
+                # tuple.__new__ that uses *args parameters for the __new__
+                # method. Therefore, we manage the *args related functionality
+                # here. For other datastructures, this is done in the __init__
+                # method.
+                result.set_new_args(args[1])
                 result.set_underlying_tuple_vt(tuple_vt)
                 return result
 

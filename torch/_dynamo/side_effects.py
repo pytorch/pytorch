@@ -470,12 +470,8 @@ class SideEffects:
                     )
                 )
                 cg(var.mutation_type.cls_source)
-                if isinstance(var, variables.UserDefinedTupleVariable):
-                    for init_arg in var.init_args:
-                        cg(init_arg)
-                    cg.append_output(
-                        create_instruction("BUILD_LIST", arg=len(var.init_args))
-                    )
+                if isinstance(var, variables.UserDefinedTupleVariable) and var.new_args:
+                    cg(var.new_args)
                     cg.extend_output(create_call_function(2, False))
                 else:
                     cg.extend_output(create_call_function(1, False))

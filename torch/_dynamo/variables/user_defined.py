@@ -1462,7 +1462,11 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self._tuple_vt = None
-        self.init_arg = None
+        # tuple.__new__ (tuple being immutable) inits the tuple elements. This
+        # behavior is different from object.__new__ or dict.__new__ where
+        # reconstructing object/dict does not need to consider __new__ args.
+        # These args are stored in the new_args field.
+        self.new_args = None
 
     def set_underlying_tuple_vt(self, tuple_vt):
         self._tuple_vt = tuple_vt
@@ -1473,8 +1477,8 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         result.set_underlying_tuple_vt(tuple_vt)
         return result
 
-    def set_init_args(self, init_args):
-        self.init_args = init_args
+    def set_new_args(self, new_args):
+        self.new_args = new_args
 
     def call_method(
         self,
