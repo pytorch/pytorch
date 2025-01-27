@@ -1475,12 +1475,12 @@ class AOTInductorTestsTemplate:
         }
 
         # Compile & run model where dynamic dim size > 0.
-        so_path: str = AOTIRunnerUtil.compile(
+        package_path: str = AOTIRunnerUtil.compile(
             Repro(),
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -1547,7 +1547,7 @@ class AOTInductorTestsTemplate:
                     args=(a, b),
                     kwargs={"alpha": 2.0},
                 )
-                kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+                kernel_runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
                 res = kernel_runner.run([a, b])
                 self.assertTrue(isinstance(res, list))
                 self.assertTrue(len(res) == 1)
@@ -1687,7 +1687,7 @@ class AOTInductorTestsTemplate:
         # Compile model with AOTInductor
         device_interface = get_interface_for_device(GPU_TYPE)
         with device_interface.device(0):
-            so_path = AOTIRunnerUtil.compile(
+            package_path = AOTIRunnerUtil.compile(
                 model=Model(
                     w1.to(torch.device(GPU_TYPE, 0)), w2.to(torch.device(GPU_TYPE, 0))
                 ),
@@ -1698,7 +1698,7 @@ class AOTInductorTestsTemplate:
         for i in range(device_interface.device_count()):
             with device_interface.device(i):
                 example_inputs = tuple(t.to(torch.device(GPU_TYPE, i)) for t in inputs)
-                optimized = AOTIRunnerUtil.load(GPU_TYPE, so_path)
+                optimized = torch._inductor.aoti_load_package(package_path)
                 result_gpu = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_gpu.cpu()))
 
@@ -2052,12 +2052,12 @@ class AOTInductorTestsTemplate:
 
         # compiler under no_grad
         with torch.no_grad():
-            so_path = AOTIRunnerUtil.compile(m, example_inputs)
+            package_path = AOTIRunnerUtil.compile(m, example_inputs)
 
         # run under grad enabled
         self.assertTrue(torch.is_grad_enabled())
 
-        optimized = AOTIRunnerUtil.load(self.device, so_path)
+        optimized = torch._inductor.aoti_load_package(package_path)
         actual = optimized(*example_inputs)
         actual = pytree.tree_leaves(actual)
 
@@ -2827,12 +2827,11 @@ class AOTInductorTestsTemplate:
                 return (self.foo_bar(x) + self.test_param) * self.test_buf
 
         with torch.no_grad():
-            so_path = AOTIRunnerUtil.compile(
+            so_path = AOTIRunnerUtil.legacy_compile(
                 model=TestModule().to(device=self.device),
                 example_inputs=(torch.rand(3, 4, device=self.device),),
             )
-
-        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         expected_original_fqns = {
             "L__self___test_param": "test_param",
@@ -3168,7 +3167,9 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.debug_compile": True,
             }
         ):
-            so_path = AOTIRunnerUtil.compile(m, inputs, dynamic_shapes=dynamic_shapes)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                m, inputs, dynamic_shapes=dynamic_shapes
+            )
         with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
             src_code = cpp.read()
             FileCheck().check_count(
@@ -3197,10 +3198,8 @@ class AOTInductorTestsTemplate:
                 else 19,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
-        optimized = AOTIRunnerUtil.load(self.device, so_path)
-        actual = optimized(*inputs)
-        expected = m(*inputs)
-        torch.testing.assert_close(actual, expected)
+
+        self.check_model(m, inputs)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
@@ -3299,11 +3298,11 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.debug_compile": True,
             }
         ):
-            so_path: str = AOTIRunnerUtil.compile(
+            package_path: str = AOTIRunnerUtil.compile(
                 model,
                 (x,),
             )
-        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         x_casted = x.float()
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
@@ -3386,10 +3385,10 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.debug_compile": True,
             }
         ):
-            so_path: str = AOTIRunnerUtil.compile(
+            package_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
-        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         # dynamic dim works fine
         _ = aot_inductor_module(y0)
         with self.assertRaisesRegex(Exception, ""):
@@ -3976,7 +3975,7 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.package_constants_in_so": True,
             }
         ):
-            so_path = AOTIRunnerUtil.compile(
+            so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
@@ -3987,14 +3986,14 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.package_constants_in_so": False,
             }
         ):
-            so_path_weightless = AOTIRunnerUtil.compile(
+            so_path_weightless = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
         self.assertTrue(os.path.getsize(so_path) > 10_000_000)
         self.assertTrue(os.path.getsize(so_path_weightless) < 10_000_000)
 
-        runner = AOTIRunnerUtil.load_runner(self.device, so_path_weightless)
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path_weightless)
 
         # Let's check whether the model has correct constant name mapping.
         expected_original_fqns = {
@@ -4041,12 +4040,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
-            so_path = AOTIRunnerUtil.compile(
+            so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
 
-        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         # Let's check whether the model has correct constant name mapping.
         expected_original_fqns = {
@@ -4123,8 +4122,8 @@ class AOTInductorTestsTemplate:
         example_inputs = (arg,)
         model = Model()
         expected = model(*example_inputs)
-        so_path = AOTIRunnerUtil.compile(model, example_inputs)
-        optimized = AOTIRunnerUtil.load(self.device, so_path)
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = torch._inductor.aoti_load_package(package_path)
         # If the model is compiled with aligned inputs, the generated
         # code will check inputs alignment at runtime
         self.code_check_count(
