@@ -193,7 +193,7 @@ class SizeArg:
     expr: sympy.Expr
 
     @property
-    def alias_of(self) -> None:
+    def alias_of(self) -> Optional[str]:
         return None
 
 
@@ -223,13 +223,13 @@ class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name: str):
         raise NotImplementedError
 
-    def set_device(self, device_idx: int):
+    def set_device(self, device_idx: int) -> str:
         raise NotImplementedError
 
     def synchronize(self):
         raise NotImplementedError
 
-    def device_guard(self, device_idx: int):
+    def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
     def cpp_device_guard(self):
