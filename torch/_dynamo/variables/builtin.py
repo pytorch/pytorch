@@ -1035,7 +1035,9 @@ class BuiltinVariable(VariableTracker):
             # We don't have to set the underlying dict_vt in
             # UserDefinedDictVariable because it will be set to empty
             # ConstDictVariableTracker in the constructor.
-            return tx.output.side_effects.track_object_new_from_user_defined_class(args[0])
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
+            )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
 

@@ -736,7 +736,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn({}, x), opt_fn({}, x))
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
 
-
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
             pass
@@ -761,6 +760,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, dict)
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, dict))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
