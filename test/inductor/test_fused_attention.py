@@ -136,7 +136,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
             source_code = "\n".join(source_code)
             if has_fuse_pattern:
-                self.assertGreaterEqual(counters["inductor"]["int8_sdpa_count"], 1)
+                self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
             if contains:
                 # many of the patterns get re-expanded in dispatcher
                 self.assertTrue(
@@ -1031,10 +1031,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         # pattern is different for bs=1
         for dtype, has_mask, bs in itertools.product(
-            [torch.float32],
-            [True, False],
-            [56]
-            # [torch.float32, torch.bfloat16], [True, False], [56, 1]
+            [torch.float32], [True, False], [56, 1]
         ):
             seqlen, numhead, headsize = 384, 16, 64
             mod = SelfAttnLikeModule(
