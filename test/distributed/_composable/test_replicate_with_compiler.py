@@ -78,6 +78,7 @@ class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
     to handle isolation of the inductor cache dir.
     """
 
+
 class ReplicateTest(MultiProcessInductorTestCase):
     def _test_compile(
         self,
