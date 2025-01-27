@@ -282,7 +282,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
     "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
@@ -1111,6 +1110,7 @@ class TestInductorOpInfo(TestCase):
             def _get_tolerances(dtype):
                 _custom_tolerances = {
                     torch.float32: (1.3e-5, 1.5e-5),
+                    torch.float16: (1.3e-5, 1.5e-4),
                 }
                 if dtype in _custom_tolerances:
                     return _custom_tolerances[dtype]

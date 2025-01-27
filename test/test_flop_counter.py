@@ -842,11 +842,11 @@ class TestFlopCounter(TestCase):
         "Does not support fp8 (pre-SM90 hardware on CUDA)",
     )
     def test_scaled_mm(self):
-        mod = torch.nn.Linear(9, 10)
+        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         with FlopCounterMode() as mode:
             torch._scaled_mm(
-                torch.randn((3 * 16, 5 * 16), device="cuda").to(torch.float8_e4m3fn),
-                torch.randn((7 * 16, 5 * 16), device="cuda").to(torch.float8_e4m3fn).t(),
+                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
+                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
                 scale_a=torch.ones((), device="cuda"),
                 scale_b=torch.ones((), device="cuda"),
                 out_dtype=torch.bfloat16,
