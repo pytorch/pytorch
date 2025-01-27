@@ -33,6 +33,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "alexnet",
                 "cait_m36_384",
                 "detectron2_fcos_r_50_fpn",
+                "hf_BigBird",
                 "hf_Longformer",
                 "hf_T5",
                 "hf_T5_base",

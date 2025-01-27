@@ -22,7 +22,7 @@ Super_SloMo,pass,7
 
 
 
-alexnet,pass,6
+alexnet,pass,0
 
 
 
@@ -94,7 +94,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,6
+hf_BigBird,pass,15
 
 
 
@@ -242,7 +242,7 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,5
+stable_diffusion_text_encoder,pass,0
 
 
 
