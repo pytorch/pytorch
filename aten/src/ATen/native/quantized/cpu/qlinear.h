@@ -42,4 +42,10 @@ C10_API static Tensor run_pointwise_binary_tensor(
       std::string_view unary_post_op_algorithm);
 };
 
+C10_API Tensor _weight_int4pack_mm_cpu_tensor(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& qGroupSize,
+    const Tensor& qScaleAndZeros);
+
 } // namespace at::native

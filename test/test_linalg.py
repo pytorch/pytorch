@@ -6635,9 +6635,16 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             if self.device_type == 'cpu':
                 self.assertTrue(b_int4pack.dtype is torch.uint8)
                 self.assertTrue(b_int4pack.dim() == 2)
-                return torch._weight_int4pack_mm_for_cpu(
+                c = torch._weight_int4pack_mm_for_cpu(
                     a, b_int4pack, q_group, b_scales_and_zeros
                 )
+                # test wrapper
+                q_group_t = torch.tensor(q_group, dtype=torch.int64, device=device)
+                c_2 = torch.ops.quantized.int4mm_packed_weight_cpu(
+                    a, b_int4pack, q_group_t, b_scales_and_zeros
+                )
+                assert torch.equal(c, c_2)
+                return c
             else:
                 self.assertTrue(b_int4pack.dtype is torch.int32)
                 self.assertTrue(b_int4pack.dim() == 4)
