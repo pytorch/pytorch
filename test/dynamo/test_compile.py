@@ -177,6 +177,17 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(NameError):
             fn(x)
 
+    def test_compilation_tensor_invalid_method(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = torch.tensor(x)
+            return y.doesnotexist()
+
+        x = torch.randn(10, 10)
+
+        with self.assertRaises(AttributeError):
+            fn(x)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
