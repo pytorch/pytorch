@@ -7216,6 +7216,7 @@ class Conditional(ExternKernel):
         self.false_subgraph = false_subgraph
 
         sym_args, tensor_args = _split_by_sym_type([predicate] + operands)
+        breakpoint()
 
         super().__init__(
             name=None,
@@ -7235,6 +7236,7 @@ class Conditional(ExternKernel):
         false_fn: Subgraph,
         operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
+        predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
@@ -7269,16 +7271,11 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            # use predicate device for consistent codegen-ing
-            device = predicate.get_device()
-        else:
-            # predicate is not a Tensor: use first operand's device
-            assert (
-                len(operands) > 0
-            ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
-            device = operands[0].get_device()
-
+        device = next(
+            operands[0].get_device()
+            for o in [predicate] + operands
+            if not isinstance(o, ShapeAsConstantBuffer)
+        )
         assert device is not None, "cannot determine device"
         conditional = Conditional(
             predicate=predicate,
@@ -7342,6 +7339,7 @@ class WhileLoop(ExternKernel):
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
     ) -> None:
+        self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
