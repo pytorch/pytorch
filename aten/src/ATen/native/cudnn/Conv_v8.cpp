@@ -762,21 +762,21 @@ auto get_plans_from_find(
     case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
     case cudnn_frontend::CudnnFindSamplingTechnique::
         CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::
               CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
     case cudnn_frontend::CudnnFindSamplingTechnique::
         CUDNN_FIND_SAMPLE_TILL_STABLE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::
               CUDNN_FIND_SAMPLE_TILL_STABLE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
   }
 
@@ -837,21 +837,21 @@ auto get_plans_from_find_fused(
     case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
     case cudnn_frontend::CudnnFindSamplingTechnique::
         CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::
               CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
     case cudnn_frontend::CudnnFindSamplingTechnique::
         CUDNN_FIND_SAMPLE_TILL_STABLE:
       plans = cudnn_frontend::time_sorted_plan<
           cudnn_frontend::CudnnFindSamplingTechnique::
               CUDNN_FIND_SAMPLE_TILL_STABLE>(
-          handle, std::move(valid_plans), variantPack, benchmark_limit);
+          handle, std::move(valid_plans), std::move(variantPack), benchmark_limit);
       break;
   }
 
