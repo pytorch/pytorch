@@ -925,20 +925,28 @@ def skip_inductor_test_unless_backend_available(
 # This will generate test classes like the below depending on whether the DeviceTypeTestBase
 # subclasses opt in for the generation of inductor backend specific classes.
 #
-# If the DeviceTypeTestBase subclass opts in
-# e.g. class NewDeviceTypeTest(DeviceTypeTestBase):
-#           device_type = "new_device"
+# If a DeviceTypeTestBase subclass opts in
+# e.g.
+# A custom subclass is registered:
+# class NewDeviceTypeTest(DeviceTypeTestBase):
+#           device_type = "newdevice"
 #           inductor_backends = ["cpp", "triton"]
+# using `instantiate_device_type_tests` with the appropriate inductor flags
+# in a test module will generate the following test classes in the modules scope:
 # instantiate_device_type_tests(..., enable_inductor_backend_classes=True)
+# Generated test classes:
 # TestInductorOpInfoCppNEWDEVICE
 # TestInductorOpInfoTritonNEWDEVICE
 #
-# Default opt out
-# e.g. class NewDeviceTypeTest(DeviceTypeTestBase):
-#           device_type = "new_device"
+# If instead the custom device does not opt in
+# e.g.
+# A custom subclass is registered with `inductor_backends` defaulted:
+# class NewDeviceTypeTest(DeviceTypeTestBase):
+#           device_type = "newdevice"
 #           inductor_backends = None
+# The following test classes are generated instead
 # instantiate_device_type_tests(..., enable_inductor_backend_classes=True)
-# TestInductorOpInfoDEVICE
+# TestInductorOpInfoNEWDEVICE
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.
