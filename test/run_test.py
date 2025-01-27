@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -1078,7 +1079,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         return return_code
     if sys.platform != "win32":
         exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(

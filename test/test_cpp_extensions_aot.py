@@ -185,7 +185,10 @@ class TestCppExtensionAOT(common.TestCase):
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
-    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
+    @unittest.skipIf(
+        not (TEST_CUDA or TEST_XPU),
+        "python_agnostic is a CUDA/XPU extension + needs CUDA/XPU",
+    )
     @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
     def test_python_agnostic(self):
         # For this test, run_test.py will call `python setup.py bdist_wheel` in the
