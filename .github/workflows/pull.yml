@@ -308,7 +308,7 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
     secrets: inherit
-  
+
   linux-focal-cuda12_6-py3_10-gcc9-build:
     name: linux-focal-cuda12.6-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
