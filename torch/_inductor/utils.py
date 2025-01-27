@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from .codegen.common import WorkspaceArg
+    from .graph import SaveOutputCodeContext
 
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
@@ -856,15 +857,20 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
-            shutil.rmtree(inductor_cache_dir)
+            shutil.rmtree(
+                inductor_cache_dir,
+                # Let's not fail if we can't clean up the temp dir. Also note that for
+                # Windows, we can't delete the loaded modules because the module binaries
+                # are open.
+                onerror=lambda func, path, exc_info: log.warning(
+                    "Failed to remove temporary cache dir at %s",
+                    inductor_cache_dir,
+                    exc_info=exc_info,
+                ),
+            )
     except Exception:
-        if not _IS_WINDOWS:
-            """
-            Windows can't delete the loaded modules, because the modules binaries are opened.
-            TODO: discuss if have better solution to handle this issue.
-            """
-            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-            raise
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
     finally:
         clear_inductor_caches()
 
@@ -1460,18 +1466,40 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
+def _run_and_get_code_for_context(
+    fn: Callable[P, _T],
+    for_context: SaveOutputCodeContext,
+    args: P.args,
+    kwargs: P.kwargs,
+) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
     source_codes: list[str] = []
 
-    def save_output_code(code: str):
-        source_codes.append(code)
+    def save_output_code(code: str, context: SaveOutputCodeContext):
+        if context == for_context:
+            source_codes.append(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
     return result, source_codes
+
+
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
+    from .graph import SaveOutputCodeContext
+
+    return _run_and_get_code_for_context(
+        fn, SaveOutputCodeContext.AFTER_COMPILE, args, kwargs
+    )
+
+
+def run_and_get_code_before_compile(fn, *args, **kwargs) -> tuple[Any, list[str]]:
+    from .graph import SaveOutputCodeContext
+
+    return _run_and_get_code_for_context(
+        fn, SaveOutputCodeContext.BEFORE_COMPILE, args, kwargs
+    )
 
 
 def run_and_get_kernels(fn, *args, **kwargs) -> tuple[Any, list[str]]:
@@ -1493,12 +1521,13 @@ def run_fw_bw_and_get_code(fn):
 
 def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
-    from .graph import GraphLowering
+    from .graph import GraphLowering, SaveOutputCodeContext
 
     source_codes: list[str] = []
 
-    def save_output_code(code: str):
-        source_codes.append(code)
+    def save_output_code(code: str, context: SaveOutputCodeContext):
+        if context == SaveOutputCodeContext.AFTER_COMPILE:
+            source_codes.append(code)
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
@@ -1516,7 +1545,7 @@ def get_code(fn, *args, **kwargs):
         )
         # Skip all the actual compiling.
         nonlocal save_output_code
-        save_output_code(code)
+        save_output_code(code, SaveOutputCodeContext.BEFORE_COMPILE)
 
         return DummyModule()
 
