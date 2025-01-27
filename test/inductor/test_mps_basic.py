@@ -152,6 +152,8 @@ for test_name in [
     "test_builtins_round_float_ndigits_neg",
     "test_lgamma",
     "test_erfinv",
+    "test_randint_int64_mod",
+    "test_randn_generator",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
