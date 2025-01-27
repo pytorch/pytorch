@@ -1078,16 +1078,16 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         return return_code
     if sys.platform != "win32":
         exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
-        if TEST_CUDA:
-            exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
-        for cmd, extension_dir in exts_to_build:
-            return_code = shell(
-                cmd,
-                cwd=os.path.join(cpp_extensions_test_dir, extension_dir),
-                env=shell_env,
-            )
-            if return_code != 0:
-                return return_code
+    if TEST_CUDA:
+        exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+    for cmd, extension_dir in exts_to_build:
+        return_code = shell(
+            cmd,
+            cwd=os.path.join(cpp_extensions_test_dir, extension_dir),
+            env=shell_env,
+        )
+        if return_code != 0:
+            return return_code
 
     from shutil import copyfile
 
