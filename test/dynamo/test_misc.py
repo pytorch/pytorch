@@ -3974,6 +3974,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         x += 1
         self.assertEqual(1, get_x())
 
+    def test_input_cell_mutation(self):
+        def fn(x):
+            x = x.cos()
+
+            def inner():
+                return x.sin()
+
+            return inner()
+
+        x = torch.ones(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
