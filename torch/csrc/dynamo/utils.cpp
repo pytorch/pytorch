@@ -5,9 +5,12 @@ namespace torch::dynamo {
 // random utilities for C dynamo
 
 // random module reference
-py::object _random = py::module::import("random");
+py::object _random{py::none()};
 
 PyObject* random_module() {
+  if (_random.is_none()) {
+    _random = py::module_::import("random");
+  }
   return _random.ptr();
 }
 
