@@ -159,7 +159,7 @@ def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
     indices: Optional[list[int]] = None,
-) -> list[int]:
+) -> tuple[int, ...]:
     if indices is None:
         indices = list(range(len(args)))
 
