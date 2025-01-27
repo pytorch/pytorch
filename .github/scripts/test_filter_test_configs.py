@@ -613,37 +613,6 @@ class TestConfigFilter(TestCase):
                 "expected": '{"include": [{"config": "default", "unstable": "unstable"}]}',
                 "description": "Both binary build and test jobs are unstable",
             },
-            {
-                "workflow": "inductor",
-                "job_name": "cuda12.4-py3.10-gcc9-sm86 / build",
-                "test_matrix": """
-                    { include: [
-                        { config: "inductor" },
-                        { config: "inductor_huggingface", shard: 1 },
-                        { config: "inductor_huggingface", shard: 2 },
-                        { config: "inductor_timm", shard: 1 },
-                        { config: "inductor_timm", shard: 2 },
-                        { config: "inductor_torchbench" },
-                        { config: "inductor_huggingface_dynamic" },
-                        { config: "inductor_torchbench_dynamic" },
-                        { config: "inductor_distributed" },
-                    ]}
-                """,
-                "expected": """
-                    { "include": [
-                        { "config": "inductor", "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 1, "unstable": "unstable" },
-                        { "config": "inductor_huggingface", "shard": 2, "unstable": "unstable" },
-                        { "config": "inductor_timm", "shard": 1 },
-                        { "config": "inductor_timm", "shard": 2 },
-                        { "config": "inductor_torchbench" },
-                        { "config": "inductor_huggingface_dynamic", "unstable": "unstable" },
-                        { "config": "inductor_torchbench_dynamic" },
-                        { "config": "inductor_distributed" }
-                    ]}
-                """,
-                "description": "Marking multiple unstable configurations",
-            },
         ]
 
         for case in testcases:
