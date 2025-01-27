@@ -14,7 +14,7 @@ class Benchmark(BenchmarkBase):
         )
 
     def name(self):
-        return f"{self.category()}_{self.device()}"
+        return f"{self.category()}_{self.device()}2"
 
     def description(self):
         return """
