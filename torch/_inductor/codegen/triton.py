@@ -298,7 +298,7 @@ class BlockPtrOptions:
         *,
         params: BlockParameters,
         constant_offset: sympy.Expr,
-        range_trees: list[IterationRangesEntry],
+        range_trees: list[IterationRangesRoot],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
     ) -> BlockPtrOptions:
@@ -1749,7 +1749,7 @@ class TritonKernel(SIMDKernel):
         ):
 
             def match_strided_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches expressions of the form:
@@ -1771,7 +1771,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_mod_div_block(
-                index: sympy.Expr, range_tree: IterationRangesEntry
+                index: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Matches higher-dimensional blocks coming from FloorDiv and ModularIndexing.
@@ -1869,7 +1869,7 @@ class TritonKernel(SIMDKernel):
                 )
 
             def match_block_pointer_subexpr(
-                expr: sympy.Expr, range_tree: IterationRangesEntry
+                expr: sympy.Expr, range_tree: IterationRangesRoot
             ) -> Optional[BlockParameters]:
                 """
                 Match a block indexing subexpression involving a single range tree.
@@ -3853,7 +3853,7 @@ class TritonScheduling(SIMDScheduling):
             )
         )
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
         if scheduler is None or not hasattr(scheduler, "nodes"):
             return
