@@ -1062,10 +1062,6 @@ class SIMDKernel(Kernel):
 class SIMDScheduling(BaseScheduling):
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
-    def __init__(self, scheduler) -> None:
-        super().__init__()
-        self.scheduler = scheduler
-
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
@@ -1411,7 +1407,7 @@ class SIMDScheduling(BaseScheduling):
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )
 
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
@@ -1575,7 +1571,7 @@ class SIMDScheduling(BaseScheduling):
 
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()
         return None
 
     def codegen_sync(self):
@@ -1660,7 +1656,7 @@ class SIMDScheduling(BaseScheduling):
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        self.scheduler.free_buffers()
+        self.free_buffers_in_scheduler()
 
     @classmethod
     @functools.lru_cache(32)
