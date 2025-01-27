@@ -618,6 +618,15 @@ class ChunkedStream {
 class LibUVStoreDaemon : public BackgroundThread {
  public:
   explicit LibUVStoreDaemon(int port);
+  // Disable copy constructor
+  LibUVStoreDaemon(const LibUVStoreDaemon& other) = delete;
+  // Disable move constructor
+  LibUVStoreDaemon(LibUVStoreDaemon&& other) = delete;
+  // Disable copy assignment operator
+  LibUVStoreDaemon& operator=(const LibUVStoreDaemon& other) = delete;
+  // Disable move assignment operator
+  LibUVStoreDaemon& operator=(LibUVStoreDaemon&& other) = delete;
+
   ~LibUVStoreDaemon() override;
 
   uint16_t port() const override;
