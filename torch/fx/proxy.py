@@ -349,6 +349,8 @@ class TracerBase:
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
+        elif isinstance(a, torch._higher_order_ops.flat_apply.SideTableKey):
+            return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
 
