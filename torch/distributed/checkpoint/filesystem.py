@@ -522,6 +522,7 @@ class _FileSystemWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        fs: FileSystemBase = FileSystem(),
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -536,11 +537,12 @@ class _FileSystemWriter(StorageWriter):
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            fs: Object to use for file system operations. Default to FileSystem().
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        self.fs = FileSystem()
+        self.fs = fs
         self.path = self.fs.init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
@@ -721,9 +723,10 @@ class FileSystemReader(StorageReader):
         self,
         path: Union[str, os.PathLike],
         _extension_registry: Optional[ExtensionRegistry] = None,  # EXPERIMENTAL
+        fs: FileSystemBase = FileSystem()
     ) -> None:
         super().__init__()
-        self.fs = FileSystem()
+        self.fs = fs
         self.path = self.fs.init_path(path)
         self.storage_data: dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
@@ -855,6 +858,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        fs: FileSystemBase = FileSystem(),
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -870,6 +874,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
                 that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            fs: Object to use for file system operations. Default to FileSystem().
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -882,6 +887,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead=per_thread_copy_ahead,
             overwrite=overwrite,
             _extensions=_extensions,
+            fs=fs,
         )
         BlockingAsyncStager.__init__(
             self,

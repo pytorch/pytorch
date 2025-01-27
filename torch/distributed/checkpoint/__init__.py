@@ -2,6 +2,7 @@ from . import _extension
 from .api import CheckpointException
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter
+from .hf_filesystem import _HfFileSystem
 from .metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
