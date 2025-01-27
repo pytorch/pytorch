@@ -933,7 +933,6 @@ void initializeCudaContext() {
   }
 }
 
-#ifdef USE_ROCM
 int calc_io_size(
     const int nInputs,
     const int nOutputs,
@@ -953,7 +952,6 @@ int calc_io_size(
 
     return 0;
 }
-#endif
 
 int calc_thread_work_size(
     const int nInputs,
@@ -972,7 +970,14 @@ int calc_thread_work_size(
     }
     return io_size;
 #else
-    return JIT_THREAD_WORK_SIZE;
+    auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
+    TORCH_INTERNAL_ASSERT(io_size > 0);
+    if (io_size == 1) {
+        return 16;
+    } else {
+        return 8;
+    }
+    return io_size;
 #endif
 }
 
