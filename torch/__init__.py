@@ -278,7 +278,7 @@ def _preload_pypi_cuda_deps() -> None:
     from torch.version import cuda as cuda_version
     assert platform.system() == "Linux" and cuda_version
 
-    cuda_libs: _Dict[str, _Tuple[str, bool]] = {
+    cuda_libs: _Dict[str, _Tuple[str, builtins.bool]] = {
         "cublas": "libcublas.so.*[0-9]",
         "cudnn": "libcudnn.so.*[0-9]",
         "cuda_nvrtc": "libnvrtc.so.*[0-9]",
@@ -298,8 +298,6 @@ def _preload_pypi_cuda_deps() -> None:
     # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
     # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
     # See https://github.com/pytorch/pytorch/issues/145580
-    if cuda_version >= '11.8':
-        cuda_libs["nvrtc"] = "libnvrtc.so.*[0-9]"
     if cuda_version >= '12.4':
         cuda_libs["nvjitlink"] = "libnvJitLink.so.*[0-9]"
 
