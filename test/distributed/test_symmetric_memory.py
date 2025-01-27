@@ -366,7 +366,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
-        # See _should_use_fused_all_gather_matmul_native() for the algo
+        # See _select_all_gather_matmul_algo() for the algo
         # selection criteria of _fused_all_gather_matmul_native().
         M = 4096
         N = 1024
@@ -418,7 +418,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_multimem_all_gather_matmul(self) -> None:
         self._init_process()
 
-        # See _should_use_multimem_all_gather_matmul() for the algo
+        # See _select_all_gather_matmul_algo() for the algo
         # selection criteria of _multimem_gather_matmul().
         M = 1024
         N = 1024
