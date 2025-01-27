@@ -684,24 +684,6 @@ class TupleVariable(BaseListVariable):
         return variables.ConstantVariable.create(hasattr((), name))
 
 
-class UserDefinedTupleVariable(TupleVariable):
-    def __init__(self, items, tuple_cls_vt, **kwargs) -> None:
-        super().__init__(items, **kwargs)
-        self.tuple_cls_vt = tuple_cls_vt
-
-    def python_type(self):
-        return self.tuple_cls_vt.as_python_constant()
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Load tuple.__new__
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(torch._dynamo.utils.__name__, "tuple_new")
-        )
-        codegen(self.tuple_cls_vt.source)
-        super().reconstruct(codegen)
-        codegen.extend_output(create_call_function(2, False))
-
-
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 

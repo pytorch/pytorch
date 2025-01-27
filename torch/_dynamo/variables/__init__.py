@@ -71,7 +71,6 @@ from .lists import (
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
-    UserDefinedTupleVariable,
 )
 from .misc import (
     AutogradFunctionContextVariable,
@@ -120,6 +119,7 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -185,6 +185,7 @@ __all__ = [
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
+    "UserDefinedTupleVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
