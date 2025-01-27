@@ -1,6 +1,5 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <vector>
