@@ -995,6 +995,8 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
+        # If enable_inductor_backend_classes is False, inductor backend specific
+        # classes will not be generated
         base_inductor_backends = [""]
         if enable_inductor_backend_classes and base.inductor_backends is not None:
             base_inductor_backends = base.inductor_backends
