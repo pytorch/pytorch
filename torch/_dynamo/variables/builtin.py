@@ -481,6 +481,20 @@ class BuiltinVariable(VariableTracker):
 
             if op is operator.ne:
                 result = []
+                op_var = BuiltinVariable(op)
+                # Special handling of SymNode variable
+                result.extend(
+                    [
+                        (
+                            (SymNodeVariable, VariableTracker),
+                            op_var._comparison_with_symnode,
+                        ),
+                        (
+                            (VariableTracker, SymNodeVariable),
+                            op_var._comparison_with_symnode,
+                        ),
+                    ]
+                )
 
                 def handler(tx, a, b):
                     return tx.inline_user_function_return(

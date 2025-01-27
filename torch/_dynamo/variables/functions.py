@@ -873,6 +873,9 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
+    def as_python_constant(self):
+        return self.fn
+
     def call_function(
         self,
         tx: "InstructionTranslator",
