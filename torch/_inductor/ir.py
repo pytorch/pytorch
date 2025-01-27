@@ -7271,7 +7271,7 @@ class Conditional(ExternKernel):
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
         device = next(
-            operands[0].get_device()
+            o.get_device()
             for o in [predicate] + operands
             if not isinstance(o, ShapeAsConstantBuffer)
         )
@@ -7350,6 +7350,7 @@ class WhileLoop(ExternKernel):
             inputs=tensor_args,
             constant_args=sym_args,
         )
+
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
