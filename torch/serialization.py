@@ -1896,9 +1896,9 @@ def _load(
     calculate_storage_offsets = config.load.calculate_storage_offsets
     run_debug_asserts = os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1"
     current_offset = None
-    # constants from miniz.h
-    data_descriptor_size64 = 24
-    data_descriptor_size32 = 16
+    # constants from miniz.h/miniz.c
+    data_descripter_size64 = 24
+    data_descripter_size32 = 16
     mz_uint32_max = 0xFFFFFFFF
     offsets: Dict[str, int] = dict()
 
@@ -1940,9 +1940,9 @@ def _load(
         current_offset = storage_offset + numel
         # add size of data descriptor after payload
         if local_header_offset >= mz_uint32_max or numel >= mz_uint32_max:
-            current_offset += data_descriptor_size64
+            current_offset += data_descripter_size64
         else:
-            current_offset += data_descriptor_size32
+            current_offset += data_descripter_size32
 
         return storage_offset
 
