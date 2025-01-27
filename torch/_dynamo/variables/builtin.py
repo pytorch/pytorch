@@ -1029,7 +1029,15 @@ class BuiltinVariable(VariableTracker):
         if self.fn is dict and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
+                return dict_vt
+            # We don't have to set the underlying dict_vt in
+            # UserDefinedDictVariable because it will be set to empty
+            # ConstDictVariableTracker in the constructor.
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
+            )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
 
