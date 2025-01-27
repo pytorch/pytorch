@@ -283,7 +283,8 @@ static int getLRUCacheLimit() {
 }
 
 static auto getBenchmarkTechnique() {
-  constexpr auto DEFAULT_TECHNIQUE = cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE;
+  constexpr auto DEFAULT_TECHNIQUE =
+      cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE;
   static auto mode = [&] {
     const char* val = getenv("TORCH_CUDNN_V8_API_BENCHMARK_TECHNIQUE");
     if (!val) {
@@ -293,12 +294,15 @@ static auto getBenchmarkTechnique() {
     if (valstr == "CUDNN_FIND_SAMPLE_ONCE") {
       return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE;
     } else if (valstr == "CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE") {
-      return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE;
+      return cudnn_frontend::CudnnFindSamplingTechnique::
+          CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE;
     } else if (valstr == "CUDNN_FIND_SAMPLE_TILL_STABLE") {
-      return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE;
+      return cudnn_frontend::CudnnFindSamplingTechnique::
+          CUDNN_FIND_SAMPLE_TILL_STABLE;
     } else {
-      TORCH_WARN_ONCE("Unable to parse cuDNN V8 API Benchmark Technique env var, using default of\n"
-                      "CUDNN_FIND_SAMPLE_ONCE.");
+      TORCH_WARN_ONCE(
+          "Unable to parse cuDNN V8 API Benchmark Technique env var, using default of\n"
+          "CUDNN_FIND_SAMPLE_ONCE.");
       return DEFAULT_TECHNIQUE;
     }
   }();
@@ -755,18 +759,25 @@ auto get_plans_from_find(
   const auto technique = getBenchmarkTechnique();
   cudnn_frontend::executionPlans_t plans;
   switch (technique) {
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::
+        CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::
+              CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::
+        CUDNN_FIND_SAMPLE_TILL_STABLE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::
+              CUDNN_FIND_SAMPLE_TILL_STABLE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
   }
 
   cudnn_frontend::executionPlans_t sorted_plans;
@@ -823,18 +834,25 @@ auto get_plans_from_find_fused(
   const auto technique = getBenchmarkTechnique();
   cudnn_frontend::executionPlans_t plans;
   switch (technique) {
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
-      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE:
-          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(
-              handle, std::move(valid_plans), variantPack, benchmark_limit);
-          break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::
+        CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::
+              CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
+    case cudnn_frontend::CudnnFindSamplingTechnique::
+        CUDNN_FIND_SAMPLE_TILL_STABLE:
+      plans = cudnn_frontend::time_sorted_plan<
+          cudnn_frontend::CudnnFindSamplingTechnique::
+              CUDNN_FIND_SAMPLE_TILL_STABLE>(
+          handle, std::move(valid_plans), variantPack, benchmark_limit);
+      break;
   }
 
   cudnn_frontend::executionPlans_t sorted_plans;
