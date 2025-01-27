@@ -366,8 +366,8 @@ at::Tensor multimem_all_gather_out(
       1,
       alignment,
       1,
-      8,
-      1024,
+      16,
+      512,
       num_blocks,
       num_threads);
 

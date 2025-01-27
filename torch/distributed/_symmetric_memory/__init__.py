@@ -666,9 +666,11 @@ def _can_use_all_gather_matmul_native(
 
     group = c10d._resolve_process_group(group_name)
     M = math.prod(A_shard.shape[:-1]) * group.size()
+    N = max(B.shape[1] for B in Bs)
     K = A_shard.shape[-1]
 
-    if not (M % (group.size() * 128) == 0 and K % 64 == 0):
+    print(M, N, K)
+    if not (M % (group.size() * 128) == 0 and N % 64 == 0 and K % 64 == 0):
         return False
     return True
 
@@ -698,6 +700,15 @@ def _select_all_gather_matmul_algo(
     group_name: str,
     return_A: bool,
 ) -> _AllGatherMatmulAlgo:
+    if os.environ["AG_MM_ALGO"] == "DECOMPOSE":
+        return _AllGatherMatmulAlgo.DECOMPOSE
+    elif os.environ["AG_MM_ALGO"] == "MULTICAST":
+        return _AllGatherMatmulAlgo.MULTICAST
+    elif os.environ["AG_MM_ALGO"] == "NATIVE":
+        return _AllGatherMatmulAlgo.NATIVE
+    else:
+        raise AssertionError("unrecognized config")
+
     group = c10d._resolve_process_group(group_name)
     local_M = math.prod(A_shard.shape[:-1])
     M = local_M * group.size()
@@ -716,11 +727,15 @@ def _select_all_gather_matmul_algo(
         M, max(Ns), K, A_shard.dtype
     ):
         return _AllGatherMatmulAlgo.MULTICAST
-    return _AllGatherMatmulAlgo.NATIVE
 
     if _can_use_all_gather_matmul_native(A_shard, Bs, group_name):
         return _AllGatherMatmulAlgo.NATIVE
 
+    # TODO: find when to use decompose compared to multicast and native
+    # possible:
+    # - small to medium
+    # - large total intensity but small individual intensity
+    # TODO: multicast should be default
     return _AllGatherMatmulAlgo.DECOMPOSE
 
 
