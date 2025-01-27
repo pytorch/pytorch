@@ -4450,6 +4450,16 @@ def run(runner, args, original_dir=None):
         # Stricter check to disable fallbacks
         args.suppress_errors = False
 
+        if not args.disable_cudagraphs:
+            runner.skip_models.update(
+                {
+                    # xfail: https://github.com/pytorch/pytorch/issues/145773
+                    "convit_base",
+                    "llama",
+                    "cm3leon_generate",
+                }
+            )
+
     if args.device_index is not None:
         if args.multiprocess:
             print("Cannot specify both --device_index and --multiprocess")
