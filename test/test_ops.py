@@ -1686,7 +1686,7 @@ class TestCommon(TestCase):
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        for i, sample in enumerate(samples):
+        for sample in samples:
             input, args, kwargs = (sample.input, sample.args, sample.kwargs)
 
             try:
@@ -2763,7 +2763,7 @@ class TestFakeTensor(TestCase):
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        for iter, sample in enumerate(samples):
+        for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
