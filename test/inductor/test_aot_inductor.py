@@ -3898,8 +3898,7 @@ class AOTInductorTestsTemplate:
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.load(self.device, so_path)
-        expected = model(*example_inputs)
-        actual = compiled(*example_inputs)
+        compiled(*example_inputs)
 
         # Check the runtime assertion.
         with self.assertRaisesRegex(Exception, ""):
