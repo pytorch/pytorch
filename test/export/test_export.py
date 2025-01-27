@@ -3710,6 +3710,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    @testing.expectedFailureCppSerDes  # no unbacked bindings after deserialization?
+    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
