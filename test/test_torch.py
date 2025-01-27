@@ -8997,10 +8997,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             )
             
     # For testing in64 support in upsample_nearest3d
-    @largeTensorTest('56GB')
-    def test_int64_upsample3d(self):
-        is_gpu = torch.cuda.is_available()
-        x = torch.ones((1, 256, 16, 720, 1280), dtype=torch.bfloat16, device="cuda" if is_gpu else "cpu")
+    @onlyCUDA
+    @largeTensorTest('56GB', device='cuda')
+    @dtypes(torch.bfloat16) 
+    @unittest.skipIf(IS_JETSON, "Large tensor tests are too large for Jetson.")
+    def test_int64_upsample3d(self, device, dtype):
+        x = torch.ones((1, 256, 16, 720, 1280), dtype=dtype, device=device)
         try:
             torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         except Exception as e:
