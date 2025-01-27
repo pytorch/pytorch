@@ -143,7 +143,7 @@ std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
-#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+#if defined(NCCL_HAS_COMM_SPLIT)
 // last argument to split() API is not used to support
 // multiple implementations
 std::shared_ptr<NCCLComm> NCCLComm::split(
@@ -157,6 +157,15 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
       ", but got ",
       color_id);
+#ifdef NCCL_COMM_SPLIT_GROUP_RANKS_SUPPORTED
+  // pass group_ranks info to nccl through nccl_config
+  config.splitGroupSize = ranks_ull.size();
+  config.splitGroupRanks = new int[ranks_ull.size()];
+  for (int i = 0; i < ranks_ull.size(); ++i) {
+    config.splitGroupRanks[i] = ranks_ull[i];
+  }
+#endif
+
   LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
             << source->repr() << " with color_id " << color_id << " and rank "
             << rank;
