@@ -137,7 +137,7 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel: CppTemplateKernel,
         function_name: str,
         placeholder: str,
-        b_index: int,
+        b_index: str,
     ) -> str:
         """
         Similar to 'def_kernel' in cpp_template_kernel, but instead of generating a function definition,
