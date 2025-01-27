@@ -708,13 +708,13 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     at::Tensor out) {
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
-  const bool sm90OrLater = properties != nullptr && properties->major >= 9;
-  if (!(sm89 || sm90OrLater)) {
+  const bool sm9x = properties != nullptr && properties->major == 9;
+  if (!(sm89 || sm9x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm90OrLater) {
+  if (sm9x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
@@ -790,9 +790,6 @@ void check_inputs(
     const at::Tensor& scale_b,
     const std::optional<at::Tensor>& bias,
     const at::Tensor& out) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK(dprops->major <= 9, "f8f8bf16_rowwise is sm_90 specific.");
-
   TORCH_CHECK(a.is_cuda());
   TORCH_CHECK(a.device() == b.device());
   TORCH_CHECK(scale_a.device() == a.device());

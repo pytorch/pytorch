@@ -665,7 +665,7 @@ class TestFP8MatmulCuda(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError,
                 re.escape(
-                    "f8f8bf16_rowwise is not implemented on sm_100 or later.",
+                    "Rowwise scaling is not currently supported on your device",
                 ),
             ):
                 torch._scaled_mm(
