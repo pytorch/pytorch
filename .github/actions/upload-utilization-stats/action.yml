@@ -28,6 +28,7 @@ runs:
   using: composite
   steps:
     - name: Print Inputs
+      shell: bash
       run: |
         echo "workflow_id: ${{github.event.inputs.workflow_runner_id}}"
         echo "workflow_attempt: ${{github.event.inputs.workflow_attempt}}"
