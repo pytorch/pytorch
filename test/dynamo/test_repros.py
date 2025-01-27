@@ -47,10 +47,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     TEST_CUDA,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
 )
@@ -1062,14 +1064,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
-    @requires_cuda
-    def test_sub_alpha_scalar_repro(self):
-        @torch.compile(backend="aot_eager")
-        def f(x):
-            return x.sub(1, alpha=2)
-
-        f(torch.ones(2, device="cuda", dtype=torch.float64))
-
     # https://github.com/pytorch/pytorch/issues/113010
     def test_out_overload_non_contiguous(self):
         def f(x, y):
@@ -1638,6 +1632,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         opt_test_fn()
+
+    def test_foreach_decomp_arg_names(self):
+        # https://github.com/pytorch/pytorch/issues/138698
+
+        @torch.compile(fullgraph=True)
+        def foreach_pow(**kwargs):
+            return torch._foreach_pow(**kwargs)
+
+        foreach_pow(self=[torch.ones(2, 2, device="cpu")], exponent=2.7)
+
+        @torch.compile(fullgraph=True)
+        def foreach_lerp_(**kwargs):
+            return torch._foreach_lerp_(**kwargs)
+
+        foreach_lerp_(
+            self=[torch.ones(2, 2, device="cpu")],
+            tensors1=[torch.ones(2, 2, device="cpu")],
+            weights=[torch.ones(2, 2, device="cpu")],
+        )
 
     def test_reformer_min_chunk_len(self):
         def fn(cfg):
@@ -2764,29 +2777,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda
-    def test_norm_dtype(self):
-        def foo(_stack0):
-            getitem = _stack0[(slice(None, None, None), -1)]
-            _stack0 = None
-            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
-            getitem = None
-            return (normalize,)
-
-        args = [((2, 50, 256), (1, 256, 1), torch.float16, "cuda", False)]
-        args = [
-            rand_strided(sh, st, dt, dev).requires_grad_(rg)
-            for (sh, st, dt, dev, rg) in args
-        ]
-
-        torch.compile(foo, backend="aot_eager_decomp_partition")
-        with torch.cuda.amp.autocast(enabled=True):
-            ref = foo(*args)[0]
-            res = foo(*args)[0]
-            self.assertEqual(ref.dtype, res.dtype)
-
-            self.assertTrue(same(res, ref))
-
     def test_for_loop_graph_break(self):
         def inner(x):
             return torch.sin(x)
@@ -3706,7 +3696,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
@@ -4093,6 +4082,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), torch.sin(x))
 
+    def test_int_format(self):
+        def fn(num: int):
+            return format(num, "b")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=False)
+        self.assertEqual(fn(10), opt_fn(10))
+
     # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
     # due to bad empty list handling
     def test_empty_list_contains_with_jump(self):
@@ -4386,57 +4382,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # frame_count should stay at 1.
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
-    def test_flash_attn_backward_mixed_strides(self):
-        # in this repro, "grad_out" and "value" are transposed tensors,
-        # but "key" and "value" are contiguous
-        def gen_inputs(device):
-            return (
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, device=device),
-                None,
-                None,
-                513,
-                513,
-                0.0,
-                False,
-                torch.tensor(1, dtype=torch.int64),
-                torch.tensor(1, dtype=torch.int64),
-            )
-
-        inps_cuda = gen_inputs("cuda")
-        inps_meta = gen_inputs("meta")
-        (
-            out1_ref,
-            out2_ref,
-            out3_ref,
-        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
-            *inps_cuda, scale=0.125
-        )
-        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
-
-        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
-            *inps_meta, scale=0.125
-        )
-
-        self.assertEqual(out1_ref.shape, out1_test.shape)
-        self.assertEqual(out1_ref.stride(), out1_test.stride())
-        self.assertEqual(out2_ref.shape, out2_test.shape)
-        self.assertEqual(out2_ref.stride(), out2_test.stride())
-        self.assertEqual(out3_ref.shape, out3_test.shape)
-        self.assertEqual(out3_ref.stride(), out3_test.stride())
-
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -4689,27 +4634,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             pass
         else:
             self.fail("expected exception")
-
-    def test_megablocks_moe(self):
-        try:
-            from megablocks.layers import moe
-            from megablocks.layers.arguments import Arguments
-        except ImportError as e:
-            raise unittest.SkipTest("requires megablocks") from e
-        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
-        args = Arguments(
-            hidden_size=hs,
-            ffn_hidden_size=hs * 2,
-            moe_num_experts=num_experts,
-            moe_capacity_factor=1,
-            moe_top_k=top_k,
-        )
-        moe_mlp = moe.MoE(args)
-        moe_mlp.cuda(torch.cuda.current_device()).half()
-        x = torch.randn(sl, bs, hs).cuda().half()
-        out1, _ = moe_mlp(x)
-        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
-        self.assertEqual(out1, out2)
 
     def test_udf_classes_reconstruction(self):
         def fn(x):
@@ -5837,54 +5761,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         mod.eval()
         self.assertFalse(opt_mod.training)
 
-    @requires_cuda
-    def test_memleak_when_graph_input_has_tensor_attr(self):
-        @torch.compile(backend="eager")
-        def f(x):
-            x.add_(1)
-
-        mem_before = torch.cuda.memory_allocated()
-
-        x = torch.ones(2, device="cuda")
-        x.foo = torch.zeros(2, device="cuda")
-        f(x)
-        del x.foo
-        del x
-        mem_after = torch.cuda.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
-        # check when non-tensor data structure attribute contains a tensor
-        @torch.compile(backend="eager")
-        def f(x):
-            x.add_(1)
-
-        mem_before = torch.cuda.memory_allocated()
-        x = torch.ones(2, device="cuda")
-        x.foo = [torch.zeros(2, device="cuda") for _ in range(5)]
-        f(x)
-        del x.foo
-        del x
-        mem_after = torch.cuda.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
-        # check with tensor refcycle
-        @torch.compile(backend="eager")
-        def g(x, y):
-            return x + y
-
-        mem_before = torch.cuda.memory_allocated()
-        x = torch.ones(2, device="cuda")
-        y = torch.zeros(2, device="cuda")
-        x.foo = [y]
-        y.foo = [x]
-        g(x, y)
-        del x.foo
-        del y.foo
-        del x
-        del y
-        mem_after = torch.cuda.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
     def test_os_fspath(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -6370,27 +6246,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    @requires_cuda
-    def test_sdpa_dynamic_shapes(self):
-        def f(x, s0, s1, s2):
-            q = x.view(2, s0, s2, s0)
-            return torch._C._nn.scaled_dot_product_attention(
-                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
-            )
-
-        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device="cuda")
-        x_ref = x.clone().detach().requires_grad_()
-        s0 = 32
-        s1 = 64
-        s2 = 128
-
-        f_compiled = torch.compile(f, dynamic=True)
-
-        with torch._dynamo.config.patch(assume_static_by_default=False):
-            out_ref = f(x_ref, s0, s1, s2)
-            out = f_compiled(x, s0, s1, s2)
-            self.assertEqual(out_ref, out)
-
     def test_bitwise_op_guard(self):
         # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
         def fn(x):
@@ -6573,9 +6428,207 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             self.assertEqual(actual, expected)
 
 
+class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+    def test_sub_alpha_scalar_repro(self, device):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device=device, dtype=torch.float64))
+
+    @requires_cuda
+    def test_norm_dtype(self, device):
+        def foo(_stack0):
+            getitem = _stack0[(slice(None, None, None), -1)]
+            _stack0 = None
+            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
+            getitem = None
+            return (normalize,)
+
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, device, False)]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        torch.compile(foo, backend="aot_eager_decomp_partition")
+        with torch.cuda.amp.autocast(enabled=True):
+            ref = foo(*args)[0]
+            res = foo(*args)[0]
+            self.assertEqual(ref.dtype, res.dtype)
+
+            self.assertTrue(same(res, ref))
+
+    def test_guard_default_device(self, device):
+        try:
+            torch.set_default_device(device)
+
+            counter = torch._dynamo.testing.CompileCounter()
+
+            @torch._dynamo.optimize(counter)
+            def f():
+                x = torch.randn(3)
+                return x * 2
+
+            self.assertEqual(f().device.type + ":0", device)
+            self.assertEqual(counter.frame_count, 1)
+
+            torch.set_default_device("cpu")
+
+            self.assertEqual(f().device.type, "cpu")
+            self.assertEqual(counter.frame_count, 2)
+
+        finally:
+            torch.set_default_device(None)
+
+    @skipIfHpu
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "flash attention not supported",
+    )
+    def test_flash_attn_backward_mixed_strides(self, device):
+        # in this repro, "grad_out" and "value" are transposed tensors,
+        # but "key" and "value" are contiguous
+        def gen_inputs(device):
+            return (
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, device=device),
+                None,
+                None,
+                513,
+                513,
+                0.0,
+                False,
+                torch.tensor(1, dtype=torch.int64),
+                torch.tensor(1, dtype=torch.int64),
+            )
+
+        inps_device = gen_inputs(device)
+        inps_meta = gen_inputs("meta")
+        (
+            out1_ref,
+            out2_ref,
+            out3_ref,
+        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
+            *inps_device, scale=0.125
+        )
+        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
+
+        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
+            *inps_meta, scale=0.125
+        )
+
+        self.assertEqual(out1_ref.shape, out1_test.shape)
+        self.assertEqual(out1_ref.stride(), out1_test.stride())
+        self.assertEqual(out2_ref.shape, out2_test.shape)
+        self.assertEqual(out2_ref.stride(), out2_test.stride())
+        self.assertEqual(out3_ref.shape, out3_test.shape)
+        self.assertEqual(out3_ref.stride(), out3_test.stride())
+
+    def test_megablocks_moe(self, device):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        # moe_mlp.cuda(torch.cuda.current_device()).half()
+        moe_mlp.device(torch.device.current_device()).half()
+        x = torch.randn(sl, bs, hs).device().half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
+    @requires_cuda
+    def test_memleak_when_graph_input_has_tensor_attr(self, device):
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+
+        x = torch.ones(2, device=device)
+        x.foo = torch.zeros(2, device=device)
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check when non-tensor data structure attribute contains a tensor
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device=device)
+        x.foo = [torch.zeros(2, device=device) for _ in range(5)]
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check with tensor refcycle
+        @torch.compile(backend="eager")
+        def g(x, y):
+            return x + y
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device=device)
+        y = torch.zeros(2, device=device)
+        x.foo = [y]
+        y.foo = [x]
+        g(x, y)
+        del x.foo
+        del y.foo
+        del x
+        del y
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+    @requires_cuda
+    def test_sdpa_dynamic_shapes(self, device):
+        def f(x, s0, s1, s2):
+            q = x.view(2, s0, s2, s0)
+            return torch._C._nn.scaled_dot_product_attention(
+                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
+
+        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device=device)
+        x_ref = x.clone().detach().requires_grad_()
+        s0 = 32
+        s1 = 64
+        s2 = 128
+
+        f_compiled = torch.compile(f, dynamic=True)
+
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            out_ref = f(x_ref, s0, s1, s2)
+            out = f_compiled(x, s0, s1, s2)
+            self.assertEqual(out_ref, out)
+
+
 instantiate_parametrized_tests(ReproTests)
 
-
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

@@ -3180,33 +3180,41 @@ class TestCase(expecttest.TestCase):
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super_run)
-            elif TEST_WITH_AOT_EAGER:
+            if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-            elif TEST_WITH_TORCHDYNAMO:
-                # TorchDynamo optimize annotation
-                # Assume eager-generated GraphModules will not error out.
-                # If we do, this is probably a Dynamo bug!
-                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
-                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
+            elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
+                if TEST_WITH_TORCHINDUCTOR:
+                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                else:
+                    # Assume eager-generated GraphModules will not error out.
+                    # If we do, this is probably a Dynamo bug!
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
 
-                def expect_failure(f, test_name):
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
+                        raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_expected_failures:
-                    method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method, key))
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_expected_failures"
+                    from .dynamo_test_failures import inductor_expected_failures as expected_failures
+                else:
+                    subdir = "test/dynamo_expected_failures"
+                    from .dynamo_test_failures import dynamo_expected_failures as expected_failures
 
-                def ignore_failure(f, test_name):
+                if key in expected_failures:
+                    method = getattr(self, self._testMethodName)
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, expect_failure(method, file_name))
+
+                def ignore_failure(f, file_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
@@ -3217,12 +3225,20 @@ class TestCase(expecttest.TestCase):
                         if getattr(method, "__unittest_expecting_failure__", False):
                             self.skipTest("unexpected success")
                         else:
-                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
+                            self.skipTest(f"This test passed, maybe we can remove `{file_name}`")
                     return wrapper
 
-                if key in dynamo_skips:
+                if TEST_WITH_TORCHINDUCTOR:
+                    subdir = "test/inductor_skips"
+                    from .dynamo_test_failures import inductor_skips as skips
+                else:
+                    subdir = "test/dynamo_skips"
+                    from .dynamo_test_failures import dynamo_skips as skips
+
+                if key in skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method, key))
+                    file_name = os.path.join(subdir, key)
+                    setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
             super_run(result=result)
 
