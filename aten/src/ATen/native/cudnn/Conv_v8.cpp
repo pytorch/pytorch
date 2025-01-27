@@ -282,6 +282,29 @@ static int getLRUCacheLimit() {
   return limit;
 }
 
+static auto getBenchmarkTechnique() {
+  constexpr auto DEFAULT_TECHNIQUE = cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE;
+  static auto mode = [&] {
+    const char* val = getenv("TORCH_CUDNN_V8_API_BENCHMARK_TECHNIQUE");
+    if (!val) {
+      return DEFAULT_TECHNIQUE;
+    }
+    const std::string valstr = std::string(val);
+    if (valstr == "CUDNN_FIND_SAMPLE_ONCE") {
+      return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE;
+    } else if (valstr == "CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE") {
+      return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE;
+    } else if (valstr == "CUDNN_FIND_SAMPLE_TILL_STABLE") {
+      return cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE;
+    } else {
+      TORCH_WARN_ONCE("Unable to parse cuDNN V8 API Benchmark Technique env var, using default of\n"
+                      "CUDNN_FIND_SAMPLE_ONCE.");
+      return DEFAULT_TECHNIQUE;
+    }
+  }();
+  return mode;
+}
+
 template <typename T, typename KeyType>
 struct BenchmarkCache {
   std::list<KeyType> engine_cache_order;
@@ -729,9 +752,22 @@ auto get_plans_from_find(
 
   auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
   benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
-  auto plans = cudnn_frontend::time_sorted_plan<
-      cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-      handle, std::move(valid_plans), variantPack, benchmark_limit);
+  const auto technique = getBenchmarkTechnique();
+  cudnn_frontend::executionPlans_t plans;
+  switch (technique) {
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+  }
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
@@ -784,9 +820,22 @@ auto get_plans_from_find_fused(
 
   auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
   benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
-  auto plans = cudnn_frontend::time_sorted_plan<
-      cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-      handle, std::move(valid_plans), variantPack, benchmark_limit);
+  const auto technique = getBenchmarkTechnique();
+  cudnn_frontend::executionPlans_t plans;
+  switch (technique) {
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+      case cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE:
+          plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(
+              handle, std::move(valid_plans), variantPack, benchmark_limit);
+          break;
+  }
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
