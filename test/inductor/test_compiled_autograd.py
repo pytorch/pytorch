@@ -3660,7 +3660,6 @@ class TestCompiledAutogradOpInfo(TestCase):
         config.compiled_autograd = False
         compiled_autograd.reset()
 
-    @inductor_config.patch(fx_graph_cache=False)
     @ops(hop_db, allowed_dtypes=(torch.float,))
     def test_hops_in_bwd(self, device, dtype, op):
         if self.id() in known_failing_tests:
