@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-# python script is mainly for uploading test logs to s3 for a test job
-# adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..",".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import argparse
 import json
 import zipfile
@@ -248,7 +246,7 @@ class UploadUtilizationData:
         self._upload_utilization_data_to_s3(
             collection=ts_collection,
             version=version,
-            repo = self.info.repo,
+            repo=self.info.repo,
             workflow_run_id=self.info.workflow_run_id,
             workflow_run_attempt=self.info.run_attempt,
             job_id=self.info.job_id,
