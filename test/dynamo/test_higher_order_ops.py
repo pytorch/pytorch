@@ -6978,9 +6978,18 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             _assert_tensors_nonaliasing(a, a)
 
 
+xfail_dynamo_hops = {
+    "map",  # assert type(args[1].realize()) is TensorVariable
+    "scan",  # scan is not an OpOverload
+}
+
+
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @parametrize("backend", ("aot_eager", "inductor"))
-    @ops(hop_db, allowed_dtypes=(torch.float,))
+    @ops(
+        list(filter(lambda op: op.name not in xfail_dynamo_hops, hop_db)),
+        allowed_dtypes=(torch.float,),
+    )
     def test_hops_dynamo(self, device, dtype, op, backend):
         # Ensure HOPs can be compiled by Dynamo
         sample_inputs_itr = op.sample_inputs(
