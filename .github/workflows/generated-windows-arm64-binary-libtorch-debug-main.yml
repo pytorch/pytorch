@@ -20,6 +20,7 @@ env:
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
+  ENABLE_OPENBLAS: 0
   MSVC_VERSION : latest
   AWS_DEFAULT_REGION: us-east-1
 
@@ -71,7 +72,7 @@ jobs:
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "pytorch"   
+          path: "pytorch"
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -86,7 +87,7 @@ jobs:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
           path: "pytorch"
-          submodules: recursive      
+          submodules: recursive   
       - name: Bootstrap Python
         shell: cmd
         run: |
@@ -166,7 +167,7 @@ jobs:
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "pytorch"   
+          path: "pytorch"
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -181,7 +182,7 @@ jobs:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
           path: "pytorch"
-          submodules: recursive      
+          submodules: recursive   
       - name: Bootstrap APL
         shell: cmd
         run: |
