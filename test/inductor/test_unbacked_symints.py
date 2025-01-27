@@ -13,11 +13,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import (
-    MI300_ARCH,
-    parametrize,
-    skipIfRocmArch,
-)
+from torch.testing._internal.common_utils import MI300_ARCH, parametrize, skipIfRocmArch
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
