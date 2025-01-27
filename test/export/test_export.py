@@ -1909,6 +1909,7 @@ graph():
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
         ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertTrue(torch.allclose(ep_training.module()(ref_x), ref_out))
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\

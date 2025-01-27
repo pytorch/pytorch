@@ -2801,7 +2801,6 @@ def _as_tensor_fullprec(t):
 # export graph and run it in eager. Therefore, the implementation
 # of this aten op should be ready at startup time.
 lib = torch.library.Library("aten", "FRAGMENT")
-lib.define("_access_subclass_inner_tensor(Tensor src, str attr) -> Tensor")
 
 
 def impl(x, y):

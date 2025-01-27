@@ -23,6 +23,7 @@
 #include <ATen/ops/_conj_physical.h>
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_neg_view_native.h>
+#include <ATen/ops/_access_subclass_inner_tensor.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/absolute_native.h>
@@ -507,6 +508,16 @@ Tensor rad2deg(const Tensor& self) {
 }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
+Tensor _access_subclass_inner_tensor(
+    const Tensor& self,
+    std::string_view attr) {
+  TORCH_CHECK(
+      false,
+      "This method is for only python tensor subclasses, should never get here!");
+  return self;
+}
+
+
 Tensor& deg2rad_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
@@ -743,6 +754,8 @@ Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
 Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
+
+
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {

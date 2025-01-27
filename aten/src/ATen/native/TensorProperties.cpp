@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_access_subclass_inner_tensor.h>
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
@@ -121,15 +122,6 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       "preserve memory format is unsupported by the contiguous operator");
 
   return self.clone(memory_format);
-}
-
-Tensor _access_subclass_inner_tensor(
-    const Tensor& self,
-    const std::string& attr) {
-  TORCH_CHECK(
-      false,
-      "This method is for only python tensor subclasses, should never get here!");
-  return self;
 }
 
 bool is_set_to(const Tensor& self, const Tensor& src) {

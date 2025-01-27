@@ -187,6 +187,10 @@
   dispatch:
     CPU: _functional_assert_async_msg_cpu
 
+- func: _access_subclass_inner_tensor(Tensor src, str attr) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _access_subclass_inner_tensor
+
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None, *, Device? device=None, Layout? layout=None) -> ()
   dispatch:
     CompositeExplicitAutograd: _assert_tensor_metadata
