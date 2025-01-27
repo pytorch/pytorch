@@ -3,7 +3,7 @@ import logging
 import os
 import pickle
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -19,7 +19,7 @@ class CacheArtifactType(Enum):
 
     INDUCTOR = 0
     AUTOTUNE = 1
-    AOT_AUTOGRAD = 2  # NYI
+    AOT_AUTOGRAD = 2
     PGO = 3
 
 
@@ -41,10 +41,10 @@ class CacheInfo:
     instrumentation
     """
 
-    inductor_artifacts: List[str] = dataclasses.field(default_factory=list)
-    autotune_artifacts: List[str] = dataclasses.field(default_factory=list)
-    aot_autograd_artifacts: List[str] = dataclasses.field(default_factory=list)
-    pgo_artifacts: List[str] = dataclasses.field(default_factory=list)
+    inductor_artifacts: list[str] = dataclasses.field(default_factory=list)
+    autotune_artifacts: list[str] = dataclasses.field(default_factory=list)
+    aot_autograd_artifacts: list[str] = dataclasses.field(default_factory=list)
+    pgo_artifacts: list[str] = dataclasses.field(default_factory=list)
 
     def add(self, artifact: CacheArtifact) -> None:
         if artifact.type == CacheArtifactType.INDUCTOR:
@@ -77,7 +77,7 @@ class CacheArtifactManager:
     """
 
     # Protected by the compile_lock
-    _cache_artifacts: List[CacheArtifact] = []
+    _cache_artifacts: list[CacheArtifact] = []
 
     @classmethod
     def clear(cls) -> None:
@@ -102,7 +102,7 @@ class CacheArtifactManager:
         cls._cache_artifacts.append(CacheArtifact(artifact_type, key, content))
 
     @classmethod
-    def serialize(cls) -> Optional[Tuple[bytes, CacheInfo]]:
+    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
         """
         Converts the "mega" list into portable format
         """
@@ -128,6 +128,7 @@ class CacheArtifactManager:
             return None
 
         from torch._dynamo.pgo import write_local_impl
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
         from torch._inductor.codecache import FxGraphCache
         from torch._inductor.runtime.autotune_cache import _LocalAutotuneCacheBackend
 
@@ -144,7 +145,7 @@ class CacheArtifactManager:
                 key = os.path.join(cache_dir(), artifact.key)
                 autotune_cache._put(key, artifact.content)
             elif artifact.type == CacheArtifactType.AOT_AUTOGRAD:
-                raise AssertionError("not yet implemented")
+                AOTAutogradCache._write_to_local_cache(artifact.key, artifact.content)
             elif artifact.type == CacheArtifactType.PGO:
                 meta = write_local_impl(artifact.key, artifact.content)
                 assert meta is not None

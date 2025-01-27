@@ -90,7 +90,6 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    const std::vector<size_t>& per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,

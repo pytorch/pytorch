@@ -337,6 +337,8 @@ class TORCH_API Context {
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
   void setAllowBF16ReductionCuBLAS(bool);
+  bool allowFP16AccumulationCuBLAS() const;
+  void setAllowFP16AccumulationCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -418,6 +420,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
+  bool allow_fp16_accumulation_cublas = false;
   bool enabled_mkldnn = true;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
@@ -565,45 +568,28 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
+    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
-  // NB: Sometimes we build with CUDA, but we don't have any GPUs
-  // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
-  if (hasCUDA() && cuda_num_gpus > 0) {
-    for (const auto i : c10::irange(cuda_num_gpus)) {
-      auto cuda_gen = globalContext().defaultGenerator(
-          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
-        cuda_gen.set_current_seed(seed);
-      }
-    }
-  }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
-  if (hasXPU() && xpu_num_gpus) {
-    for (const auto i : c10::irange(xpu_num_gpus)) {
-      auto xpu_gen = globalContext().defaultGenerator(
-          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
-        xpu_gen.set_current_seed(seed);
-      }
-    }
+  const auto opt_device_type = at::getAccelerator();
+  if (!opt_device_type.has_value()) {
+    return;
   }
-
-  if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(mps_gen.mutex());
-    mps_gen.set_current_seed(seed);
+  const auto num_gpus = globalContext()
+                            .getAcceleratorHooksInterface(opt_device_type)
+                            .deviceCount();
+  for (const auto i : c10::irange(num_gpus)) {
+    auto gen = globalContext().defaultGenerator(
+        Device(opt_device_type.value(), static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
   }
 }
 

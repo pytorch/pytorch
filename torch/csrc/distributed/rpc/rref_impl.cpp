@@ -15,6 +15,7 @@
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
@@ -29,6 +30,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
       return type->annotation_str();
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
 

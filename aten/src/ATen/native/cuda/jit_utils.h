@@ -53,6 +53,14 @@ KernelDescriptor make_kernel_descriptor(
 
 inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   auto ip = reinterpret_cast<uintptr_t>(pointer);
+#ifdef USE_ROCM
+  if ((default_alignment == 1) && (ip % (16 * default_alignment) == 0)) {
+    return 16;
+  }
+  if ((default_alignment <= 2) && (ip % (8 * default_alignment) == 0)) {
+    return 8;
+  }
+#endif
   if (ip % (4 * default_alignment) == 0) {
     return 4;
   }
@@ -79,18 +87,36 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
   return result;
 }
 
+//FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
+#define JIT_THREAD_WORK_SIZE 4
+
+#ifdef USE_ROCM
+int calc_io_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type);
+#endif
+
+int calc_thread_work_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type);
+
 std::string generate_code(
     int nInputs,
     int nOutputs,
     const std::string& func,
     const std::string& name,
-    const std::string& f_input_type,
+    const std::string& f_inputs_type,
     const std::string& compute_type,
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool vectorized=false,
     int vec_size=0,
     bool return_by_ref=false);
@@ -100,6 +126,7 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool vectorized=false,
     int vec_size=0,
     bool return_by_ref=false);

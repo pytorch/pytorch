@@ -3,7 +3,7 @@
 import itertools
 import operator
 import sys
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -39,8 +39,8 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
 
@@ -208,7 +208,7 @@ class IteratorVariable(VariableTracker):
     # Normally, iterators are accessed lazily.
     # Example of safe eager unpacking: list(map(f, seq))
     # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -281,7 +281,7 @@ class CycleIteratorVariable(IteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,
-        saved: Optional[List[VariableTracker]] = None,
+        saved: Optional[list[VariableTracker]] = None,
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
@@ -335,7 +335,7 @@ class ZipVariable(IteratorVariable):
 
     def __init__(
         self,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         strict: bool = False,
         **kwargs,
     ) -> None:
@@ -355,7 +355,7 @@ class ZipVariable(IteratorVariable):
             for it in self.iterables
         )
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         iterables = []
         for it in self.iterables:
@@ -449,7 +449,7 @@ class MapVariable(ZipVariable):
     def __init__(
         self,
         fn: VariableTracker,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         **kwargs,
     ) -> None:
         super().__init__(iterables, **kwargs)
@@ -492,7 +492,7 @@ class FilterVariable(IteratorVariable):
     def __init__(
         self,
         fn: VariableTracker,
-        iterable: Union[List[VariableTracker], VariableTracker],
+        iterable: Union[list[VariableTracker], VariableTracker],
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -508,7 +508,7 @@ class FilterVariable(IteratorVariable):
             tx
         )
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         it = None
         if isinstance(self.iterable, list):

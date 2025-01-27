@@ -9,8 +9,8 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView, MutableMapping
-from typing import Dict, List, TYPE_CHECKING
+from collections.abc import KeysView
+from typing import TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -38,7 +38,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
-    does_not_override_dict_iter_methods,
+    dict_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -479,6 +479,17 @@ class BuiltinVariable(VariableTracker):
                 result.append(((VariableTracker, VariableTracker), handler))
                 return result
 
+            if op is operator.ne:
+                result = []
+
+                def handler(tx, a, b):
+                    return tx.inline_user_function_return(
+                        VariableTracker.build(tx, polyfills.cmp_ne), [a, b], {}
+                    )
+
+                result.append(((VariableTracker, VariableTracker), handler))
+                return result
+
             result = [((ConstantVariable, ConstantVariable), compare_by_value)]
 
             if op in supported_const_comparison_ops.values():
@@ -720,7 +731,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     @staticmethod
-    def _make_handler(fn, arg_types: List[type], has_kwargs: bool):
+    def _make_handler(fn, arg_types: list[type], has_kwargs: bool):
         from .lazy import LazyVariableTracker
 
         obj = BuiltinVariable(fn)
@@ -1000,8 +1011,8 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
@@ -1020,8 +1031,8 @@ class BuiltinVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if self.fn is object and name == "__setattr__":
             assert len(args) == 3
@@ -1040,8 +1051,21 @@ class BuiltinVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 args[0]
             )
+        if self.fn is dict and name == "__new__":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+        if self.fn is dict:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in dict_methods:
+                if isinstance(args[0], variables.UserDefinedDictVariable):
+                    return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -1214,6 +1238,12 @@ class BuiltinVariable(VariableTracker):
                 "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
+        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            value = self.fn(
+                a.as_python_constant(),
+                b.as_python_constant(),
+            )
+            return ConstantVariable(value)
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -1378,73 +1408,11 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
-        if not kwargs:
-            if not args:
-                args = ({},)
-            assert len(args) == 1
-            arg = args[0]
-            if isinstance(arg, dict):
-                return ConstDictVariable(
-                    arg, user_cls, mutation_type=ValueMutationNew()
-                )
-            elif isinstance(arg, variables.ConstDictVariable):
-                return arg.clone(
-                    user_cls=user_cls, source=None, mutation_type=ValueMutationNew()
-                )
-            elif isinstance(
-                arg,
-                (
-                    ListVariable,
-                    TupleVariable,
-                    ListIteratorVariable,
-                    variables.IteratorVariable,
-                ),
-            ):
-                items = dict(
-                    x.force_unpack_var_sequence(tx)
-                    for x in arg.force_unpack_var_sequence(tx)
-                )
-                return ConstDictVariable(
-                    items, user_cls, mutation_type=ValueMutationNew()
-                )
-            elif hasattr(arg, "value") and isinstance(arg.value, MutableMapping):
-                # This handles all other `MutableMapping` instances; for
-                # example, TensorDict which derives from MutableMapping.
-                #
-                # TODO(#142414) `hasattr(arg, 'value')` is a local workaround
-                # for lack of generall multiple inheritance in Dynamo. We can't
-                # use `isinstance(arg, MutableMappingVariable)` here because
-                # `arg` could be, e.g., a `UnspecializedNNModuleVariable` when
-                # `arg.value` has multiple inheritace.
-                if does_not_override_dict_iter_methods(type(arg.value)):
-                    # In this case, `arg.value.items()` uses the default impls,
-                    # which are implemented in C and cannot be traced, so we
-                    # will have to manually construct the items. This is safe
-                    # because we know they are side-effect free.
-                    #
-                    # Mutation tracked by Dynamo isn't reflected in `arg.value`,
-                    # so we can't handle such cases by just calling
-                    # `arg.value.items()`
-                    if tx.output.side_effects.has_pending_mutation(arg):
-                        unimplemented(
-                            f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
-                        )
-                    new_dict = dict(arg.value.items())
-                    return VariableTracker.build(tx, new_dict)
-                else:
-                    func_var = arg.var_getattr(tx, "items")
-                    if not isinstance(func_var, variables.UserFunctionVariable):
-                        unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
-                    out = tx.inline_user_function_return(func_var, args, kwargs)
-                    if isinstance(out, ConstDictVariable):
-                        return out
-                    return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
-        elif not args and kwargs:
-            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
-            return variables.ConstDictVariable(
-                items, user_cls=user_cls, mutation_type=ValueMutationNew()
-            )
-        unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.construct_dict),
+            [VariableTracker.build(tx, user_cls), *args],
+            kwargs,
+        )
 
     @staticmethod
     def call_custom_dict_fromkeys(
@@ -1924,6 +1892,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_format(self, tx: "InstructionTranslator", _format_string, *args, **kwargs):
         format_string = _format_string.as_python_constant()
+        format_string = str(format_string)
         return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(self, tx: "InstructionTranslator", *args):
