@@ -713,63 +713,93 @@ class UvClient : public UvTcpSocket {
       if (!stream.read1(command))
         break;
       if (store->isMiscellaneousClient(iptr())) {
-        if ((QueryType)command != QueryType::VALIDATE)
+        if ((QueryType)command != QueryType::VALIDATE) {
+          stream.commit();
           return;
-        if (!parse_validate_command())
+        }
+        if (!parse_validate_command()) {
+          stream.commit();
           return;
+        }
       } else {
         switch ((QueryType)command) {
           case QueryType::PING:
-            if (!parse_ping_command())
+            if (!parse_ping_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::SET:
-            if (!parse_set_command())
+            if (!parse_set_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::COMPARE_SET:
-            if (!parse_compare_set_command())
+            if (!parse_compare_set_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::GET:
-            if (!parse_get_command())
+            if (!parse_get_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::ADD:
-            if (!parse_add_command())
+            if (!parse_add_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::CHECK:
-            if (!parse_check_command())
+            if (!parse_check_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::WAIT:
-            if (!parse_wait_command())
+            if (!parse_wait_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::GETNUMKEYS:
-            if (!parse_getnumkeys_command())
+            if (!parse_getnumkeys_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::DELETE_KEY:
-            if (!parse_delete_key_command())
+            if (!parse_delete_key_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::APPEND:
-            if (!parse_append_command())
+            if (!parse_append_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::MULTI_GET:
-            if (!parse_multi_get_command())
+            if (!parse_multi_get_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::MULTI_SET:
-            if (!parse_multi_set_command())
+            if (!parse_multi_set_command()) {
+              stream.commit();
               return;
+            }
             break;
           case QueryType::CANCEL_WAIT:
-            if (!parse_cancel_wait_command())
+            if (!parse_cancel_wait_command()) {
+              stream.commit();
               return;
+            }
             break;
           default:
             C10D_DEBUG(
@@ -777,6 +807,8 @@ class UvClient : public UvTcpSocket {
                 (void*)this,
                 (int)command);
             close();
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+            free(buf->base);
             return;
         }
       }
