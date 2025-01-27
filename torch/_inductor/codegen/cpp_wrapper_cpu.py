@@ -70,7 +70,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def create(
-        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+        is_subgraph: bool,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -155,7 +157,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 #include <Python.h>
 
                 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
+                """
+            )
+            self.header.splice(
+                "#include <pybind11/pybind11.h>"
+                if config.is_fbcode()
+                else "#include <pybind11/gil.h>"
+            )
+            self.header.splice(
+                """
                 namespace py = pybind11;
 
                 class RAIIPyObject {
