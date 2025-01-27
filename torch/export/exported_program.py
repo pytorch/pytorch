@@ -361,8 +361,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
-
-    # from torch.export.unflatten import _assign_attr, _AttrKind
+    
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     def _is_joint_ir_decomp(ep, joint_loss_index):
@@ -426,7 +425,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # functionalize the operators that are operating on constant tensors. Since dynamo already
         # wraps constants as buffers, we temporarily register the constants as buffers and undo this
         # operation after AOTDispatcher is done.
-        temp_registered_constants = _register_constants_as_buffers(mod)
+        temp_registered_constants = _register_constants_as_buffers(mod, ep.state_dict)
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)

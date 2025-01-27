@@ -89,17 +89,16 @@ def _collect_and_set_constant_attrs(
     return constant_attrs
 
 
-def _register_constants_as_buffers(mod: torch.nn.Module):
+def _register_constants_as_buffers(mod: torch.fx.GraphModule, state_dict):
     # TODO some annoying circular dependency issue
     from torch.export.unflatten import _assign_attr, _AttrKind
 
-    registered_buffers = set([k for k, _ in mod.named_buffers()])
     temp_registered_constants = set()
 
     for node in mod.graph.nodes:
         if node.op == "get_attr":
-            if node.target not in registered_buffers:
-                target = torch.fx.graph_module._get_attr(mod, node.target)
+            target = torch.fx.graph_module._get_attr(mod, node.target)
+            if isinstance(target, torch.Tensor) and node.target not in state_dict:
                 torch.fx.graph_module._del_attr(mod, node.target)
                 _assign_attr(target, mod, node.target, _AttrKind.BUFFER)
                 temp_registered_constants.add(node.target)
@@ -120,6 +119,10 @@ def _override_graph_signature_for_temp_registered_constants(
             spec.arg.name = new_name
             spec.kind = InputKind.CONSTANT_TENSOR
             spec.persistent = None
+    
+    for spec in sig.output_specs:
+        if spec.arg.name in remap:
+            spec.arg.name = remap[spec.arg.name]
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
