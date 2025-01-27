@@ -54,6 +54,14 @@ tolerance:
     - drq
     - hf_Whisper
 
+  freezing:
+    # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
+    # the conv-batchnorm fusion used under freezing may cause relatively
+    # large numerical difference. We need are larger tolerance.
+    # Check https://github.com/pytorch/pytorch/issues/120545 for context
+    even_higher:
+      - mobilenet_v2
+
   cosine: []
 
 require_larger_multiplier_for_smaller_tensor:
