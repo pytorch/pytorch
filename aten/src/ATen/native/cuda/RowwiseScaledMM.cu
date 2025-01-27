@@ -791,7 +791,7 @@ void check_inputs(
     const std::optional<at::Tensor>& bias,
     const at::Tensor& out) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK(dprops->major == 9, "f8f8bf16_rowwise is sm_90 specific.");
+  TORCH_CHECK(dprops->major <= 9, "f8f8bf16_rowwise is sm_90 specific.");
 
   TORCH_CHECK(a.is_cuda());
   TORCH_CHECK(a.device() == b.device());
