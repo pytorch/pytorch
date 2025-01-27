@@ -662,10 +662,11 @@ class TestFP8MatmulCuda(TestCase):
             )
 
         if _IS_SM10X:
-            # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"f8f8bf16_rowwise is not implemented on sm_100 or later.",
+                re.escape(
+                    "f8f8bf16_rowwise is not implemented on sm_100 or later.",
+                ),
             ):
                 torch._scaled_mm(
                     x_fp8,
