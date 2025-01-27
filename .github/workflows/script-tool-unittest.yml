@@ -1,4 +1,4 @@
-name: Pytest Unit Tests for script tools
+name: Unit Tests for script tools
 on:
   pull_request:
     paths:
