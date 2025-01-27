@@ -2408,9 +2408,8 @@ class Scheduler:
             raise RuntimeError(
                 f"get_unmet_dep_nodes is not implemented for {type(snode)}."
             )
-        return [
-            *OrderedSet(self.name_to_buf[dep].defining_op_name() for dep in unmet_deps)
-        ]
+        unmet_dep_ops = (self.name_to_buf[dep].defining_op_name() for dep in unmet_deps)
+        return list(OrderedSet(self.name_to_fused_node[n] for n in unmet_dep_ops))
 
     def _topological_sort_nodes(self) -> list[list[BaseSchedulerNode]]:
         """
