@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
     BytesIOContext,
     download_file,
     instantiate_parametrized_tests,
-    # IS_CI,
+    IS_CI,
     IS_FBCODE,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
@@ -828,7 +828,7 @@ class SerializationMixin:
             loaded_data = torch.load(f, weights_only=True)
             self.assertEqual(data, loaded_data)
 
-    # @unittest.skipIf(not IS_CI, "only check debug var is set in CI")
+    @unittest.skipIf(not IS_CI, "only check debug var is set in CI")
     def test_debug_set_in_ci(self):
         # This test is to make sure that the serialization debug flag is set in CI
         self.assertTrue(os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1")

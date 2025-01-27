@@ -274,9 +274,7 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf) {
-  std::tuple<size_t, size_t> result = getOffset(cursor, filename_size, size);
-  size_t next_offset = std::get<0>(result);
-  size_t start = std::get<1>(result);
+  auto [next_offset, start] = getOffset(cursor, filename_size, size);
   size_t padding_size = next_offset - start;
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {

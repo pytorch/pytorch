@@ -1851,7 +1851,10 @@ def _load(
 
     loaded_storages = {}
 
-    has_version = zip_file.has_record(".format_version")
+    can_calculate_storage_offsets = False
+    if zip_file.has_record(".format_version"):
+        version = zip_file.get_record(".format_version")
+        can_calculate_storage_offsets = version >= b"1"
 
     # check if byteswapping is needed
     byteordername = "byteorder"
@@ -1893,14 +1896,20 @@ def _load(
     calculate_storage_offsets = config.load.calculate_storage_offsets
     run_debug_asserts = os.environ.get("TORCH_SERIALIZATION_DEBUG", "0") == "1"
     current_offset = None
+    # constants from miniz.h
     data_descriptor_size64 = 24
     data_descriptor_size32 = 16
+    mz_uint32_max = 0xFFFFFFFF
     offsets: Dict[str, int] = dict()
 
     def _get_offset(key, name, numel):
         """
         Return the offset of the storage associated with key with record name `name` and size numel.
         It is expected that the zipfile header of this storage starts at current_offset.
+
+        WARNING: This function relies on the behavior of the zipwriter in miniz.c. In particular,
+        the behavior of `mz_zip_writer_add_mem_ex_v2`. The behavior of this function must be kept
+        in sync with that of miniz!
 
         After reading a storage of size numel that starts at storage_offset
         if it is the first time that storage was read, update nonlocal variable
@@ -1930,7 +1939,7 @@ def _load(
         local_header_offset = current_offset
         current_offset = storage_offset + numel
         # add size of data descriptor after payload
-        if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
+        if local_header_offset >= mz_uint32_max or numel >= mz_uint32_max:
             current_offset += data_descriptor_size64
         else:
             current_offset += data_descriptor_size32
@@ -1943,24 +1952,29 @@ def _load(
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            if has_version and calculate_storage_offsets:
+            if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)
                 if run_debug_asserts:
-                    assert (
-                        storage_offset == zip_file.get_record_offset(name)
-                    ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
-
+                    if storage_offset != zip_file.get_record_offset(name):
+                        raise RuntimeError(
+                            "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
+                            f"variable was set: Incorrect offset for {name}, got {storage_offset} expected "
+                            f"{zip_file.get_record_offset(name)}"
+                        )
             else:
                 storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset : storage_offset + numel]
         else:
-            if has_version and run_debug_asserts:
+            if can_calculate_storage_offsets and run_debug_asserts:
                 # This is debug code that we use to test the validity of
                 # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
                 storage_offset = _get_offset(key, name, numel)
-                assert (
-                    storage_offset == zip_file.get_record_offset(name)
-                ), f"Incorrect offset for {name}, got {storage_offset} expected {zip_file.get_record_offset(name)}"
+                if storage_offset != zip_file.get_record_offset(name):
+                    raise RuntimeError(
+                        "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
+                        f"variable was set: Incorrect offset for {name}, got {storage_offset} expected "
+                        f"{zip_file.get_record_offset(name)}"
+                    )
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
                 ._typed_storage()
