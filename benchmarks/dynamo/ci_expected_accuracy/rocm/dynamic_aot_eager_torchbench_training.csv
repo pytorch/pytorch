@@ -110,7 +110,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,23
+
+
+
+hf_T5,pass,0
 
 
 
@@ -238,7 +246,15 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
+timm_efficientdet,pass,2
+
+
+
 timm_efficientnet,pass,7
+
+
+
+timm_nfnet,pass,0
 
 
 
