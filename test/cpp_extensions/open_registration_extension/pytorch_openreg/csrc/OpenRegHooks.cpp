@@ -12,8 +12,8 @@
 namespace openreg {
 
 namespace {
-// Python dictionary where real implementations can be found
-PyObject* py_registry;
+// Python factory function where real implementations can be found
+PyObject* py_factory;
 
 using host_ptr_t = uint64_t;
 
@@ -73,7 +73,6 @@ class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
 static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
   return at::make_generator<OpenRegGeneratorImpl>(device_index);
 }
-REGISTER_GENERATOR_PRIVATEUSE1(make_openreg_generator)
 
 // Default, global generators, one per device.
 static std::vector<at::Generator> default_generators;
@@ -119,6 +118,10 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
       TORCH_CHECK(idx >= 0 && idx < device_count());
     }
     return default_generators[idx];
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+    return make_openreg_generator(device_index);
   }
 };
 
@@ -341,15 +344,12 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 } // anonymous namspaces
 
 // Setter for the python dictionary with implementations
-void set_impl_registry(PyObject* registry) {
-  py_registry = registry;
+void set_impl_factory(PyObject* factory) {
+  py_factory = factory;
 }
 
 py::function get_method(const char* name) {
-  auto dict = py::cast<py::dict>(py_registry);
-    TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
-        "an implementation for '", name, "' make sure to add it in the __init__.py "
-      "file and register it.")
-  return dict[name];
+  auto factory = py::cast<py::function>(py_factory);
+  return factory(name);
 }
 } // openreg
