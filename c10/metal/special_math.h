@@ -305,8 +305,8 @@ float log_gamma(const T x) {
   }
 
   // Reflection formula
-  return LOG_PI - rc -
-      ::metal::log(::metal::abs(abs_x * ::metal::sinpi(abs_x)));
+  auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
+  return LOG_PI - rc - ::metal::log(log_arg);
 }
 
 } // namespace metal
