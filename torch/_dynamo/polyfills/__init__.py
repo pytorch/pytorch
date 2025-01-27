@@ -242,3 +242,7 @@ def cmp_ne(a, b):
     if isinstance(type(a).__ne__, types.FunctionType):
         return a.__ne__(b)
     return not cmp_eq(a, b)
+
+
+def cmp_is(a, b):
+    return a is b

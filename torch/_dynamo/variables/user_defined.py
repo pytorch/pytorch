@@ -786,6 +786,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
+            if method is object.__eq__ and len(args) == 1 and not kwargs:
+                other = args[0]
+                if not isinstance(other, UserDefinedObjectVariable):
+                    return variables.ConstantVariable.create(NotImplemented)
+
+                # TODO(anijain2305) - Identity checking should already be a part
+                # of the cmp_eq  polyfill function.
+                func_var = VariableTracker.build(tx, polyfills.cmp_is)
+                return func_var.call_function(tx, [self, *args], kwargs)
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
