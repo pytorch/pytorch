@@ -2803,8 +2803,10 @@ def _as_tensor_fullprec(t):
 lib = torch.library.Library("aten", "FRAGMENT")
 
 
-def impl(x, y):
-    return getattr(x, y)
+def impl(src_subclass_tensor: torch.Tensor, attr: str):
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+    assert is_traceable_wrapper_subclass(src_subclass_tensor)
+    return getattr(src_subclass_tensor, attr)
 
 
 lib.impl("_access_subclass_inner_tensor", impl, "Autograd")
