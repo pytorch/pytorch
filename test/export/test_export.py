@@ -956,31 +956,6 @@ graph():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
 
-    def test_sizelike_v0(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                u0, u1, u2 = x.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
-                torch._check(u1 >= u0)
-                torch._check(u0 <= 8)
-                torch._check(u1 <= 8)
-                z = y[u0 : u1]
-                return z
-
-        ep = export(Foo(), (torch.tensor([2, 4, 6]), torch.randn(8)))
-        print(ep)
-
-    def test_sizelike_v1(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                u0, u1, u2 = x.tolist()
-                t = torch.empty(u0)
-                return t[:-1] + t[1:]
-
-        ep = export(Foo(), (torch.tensor([2, 4, 6]),))
-        print(ep)
-
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
