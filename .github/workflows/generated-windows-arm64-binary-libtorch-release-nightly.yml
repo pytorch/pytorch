@@ -78,7 +78,7 @@ jobs:
         with:
           repository:  "iremyux/pytorch"
           ref: "nightly-for-win-arm64"
-          path: "%PYTORCH_ROOT%"   
+          path: "pytorch"   
       - name: Bootstrap Git
         shell: cmd
         run: |
