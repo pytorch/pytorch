@@ -1041,6 +1041,35 @@ class BuiltinVariable(VariableTracker):
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if self.fn is tuple:
+            resolved_fn = getattr(self.fn, name)
+            if (
+                resolved_fn is tuple.__new__
+                and len(args) == 2
+                and args[1].has_unpack_var_sequence(tx)
+                and not kwargs
+            ):
+                init_args = args[1].unpack_var_sequence(tx)
+                tuple_vt = variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
+                )
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+                    return tuple_vt
+
+                result = (
+                    tx.output.side_effects.track_object_new_from_user_defined_class(
+                        args[0]
+                    )
+                )
+                # side_effects data structure does not support methods like
+                # tuple.__new__ that uses *args parameters for the __new__
+                # method. Therefore, we manage the *args related functionality
+                # here. For other datastructures, this is done in the __init__
+                # method.
+                result.set_new_args(args[1])
+                result.set_underlying_tuple_vt(tuple_vt)
+                return result
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
