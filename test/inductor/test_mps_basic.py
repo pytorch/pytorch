@@ -58,6 +58,7 @@ class MPSBasicTests(TestCase):
     test_inf = CommonTemplate.test_inf
     test_isinf = CommonTemplate.test_isinf
     test_isinf2 = CommonTemplate.test_isinf2
+    test_log_fp64 = CommonTemplate.test_log_fp64
     test_low_memory_max_pool = CommonTemplate.test_low_memory_max_pool
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
@@ -151,6 +152,8 @@ for test_name in [
     "test_builtins_round_float_ndigits_neg",
     "test_lgamma",
     "test_erfinv",
+    "test_randint_int64_mod",
+    "test_randn_generator",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
 
