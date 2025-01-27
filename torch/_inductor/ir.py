@@ -1235,7 +1235,9 @@ class Reduction(Loops):
         num_inner = 0
         for i in indices:
             j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
-            strides = V.graph.sizevars.stride_hints(j, reduction_vars, ranges1.keys())
+            strides = V.graph.sizevars.stride_hints(
+                j, reduction_vars, list(ranges1.keys())
+            )
             outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
@@ -6292,27 +6294,6 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ) -> None:
-        # When aten binary ops have constant second args, cpp wrapper expects the scalar
-        # version.  This should long-term be handled as in
-        # https://github.com/pytorch/pytorch/issues/90923.
-        BINARY_OP_MAPPING = {
-            aten.add.Tensor: aten.add.Scalar,
-            aten.div.Tensor: aten.div.Scalar,
-            aten.divide.Tensor: aten.divide.Scalar,
-            aten.floor_divide: aten.floor_divide.Scalar,
-            aten.mul.Tensor: aten.mul.Scalar,
-            aten.multiply.Tensor: aten.multiply.Scalar,
-            aten.sub.Tensor: aten.sub.Scalar,
-            aten.subtract.Tensor: aten.subtract.Scalar,
-            aten.true_divide.Tensor: aten.true_divide.Scalar,
-        }
-        if (
-            kernel in BINARY_OP_MAPPING
-            and len(tensor_args) == 1
-            and len(nontensor_args) == 1
-        ):
-            kernel = BINARY_OP_MAPPING[kernel]
-
         super().__init__(
             layout,
             tuple(tensor_args),
