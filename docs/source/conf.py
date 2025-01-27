@@ -1973,7 +1973,6 @@ coverage_ignore_functions = [
     "mm_flop",
     "normalize_tuple",
     "register_flop_formula",
-    "scaled_mm_flop",
     "sdpa_backward_flop",
     "sdpa_backward_flop_count",
     "sdpa_flop",

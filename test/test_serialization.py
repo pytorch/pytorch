@@ -466,7 +466,11 @@ class SerializationMixin:
         b += [a[0].storage()]
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
-        c = torch.load(path, weights_only=weights_only)
+        if weights_only:
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Cannot use ``weights_only=True`` with files saved in the legacy .tar format."):
+                c = torch.load(path, weights_only=weights_only)
+        c = torch.load(path, weights_only=False)
         self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))

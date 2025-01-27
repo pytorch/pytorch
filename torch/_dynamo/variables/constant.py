@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import operator
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -121,8 +121,8 @@ its type to `common_constant_types`.
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 

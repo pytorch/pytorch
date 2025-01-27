@@ -2410,7 +2410,6 @@
     "get_suffix_str",
     "mm_flop",
     "normalize_tuple",
-    "scaled_mm_flop",
     "sdpa_backward_flop",
     "sdpa_backward_flop_count",
     "sdpa_flop",

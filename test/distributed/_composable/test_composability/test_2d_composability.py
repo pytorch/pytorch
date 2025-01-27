@@ -4,7 +4,7 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import List, Optional, Type
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -166,7 +166,7 @@ class TestFullyShard2DTraining(FSDPTest):
         device = torch.device("cuda")
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                 losses.append(_model(inp).sum())
@@ -335,7 +335,7 @@ class TestFullyShard2DTraining(FSDPTest):
         self,
         use_seq_parallel: bool,
         reuse_model_optim: bool,
-        optimizer_class: Type[torch.optim.Optimizer],
+        optimizer_class: type[torch.optim.Optimizer],
         foreach: bool,
     ):
         def train_step(

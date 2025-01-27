@@ -6,9 +6,10 @@ import logging
 import types
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Dict, Generator, List, Optional, Protocol, Set, Union
+from typing import Any, Callable, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
@@ -224,8 +225,10 @@ def _scaled_dot_product_ring_efficient_attention(
 ) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
+
     if not compute_log_sumexp:
-        raise NotImplementedError("compute_log_sumexp must be set")
+        # CP requires compute_log_sumexp to be True because it always merges LSE
+        compute_log_sumexp = True
 
     seq_dim = 2
     return _templated_ring_attention(
@@ -435,7 +438,7 @@ def _templated_ring_attention(
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
     if isinstance(mesh, dist.ProcessGroup):
-        pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
+        pg: Union[dist.ProcessGroup, list[dist.ProcessGroup]] = mesh
     else:
         pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "process group must be single dimension"
@@ -452,7 +455,7 @@ def _templated_ring_attention(
 
     sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=seq_dim)
 
-    rest: List[Any]
+    rest: list[Any]
     out: torch.Tensor
     logsumexp: torch.Tensor
 
@@ -519,7 +522,7 @@ def _templated_ring_attention(
 def _sdpa_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
@@ -557,7 +560,7 @@ def _sdpa_handler(
 def _sdpa_backward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
-    kwargs: Dict[str, object],
+    kwargs: dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as output tensor
     args = list(args)
@@ -614,7 +617,7 @@ def _templated_ring_attention_backward(
     size = dist.get_world_size(pg)
     next_kv = None
     next_grad_kv = None
-    rest: List[Any]
+    rest: list[Any]
     grad_query_, grad_key_, grad_value_ = None, None, None
 
     accum_dtype = torch.float32 if _cp_options.convert_to_f32 else query.dtype
@@ -850,7 +853,7 @@ customized_ops = {
 }
 
 
-_replaced_functions: Dict[Callable, tuple[str, Callable]] = {}
+_replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
 
 def _distribute_function(
@@ -890,7 +893,7 @@ def _distribute_function(
     def wrapper(
         target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
     ) -> Callable:
-        def inner_fn(*args: tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
+        def inner_fn(*args: tuple[Any, ...], **kwargs: dict[str, Any]) -> Any:
             if input_fn is not None:
                 args, kwargs = input_fn(device_mesh, *args, **kwargs)
             output = target_fn(*args, **kwargs)
@@ -1045,8 +1048,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
-        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: Dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         placement = [Shard(seq_dim)]
         all_args = []
 
@@ -1180,9 +1183,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
 
 def _context_parallel_buffers(
     mesh: DeviceMesh,
-    buffers: List[torch.Tensor],
-    buffer_seq_dims: List[int],
-) -> List[torch.Tensor]:
+    buffers: list[torch.Tensor],
+    buffer_seq_dims: list[int],
+) -> list[torch.Tensor]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
     sharder = (
@@ -1201,9 +1204,9 @@ def _context_parallel_buffers(
 def context_parallel(
     mesh: DeviceMesh,
     *,
-    buffers: Optional[List[torch.Tensor]] = None,
-    buffer_seq_dims: Optional[List[int]] = None,
-    no_restore_buffers: Optional[Set[torch.Tensor]] = None,
+    buffers: Optional[list[torch.Tensor]] = None,
+    buffer_seq_dims: Optional[list[int]] = None,
+    no_restore_buffers: Optional[set[torch.Tensor]] = None,
 ) -> Generator[None, None, None]:
     """
 
@@ -1267,9 +1270,9 @@ def context_parallel(
 @torch.no_grad()
 def context_parallel_unshard(
     mesh: DeviceMesh,
-    buffers: List[torch.Tensor],
-    seq_dims: List[int],
-) -> List[torch.Tensor]:
+    buffers: list[torch.Tensor],
+    seq_dims: list[int],
+) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
 
