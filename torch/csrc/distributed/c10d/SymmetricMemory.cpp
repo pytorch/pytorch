@@ -248,6 +248,9 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+
+  m.def(
+      "_all_gather_mm(Tensor a_shard, Tensor b, str group_name) -> (Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

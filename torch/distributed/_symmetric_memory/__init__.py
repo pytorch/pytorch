@@ -675,13 +675,7 @@ def _fused_all_gather_matmul(
         )
 
     if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
-        group = c10d._resolve_process_group(group_name)
-        leading_dims = list(A_shard.shape[:-1])
-        leading_dims[0] *= group.size()
-        A, out = _fused_all_gather_matmul_native(
-            A_shard.flatten(0, -2), Bs[0], group_name
-        )
-        return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
+        return _fused_all_gather_matmul_native(A_shard, Bs[0], group_name)
 
     if _should_use_multimem_all_gather_matmul(
         A_shard, gather_dim, group_name, return_A
@@ -730,6 +724,13 @@ def _fused_all_gather_matmul_native(
     B: torch.Tensor,
     group_name: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    assert A_shard.is_contiguous()
+
+    group = c10d._resolve_process_group(group_name)
+    leading_dims = list(A_shard.shape[:-1])
+    leading_dims[0] *= group.size()
+    A_shard = A_shard.flatten(0, -2)
+
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -740,43 +741,8 @@ def _fused_all_gather_matmul_native(
         buf.copy_(A_shard)
         A_shard = buf
 
-    rank = symm_mem.rank
-    world_size = symm_mem.world_size
-
-    current_stream = torch.cuda.current_stream()
-    backend_stream = _get_backend_stream(priority=-1)
-
-    symm_mem.barrier()
-    backend_stream.wait_stream(current_stream)
-    current_stream.wait_stream(backend_stream)
-
-    A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
-    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
-    A_shards = A.chunk(world_size)
-
-    A_shards[rank].copy_(A_shard)
-    if not torch.cuda.is_current_stream_capturing():
-        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
-    else:
-        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
-
-    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
-    for step in range(1, world_size):
-        src_rank = (rank + step) % world_size
-        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-        with backend_stream:
-            A_shards[src_rank].copy_(src_buf)
-            if not torch.cuda.is_current_stream_capturing():
-                # cuStreamWriteValue32 issues a system level fence before the write
-                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
-            else:
-                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
-
-    current_stream.wait_stream(backend_stream)
-    backend_stream.wait_stream(current_stream)
-
-    symm_mem.barrier()
-    return A, out
+    A, out = torch.ops.symm_mem._all_gather_mm(A_shard, B, group_name)
+    return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
 
 
 def _should_use_multimem_all_gather_matmul(

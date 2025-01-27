@@ -5,7 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#if false && !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
     CUDA_VERSION >= 12000
 #define BUILD_ASYNC_MM_KERNEL
 #endif
@@ -272,7 +272,7 @@ at::Tensor async_input_mm_out(
 #if defined(BUILD_ASYNC_MM_KERNEL)
   DISPATCH_LAYOUT_B(is_b_row_major, [&]() {
     // TODO(yifu): tuning
-    async_input_mm_impl<LayoutB, Shape<_128, _256, _64>, Shape<_2, _1, _1>>(
+    async_input_mm_impl<LayoutB, Shape<_128, _128, _64>, Shape<_1, _2, _1>>(
         a, b, a_chunk_signals, a_chunk_pivot, out);
   });
 #else

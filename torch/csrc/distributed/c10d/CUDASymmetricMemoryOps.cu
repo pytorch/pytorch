@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -693,6 +695,123 @@ at::Tensor stream_write_value32_(
   return input;
 }
 
+std::tuple<at::Tensor, at::Tensor> _all_gather_mm(
+    at::Tensor a_shard,
+    at::Tensor b,
+    std::string group_name) {
+  c10::cuda::CUDAGuard guard(a_shard.device());
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(a_shard, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "_all_gather_mm: input must be allocated with empty_strided_p2p().");
+
+  int rank = symm_mem->get_rank();
+  int world_size = symm_mem->get_world_size();
+
+  auto current_stream = at::cuda::getCurrentCUDAStream();
+
+  static std::optional<at::cuda::CUDAStream> copy_stream = std::nullopt;
+  static std::optional<at::cuda::CUDAStream> signal_stream = std::nullopt;
+  if (!copy_stream.has_value()) {
+    copy_stream = c10::cuda::getStreamFromPool(-1, a_shard.device().index());
+    signal_stream = c10::cuda::getStreamFromPool(-1, a_shard.device().index());
+  }
+
+  symm_mem->barrier(0, 0);
+  {
+    auto event = at::cuda::CUDAEvent();
+    event.record(current_stream);
+    event.block(*copy_stream);
+  }
+
+  auto is_capturing =
+      (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None);
+  if (is_capturing) {
+    auto event = at::cuda::CUDAEvent();
+    event.record(current_stream);
+    event.block(*signal_stream);
+  }
+
+  auto a_sizes = a_shard.sizes().vec();
+  a_sizes[0] *= world_size;
+  auto a = a_shard.new_empty(a_sizes);
+  auto a_signals = at::zeros(
+      world_size,
+      at::TensorOptions().dtype(at::ScalarType::UInt32).device(a.device()));
+
+  auto shard_sz = a_shard.numel() * a_shard.element_size();
+  std::vector<void*> chunk_ptrs;
+  chunk_ptrs.reserve(world_size);
+  for (int r = 0; r < world_size; ++r) {
+    chunk_ptrs.push_back(
+        reinterpret_cast<uint8_t*>(a.data_ptr()) + r * shard_sz);
+  }
+
+  // stream_write_value32_ is more efficient than memset32_, but it is not
+  // compatible with CUDA graph. Using memset32_ directly on copy_stream during
+  // graph capture would delay the copies. To address this, we use memset32_
+  // for signaling while offloading it to a third stream during graph capture.
+  // Although this approach significantly increases the launch overhead in
+  // non-CUDA graph mode, it works seamlessly in CUDA graph mode, which
+  // eliminates the overhead.
+  auto async_signal = [&](int signal_rank) {
+    auto event = at::cuda::CUDAEvent();
+    event.record(at::cuda::getCurrentCUDAStream());
+    event.block(*signal_stream);
+    c10::cuda::CUDAStreamGuard guard(*signal_stream);
+    memset32_(a_signals, signal_rank, 1, 1);
+  };
+
+  cudaMemcpyAsync(
+      chunk_ptrs[rank],
+      a_shard.data_ptr(),
+      shard_sz,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream());
+  if (!is_capturing) {
+    stream_write_value32_(a_signals, rank, 1);
+  } else {
+    async_signal(rank);
+  }
+
+  auto out = c10d::cuda::detail::async_input_mm(a, b, a_signals, rank);
+  {
+    c10::cuda::CUDAStreamGuard guard(*copy_stream);
+    for (int step = 1; step < world_size; ++step) {
+      auto src_rank = (rank + step) % world_size;
+      auto src_buf = symm_mem->get_buffer_ptrs()[src_rank];
+      cudaMemcpyAsync(
+          chunk_ptrs[src_rank],
+          src_buf,
+          shard_sz,
+          cudaMemcpyDeviceToDevice,
+          at::cuda::getCurrentCUDAStream());
+      if (!is_capturing) {
+        stream_write_value32_(a_signals, src_rank, 1);
+      } else {
+        async_signal(src_rank);
+      }
+    }
+    symm_mem->barrier(1, 0);
+  }
+
+  // Join the copy stream
+  {
+    auto event = at::cuda::CUDAEvent();
+    event.record(*copy_stream);
+    event.block(current_stream);
+  }
+
+  // Join the signal stream if capturing
+  if (is_capturing) {
+    auto event = at::cuda::CUDAEvent();
+    event.record(*signal_stream);
+    event.block(current_stream);
+  }
+  return std::make_tuple(a, out);
+}
+
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -714,6 +833,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
   m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
   m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
+  m.impl("_all_gather_mm", ::_all_gather_mm);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
