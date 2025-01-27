@@ -153,6 +153,7 @@ class UtilizationDbConverter:
             start_at=self.metadata.start_at,
             end_at=self.end_at,
             segments=self.segments,
+            tags=[],
         )
 
     def _to_oss_ci_timeseries_list(self) -> list[OssCiUtilizationTimeSeriesV1]:

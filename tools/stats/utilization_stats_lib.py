@@ -82,6 +82,7 @@ class OssCiUtilizationMetadataV1:
     start_at: float
     end_at: float
     segments: list[OssCiSegmentV1]
+    tags: list[str] = []
 
 
 # this data model is for the time series data:
