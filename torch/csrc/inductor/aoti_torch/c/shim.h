@@ -209,6 +209,9 @@ aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
     c10::complex<float> value,
     AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
+    c10::complex<double> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);

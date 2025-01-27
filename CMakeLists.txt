@@ -377,6 +377,8 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
                        OFF "USE_CUDA" OFF)
+cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
+                        "CPU_AARCH64" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -418,6 +420,8 @@ endif()
 if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+  set(USE_KLEIDIAI OFF)
+  message(WARNING "KleidiAI cannot be used on Windows. Set it to OFF")
 
   if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
     find_library(
@@ -666,6 +670,9 @@ if(ANDROID
   set(INTERN_BUILD_MOBILE ON)
   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
   set(BUILD_LAZY_TS_BACKEND OFF)
+
+  set(USE_KLEIDIAI OFF)
+  message(WARNING "KleidiAI cannot be used on Mobile builds. Set it to OFF")
 
   # Set -ffunction-sections and -fdata-sections so that each method has its own
   # text section. This allows the linker to remove unused section when the flag
