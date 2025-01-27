@@ -573,6 +573,14 @@ class BuildExtension(build_ext):
                         extension.extra_compile_args[ext] = []
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
+
+            if extension.py_limited_api:
+                 # compile any extension that has passed in py_limited_api to the
+                 # Extension constructor with the Py_LIMITED_API flag set to our
+                 # min supported CPython version, here, 3.9.
+                 # See https://docs.python.org/3/c-api/stable.html#c.Py_LIMITED_API
+                self._add_compile_flag(extension, '-DPy_LIMITED_API=0x03090000')
+
             # See note [Pybind11 ABI constants]
             for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
                 val = getattr(torch._C, f"_PYBIND11_{name}")
