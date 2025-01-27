@@ -123,22 +123,21 @@ class UvTcpSocket : public UvHandle {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
-      return;
+    } else if (nread <= 0) {
+      // Handle error and EOF cases
+      if (nread < 0) {
+        C10D_DEBUG(
+            "Read callback failed. code:{} name:{} desc:{}",
+            nread,
+            uv_err_name(nread),
+            uv_strerror(nread));
+      } else {
+        C10D_DEBUG("Remote peer closed the connection.");
+      }
+      uv_socket->close();
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      free(buf->base);
     }
-
-    // Handle error and EOF cases
-    if (nread < 0) {
-      C10D_DEBUG(
-          "Read callback failed. code:{} name:{} desc:{}",
-          nread,
-          uv_err_name(nread),
-          uv_strerror(nread));
-    } else {
-      C10D_DEBUG("Remote peer closed the connection.");
-    }
-    uv_socket->close();
-    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-    free(buf->base);
   }
 
  public:
