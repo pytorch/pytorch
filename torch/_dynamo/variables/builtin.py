@@ -1029,7 +1029,13 @@ class BuiltinVariable(VariableTracker):
         if self.fn is dict and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+            if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
+                return dict_vt
+            # We don't have to set the underlying dict_vt in
+            # UserDefinedDictVariable because it will be set to empty
+            # ConstDictVariableTracker in the constructor.
+            return tx.output.side_effects.track_object_new_from_user_defined_class(args[0])
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
 
@@ -1049,16 +1055,26 @@ class BuiltinVariable(VariableTracker):
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
-                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    return variables.TupleVariable(
-                        args[1].unpack_var_sequence(tx),
-                        mutation_type=ValueMutationNew(),
-                    )
-                return variables.UserDefinedTupleVariable(
-                    args[1].unpack_var_sequence(tx),
-                    tuple_cls_vt=args[0],
-                    mutation_type=ValueMutationNew(),
+                init_args = args[1].unpack_var_sequence(tx)
+                tuple_vt = variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
                 )
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+                    return tuple_vt
+
+                result = (
+                    tx.output.side_effects.track_object_new_from_user_defined_class(
+                        args[0]
+                    )
+                )
+                # side_effects data structure does not support methods like
+                # tuple.__new__ that uses *args parameters for the __new__
+                # method. Therefore, we manage the *args related functionality
+                # here. For other datastructures, this is done in the __init__
+                # method.
+                result.set_new_args(args[1])
+                result.set_underlying_tuple_vt(tuple_vt)
+                return result
 
         return super().call_method(tx, name, args, kwargs)
 

@@ -737,6 +737,31 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
 
 
+    def test_udf_dict_reconstruction(self):
+        class MyDict(dict):
+            pass
+
+        def fn(x, klass):
+            x = x * 2
+            sc_dict = dict.__new__(klass)
+            sc_dict["x"] = x
+            if isinstance(sc_dict, MyDict):
+                sc_dict.attr = 3
+            return sc_dict
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x, MyDict)
+        res = opt_fn(x, MyDict)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, MyDict))
+        self.assertEqual(ref.attr, res.attr)
+
+        ref = fn(x, dict)
+        res = opt_fn(x, dict)
+        self.assertEqual(ref, res)
+        self.assertTrue(isinstance(res, dict))
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
