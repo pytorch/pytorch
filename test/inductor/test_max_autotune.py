@@ -2,7 +2,7 @@
 import contextlib
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -310,7 +310,7 @@ class TestMaxAutotune(TestCase):
 
     def test_precompilation_threads(self):
         import threading
-        from typing import Any, Dict
+        from typing import Any
         from unittest.mock import Mock, patch
 
         class FakeChoiceCaller(ChoiceCaller):
@@ -337,11 +337,11 @@ class TestMaxAutotune(TestCase):
         fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
 
         def no_lookup(
-            choices: List[ChoiceCaller],
+            choices: list[ChoiceCaller],
             op: str,
             inputs: str,
-            benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Optional[Dict[ChoiceCaller, float]]:
+            benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+        ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
 

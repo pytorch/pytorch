@@ -5,7 +5,6 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict, Tuple
 from unittest import skip
 
 import torch
@@ -1746,7 +1745,7 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x: Dict[str, torch.Tensor]):
+            def forward(self, x: dict[str, torch.Tensor]):
                 device = next(iter(x.values())).device
                 add_ = torch.zeros(5, device=device)
                 mul_ = torch.ones(5, device=device)
@@ -2663,7 +2662,7 @@ class AOTInductorTestsTemplate:
                 def forward(
                     self,
                     self_tensor: torch.Tensor,
-                    indices: Tuple[torch.Tensor],
+                    indices: tuple[torch.Tensor],
                     values: torch.Tensor,
                 ):
                     return torch.index_put(
@@ -4288,7 +4287,7 @@ def fail_cpu(is_skip=False):
     )
 
 
-def fail_gpu(suffixes: Tuple[str, ...], is_skip=False):
+def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
     return TestFailure(
         suffixes,
         is_skip=is_skip,
