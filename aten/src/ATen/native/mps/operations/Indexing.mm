@@ -688,21 +688,8 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   return output;
 }
 
-Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
+static Tensor& masked_fill__mps_impl(Tensor& self, const Tensor& mask, const Scalar& value) {
   using namespace mps;
-
-  if (self.numel() == 0) {
-    return self;
-  }
-  TORCH_CHECK(self.device() == mask.device(),
-              "expected self and mask to be on the same device, but got mask on ",
-              mask.device(),
-              " and self on ",
-              self.device());
-  TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-
-  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
 
   bool needs_output_copy = false;
 
@@ -721,15 +708,15 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   };
 
   MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
-  MPSDataType maskDataType = getMPSScalarType(b_mask->scalar_type());
+  MPSDataType maskDataType = getMPSScalarType(mask.scalar_type());
 
   MPSStream* stream = getCurrentMPSStream();
   MPSScalar valueScalar = getMPSScalar(value, value.type());
   @autoreleasepool {
-    string key = "masked_fill" + getTensorsStringKey({self, *b_mask}) + ":" + getMPSTypeString(value.type());
+    string key = "masked_fill" + getTensorsStringKey({self, mask}) + ":" + getMPSTypeString(value.type());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
-      MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, maskDataType, getMPSShape(*b_mask));
+      MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, maskDataType, getMPSShape(mask));
       MPSGraphTensor* valueTensor = mpsGraphScalarPlaceHolder(mpsGraph, value);
 
       MPSDataType valueType = getMPSScalarType(value.type());
@@ -752,7 +739,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     Placeholder selfPlaceholder =
         Placeholder(cachedGraph->inputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/true, inputDataType);
     Placeholder maskPlaceholder =
-        Placeholder(cachedGraph->maskTensor_, *b_mask, /*mpsShape*/ nil, /*gatherTensorData=*/true, maskDataType);
+        Placeholder(cachedGraph->maskTensor_, mask, /*mpsShape*/ nil, /*gatherTensorData=*/true, maskDataType);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
                                                 needs_output_copy ? output : self,
                                                 /*mpsShape*/ nil,
@@ -772,6 +759,62 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   if (needs_output_copy) {
     self.copy_(output);
   }
+  return self;
+}
+
+Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
+  using namespace mps;
+
+  if (self.numel() == 0) {
+    return self;
+  }
+
+  TORCH_CHECK(self.device() == mask.device(),
+              "expected self and mask to be on the same device, but got mask on ",
+              mask.device(),
+              " and self on ",
+              self.device());
+  TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
+
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
+
+  // MPS has 32 bit indexing limit, we max it out here
+  const int64_t MAX_BYTES_PER_TILE = (1LL << 31) - 1;
+
+  // bytes per element based on tensor element's scalar type
+  int64_t bytes_per_element = self.element_size();
+  int64_t total_bytes = self.numel() * bytes_per_element;
+
+  // if tensor size in bytes is small, we don't need tiling
+  if (total_bytes <= MAX_BYTES_PER_TILE) {
+    return masked_fill__mps_impl(self, *b_mask, value);
+  }
+
+  // number of tiles needed based on bytes
+  int64_t elements_per_tile = MAX_BYTES_PER_TILE / bytes_per_element;
+  int64_t num_tiles = (self.numel() + elements_per_tile - 1) / elements_per_tile;
+
+  auto original_shape = self.sizes();
+
+  // flatten tensors for tiling
+  auto flat_self = self.reshape({-1});
+  auto flat_mask = b_mask->reshape({-1});
+
+  // each tile has its own kernel launch
+  for (int64_t tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
+    int64_t start_idx = tile_idx * elements_per_tile;
+    int64_t end_idx = std::min(start_idx + elements_per_tile, self.numel());
+    int64_t tile_size = end_idx - start_idx;
+
+    // views of the current tile
+    auto self_tile = flat_self.narrow(0, start_idx, tile_size);
+    auto mask_tile = flat_mask.narrow(0, start_idx, tile_size);
+
+    masked_fill__mps_impl(self_tile, mask_tile, value);
+  }
+
+  self.resize_(original_shape);
 
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
