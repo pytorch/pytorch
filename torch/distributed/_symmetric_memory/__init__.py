@@ -182,7 +182,6 @@ def _pipelined_multi_all_gather_and_consume(
 
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
-    backend_stream.wait_stream(torch.cuda.current_stream())
 
     for x, y in zip(shard, ag_out):
         assert x.is_contiguous(), (
@@ -263,32 +262,30 @@ def _pipelined_multi_all_gather_and_consume(
     # and "b" with the first shard_consumer for now.
     copy_shard(dst=local_p2p_bufs, src=shard)
     symm_mem.barrier(channel=1)
-    backend_stream.wait_stream(torch.cuda.current_stream())
+    event = torch.cuda.Event()
+    event.record()
 
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
     # remote shards.
     shard_consumer(shard, rank)
 
-    for step in range(1, group_size):
-        if step % 2 == 0:
-            stream = torch.cuda.current_stream()
-        else:
-            stream = backend_stream
-        remote_rank = (step + rank) % group_size
-        remote_p2p_bufs = get_p2p_bufs(remote_rank)
-        with stream:
+    with torch.cuda.stream(backend_stream):
+        event.wait()
+        for step in range(1, group_size, 2):
+            remote_rank = (step + rank) % group_size
+            remote_p2p_bufs = get_p2p_bufs(remote_rank)
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
+            if step == group_size - 1 and ag_out_needed:
+                copy_shard(dst=shards[rank], src=shard)
 
-    if ag_out_needed:
-        # Copy from input to the all-gather output. Opportunistically overlap
-        # it with the last shard_consumer.
-        if group_size % 2 == 0:
-            stream = torch.cuda.current_stream()
-        else:
-            stream = backend_stream
-        with stream:
+    for step in range(2, group_size, 2):
+        remote_rank = (step + rank) % group_size
+        remote_p2p_bufs = get_p2p_bufs(remote_rank)
+        copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
+        shard_consumer(shards[remote_rank], remote_rank)
+        if step == group_size - 1 and ag_out_needed:
             copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
