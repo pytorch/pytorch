@@ -828,11 +828,6 @@ class TestMaxAutotune(TestCase):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
     @config.patch(max_autotune_gemm_backends="TRITON")
-    @unittest.skipIf(
-        config.cpp_wrapper,
-        "Currently broken with cpp_wrapper, because we're fusing into three kernels "
-        "rather than two.  Under investigation.",
-    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
