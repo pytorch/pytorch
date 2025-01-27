@@ -910,9 +910,7 @@ def skip_inductor_test_unless_backend_available(
         else unittest.skipUnless(TRITON_HAS_CPU, "Requires Triton CPU"),
         "halide": unittest.skipUnless(HAS_HALIDE, "requires Halide"),
     }
-    backend_skip_fn = backend_skip_decorators.get(
-        device_type_test_class.device_type, identity
-    )
+    backend_skip_fn = backend_skip_decorators.get(inductor_backend, identity)
     return backend_skip_fn(patch_backend_fn(device_type_test_class))
 
 
@@ -1008,6 +1006,24 @@ def instantiate_device_type_tests(
             # type set to Any and suppressed due to unsupport runtime class:
             # https://github.com/python/mypy/wiki/Unsupported-Python-Features
             device_type_test_class: Any = type(class_name, (base, empty_class), {})
+
+            # The dynamically-created test class derives from the test template class
+            # and the empty class. Arrange for both setUpClass and tearDownClass methods
+            # to be called. This allows the parameterized test classes to support setup
+            # and teardown.
+            @classmethod
+            def _setUpClass(cls):
+                base.setUpClass()
+                empty_class.setUpClass()
+
+            @classmethod
+            def _tearDownClass(cls):
+                empty_class.tearDownClass()
+                base.tearDownClass()
+
+            device_type_test_class.setUpClass = _setUpClass
+            device_type_test_class.tearDownClass = _tearDownClass
+
             if inductor_backend in ("cpp", "triton", "halide"):
                 device_type_test_class = skip_inductor_test_unless_backend_available(
                     device_type_test_class, inductor_backend
@@ -1033,23 +1049,6 @@ def instantiate_device_type_tests(
                     ), f"Redefinition of directly defined member {name}"
                     nontest = getattr(generic_test_class, name)
                     setattr(device_type_test_class, name, nontest)
-
-            # The dynamically-created test class derives from the test template class
-            # and the empty class. Arrange for both setUpClass and tearDownClass methods
-            # to be called. This allows the parameterized test classes to support setup
-            # and teardown.
-            @classmethod
-            def _setUpClass(cls):
-                base.setUpClass()
-                empty_class.setUpClass()
-
-            @classmethod
-            def _tearDownClass(cls):
-                empty_class.tearDownClass()
-                base.tearDownClass()
-
-            device_type_test_class.setUpClass = _setUpClass
-            device_type_test_class.tearDownClass = _tearDownClass
 
             # Mimics defining the instantiated class in the caller's file
             # by setting its module to the given class's and adding
