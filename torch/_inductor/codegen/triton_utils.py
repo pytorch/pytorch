@@ -115,7 +115,7 @@ def signature_to_meta(
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        argdefs[i].arg_name: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
     }
 

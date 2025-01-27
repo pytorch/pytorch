@@ -12489,6 +12489,18 @@ class TestAllowMutationOnSaved(TestCase):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
 
+    def test_inplace_foreach(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors():
+            a = [
+                torch.tensor(1.0, requires_grad=True),
+                torch.tensor(1.0, requires_grad=True),
+            ]
+            b = torch._foreach_exp(a)
+            torch._foreach_add_(b, 1)
+            (b[0] + b[1]).backward()
+
+        self.assertEqual([a[0].grad, a[1].grad], torch._foreach_exp(a))
+
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):

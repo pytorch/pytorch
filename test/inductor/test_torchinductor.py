@@ -79,6 +79,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
+    _group_quantize_tensor_symmetric,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -2267,6 +2268,85 @@ class CommonTemplate:
         c = torch.rand((m, n), dtype=torch.bfloat16)
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
+
+    @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    def test__dyn_quant_pack_4bit_weight(self):
+        q_group = 32
+        k = 128
+        n = 128
+
+        torch.manual_seed(1)
+        b = torch.rand((k, n), dtype=torch.float32)
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(b, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            return b_int4pack
+
+        self.common(fn, (b, in_features, out_features))
+
+    @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    def test__dyn_quant_matmul_4bit(self):
+        q_group = 32
+        m = 32
+        k = 128
+        n = 128
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.float32)
+        b = torch.rand((k, n), dtype=torch.float32)
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(a, q_group, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            res = torch._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            return res
+
+        self.common(fn, (a, q_group, in_features, out_features))
 
     def test_expanded_reduction(self):
         def fn(x, y):
@@ -6391,10 +6471,17 @@ class CommonTemplate:
         def fn(x):
             return torch.log(x), torch.log2(x)
 
-        self.common(
-            fn,
-            (torch.randn([1024], dtype=torch.float64) + 10,),
+        _dtype = torch.float64
+        ctx = (
+            contextlib.nullcontext()
+            if self.is_dtype_supported(_dtype)
+            else self.assertRaises(TypeError)
         )
+        with ctx:
+            self.common(
+                fn,
+                (torch.randn([1024], dtype=_dtype) + 10,),
+            )
 
     def test_bitwise(self):
         def fn(x, y):
@@ -10516,14 +10603,6 @@ class CommonTemplate:
             return y
 
         x = torch.rand(48, 3, 512, 512)
-        self.common(fn, (x,))
-
-    def test_pad_single(self):
-        def fn(a):
-            y = torch.nn.functional.pad(a, (10, 10))
-            return y
-
-        x = torch.rand(1, 1, 1)
         self.common(fn, (x,))
 
     def test_pad_cast(self):
