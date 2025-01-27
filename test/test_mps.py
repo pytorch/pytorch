@@ -2438,6 +2438,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x_mps_strided, x_cpu_strided)
         self.assertFalse((x_mps_strided == float("-inf")).any())
 
+    def test_masked_fill__big(self):
+        # allocate tensor with more than 2 ** 32 bytes
+        mask = torch.triu(torch.ones(1024, 1024, device="mps", dtype=torch.bool), diagonal=1)
+        x_mps = torch.rand(2, 512, 1024, 1024, device="mps", dtype=torch.float32)
+        mask_cpu = mask.cpu()
+        x_cpu = x_mps.cpu()
+
+        val = random.random()
+        x_mps.masked_fill_(mask, val)
+        x_cpu.masked_fill_(mask_cpu, val)
+        self.assertEqual(x_mps, x_cpu)
+
     def test_nhwc_operation(self):
         def helper(shape, channels_last=False):
             import numpy as np
