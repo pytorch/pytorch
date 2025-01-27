@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
-from torch.utils._typing_utils import not_none
 
 from .linear import NonDynamicallyQuantizableLinear
 from .module import Module
@@ -1123,7 +1122,6 @@ class MultiheadAttention(Module):
             xavier_uniform_(self.v_proj_weight)
 
         if self.in_proj_bias is not None:
-            assert self.out_proj.bias is not None
             constant_(self.in_proj_bias, 0.0)
             constant_(self.out_proj.bias, 0.0)
         if self.bias_k is not None:
@@ -1321,7 +1319,7 @@ class MultiheadAttention(Module):
                         self.in_proj_weight,
                         self.in_proj_bias,
                         self.out_proj.weight,
-                        not_none(self.out_proj.bias),
+                        self.out_proj.bias,
                         merged_mask,
                         need_weights,
                         average_attn_weights,
