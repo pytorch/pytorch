@@ -147,6 +147,87 @@ void upsample_increment_value_bounded(
 }
 
 template <typename T>
+struct linear_return_type {
+  typedef float type;
+};
+template <>
+struct linear_return_type<uchar> {
+  typedef uchar type;
+};
+template <typename T>
+using linear_return_t = typename linear_return_type<T>::type;
+
+template <typename T>
+inline linear_return_t<T> linear_interp(T v0, T v1, float x) {
+  return x * v1 + (1 - x) * v0;
+}
+
+// See Note [ Weights computation for uint8_t and multiplication trick ]
+// Essentially fall back to fixed floating point arithmetic during uint8
+// interpolation, which is not necesserily more accurate (see example below),
+// but matches closes to what CPU can deliver
+// I.e. mid-point 152+249+172+35 is 152, but algorithm yields 153 as horizontal
+// and vertical interpolation is done in separate steps and results are rounded
+// to uint8 Also, as Metal is currently limited to 32-bit floats, results will
+// never match those on CPU especially for 1/3, 2/3 scale
+template <>
+inline uchar linear_interp(uchar v0, uchar v1, float x) {
+  constexpr auto PRECISION_BITS = 15;
+  constexpr auto one = 1L << (PRECISION_BITS);
+  constexpr auto onehalf = 1L << (PRECISION_BITS - 1);
+  auto ix = static_cast<long>(x * one + .5);
+  auto iomx = static_cast<long>((1.0 - x) * one + .5);
+  return (onehalf + v0 * iomx + v1 * ix) >> PRECISION_BITS;
+}
+
+template <typename T>
+kernel void upsample_bilinear2d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  auto output_x = thread_index % output_sizes.x;
+  auto output_y = thread_index / output_sizes.x;
+  auto real_x = area_pixel_compute_source_index(
+      scales.x, output_x, align_corners, /*cubic=*/false);
+  auto t_x = fract(real_x);
+
+  auto real_y = area_pixel_compute_source_index(
+      scales.y, output_y, align_corners, /*cubic=*/false);
+  auto t_y = fract(real_y);
+  for (int n = 0; n < output_sizes.w; n++) {
+    for (int c = 0; c < output_sizes.z; c++) {
+      auto i00 = upsample_get_value_bounded<T>(
+          inputData, input_sizes.xy, input_strides, n, c, real_y, real_x);
+      auto i01 = upsample_get_value_bounded<T>(
+          inputData, input_sizes.xy, input_strides, n, c, real_y, real_x + 1);
+      auto i10 = upsample_get_value_bounded<T>(
+          inputData, input_sizes.xy, input_strides, n, c, real_y + 1, real_x);
+      auto i11 = upsample_get_value_bounded<T>(
+          inputData,
+          input_sizes.xy,
+          input_strides,
+          n,
+          c,
+          real_y + 1,
+          real_x + 1);
+      auto i0_l = linear_interp(i00, i01, t_x);
+      auto i1_l = linear_interp(i10, i11, t_x);
+      auto res = linear_interp(i0_l, i1_l, t_y);
+      outputData
+          [n * output_strides.w + c * output_strides.z +
+           output_x * output_strides.x + output_y * output_strides.y] =
+              static_cast<T>(res);
+    }
+  }
+}
+
+template <typename T>
 kernel void upsample_bicubic2d(
     constant T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
@@ -284,6 +365,19 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)                        \
+  template [[host_name("upsample_bilinear2d_" #DTYPE)]] kernel void \
+  upsample_bilinear2d<DTYPE>(                                       \
+      constant DTYPE * inputData [[buffer(0)]],                     \
+      device DTYPE * outputData [[buffer(1)]],                      \
+      constant ulong4 & input_strides [[buffer(2)]],                \
+      constant ulong4 & output_strides [[buffer(3)]],               \
+      constant long4 & input_sizes [[buffer(4)]],                   \
+      constant long4 & output_sizes [[buffer(5)]],                  \
+      constant float2 & scales [[buffer(6)]],                       \
+      constant bool& align_corners [[buffer(7)]],                   \
+      uint thread_index [[thread_position_in_grid]])
+
 #define INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(DTYPE)                        \
   template [[host_name("upsample_bicubic2d_backward_" #DTYPE)]] kernel void \
   upsample_bicubic2d_backward<DTYPE>(                                       \
@@ -297,11 +391,15 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                           \
       uint thread_index [[thread_position_in_grid]])
 
+INSTANTIATE_UPSAMPLE_BILINEAR(uchar);
 INSTANTIATE_UPSAMPLE_BICUBIC(float);
+INSTANTIATE_UPSAMPLE_BILINEAR(float);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(float);
 INSTANTIATE_UPSAMPLE_BICUBIC(half);
+INSTANTIATE_UPSAMPLE_BILINEAR(half);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UPSAMPLE_BICUBIC(bfloat);
+INSTANTIATE_UPSAMPLE_BILINEAR(bfloat);
 INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(bfloat);
 #endif
