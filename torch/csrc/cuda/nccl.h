@@ -9,13 +9,41 @@
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
+#if defined(NCCL_MAJOR) && \
+    ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
 #if defined(__CUDA_BF16_TYPES_EXIST__)
-#define HAS_NCCL_BF16_DATATYPE \
-  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#define HAS_NCCL_BF16_DATATYPE
+#endif // defined(__CUDA_BF16_TYPES_EXIST__)
+#define NCCL_HAS_AVG
 #elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
-#define HAS_NCCL_BF16_DATATYPE 1
-#else
-#define HAS_NCCL_BF16_DATATYPE 0
+#define HAS_NCCL_BF16_DATATYPE
+#endif // NCCL >= 2.10
+
+#if defined(NCCL_MAJOR) && \
+    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 11))
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#endif
+
+#if defined(NCCL_MAJOR) && \
+    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 13))
+#define NCCL_HAS_REMOTE_ERROR
+#define ENABLE_NCCL_GET_LAST_ERROR
+#endif
+
+#if defined(NCCL_MAJOR) && \
+    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING
+#endif
+
+#if defined(NCCL_MAJOR) && \
+    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 17))
+#define NCCL_HAS_COMM_CTA_CGA
+#define NCCL_HAS_COMM_SPLIT
+#endif
+
+#if defined(NCCL_MAJOR) && \
+    (NCCL_MAJOR > 2 || (NCCL_MAJOR == 2 && NCCL_MINOR >= 19))
+#define NCCL_HAS_COMM_REGISTER
 #endif
 
 namespace torch::cuda::nccl {

@@ -18,70 +18,9 @@
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 18)
-#define NCCL_HAS_COMM_SPLIT
-#endif
-
-// ncclGetLastError() is enabled only for NCCL versions 2.13+
-// ncclRemoteError only exists in NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#endif
-
 static_assert(
     (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
     "NCCL version must be 2.7 or later");
-
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
-#define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
-#endif
-
-// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
-// and ncclRecv() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 7)
-#define ENABLE_NCCL_P2P_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_P2P_SUPPORT
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 17)
-#define NCCL_HAS_COMM_CTA_CGA
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_CTA_CGA
-#endif
-
-#if defined(NCCL_REGISTRATION_SUPPORTED) ||                              \
-    ((defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-      (NCCL_MINOR >= 19)))
-#define NCCL_HAS_COMM_REGISTER
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_REGISTER
-#endif
 
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
@@ -261,6 +200,7 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   // Wait for the communicator to be ready. This is a blocking function.
   // Useful in nonblocking mode: NCCL requires the communicator to be ready
   // before issuing a second command.
@@ -271,6 +211,7 @@ class NCCLComm {
   //   complete. Use `longInterval=false` when waiting collective call to return
   //   ncclSuccess.
   void waitReady(bool longInterval);
+#endif
 
   std::optional<std::string> getNcclCommFailureReason() const;
 
@@ -341,7 +282,7 @@ struct ncclRedOpRAII {
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
   }
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
   ~ncclRedOpRAII() {
     if (premul_sum_) {
       ncclRedOpDestroy(op_, comm_);

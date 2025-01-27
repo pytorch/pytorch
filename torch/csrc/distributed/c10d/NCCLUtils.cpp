@@ -1,3 +1,4 @@
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 #include <c10/util/env.h>
@@ -104,6 +105,7 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   // In non-blocking mode, ensure comm is ready.
   if (nonBlocking_) {
     // Wait with long interval if communicator is being initialized.
@@ -111,6 +113,7 @@ ncclComm_t NCCLComm::getNcclComm() {
     waitReady(longInterval);
     // ncclComm_ should be initialized by now
   }
+#endif
   if (!initialized_) {
     // TODO: see if we can consolidate other `initialized_` flipping here.
     // Maintaining it elsewhere is some work.
@@ -121,6 +124,7 @@ ncclComm_t NCCLComm::getNcclComm() {
   return ncclComm_;
 }
 
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
 // Wait for the communicator to be ready. This is a blocking function.
 // Arguments:
 //   longInterval: if true, wait with sleep of an interval; otherwise, wait
@@ -136,6 +140,7 @@ void NCCLComm::waitReady(bool longInterval) {
     C10D_NCCL_CHECK_TIMEOUT(ncclInProgress, ncclComm_, std::nullopt);
   }
 }
+#endif
 
 std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
   LockType lock(mutex_);
@@ -216,7 +221,11 @@ void NCCLComm::finalize() {
   }
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   auto comm = getNcclComm();
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
+#else
+  C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
+#endif
 }
 
 void NCCLComm::destroy() {
@@ -236,7 +245,6 @@ void NCCLComm::destroy() {
 void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LockType lock(mutex_);
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   if (aborted_ && !initialized_) {
     // Should not abort twice.
     return;
@@ -276,10 +284,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   if (ncclAsyncErr_ == ncclSuccess) {
     ncclAsyncErr_ = ncclSystemError;
   }
-#else
-  // This is a NOOP, if error checks are disabled.
-  return;
-#endif
 }
 
 bool NCCLComm::isInitialized() const {
@@ -298,17 +302,12 @@ uint64_t NCCLComm::getCommSplitCounter() const {
 
 ncclResult_t NCCLComm::checkForNcclError() {
   LockType lock(mutex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclAsyncErr_ != ncclSuccess) {
     return ncclAsyncErr_;
   }
   C10D_NCCL_CHECK(
       ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
   return ncclAsyncErr_;
-#else
-  // Always return success, if error checks are disabled.
-  return ncclSuccess;
-#endif
 }
 
 ncclResult_t NCCLComm::registerSegment(void* ptr, size_t size) {
@@ -477,7 +476,7 @@ std::string getNcclErrorDetailStr(
   }
   std::string interpret;
   std::string err;
-#ifdef ENABLE_NCCL_GET_LAST_ERROR
+#ifdef NCCL_HAS_REMOTE_ERROR
   auto ret = ncclGetLastError(nullptr);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
@@ -492,7 +491,7 @@ std::string getNcclErrorDetailStr(
     case ncclSystemError:
       interpret =
           "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. ";
-#ifndef NCCL_REMOTE_ERROR
+#ifndef NCCL_HAS_REMOTE_ERROR
       // Before ncclRemoteError was created, unexpected remote disconnect was
       // categorized as ncclSystemError
       interpret += "It can be also caused by unexpected exit of a remote peer.";
@@ -508,7 +507,7 @@ std::string getNcclErrorDetailStr(
       interpret =
           "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
       break;
-#ifdef NCCL_REMOTE_ERROR
+#ifdef NCCL_HAS_REMOTE_ERROR
     case ncclRemoteError:
       interpret =
           "ncclRemoteError: A call failed possibly due to a network error or a remote process exiting prematurely.";

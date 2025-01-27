@@ -66,7 +66,7 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
 
   auto output = at::empty(
       {nrows, ncols},
-#if HAS_NCCL_BF16_DATATYPE
+#ifdef HAS_NCCL_BF16_DATATYPE
       input.options().dtype(at::kBFloat16));
 #else
       input.options().dtype(at::kHalf));
@@ -92,7 +92,7 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       input.const_data_ptr<float>(),
       nrows,
       ncols,
-#if HAS_NCCL_BF16_DATATYPE
+#ifdef HAS_NCCL_BF16_DATATYPE
       reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::BFloat16>())
 #else
       reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>())
@@ -137,7 +137,7 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
       blockDim,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-#if HAS_NCCL_BF16_DATATYPE
+#ifdef HAS_NCCL_BF16_DATATYPE
       reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::BFloat16>()),
 #else
       reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::Half>()),
