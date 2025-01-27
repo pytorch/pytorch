@@ -25,13 +25,13 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     get_origin as _get_origin,
+    List as _List,
     Optional as _Optional,
     overload as _overload,
+    Tuple as _Tuple,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
     Union as _Union,
-    Dict as _Dict,
-    Tuple as _Tuple,
 )
 from typing_extensions import ParamSpec as _ParamSpec
 
@@ -276,36 +276,43 @@ if sys.platform == "win32":
 def _preload_pypi_cuda_deps() -> None:
     """Try to preloads cuda deps if possible."""
     from torch.version import cuda as cuda_version
-    assert platform.system() == "Linux" and cuda_version
 
-    cuda_libs: _Dict[str, _Tuple[str, builtins.bool]] = {
-        "cublas": "libcublas.so.*[0-9]",
-        "cudnn": "libcudnn.so.*[0-9]",
-        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-        "cuda_runtime": "libcudart.so.*[0-9]",
-        "cuda_cupti": "libcupti.so.*[0-9]",
-        "cufft": "libcufft.so.*[0-9]",
-        "curand": "libcurand.so.*[0-9]",
-        "cusparse": "libcusparse.so.*[0-9]",
-        "cusparselt": "libcusparseLt.so.*[0-9]",
-        "cusolver": "libcusolver.so.*[0-9]",
-        "nccl": "libnccl.so.*[0-9]",
-        "nvtx": "libnvToolsExt.so.*[0-9]",
-    }
+    if not cuda_version:
+        return
+
+    assert platform.system() == "Linux"
+
     # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
     # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
     # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
     # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
     # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
     # See https://github.com/pytorch/pytorch/issues/145580
-    if cuda_version >= '12.4':
-        cuda_libs["nvjitlink"] = "libnvJitLink.so.*[0-9]"
+
+    # Preloading nvrtc before cudnn, preload nvjitlink if CUDA version >= 12.4
+    cuda_libs: _List[_Tuple[str, str]] = [
+        ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
+        ("cublas", "libcublas.so.*[0-9]"),
+        ("cudnn", "libcudnn.so.*[0-9]"),
+        ("cuda_runtime", "libcudart.so.*[0-9]"),
+        ("cuda_cupti", "libcupti.so.*[0-9]"),
+        ("cufft", "libcufft.so.*[0-9]"),
+        ("curand", "libcurand.so.*[0-9]"),
+        ("cusparse", "libcusparse.so.*[0-9]"),
+        ("cusparselt", "libcusparseLt.so.*[0-9]"),
+        ("cusolver", "libcusolver.so.*[0-9]"),
+        ("nccl", "libnccl.so.*[0-9]"),
+        ("nvtx", "libnvToolsExt.so.*[0-9]"),
+    ]
+
+    if cuda_version >= "12.4":
+        cuda_libs.insert(0, ("nvjitlink", "libnvjitlink.so.*[0-9]"))
 
     try:
         current_lib = None
         import nvidia  # type: ignore[import-not-found]
 
-        for lib, lib_name in cuda_libs.items():
+        for lib, lib_name in cuda_libs:
             current_lib = lib
             try:
                 lib_pkg = importlib.import_module("." + lib, package="nvidia")
