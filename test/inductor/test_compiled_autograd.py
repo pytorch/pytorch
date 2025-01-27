@@ -148,6 +148,28 @@ main()
         for _ in range(3):
             self.run_as_subprocess(script)
 
+    def test_reset(self):
+        compiled_autograd.compiled_autograd_enabled = True
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(lambda: None, True)
+        # TODO: return prior verbose logger
+        # torch._C._dynamo.compiled_autograd.set_verbose_logger(dummy)
+        compiled_autograd.COMPILE_COUNTER = None
+
+        # state should be clean after reset
+        compiled_autograd.reset()
+
+        assert compiled_autograd.compiled_autograd_enabled is False
+        (
+            prior_compiler,
+            prior_dynamic,
+        ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
+        assert prior_compiler is None
+        assert prior_dynamic is False
+        assert (
+            compiled_autograd.COMPILE_COUNTER is not None
+            and next(compiled_autograd.COMPILE_COUNTER) == 0
+        )
+
     def test_basic(self):
         def fn():
             model = torch.nn.Sequential(
@@ -3256,7 +3278,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 yield v.grad
 
         self.check_output_and_recompiles(
-            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=True)
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
     @unittest.expectedFailure

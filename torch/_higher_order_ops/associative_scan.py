@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -335,7 +335,7 @@ def generic_associative_scan(operator, leaves, dim=0):
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor], dim: int
+    proxy_mode, func_overload, combine_fn: Callable, xs: list[torch.Tensor], dim: int
 ):
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x, dim) for x in itertools.chain(xs, xs)]
@@ -415,7 +415,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, dim):
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):  # noqa: F811
     inp_leaves, spec = pytree.tree_flatten(xs)
-    result_flat: List[Any] = []
+    result_flat: list[Any] = []
     num_leaves = len(inp_leaves)
     op = reversed if reverse else lambda x: x
 

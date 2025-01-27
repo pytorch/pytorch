@@ -2,13 +2,14 @@
 import contextlib
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
+from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -22,7 +23,7 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -307,7 +308,7 @@ class TestMaxAutotune(TestCase):
 
     def test_precompilation_threads(self):
         import threading
-        from typing import Any, Dict
+        from typing import Any
         from unittest.mock import Mock, patch
 
         class FakeChoiceCaller(ChoiceCaller):
@@ -334,11 +335,11 @@ class TestMaxAutotune(TestCase):
         fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
 
         def no_lookup(
-            choices: List[ChoiceCaller],
+            choices: list[ChoiceCaller],
             op: str,
             inputs: str,
-            benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Optional[Dict[ChoiceCaller, float]]:
+            benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+        ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -974,6 +975,49 @@ class TestMaxAutotune(TestCase):
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
             self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties().total_memory < 2e10,
+        "Only if the GPU has at least 20GB memory to be safe",
+    )
+    @config.patch(force_shape_pad=True, max_autotune=True)
+    def test_linear_and_cel(self):
+        """
+        Similate a GPU without enough SMs. Make sure max-autotune still
+        works even when the MultiTritonTemplate encapsulates just extern
+        kernels.
+        """
+
+        def mock_is_big_gpu(*args, **kwargs):
+            return False
+
+        B, T, C, V = 32, 1024, 768, 50257
+
+        linear = nn.Linear(C, V).bfloat16().to(device=GPU_TYPE)
+        ce = torch.nn.CrossEntropyLoss()
+
+        def f(x, y):
+            x.grad = None
+            linear.weight.grad = None
+            linear.bias.grad = None
+
+            loss = ce(linear(x), y)
+            loss.backward()
+            return loss
+
+        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x.retain_grad()
+        y = torch.randint(0, V, (B * T,)).cuda()
+
+        import torch._inductor.utils as inductor_utils
+
+        with unittest.mock.patch.object(inductor_utils, "is_big_gpu", mock_is_big_gpu):
+            opt_f = torch.compile(f)
+
+            expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
+            actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
+            assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
@@ -1213,7 +1257,10 @@ class TestPrologueFusion(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
-    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+ and sm_89 and MI300+ devices",
+    )
     def test_low_precision(self):
         M = K = N = 128
 
