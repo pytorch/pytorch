@@ -4454,13 +4454,43 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(inputs, x), opt_fn(inputs, x))
 
-    def test_udf_list(self):
+    def test_udf_tuple(self):
+        class MyTuple(tuple):
+            def len_mulitply_2(self):
+                return len(self) * 2
+
+            def __contains__(self, val):
+                # Ensure that overridden method is traced
+                self.checked = True
+                return super().__contains__(val)
+
+        def fn(x, tup):
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x * tup.len_mulitply_2()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_tup = MyTuple([1, 2, 3])
+        ref = fn(x, ref_tup)
+        res_tup = MyTuple([1, 2, 3])
+        res = opt_fn(x, res_tup)
+        self.assertEqual(ref, res)
+        self.assertTrue(ref_tup.checked)
+        self.assertTrue(res_tup.checked)
+
+    def test_udf_tuple_reconstruction(self):
         class MyTuple(tuple):
             pass
 
         def fn(x, klass):
             x = x * 2
-            return tuple.__new__(klass, [x])
+            sc_tuple = tuple.__new__(klass, [x])
+            if isinstance(sc_tuple, MyTuple):
+                sc_tuple.attr = 3
+            return sc_tuple
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
@@ -4468,6 +4498,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, MyTuple)
         self.assertEqual(ref, res)
         self.assertTrue(isinstance(res, MyTuple))
+        self.assertEqual(ref.attr, res.attr)
 
         ref = fn(x, tuple)
         res = opt_fn(x, tuple)
