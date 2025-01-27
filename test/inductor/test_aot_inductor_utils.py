@@ -109,7 +109,7 @@ class AOTIRunnerUtil:
     ):
         with torch.no_grad():
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=False
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs
