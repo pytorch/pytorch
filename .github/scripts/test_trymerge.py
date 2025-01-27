@@ -535,8 +535,8 @@ class TestTryMerge(TestCase):
     def test_remove_job_name_suffix(self, *args: Any) -> None:
         test_cases = [
             {
-                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
-                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+                "name": "linux-bionic-cuda12.4-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.4-py3.10-gcc9-sm86 / test (default)",
             },
             {
                 "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",
@@ -709,7 +709,7 @@ class TestBypassFailures(TestCase):
             checks,
             [],
         )
-        workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
+        workflow_name = "linux-bionic-cuda12.4-py3.10-gcc9-bazel-test"
         job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
         self.assertTrue(
             checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
