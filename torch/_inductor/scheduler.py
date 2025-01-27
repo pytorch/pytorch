@@ -76,7 +76,7 @@ class SchedulerBuffer:
 
     def defining_op_name(self) -> str:
         op = self.defining_op
-        assert op
+        assert op is not None
         return op.get_name()
 
     def __hash__(self) -> int:
