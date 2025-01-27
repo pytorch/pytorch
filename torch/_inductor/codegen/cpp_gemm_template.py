@@ -311,7 +311,6 @@ def is_slice(node: ir.IRNode):
             isinstance(node.data, ir.StorageBox)
             and V.graph.sizevars.shape_env.evaluate_expr(new_layout.offset > 0)
             and all(size_comparisons)
-            and len(old_layout.size) > len(new_layout.size)
         )
     return False
 
@@ -924,6 +923,8 @@ class CppGemmTemplate(CppTemplate):
 
         # If weight is a slice of a larger tensor, we need the entire tensor and shouldn't unwrap it
         # because the GEMM template expects the whole tensor.
+        # We shouldn't unwrap the weight if we are using VNNI blocking because we do a reshape on the
+        # slice of the weights.
         if not block_weights and is_slice(original_weight_node):
             should_unwrap_weight = False
 

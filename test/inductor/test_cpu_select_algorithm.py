@@ -2313,11 +2313,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize(
         "slices",
         (
+            ((1, 4, 64, 64), slice_maker[:, 1:]),  # Contiguous slice, dynamic offset
+            ((4, 64, 64), slice_maker[1:]),  # Contiguous slice, same length
             ((3, 4, 64, 64), slice_maker[2, :3]),  # Contiguous slice of weights
             ((3, 4, 64, 64), slice_maker[2, 1:]),  # Contiguous slice of weights
-            ((3, 4, 65, 64), slice_maker[2, 1:, :64]),  # Contiguous slice of weights
-            ((3, 4, 64, 64), slice_maker[:, 2]),  # Non-contigous slice of weights
             ((3, 4, 65, 64), slice_maker[:, 2, :64]),  # Non-contigous slice of weights
+            ((3, 64, 64), slice_maker[:]),  # Contigous non-slice of weights
         ),
     )
     @dtypes(torch.float)
@@ -2325,21 +2326,25 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                w = torch.randn(3, 64, 64)
-                self.weight = torch.nn.Parameter(w, requires_grad=False)
 
             def forward(self, x, w):
                 return x @ w[slices[-1]]
 
         counters.clear()
         x_shape = (3, 64, 64)
+        w_shape = slices[-2]
         x = torch.randn(x_shape).to(dtype=dtype)
-        w = torch.randn(slices[-2]).to(dtype=dtype)
+        w = torch.randn(w_shape).to(dtype=dtype)
         if isinstance(self, _DynamicShapesTestBase):
-            torch._dynamo.mark_dynamic(w, 0)
-            torch._dynamo.mark_dynamic(w, 1)
-            torch._dynamo.mark_static(w, 2)
-            torch._dynamo.mark_static(w, 3)
+            if len(w_shape) == 4:
+                torch._dynamo.mark_dynamic(w, 0)
+                torch._dynamo.mark_dynamic(w, 1)
+                torch._dynamo.mark_static(w, 2)
+                torch._dynamo.mark_static(w, 3)
+            elif len(w_shape) == 3:
+                torch._dynamo.mark_dynamic(w, 0)
+                torch._dynamo.mark_static(w, 1)
+                torch._dynamo.mark_static(w, 2)
             torch._dynamo.mark_dynamic(x, 0)
             torch._dynamo.mark_static(x, 1)
             torch._dynamo.mark_static(x, 2)
