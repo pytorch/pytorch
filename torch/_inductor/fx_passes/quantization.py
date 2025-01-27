@@ -1067,45 +1067,23 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_woq_optimization_pattern(is_int4=False):
-    kwarg_list = (
-        ["x", "weight", "qGroupSize", "qScaleAndZeros"]
-        if is_int4
-        else ["x", "weight", "scales"]
-    )
-
+def _is_valid_woq_optimization_pattern():
     def fn(match):
-        assert all(k in match.kwargs for k in kwarg_list)
+        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         x = match.kwargs["x"].meta["val"]
         weight = match.kwargs["weight"].meta["val"]
-        scales = None if is_int4 else match.kwargs["scales"].meta["val"]
-        qGroupSize = match.kwargs["qGroupSize"] if is_int4 else None
-        qScaleAndZeros = match.kwargs["qScaleAndZeros"].meta["val"] if is_int4 else None
-        if is_int4:
-            assert qScaleAndZeros is not None
-            group_size_valid = qGroupSize == (weight.numel() * 2) // (
-                qScaleAndZeros.numel() / 2
-            )
-            scale_device = qScaleAndZeros.device
-        else:
-            assert scales is not None
-            group_size_valid = True
-            scale_device = scales.device
-        weight_dtype = torch.uint8 if is_int4 else torch.int8
+        scales = match.kwargs["scales"].meta["val"]
         return (
             # For now, we only support woq mm kernels
             # with x.type=bfloat16 and w.type=int8
             x.dtype == torch.bfloat16
-            and weight.dtype == weight_dtype
-            and (scales is None or scales.dtype == torch.bfloat16)
-            and (qGroupSize is None or qGroupSize > 0)
-            and (qScaleAndZeros is None or qScaleAndZeros.dtype == torch.bfloat16)
-            and group_size_valid
+            and weight.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
             # _weight_int8pack_mm kernel only supports cpu now
             # TODO: add cuda kernel support instead of calling mul+sum
             and x.device.type == "cpu"
             and x.device == weight.device
-            and x.device == scale_device
+            and x.device == scales.device
         )
 
     return fn
@@ -1231,33 +1209,6 @@ def _register_woq_mm_int8_pattern4():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
-def _register_woq_mm_int4_lowering():
-    computation_op = aten._weight_int4pack_mm_for_cpu.default
-    pattern = CallFunction(
-        computation_op,
-        KeywordArg("x"),
-        KeywordArg("weight"),
-        KeywordArg("qGroupSize"),
-        KeywordArg("qScaleAndZeros"),
-    )
-
-    @register_lowering_pattern(
-        pattern,
-        extra_check=_is_valid_woq_optimization_pattern(is_int4=True),
-    )
-    def woq_int4(match: Match, *args, **kwargs):
-        x = kwargs["x"]
-        weight = kwargs["weight"]
-        qGroupSize = kwargs["qGroupSize"]
-        qScaleAndZeros = kwargs["qScaleAndZeros"]
-        counters["inductor"]["woq_matcher_count"] += 1
-        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
-
-        return L[computation_op](x, weight, qGroupSize, qScaleAndZeros)
-
-    return woq_int4
-
-
 def _register_quantization_lowerings():
     _register_quantization_unary_lowering()
     _register_quantization_binary_lowering()
@@ -1271,7 +1222,6 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
     _register_woq_mm_int8_pattern4()
-    _register_woq_mm_int4_lowering()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):

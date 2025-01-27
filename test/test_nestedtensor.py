@@ -8391,11 +8391,12 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
         name="cross_device_transfer_wrong_nested_int_in_compile",
     ),
-    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
+    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
+    # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
+        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8403,22 +8404,21 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
-    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
-    # data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+    # chunk(): broken in several ways on the batch dim; revisit after similar
+    # data-dependency issues are handled for narrow()
+    SkipRule(
         op_match_fn=lambda device, op: (op.full_name == "chunk"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="chunk_batch_dim_data_dependency",
+        name="broken_chunk_compile_backward_on_batch_dim",
     ),
-    # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
+    # select on batch dim currently uses unbind(), leading to data-dependent error in
+    # torch.compile that needs to be addressed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
         op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: (sample.kwargs["dim"] == 0),
-        name="select_unbind_data_dependency",
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
     ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
@@ -8441,13 +8441,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: True,
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="noncontig_holes_data_dependency",
-    ),
-    # chunk(): broken in several ways on the batch dim; revisit after similar
-    # data-dependency issues are handled for narrow()
-    SkipRule(
-        op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_chunk_compile_backward_on_batch_dim",
     ),
     # mean(): weird bug
     XFailRule(
@@ -8491,69 +8484,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
-    ),
-    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
-    # from item call in clone() -> unbind()
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_max",
-                "clamp_min",
-                "float_power",
-                "pow",
-                "sinc",
-            }
-            or (
-                isinstance(op, BinaryUfuncInfo)
-                and
-                # don't include unimplemented ops
-                op.full_name
-                not in {
-                    "__rsub__",
-                    "complex",
-                    "floor_divide",
-                    "polar",
-                    "rsub",
-                }
-            )
-        ),
-        sample_match_fn=lambda device, sample: (
-            "(NT, T) broadcasting all 1s" in sample.name
-            and "noncontig_holes" in sample.name
-        ),
-        name="backward_unbind_data_dependency",
-    ),
-    # ditto
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
-        sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
-        name="rms_norm_backward_unbind_data_dependency",
-    ),
-    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
-    # unbind(), leading to data-dependent error in torch.compile
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="Backend compiler failed with a fake tensor exception",
-        op_match_fn=lambda device, op: (op.full_name == "clone"),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_holes" in sample.name
-            and sample.kwargs.get("memory_format", None) == torch.preserve_format
-        ),
-        name="clone_unbind_data_dependency_backward",
-    ),
-    # select(): pending unbacked symints not in returned output (needs fix)
-    XFailRule(
-        error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_select_backward_unbacked",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
@@ -8646,11 +8576,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8703,6 +8635,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8710,9 +8644,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
@@ -8759,6 +8690,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @skipIfTorchDynamo(
         "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"

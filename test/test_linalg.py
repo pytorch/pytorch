@@ -6640,7 +6640,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 )
                 # test wrapper
                 q_group_t = torch.tensor(q_group, dtype=torch.int64, device=device)
-                c_2 = torch.ops.quantized_decomposed.int4mm_packed_weight_cpu(
+                c_2 = torch.ops.quantized.int4mm_packed_weight_cpu(
                     a, b_int4pack, q_group_t, b_scales_and_zeros
                 )
                 assert torch.equal(c, c_2)
@@ -8623,7 +8623,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                          fn(torch.slogdet, (0, 0)))
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.07)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)

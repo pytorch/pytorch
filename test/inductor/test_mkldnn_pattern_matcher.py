@@ -117,7 +117,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4):
     ):
         input_kernel = 1
     if output.is_contiguous(memory_format=torch.contiguous_format) or (
-        TEST_ACL and dtype == torch.bfloat16
+        TEST_ACL and (dtype == torch.bfloat16 or dtype == torch.half)
     ):
         output_kernel = 1
     return input_kernel + output_kernel
@@ -3301,7 +3301,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
-    def test_woq_int4(self):
+    def test_woq_int4_cpu(self):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, group_size):
                 super().__init__()
@@ -3343,11 +3343,22 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
                 )
 
-            self._test_common(
+            # self._test_common(
+            #     m,
+            #     (x,),
+            #     matcher_check_fn,
+            #     check_quantization=False,
+            # )
+            include_ops = [
+                "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
+                if torch._inductor.config.cpp_wrapper
+                else "extern_kernels.int4mm_packed_weight_cpu"
+            ]
+            self._test_code_common(
                 m,
                 (x,),
-                matcher_check_fn,
-                check_quantization=False,
+                include_ops,
+                ["torch.ops.aten._weight_int4pack_mm_for_cpu.default"],
             )
 
     def _test_linear_dynamic_fp16_helper(self, use_relu: bool):
